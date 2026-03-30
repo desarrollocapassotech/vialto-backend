@@ -1,0 +1,354 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL_UNPOOLED")  // pooler para runtime
+  directUrl = env("DATABASE_URL")           // directa para migraciones
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tenant — una fila por organización Clerk (tenantId en tablas = clerkOrgId)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Tenant {
+  id               String   @id @default(cuid())
+  clerkOrgId       String   @unique
+  name             String
+  cuit             String?  @unique
+  plan             String   @default("basico") // basico | pro | enterprise
+  modules          String[] @default([])
+  maxUsers         Int      @default(5)
+  billingStatus    String   @default("trial") // trial | active | suspended
+  billingRenewsAt  DateTime?
+  whiteLabelDomain String?
+  createdAt        DateTime @default(now())
+
+  clientes                Cliente[]
+  transportistas          Transportista[]
+  choferes                Chofer[]
+  vehiculos               Vehiculo[]
+  viajes                  Viaje[]
+  facturas                Factura[]
+  pagos                   Pago[]
+  movimientosCc           MovimientoCuentaCorriente[]
+  productos               Producto[]
+  movimientosStock        MovimientoStock[]
+  cargasCombustible       CargaCombustible[]
+  intervenciones          Intervencion[]
+  remitos                 Remito[]
+
+  @@map("tenants")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Core (siempre presentes)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Cliente {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre    String
+  cuit      String?
+  email     String?
+  telefono  String?
+  direccion String?
+  createdAt DateTime @default(now())
+
+  viajes           Viaje[]
+  facturas         Factura[]
+  movimientosCc    MovimientoCuentaCorriente[]
+  movimientosStock MovimientoStock[]
+  remitos          Remito[]
+
+  @@index([tenantId])
+  @@map("clientes")
+}
+
+model Transportista {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre    String
+  cuit      String?
+  email     String?
+  telefono  String?
+  tipo      String   @default("externo") // externo | propio
+  createdAt DateTime @default(now())
+
+  choferes  Chofer[]
+  vehiculos Vehiculo[]
+  viajes    Viaje[]
+
+  @@index([tenantId])
+  @@map("transportistas")
+}
+
+model Chofer {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre          String
+  dni             String?
+  licencia        String?
+  licenciaVence   DateTime?
+  telefono        String?
+  transportistaId String?
+  transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
+
+  viajes              Viaje[]
+  cargasCombustible   CargaCombustible[]
+  remitos             Remito[]
+
+  @@index([tenantId])
+  @@map("choferes")
+}
+
+model Vehiculo {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  patente         String
+  tipo            String // tractor | semirremolque | camion | utilitario | otro
+  marca           String?
+  modelo          String?
+  anio            Int?
+  kmActual        Int      @default(0)
+  transportistaId String?
+  transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+
+  viajes            Viaje[]
+  cargasCombustible CargaCombustible[]
+  intervenciones    Intervencion[]
+  remitos           Remito[]
+
+  @@unique([tenantId, patente])
+  @@index([tenantId])
+  @@map("vehiculos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: viajes
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Viaje {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero           String
+  estado           String    @default("pendiente") // pendiente | en_transito | despachado | cerrado
+  clienteId        String
+  cliente          Cliente   @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  transportistaId  String?
+  transportista    Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  choferId         String?
+  chofer           Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  vehiculoId       String?
+  vehiculo         Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  origen           String?
+  destino          String?
+  fechaSalida      DateTime?
+  fechaLlegada     DateTime?
+  mercaderia       String?
+  kmRecorridos     Int?
+  litrosConsumidos Float?
+  precioCliente    Float?
+  precioFletero    Float?
+  gananciaBruta    Float?
+  documentacion    String[]  @default([])
+  observaciones    String?
+  createdAt        DateTime  @default(now())
+  createdBy        String
+
+  facturas Factura[]
+
+  @@unique([tenantId, numero])
+  @@index([tenantId])
+  @@index([tenantId, estado])
+  @@index([tenantId, clienteId])
+  @@map("viajes")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: facturación
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Factura {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero           String
+  tipo             String // cliente | fletero
+  clienteId        String?
+  cliente          Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  viajeId          String?
+  viaje            Viaje?    @relation(fields: [viajeId], references: [id], onDelete: SetNull)
+  importe          Float
+  fechaEmision     DateTime
+  fechaVencimiento DateTime?
+  estado           String    @default("pendiente") // pendiente | cobrada | vencida
+  diferencia       Float?
+  createdAt        DateTime  @default(now())
+  pagos            Pago[]
+
+  @@index([tenantId])
+  @@index([tenantId, clienteId])
+  @@index([tenantId, estado])
+  @@map("facturas")
+}
+
+model Pago {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  facturaId String
+  factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  importe   Float
+  fecha     DateTime
+  formaPago String? // transferencia | cheque | efectivo
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("pagos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: cuenta corriente
+// ═══════════════════════════════════════════════════════════════════════════
+
+model MovimientoCuentaCorriente {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  clienteId  String
+  cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  tipo       String // cargo | pago | nota_credito
+  concepto   String
+  importe    Float
+  saldoPost  Float
+  fecha      DateTime
+  referencia String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, clienteId])
+  @@map("movimientos_cuenta_corriente")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: stock
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Producto {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre    String
+  unidad    String // kg | unidad | palet | rollo | otro
+  createdAt DateTime @default(now())
+
+  movimientos MovimientoStock[]
+
+  @@index([tenantId])
+  @@map("productos")
+}
+
+model MovimientoStock {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  clienteId  String
+  cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  tipo       String // ingreso | egreso | division
+  cantidad   Float
+  pesoKg     Float?
+  remito     String?
+  fecha      DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, productoId])
+  @@index([tenantId, clienteId])
+  @@map("movimientos_stock")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: combustible
+// ═══════════════════════════════════════════════════════════════════════════
+
+model CargaCombustible {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  vehiculoId String
+  vehiculo   Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
+  choferId   String?
+  chofer     Chofer?  @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  estacion   String
+  litros     Float
+  importe    Float
+  km         Int
+  formaPago  String?
+  fecha      DateTime
+  createdAt  DateTime @default(now())
+  createdBy  String
+
+  @@index([tenantId])
+  @@index([tenantId, vehiculoId])
+  @@map("cargas_combustible")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: mantenimiento (PostgreSQL; checklist diario en Firestore según doc)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Intervencion {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  vehiculoId  String
+  vehiculo    Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
+  tipo        String // service | aceite | filtro | cubiertas | otro
+  descripcion String?
+  km          Int?
+  proximoKm   Int?
+  fecha       DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, vehiculoId])
+  @@map("intervenciones")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: remitos
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Remito {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero      String
+  clienteId   String
+  cliente     Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  choferId    String?
+  chofer      Chofer?  @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  vehiculoId  String?
+  vehiculo    Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  descripcion String
+  fecha       DateTime
+  firmaUrl    String?
+  estado      String   @default("emitido") // emitido | firmado | facturado
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, numero])
+  @@index([tenantId])
+  @@index([tenantId, clienteId])
+  @@map("remitos")
+}

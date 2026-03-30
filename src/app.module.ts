@@ -20,6 +20,7 @@ import { RemitosModule } from './modules/remitos/remitos.module';
 import { TurnosModule } from './modules/turnos/turnos.module';
 import { ReportesModule } from './modules/reportes/reportes.module';
 import { HealthController } from './health.controller';
+import { PlatformModule } from './core/platform/platform.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { HealthController } from './health.controller';
     RemitosModule,
     TurnosModule,
     ReportesModule,
+    PlatformModule,
   ],
   controllers: [HealthController],
 })

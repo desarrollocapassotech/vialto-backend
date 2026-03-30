@@ -18,7 +18,15 @@ export class ModuleGuard implements CanActivate {
 
     if (!requiredModule) return true;
 
-    const { tenantId } = context.switchToHttp().getRequest().auth;
+    const auth = context.switchToHttp().getRequest().auth as {
+      role?: string | null;
+      tenantId?: string | null;
+    };
+
+    /** Superadmin puede auditar cualquier org sin depender del plan / módulos. */
+    if (auth.role === 'superadmin') return true;
+
+    const { tenantId } = auth;
     if (!tenantId) throw new ForbiddenException('Tenant no identificado');
 
     const tenant = await this.prisma.tenant.findUnique({

@@ -7,6 +7,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
+import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
 function calcGanancia(precioCliente?: number | null, precioFletero?: number | null) {
   if (precioCliente == null || precioFletero == null) return null;
@@ -54,6 +55,34 @@ export class ViajesService {
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
+  }
+
+  async findAllPaginated(tenantId: string, query: PaginationQueryDto, estado?: string) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    const where = { tenantId, ...(estado ? { estado } : {}) };
+
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.viaje.count({ where }),
+      this.prisma.viaje.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async findOne(id: string, tenantId: string) {

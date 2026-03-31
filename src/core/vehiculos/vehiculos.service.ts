@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
+import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
 @Injectable()
 export class VehiculosService {
@@ -16,6 +17,32 @@ export class VehiculosService {
       where: { tenantId },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async findAllPaginated(tenantId: string, query: PaginationQueryDto) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.vehiculo.count({ where: { tenantId } }),
+      this.prisma.vehiculo.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async findOne(id: string, tenantId: string) {

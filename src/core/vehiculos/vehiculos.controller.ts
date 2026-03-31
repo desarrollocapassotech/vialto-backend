@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, UseGuards,
+  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
 import { VehiculosService } from './vehiculos.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
@@ -11,6 +11,7 @@ import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
+import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
 @Controller('vehiculos')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
@@ -22,6 +23,16 @@ export class VehiculosController {
   findAll(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId);
+  }
+
+  @Get('paginated')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  findAllPaginated(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.findAllPaginated(auth.tenantId, query);
   }
 
   @Get(':id')

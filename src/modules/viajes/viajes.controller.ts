@@ -13,6 +13,7 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
+import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
 @Controller('viajes')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
@@ -25,6 +26,17 @@ export class ViajesController {
   list(@CurrentAuth() auth: AuthPayload, @Query('estado') estado?: string) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId, estado);
+  }
+
+  @Get('paginated')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listPaginated(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
+    @Query('estado') estado?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.findAllPaginated(auth.tenantId, query, estado);
   }
 
   @Get(':id')

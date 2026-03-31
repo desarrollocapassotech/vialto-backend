@@ -47,7 +47,6 @@ model Tenant {
   clerkOrgId       String    @unique
   name             String
   cuit             String?   @unique
-  plan             String    @default("basico")    // basico | pro | enterprise
   modules          String[]                        // módulos activos
   maxUsers         Int       @default(10)
   billingStatus    String    @default("trial")     // trial | active | suspended
@@ -479,15 +478,15 @@ FASE 8 — Transversal
 
 ---
 
-## Modelo de planes SaaS
+## Modelo de suscripción SaaS (por módulos)
 
-| Plan | Módulos incluidos | Max usuarios |
-|---|---|---|
-| Básico | 1 módulo a elección | 5 |
-| Pro | viajes + facturacion + cuenta-corriente | 20 |
-| Enterprise | todos + white-label | ilimitado |
-
-> Cada módulo adicional suma a la cuota mensual base. Los precios en ARS se ajustan por inflación.
+- No hay planes fijos (`Básico`, `Pro`, `Enterprise`).
+- Cada cliente paga una suscripción según:
+  - cantidad de módulos habilitados
+  - tipo de módulos habilitados
+- `modules` en `Tenant` es la fuente de verdad comercial/funcional.
+- `maxUsers` se configura por tenant según acuerdo comercial.
+- Los precios en ARS se ajustan por inflación.
 
 ---
 

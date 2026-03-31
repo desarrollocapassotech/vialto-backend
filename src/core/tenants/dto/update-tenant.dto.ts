@@ -4,7 +4,6 @@ import { Type } from 'class-transformer';
 export class UpdateTenantDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() cuit?: string;
-  @IsOptional() @IsIn(['basico', 'pro', 'enterprise']) plan?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) modules?: string[];
   @IsOptional() @IsInt() @Type(() => Number) maxUsers?: number;
   @IsOptional() @IsIn(['trial', 'active', 'suspended']) billingStatus?: string;

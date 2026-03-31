@@ -1,14 +1,16 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { createClerkClient } from '@clerk/backend';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { ListTenantsDto } from './dto/list-tenants.dto';
 
-const PLAN_MAX_USERS: Record<string, number> = {
-  basico: 5,
-  pro: 20,
-  enterprise: 2147483647,
-};
+const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 @Injectable()
 export class TenantsService {
@@ -64,7 +66,7 @@ export class TenantsService {
     return tenant;
   }
 
-  async create(dto: CreateTenantDto) {
+  async create(dto: CreateTenantDto, requesterUserId?: string) {
     if (dto.cuit) {
       const existing = await this.prisma.tenant.findFirst({
         where: { cuit: dto.cuit },
@@ -72,19 +74,44 @@ export class TenantsService {
       if (existing) throw new ConflictException('Ya existe un tenant con ese CUIT');
     }
 
-    const plan = dto.plan ?? 'basico';
-    const maxUsers = PLAN_MAX_USERS[plan] ?? 5;
+    let clerkOrgId = dto.clerkOrgId?.trim();
+    let createdOrgId: string | null = null;
 
-    return this.prisma.tenant.create({
-      data: {
-        clerkOrgId: dto.clerkOrgId,
-        name: dto.name,
-        cuit: dto.cuit ?? null,
-        plan,
-        modules: dto.modules ?? [],
-        maxUsers,
-      },
-    });
+    if (!clerkOrgId) {
+      try {
+        const org = await clerk.organizations.createOrganization({
+          name: dto.name.trim(),
+          createdBy: requesterUserId,
+        });
+        clerkOrgId = org.id;
+        createdOrgId = org.id;
+      } catch {
+        throw new InternalServerErrorException(
+          'No se pudo crear la organización en Clerk',
+        );
+      }
+    }
+
+    try {
+      return await this.prisma.tenant.create({
+        data: {
+          clerkOrgId,
+          name: dto.name,
+          cuit: dto.cuit ?? null,
+          modules: dto.modules ?? [],
+          maxUsers: 10,
+        },
+      });
+    } catch (error) {
+      if (createdOrgId) {
+        try {
+          await clerk.organizations.deleteOrganization(createdOrgId);
+        } catch {
+          // Si falla rollback en Clerk, priorizamos error funcional principal.
+        }
+      }
+      throw error;
+    }
   }
 
   async update(clerkOrgId: string, dto: UpdateTenantDto) {
@@ -110,6 +137,7 @@ export class TenantsService {
 
   async remove(clerkOrgId: string) {
     await this.findOne(clerkOrgId);
+    await clerk.organizations.deleteOrganization(clerkOrgId);
     return this.prisma.tenant.delete({ where: { clerkOrgId } });
   }
 }

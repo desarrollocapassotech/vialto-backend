@@ -48,8 +48,8 @@ export class TenantsController {
 
   @Post()
   @Roles('superadmin')
-  create(@Body() dto: CreateTenantDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreateTenantDto, @CurrentAuth() auth: AuthPayload) {
+    return this.service.create(dto, auth.userId);
   }
 
   @Patch(':orgId')

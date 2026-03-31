@@ -17,9 +17,8 @@ model Tenant {
   clerkOrgId       String   @unique
   name             String
   cuit             String?  @unique
-  plan             String   @default("basico") // basico | pro | enterprise
   modules          String[] @default([])
-  maxUsers         Int      @default(5)
+  maxUsers         Int      @default(10)
   billingStatus    String   @default("trial") // trial | active | suspended
   billingRenewsAt  DateTime?
   whiteLabelDomain String?

@@ -23,7 +23,7 @@ export class ModuleGuard implements CanActivate {
       tenantId?: string | null;
     };
 
-    /** Superadmin puede auditar cualquier org sin depender del plan / módulos. */
+    /** Superadmin puede auditar cualquier org sin depender de módulos habilitados. */
     if (auth.role === 'superadmin') return true;
 
     const { tenantId } = auth;

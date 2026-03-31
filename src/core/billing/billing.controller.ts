@@ -13,11 +13,11 @@ export class BillingController {
   constructor(private readonly service: BillingService) {}
 
   @Get(':orgId')
-  getPlan(@Param('orgId') orgId: string, @CurrentAuth() auth: AuthPayload) {
+  getSubscription(@Param('orgId') orgId: string, @CurrentAuth() auth: AuthPayload) {
     if (auth.role !== 'superadmin' && auth.tenantId !== orgId) {
-      throw new ForbiddenException('Solo podés ver el plan de tu propio tenant');
+      throw new ForbiddenException('Solo podés ver la suscripción de tu propio tenant');
     }
-    return this.service.getPlan(orgId);
+    return this.service.getSubscription(orgId);
   }
 
   @Put(':orgId/modules/:moduleName/activate')

@@ -143,13 +143,11 @@ Content-Type: application/json
 ```json
 {
   "name": "Nombre comercial",
-  "clerkOrgId": "org_XXXXXXXXX",
-  "plan": "basico",
   "modules": ["combustible", "viajes"]
 }
 ```
 
-- **`clerkOrgId`:** debe ser **exactamente** el `org_...` de Clerk (y coincidir con la org activa en el token cuando probás como cliente).
+- **`clerkOrgId` (opcional):** si se envía, usa ese `org_...` de Clerk; si no se envía, el backend crea automáticamente la organización en Clerk.
 - **`modules`:** slugs exactos:  
   `viajes`, `facturacion`, `cuenta-corriente`, `stock`, `combustible`, `mantenimiento`, `remitos`, `turnos`, `reportes`.
 
@@ -228,7 +226,7 @@ Workflow: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) — `npm ci`,
 
 ## 14. Documentación adicional
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — modelo multi-tenant, módulos, planes, roadmap.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — modelo multi-tenant, módulos, suscripción por módulos y roadmap.
 
 ---
 

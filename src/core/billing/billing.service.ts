@@ -5,10 +5,10 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 export class BillingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getPlan(clerkOrgId: string) {
+  async getSubscription(clerkOrgId: string) {
     const tenant = await this.prisma.tenant.findUnique({
       where:  { clerkOrgId },
-      select: { plan: true, modules: true, billingStatus: true, billingRenewsAt: true, maxUsers: true },
+      select: { modules: true, billingStatus: true, billingRenewsAt: true, maxUsers: true },
     });
     if (!tenant) throw new NotFoundException('Tenant no encontrado');
     return { tenantId: clerkOrgId, ...tenant };

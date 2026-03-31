@@ -3,7 +3,6 @@ import {
   IsNotEmpty,
   Matches,
   IsOptional,
-  IsIn,
   IsArray,
   ValidateIf,
 } from 'class-validator';
@@ -19,13 +18,11 @@ export class CreateTenantDto {
   @Matches(/^\d{10,11}$/, { message: 'CUIT debe tener 10 u 11 dígitos' })
   cuit?: string;
 
+  @IsOptional()
+  @ValidateIf((_, v) => v != null && v !== '')
   @IsString()
   @IsNotEmpty()
-  clerkOrgId: string;
-
-  @IsOptional()
-  @IsIn(['basico', 'pro', 'enterprise'])
-  plan?: string;
+  clerkOrgId?: string;
 
   @IsOptional()
   @IsArray()

@@ -5,7 +5,6 @@ const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 function toClerkOrganizationRole(appRole: string): string {
   if (appRole === 'admin') return 'org:admin';
-  if (appRole === 'supervisor') return 'org:supervisor';
   return 'org:member';
 }
 

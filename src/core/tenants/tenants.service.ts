@@ -12,6 +12,34 @@ import { ListTenantsDto } from './dto/list-tenants.dto';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
+function isClerkNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as {
+    status?: number;
+    statusCode?: number;
+    message?: string;
+    errors?: Array<{ code?: string; longMessage?: string; message?: string }>;
+  };
+
+  if (e.status === 404 || e.statusCode === 404) return true;
+  if (typeof e.message === 'string' && e.message.toLowerCase().includes('not found')) {
+    return true;
+  }
+  if (Array.isArray(e.errors)) {
+    return e.errors.some((item) => {
+      const code = item.code?.toLowerCase() ?? '';
+      const longMessage = item.longMessage?.toLowerCase() ?? '';
+      const message = item.message?.toLowerCase() ?? '';
+      return (
+        code.includes('not_found') ||
+        longMessage.includes('not found') ||
+        message.includes('not found')
+      );
+    });
+  }
+  return false;
+}
+
 @Injectable()
 export class TenantsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -137,7 +165,16 @@ export class TenantsService {
 
   async remove(clerkOrgId: string) {
     await this.findOne(clerkOrgId);
-    await clerk.organizations.deleteOrganization(clerkOrgId);
+    try {
+      await clerk.organizations.deleteOrganization(clerkOrgId);
+    } catch (error) {
+      if (!isClerkNotFoundError(error)) {
+        throw new InternalServerErrorException(
+          'No se pudo eliminar la organización en Clerk',
+        );
+      }
+      // Si no existe en Clerk, igual limpiamos tenant local.
+    }
     return this.prisma.tenant.delete({ where: { clerkOrgId } });
   }
 }

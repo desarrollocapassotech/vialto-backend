@@ -6,7 +6,7 @@ export class UpdateTenantDto {
   @IsOptional() @IsString() cuit?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) modules?: string[];
   @IsOptional() @IsInt() @Type(() => Number) maxUsers?: number;
-  @IsOptional() @IsIn(['trial', 'active', 'suspended']) billingStatus?: string;
+  @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;
   @IsOptional() @IsDateString() billingRenewsAt?: string;
   @IsOptional() @IsString() whiteLabelDomain?: string;
 }

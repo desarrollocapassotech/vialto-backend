@@ -19,7 +19,7 @@ model Tenant {
   cuit             String?  @unique
   modules          String[] @default([])
   maxUsers         Int      @default(10)
-  billingStatus    String   @default("trial") // trial | active | suspended
+  billingStatus    String   @default("trial") // trial | active | suspended | expired
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
   createdAt        DateTime @default(now())

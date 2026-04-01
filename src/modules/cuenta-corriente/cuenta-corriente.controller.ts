@@ -4,6 +4,8 @@ import {
 import { CuentaCorrienteService } from './cuenta-corriente.service';
 import { CreateMovimientoCcDto } from './dto/create-movimiento-cc.dto';
 import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
+import { RegistrarPagoDto } from './dto/registrar-pago.dto';
+import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -30,6 +32,16 @@ export class CuentaCorrienteController {
     return this.service.findAll(auth.tenantId, clienteId);
   }
 
+  @Get('movimientos/exportar')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  exportar(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: ExportarMovimientosQueryDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.exportarMovimientos(auth.tenantId, query);
+  }
+
   @Get('movimientos/:id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -42,6 +54,23 @@ export class CuentaCorrienteController {
   create(@Body() dto: CreateMovimientoCcDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto);
+  }
+
+  @Post('pagos')
+  @Roles('admin', 'supervisor', 'superadmin')
+  registrarPago(@Body() dto: RegistrarPagoDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.registrarPago(auth.tenantId, dto);
+  }
+
+  @Get('saldo/:clienteId')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  saldoCliente(
+    @Param('clienteId') clienteId: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.saldoCliente(auth.tenantId, clienteId);
   }
 
   @Patch('movimientos/:id')

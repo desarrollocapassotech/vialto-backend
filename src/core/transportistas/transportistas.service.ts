@@ -30,7 +30,7 @@ export class TransportistasService {
         cuit: dto.cuit ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
-        tipo: dto.tipo ?? 'externo',
+        tipo: 'externo',
       },
     });
   }
@@ -39,7 +39,12 @@ export class TransportistasService {
     await this.findOne(id, tenantId);
     return this.prisma.transportista.update({
       where: { id },
-      data: dto,
+      data: {
+        nombre: dto.nombre,
+        cuit: dto.cuit,
+        email: dto.email,
+        telefono: dto.telefono,
+      },
     });
   }
 

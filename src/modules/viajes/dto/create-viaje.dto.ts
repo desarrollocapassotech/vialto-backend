@@ -13,23 +13,28 @@ export class CreateViajeDto {
   @IsString() @IsNotEmpty() numero: string;
 
   @IsOptional()
-  @IsIn(['pendiente', 'en_transito', 'despachado', 'cerrado'])
+  @IsIn(['pendiente', 'en_curso', 'finalizado', 'cancelado'])
   estado?: string;
 
   @IsString() @IsNotEmpty() clienteId: string;
   @IsOptional() @IsString() transportistaId?: string;
-  @IsOptional() @IsString() choferId?: string;
+  @IsString() @IsNotEmpty() choferId: string;
   @IsOptional() @IsString() vehiculoId?: string;
 
-  @IsOptional() @IsString() origen?: string;
-  @IsOptional() @IsString() destino?: string;
+  @IsString() @IsNotEmpty() patenteTractor: string;
+  @IsString() @IsNotEmpty() patenteSemirremolque: string;
+  @IsString() @IsNotEmpty() origen: string;
+  @IsString() @IsNotEmpty() destino: string;
+  @IsDateString() fechaCarga: string;
+  @IsDateString() fechaDescarga: string;
   @IsOptional() @IsDateString() fechaSalida?: string;
   @IsOptional() @IsDateString() fechaLlegada?: string;
-  @IsOptional() @IsString() mercaderia?: string;
+  @IsString() @IsNotEmpty() mercaderia: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
+  @IsOptional() @IsNumber() @Type(() => Number) monto?: number;
   @IsOptional() @IsNumber() @Type(() => Number) precioCliente?: number;
-  @IsOptional() @IsNumber() @Type(() => Number) precioFletero?: number;
+  @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
   @IsOptional() @IsArray() @IsString({ each: true }) documentacion?: string[];
-  @IsOptional() @IsString() observaciones?: string;
+  @IsString() @IsNotEmpty() observaciones: string;
 }

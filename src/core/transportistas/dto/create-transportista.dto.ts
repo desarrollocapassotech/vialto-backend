@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, IsNotEmpty, Matches } from 'class-validator';
+import { IsOptional, IsString, IsNotEmpty, Matches } from 'class-validator';
 
 export class CreateTransportistaDto {
   @IsString() @IsNotEmpty() nombre: string;
@@ -9,5 +9,4 @@ export class CreateTransportistaDto {
 
   @IsOptional() @IsString() email?: string;
   @IsOptional() @IsString() telefono?: string;
-  @IsOptional() @IsIn(['externo', 'propio']) tipo?: string;
 }

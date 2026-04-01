@@ -19,6 +19,8 @@ import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
+import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
+import { UpdateTransportistaDto } from '../transportistas/dto/update-transportista.dto';
 import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
 import { CurrentAuth } from '../auth/current-auth.decorator';
@@ -134,6 +136,38 @@ export class PlatformController {
   @Get('vehiculos')
   vehiculos(@Query('tenantId') tenantId?: string) {
     return this.service.listVehiculos(tenantId);
+  }
+
+  @Get('transportistas')
+  transportistas(@Query('tenantId') tenantId?: string) {
+    return this.service.listTransportistas(tenantId);
+  }
+
+  @Get('transportistas/:id')
+  transportistaById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getTransportistaById(tenantId, id);
+  }
+
+  @Post('transportistas')
+  createTransportista(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateTransportistaDto,
+  ) {
+    return this.service.createTransportista(tenantId, dto);
+  }
+
+  @Patch('transportistas/:id')
+  updateTransportista(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateTransportistaDto,
+  ) {
+    return this.service.updateTransportista(tenantId, id, dto);
+  }
+
+  @Delete('transportistas/:id')
+  removeTransportista(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.removeTransportista(tenantId, id);
   }
 
   @Get('users')

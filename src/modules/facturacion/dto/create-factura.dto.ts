@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 
 export class CreateFacturaDto {
   @IsString() @IsNotEmpty() numero: string;
-  @IsIn(['cliente', 'fletero']) tipo: string;
+  @IsIn(['cliente', 'transportista_externo']) tipo: string;
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() viajeId?: string;
   @IsNumber() @Type(() => Number) importe: number;

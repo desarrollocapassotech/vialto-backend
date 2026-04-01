@@ -74,7 +74,7 @@ model Transportista {
   cuit      String?
   email     String?
   telefono  String?
-  tipo      String   @default("externo") // externo | propio
+  tipo      String   @default("externo") // siempre externo
   createdAt DateTime @default(now())
 
   choferes  Chofer[]
@@ -139,7 +139,7 @@ model Viaje {
   tenantId         String
   tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero           String
-  estado           String    @default("pendiente") // pendiente | en_transito | despachado | cerrado
+  estado           String    @default("pendiente") // pendiente | en_curso | finalizado | cancelado
   clienteId        String
   cliente          Cliente   @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   transportistaId  String?
@@ -148,22 +148,29 @@ model Viaje {
   chofer           Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
   vehiculoId       String?
   vehiculo         Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  patenteTractor   String?
+  patenteSemirremolque String?
   origen           String?
   destino          String?
+  fechaCarga       DateTime?
+  fechaDescarga    DateTime?
   fechaSalida      DateTime?
   fechaLlegada     DateTime?
   mercaderia       String?
   kmRecorridos     Int?
   litrosConsumidos Float?
+  monto            Float?
   precioCliente    Float?
-  precioFletero    Float?
+  precioTransportistaExterno Float?
   gananciaBruta    Float?
   documentacion    String[]  @default([])
   observaciones    String?
+  fechaFinalizado  DateTime?
   createdAt        DateTime  @default(now())
   createdBy        String
 
   facturas Factura[]
+  movimientosCuentaCorriente MovimientoCuentaCorriente[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])
@@ -181,7 +188,7 @@ model Factura {
   tenantId         String
   tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero           String
-  tipo             String // cliente | fletero
+  tipo             String // cliente | transportista_externo
   clienteId        String?
   cliente          Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
   viajeId          String?
@@ -225,16 +232,22 @@ model MovimientoCuentaCorriente {
   tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   clienteId  String
   cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  tipo       String // cargo | pago | nota_credito
+  viajeId    String?
+  viaje      Viaje?  @relation(fields: [viajeId], references: [id], onDelete: SetNull)
+  tipo       String // cargo | pago
+  origen     String   @default("manual") // manual | viaje
   concepto   String
   importe    Float
-  saldoPost  Float
   fecha      DateTime
   referencia String?
   createdAt  DateTime @default(now())
 
   @@index([tenantId])
   @@index([tenantId, clienteId])
+  @@index([tenantId, fecha])
+  @@index([tenantId, origen])
+  @@index([tenantId, viajeId])
+  @@unique([tenantId, viajeId])
   @@map("movimientos_cuenta_corriente")
 }
 

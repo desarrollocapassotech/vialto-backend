@@ -9,7 +9,7 @@ import { Type } from 'class-transformer';
 
 export class UpdateFacturaDto {
   @IsOptional() @IsString() numero?: string;
-  @IsOptional() @IsIn(['cliente', 'fletero']) tipo?: string;
+  @IsOptional() @IsIn(['cliente', 'transportista_externo']) tipo?: string;
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() viajeId?: string;
   @IsOptional() @IsNumber() @Type(() => Number) importe?: number;

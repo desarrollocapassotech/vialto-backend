@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { IsOptional, IsString, Matches } from 'class-validator';
 
 export class UpdateTransportistaDto {
   @IsOptional() @IsString() nombre?: string;
@@ -9,5 +9,4 @@ export class UpdateTransportistaDto {
 
   @IsOptional() @IsString() email?: string;
   @IsOptional() @IsString() telefono?: string;
-  @IsOptional() @IsIn(['externo', 'propio']) tipo?: string;
 }

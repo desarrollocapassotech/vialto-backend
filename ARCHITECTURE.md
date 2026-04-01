@@ -30,6 +30,68 @@
 
 Cada empresa cliente es una **organización de Clerk**. El `organizationId` de Clerk es el `tenantId` en toda la base de datos.
 
+## Configuración de funcionalidades por tenant
+
+Para manejar comportamientos específicos por tenant sin ramificar el código ni crear modelos separados, Vialto usa una arquitectura de tres capas:
+
+### Capa 1 — Campos genéricos (modelo base)
+Los campos comunes a todos los tenants van en el modelo Prisma con tipado fuerte e integridad referencial. Son obligatorios para todos y nunca se omiten.
+
+### Capa 2 — Feature flags (configuración del tenant)
+Los comportamientos y reglas de negocio que algunos tenants necesitan y otros no se controlan mediante flags en una tabla de configuración. El código tiene la lógica implementada, pero la ejecuta solo si el flag está activo para ese tenant.
+```prisma
+model TenantConfig {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  flags    Json   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+```
+
+Ejemplo de flags para el módulo de viajes:
+```json
+{
+  "viajes": {
+    "requiereDespacho": true,
+    "requiereContenedor": true,
+    "autoFinalizacion48hs": true,
+    "tarifaPorHoraFinalizacion": true,
+    "calculoGananciaBruta": false
+  }
+}
+```
+
+La lectura de flags se centraliza en un servicio del core:
+```typescript
+// core/tenants/tenant-config.service.ts
+async getFlag(tenantId: string, module: string, flag: string): Promise {
+  const config = await this.prisma.tenantConfig.findUnique({ where: { tenantId } });
+  return config?.flags?.[module]?.[flag] ?? false;
+}
+```
+
+### Capa 3 — Metadata por registro (campos específicos)
+Los campos que solo usa un subconjunto de tenants y que no tienen sentido en el modelo base van en un campo `metadata: Json` en el modelo correspondiente. No tienen validación a nivel de base de datos — la validación se aplica en la capa de servicio según los flags activos del tenant.
+```prisma
+// Ejemplo en el modelo Viaje
+metadata Json @default("{}")
+```
+
+Ejemplos de uso:
+- Fernández: `{ "mic": "25AR319519Y", "crt": "AR1135010120", "kgCarga": 30760, "kgDescarga": 30100, "valorTnUsd": 280 }`
+- Riedel: `{ "despacho": "IC05 030782P", "contenedor": "OOCU 478298 0", "remitoFisico": true, "escaneado": false }`
+
+### Reglas de uso
+
+1. Si un campo es necesario para **todos** los tenants → va en el modelo base.
+2. Si una **regla de negocio** aplica solo a algunos tenants → se controla con un feature flag.
+3. Si un **campo de datos** aplica solo a algunos tenants → va en `metadata`.
+4. La validación de campos en `metadata` siempre ocurre en la capa de servicio, nunca en el controller.
+5. Nunca leer `metadata` directamente en el frontend — el backend siempre expone los campos tipados que correspondan según el tenant.
+
 ### Reglas absolutas
 
 1. **Toda query Prisma DEBE incluir `where: { tenantId }`** — nunca consultar datos sin filtrar por tenant.
@@ -209,8 +271,8 @@ model Viaje {
   kmRecorridos    Int?
   litrosConsumidos Float?
   precioCliente   Float?    // lo que cobra al cliente
-  precioFletero   Float?    // lo que paga al transportista
-  gananciaBruta   Float?    // calculado: precioCliente - precioFletero
+  precioTransportistaExterno Float? // lo que paga al transportista externo
+  gananciaBruta   Float?    // calculado: precioCliente - precioTransportistaExterno
   documentacion   String[]  // URLs en Cloudinary
   observaciones   String?
   createdAt       DateTime  @default(now())
@@ -233,7 +295,7 @@ model Factura {
   id               String    @id @default(cuid())
   tenantId         String
   numero           String
-  tipo             String    // cliente | fletero
+  tipo             String    // cliente | transportista_externo
   clienteId        String?
   viajeId          String?
   importe          Float
@@ -538,5 +600,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: marzo 2026*
+*Última actualización: abril 2026*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

@@ -6,12 +6,17 @@ import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
+import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
+import { UpdateTransportistaDto } from '../transportistas/dto/update-transportista.dto';
 import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
 import { createClerkClient } from '@clerk/backend';
+import { Prisma } from '@prisma/client';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
+const VIAJE_ESTADOS = ['pendiente', 'en_curso', 'finalizado', 'cancelado'] as const;
+type ViajeEstado = (typeof VIAJE_ESTADOS)[number];
 
 function toClerkOrganizationRole(appRole: string): string {
   if (appRole === 'admin') return 'org:admin';
@@ -41,6 +46,17 @@ function isClerkNotFound(error: unknown): boolean {
     : false;
 }
 
+async function getUserPlatformRole(userId: string | null): Promise<string | null> {
+  if (!userId) return null;
+  try {
+    const user = await clerk.users.getUser(userId);
+    const rawRole = user.publicMetadata?.vialtoRole;
+    return typeof rawRole === 'string' ? rawRole : null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class PlatformService {
   constructor(private readonly prisma: PrismaService) {}
@@ -53,9 +69,85 @@ export class PlatformService {
     return id;
   }
 
-  private calcGanancia(precioCliente?: number | null, precioFletero?: number | null) {
-    if (precioCliente == null || precioFletero == null) return null;
-    return precioCliente - precioFletero;
+  private calcGanancia(precioCliente?: number | null, precioTransportistaExterno?: number | null) {
+    if (precioCliente == null || precioTransportistaExterno == null) return null;
+    return precioCliente - precioTransportistaExterno;
+  }
+
+  private assertEstadoValido(estado: string): asserts estado is ViajeEstado {
+    if (!VIAJE_ESTADOS.includes(estado as ViajeEstado)) {
+      throw new BadRequestException('Estado de viaje inválido');
+    }
+  }
+
+  private assertTransicionEstado(actual: string, siguiente: string) {
+    this.assertEstadoValido(actual);
+    this.assertEstadoValido(siguiente);
+    if (actual === siguiente) return;
+    if (actual === 'pendiente' && siguiente === 'en_curso') return;
+    if (actual === 'en_curso' && siguiente === 'finalizado') return;
+    if (actual !== 'finalizado' && siguiente === 'cancelado') return;
+    throw new BadRequestException(
+      `Transición de estado inválida: ${actual} -> ${siguiente}`,
+    );
+  }
+
+  private getMontoFinal(viaje: {
+    monto: number | null;
+    precioCliente: number | null;
+  }) {
+    const monto = viaje.monto ?? viaje.precioCliente;
+    if (monto == null || monto <= 0) {
+      throw new BadRequestException(
+        'Para finalizar un viaje se requiere un monto mayor a 0',
+      );
+    }
+    return monto;
+  }
+
+  private async upsertCargoFinalizacion(
+    tx: Prisma.TransactionClient,
+    viaje: {
+      id: string;
+      tenantId: string;
+      clienteId: string;
+      numero: string;
+      monto: number | null;
+      precioCliente: number | null;
+      fechaFinalizado: Date | null;
+    },
+  ) {
+    const monto = this.getMontoFinal(viaje);
+    const fecha = viaje.fechaFinalizado ?? new Date();
+    const concepto = `Cargo automático por viaje ${viaje.numero}`;
+    await tx.movimientoCuentaCorriente.upsert({
+      where: {
+        tenantId_viajeId: {
+          tenantId: viaje.tenantId,
+          viajeId: viaje.id,
+        },
+      },
+      update: {
+        clienteId: viaje.clienteId,
+        tipo: 'cargo',
+        origen: 'viaje',
+        concepto,
+        importe: monto,
+        fecha,
+        referencia: viaje.numero,
+      },
+      create: {
+        tenantId: viaje.tenantId,
+        clienteId: viaje.clienteId,
+        viajeId: viaje.id,
+        tipo: 'cargo',
+        origen: 'viaje',
+        concepto,
+        importe: monto,
+        fecha,
+        referencia: viaje.numero,
+      },
+    });
   }
 
   private async assertTenantExists(tenantId: string) {
@@ -73,7 +165,7 @@ export class PlatformService {
     if (!c) throw new BadRequestException('Cliente inválido para esta empresa');
     if (dto.transportistaId) {
       const t = await this.prisma.transportista.findFirst({
-        where: { id: dto.transportistaId, tenantId },
+        where: { id: dto.transportistaId, tenantId, tipo: 'externo' },
       });
       if (!t) throw new BadRequestException('Transportista inválido');
     }
@@ -90,7 +182,7 @@ export class PlatformService {
   private async assertTransportista(tenantId: string, transportistaId?: string) {
     if (!transportistaId) return;
     const t = await this.prisma.transportista.findFirst({
-      where: { id: transportistaId, tenantId },
+      where: { id: transportistaId, tenantId, tipo: 'externo' },
     });
     if (!t) throw new BadRequestException('Transportista inválido para esta empresa');
   }
@@ -130,30 +222,43 @@ export class PlatformService {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
     await this.assertViajeRefs(scopedTenantId, dto);
-    const gananciaBruta = this.calcGanancia(dto.precioCliente, dto.precioFletero);
+    const estado = dto.estado ?? 'pendiente';
+    this.assertEstadoValido(estado);
+    if (estado === 'finalizado') {
+      throw new BadRequestException(
+        'Un viaje no puede crearse directamente en estado finalizado',
+      );
+    }
+    const precioTransportistaExterno = dto.precioTransportistaExterno;
+    const gananciaBruta = this.calcGanancia(dto.precioCliente, precioTransportistaExterno);
     return this.prisma.viaje.create({
       data: {
         tenantId: scopedTenantId,
         numero: dto.numero,
-        estado: dto.estado ?? 'pendiente',
+        estado,
         clienteId: dto.clienteId,
         transportistaId: dto.transportistaId ?? null,
         choferId: dto.choferId ?? null,
         vehiculoId: dto.vehiculoId ?? null,
+        patenteTractor: dto.patenteTractor.trim().toUpperCase(),
+        patenteSemirremolque: dto.patenteSemirremolque.trim().toUpperCase(),
         origen: dto.origen ?? null,
         destino: dto.destino ?? null,
+        fechaCarga: new Date(dto.fechaCarga),
+        fechaDescarga: new Date(dto.fechaDescarga),
         fechaSalida: dto.fechaSalida ? new Date(dto.fechaSalida) : null,
         fechaLlegada: dto.fechaLlegada ? new Date(dto.fechaLlegada) : null,
         mercaderia: dto.mercaderia ?? null,
         kmRecorridos: dto.kmRecorridos ?? null,
         litrosConsumidos: dto.litrosConsumidos ?? null,
+        monto: dto.monto ?? dto.precioCliente ?? null,
         precioCliente: dto.precioCliente ?? null,
-        precioFletero: dto.precioFletero ?? null,
+        precioTransportistaExterno: precioTransportistaExterno ?? null,
         gananciaBruta,
         documentacion: dto.documentacion ?? [],
         observaciones: dto.observaciones ?? null,
         createdBy: userId ?? 'superadmin',
-      },
+      } as any,
     });
   }
 
@@ -170,27 +275,71 @@ export class PlatformService {
     await this.assertViajeRefs(scopedTenantId, mergedRefs);
     const precioCliente =
       dto.precioCliente !== undefined ? dto.precioCliente : current.precioCliente;
-    const precioFletero =
-      dto.precioFletero !== undefined ? dto.precioFletero : current.precioFletero;
-    const gananciaBruta = this.calcGanancia(precioCliente, precioFletero);
-    return this.prisma.viaje.update({
-      where: { id },
-      data: {
-        ...dto,
-        fechaSalida:
-          dto.fechaSalida === undefined
-            ? undefined
-            : dto.fechaSalida
-              ? new Date(dto.fechaSalida)
-              : null,
-        fechaLlegada:
-          dto.fechaLlegada === undefined
-            ? undefined
-            : dto.fechaLlegada
-              ? new Date(dto.fechaLlegada)
-              : null,
-        gananciaBruta,
-      },
+    const precioTransportistaExternoInput = dto.precioTransportistaExterno;
+    const precioTransportistaExterno =
+      precioTransportistaExternoInput !== undefined
+        ? precioTransportistaExternoInput
+        : (current as any).precioTransportistaExterno;
+    const gananciaBruta = this.calcGanancia(precioCliente, precioTransportistaExterno);
+    const estadoSiguiente = dto.estado ?? current.estado;
+    this.assertTransicionEstado(current.estado, estadoSiguiente);
+
+    const data: Prisma.ViajeUpdateInput = {
+      ...dto,
+      monto:
+        dto.monto !== undefined
+          ? dto.monto
+          : current.monto ?? current.precioCliente ?? undefined,
+      fechaSalida:
+        dto.fechaSalida === undefined
+          ? undefined
+          : dto.fechaSalida
+            ? new Date(dto.fechaSalida)
+            : null,
+      fechaCarga:
+        dto.fechaCarga === undefined
+          ? undefined
+          : dto.fechaCarga
+            ? new Date(dto.fechaCarga)
+            : null,
+      fechaDescarga:
+        dto.fechaDescarga === undefined
+          ? undefined
+          : dto.fechaDescarga
+            ? new Date(dto.fechaDescarga)
+            : null,
+      fechaLlegada:
+        dto.fechaLlegada === undefined
+          ? undefined
+          : dto.fechaLlegada
+            ? new Date(dto.fechaLlegada)
+            : null,
+      patenteTractor:
+        dto.patenteTractor === undefined
+          ? undefined
+          : dto.patenteTractor.trim().toUpperCase(),
+      patenteSemirremolque:
+        dto.patenteSemirremolque === undefined
+          ? undefined
+          : dto.patenteSemirremolque.trim().toUpperCase(),
+      gananciaBruta,
+    } as any;
+    if (precioTransportistaExternoInput !== undefined) {
+      (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
+    }
+    if (current.estado !== 'finalizado' && estadoSiguiente === 'finalizado') {
+      data.fechaFinalizado = new Date();
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.viaje.update({
+        where: { id },
+        data,
+      });
+      if (updated.estado === 'finalizado') {
+        await this.upsertCargoFinalizacion(tx, updated);
+      }
+      return updated;
     });
   }
 
@@ -351,6 +500,74 @@ export class PlatformService {
       );
   }
 
+  listTransportistas(tenantId?: string) {
+    if (!tenantId?.trim()) {
+      return Promise.resolve([]);
+    }
+    const id = tenantId.trim();
+    return this.prisma.transportista
+      .findMany({
+        where: { tenantId: id },
+        take: TAKE,
+        orderBy: { createdAt: 'desc' },
+        include: { tenant: { select: { name: true } } },
+      })
+      .then((rows) =>
+        rows.map(({ tenant, ...rest }) => ({
+          ...rest,
+          empresaNombre: tenant.name,
+        })),
+      );
+  }
+
+  async getTransportistaById(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    const row = await this.prisma.transportista.findFirst({
+      where: { id, tenantId: scopedTenantId },
+    });
+    if (!row) throw new NotFoundException('Transportista no encontrado');
+    return row;
+  }
+
+  async createTransportista(tenantId: string | undefined, dto: CreateTransportistaDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.assertTenantExists(scopedTenantId);
+    return this.prisma.transportista.create({
+      data: {
+        tenantId: scopedTenantId,
+        nombre: dto.nombre,
+        cuit: dto.cuit ?? null,
+        email: dto.email ?? null,
+        telefono: dto.telefono ?? null,
+        tipo: 'externo',
+      },
+    });
+  }
+
+  async updateTransportista(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateTransportistaDto,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.getTransportistaById(scopedTenantId, id);
+    return this.prisma.transportista.update({
+      where: { id },
+      data: {
+        nombre: dto.nombre,
+        cuit: dto.cuit,
+        email: dto.email,
+        telefono: dto.telefono,
+      },
+    });
+  }
+
+  async removeTransportista(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.getTransportistaById(scopedTenantId, id);
+    return this.prisma.transportista.delete({ where: { id } });
+  }
+
   async listUsers(tenantId?: string) {
     if (!tenantId?.trim()) {
       return [];
@@ -359,14 +576,20 @@ export class PlatformService {
     const memberships = await clerk.organizations.getOrganizationMembershipList({
       organizationId,
     });
-    return memberships.data.map((m) => ({
-      userId: m.publicUserData?.userId ?? null,
-      firstName: m.publicUserData?.firstName ?? null,
-      lastName: m.publicUserData?.lastName ?? null,
-      email: m.publicUserData?.identifier ?? null,
-      role: m.role,
-      createdAt: m.createdAt,
-    }));
+    return Promise.all(
+      memberships.data.map(async (m) => {
+        const userId = m.publicUserData?.userId ?? null;
+        return {
+          userId,
+          firstName: m.publicUserData?.firstName ?? null,
+          lastName: m.publicUserData?.lastName ?? null,
+          email: m.publicUserData?.identifier ?? null,
+          role: m.role,
+          platformRole: await getUserPlatformRole(userId),
+          createdAt: m.createdAt,
+        };
+      }),
+    );
   }
 
   async getUserById(tenantId: string | undefined, userId: string) {
@@ -378,12 +601,14 @@ export class PlatformService {
     if (!membership) {
       throw new NotFoundException('Usuario no encontrado en esta empresa');
     }
+    const resolvedUserId = membership.publicUserData?.userId ?? null;
     return {
-      userId: membership.publicUserData?.userId ?? null,
+      userId: resolvedUserId,
       firstName: membership.publicUserData?.firstName ?? null,
       lastName: membership.publicUserData?.lastName ?? null,
       email: membership.publicUserData?.identifier ?? null,
       role: membership.role,
+      platformRole: await getUserPlatformRole(resolvedUserId),
       createdAt: membership.createdAt,
     };
   }

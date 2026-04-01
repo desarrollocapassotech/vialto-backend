@@ -8,15 +8,98 @@ import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { Prisma } from '@prisma/client';
 
-function calcGanancia(precioCliente?: number | null, precioFletero?: number | null) {
-  if (precioCliente == null || precioFletero == null) return null;
-  return precioCliente - precioFletero;
+function calcGanancia(precioCliente?: number | null, precioTransportistaExterno?: number | null) {
+  if (precioCliente == null || precioTransportistaExterno == null) return null;
+  return precioCliente - precioTransportistaExterno;
 }
+
+const VIAJE_ESTADOS = ['pendiente', 'en_curso', 'finalizado', 'cancelado'] as const;
+type ViajeEstado = (typeof VIAJE_ESTADOS)[number];
 
 @Injectable()
 export class ViajesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private assertEstadoValido(estado: string): asserts estado is ViajeEstado {
+    if (!VIAJE_ESTADOS.includes(estado as ViajeEstado)) {
+      throw new BadRequestException('Estado de viaje inválido');
+    }
+  }
+
+  private assertTransicionEstado(actual: string, siguiente: string) {
+    this.assertEstadoValido(actual);
+    this.assertEstadoValido(siguiente);
+    if (actual === siguiente) return;
+
+    if (actual === 'pendiente' && siguiente === 'en_curso') return;
+    if (actual === 'en_curso' && siguiente === 'finalizado') return;
+    if (actual !== 'finalizado' && siguiente === 'cancelado') return;
+
+    throw new BadRequestException(
+      `Transición de estado inválida: ${actual} -> ${siguiente}`,
+    );
+  }
+
+  private getMontoFinal(viaje: {
+    monto: number | null;
+    precioCliente: number | null;
+  }) {
+    const monto = viaje.monto ?? viaje.precioCliente;
+    if (monto == null || monto <= 0) {
+      throw new BadRequestException(
+        'Para finalizar un viaje se requiere un monto mayor a 0',
+      );
+    }
+    return monto;
+  }
+
+  private async upsertCargoFinalizacion(
+    tx: Prisma.TransactionClient,
+    viaje: {
+      id: string;
+      tenantId: string;
+      clienteId: string;
+      numero: string;
+      monto: number | null;
+      precioCliente: number | null;
+      fechaFinalizado: Date | null;
+    },
+  ) {
+    const monto = this.getMontoFinal(viaje);
+    const fecha = viaje.fechaFinalizado ?? new Date();
+    const concepto = `Cargo automático por viaje ${viaje.numero}`;
+
+    await tx.movimientoCuentaCorriente.upsert({
+      where: {
+        tenantId_viajeId: {
+          tenantId: viaje.tenantId,
+          viajeId: viaje.id,
+        },
+      },
+      update: {
+        clienteId: viaje.clienteId,
+        tipo: 'cargo',
+        origen: 'viaje',
+        concepto,
+        importe: monto,
+        fecha,
+        referencia: viaje.numero,
+      },
+      create: {
+        tenantId: viaje.tenantId,
+        clienteId: viaje.clienteId,
+        viajeId: viaje.id,
+        tipo: 'cargo',
+        origen: 'viaje',
+        concepto,
+        importe: monto,
+        fecha,
+        referencia: viaje.numero,
+      },
+    });
+  }
 
   private async assertRefs(tenantId: string, dto: {
     clienteId: string;
@@ -31,7 +114,7 @@ export class ViajesService {
 
     if (dto.transportistaId) {
       const t = await this.prisma.transportista.findFirst({
-        where: { id: dto.transportistaId, tenantId },
+        where: { id: dto.transportistaId, tenantId, tipo: 'externo' },
       });
       if (!t) throw new BadRequestException('Transportista inválido');
     }
@@ -93,30 +176,43 @@ export class ViajesService {
 
   async create(tenantId: string, auth: AuthPayload, dto: CreateViajeDto) {
     await this.assertRefs(tenantId, dto);
-    const gananciaBruta = calcGanancia(dto.precioCliente, dto.precioFletero);
+    const estado = dto.estado ?? 'pendiente';
+    this.assertEstadoValido(estado);
+    if (estado === 'finalizado') {
+      throw new BadRequestException(
+        'Un viaje no puede crearse directamente en estado finalizado',
+      );
+    }
+    const precioTransportistaExterno = dto.precioTransportistaExterno;
+    const gananciaBruta = calcGanancia(dto.precioCliente, precioTransportistaExterno);
     return this.prisma.viaje.create({
       data: {
         tenantId,
         numero: dto.numero,
-        estado: dto.estado ?? 'pendiente',
+        estado,
         clienteId: dto.clienteId,
         transportistaId: dto.transportistaId ?? null,
         choferId: dto.choferId ?? null,
         vehiculoId: dto.vehiculoId ?? null,
+        patenteTractor: dto.patenteTractor.trim().toUpperCase(),
+        patenteSemirremolque: dto.patenteSemirremolque.trim().toUpperCase(),
         origen: dto.origen ?? null,
         destino: dto.destino ?? null,
+        fechaCarga: new Date(dto.fechaCarga),
+        fechaDescarga: new Date(dto.fechaDescarga),
         fechaSalida: dto.fechaSalida ? new Date(dto.fechaSalida) : null,
         fechaLlegada: dto.fechaLlegada ? new Date(dto.fechaLlegada) : null,
         mercaderia: dto.mercaderia ?? null,
         kmRecorridos: dto.kmRecorridos ?? null,
         litrosConsumidos: dto.litrosConsumidos ?? null,
+        monto: dto.monto ?? dto.precioCliente ?? null,
         precioCliente: dto.precioCliente ?? null,
-        precioFletero: dto.precioFletero ?? null,
+        precioTransportistaExterno: precioTransportistaExterno ?? null,
         gananciaBruta,
         documentacion: dto.documentacion ?? [],
         observaciones: dto.observaciones ?? null,
         createdBy: auth.userId,
-      },
+      } as any,
     });
   }
 
@@ -137,28 +233,71 @@ export class ViajesService {
 
     const precioCliente =
       dto.precioCliente !== undefined ? dto.precioCliente : current.precioCliente;
-    const precioFletero =
-      dto.precioFletero !== undefined ? dto.precioFletero : current.precioFletero;
-    const gananciaBruta = calcGanancia(precioCliente, precioFletero);
+    const precioTransportistaExternoInput = dto.precioTransportistaExterno;
+    const precioTransportistaExterno =
+      precioTransportistaExternoInput !== undefined
+        ? precioTransportistaExternoInput
+        : (current as any).precioTransportistaExterno;
+    const gananciaBruta = calcGanancia(precioCliente, precioTransportistaExterno);
+    const estadoSiguiente = dto.estado ?? current.estado;
+    this.assertTransicionEstado(current.estado, estadoSiguiente);
 
-    return this.prisma.viaje.update({
-      where: { id },
-      data: {
-        ...dto,
-        fechaSalida:
-          dto.fechaSalida === undefined
-            ? undefined
-            : dto.fechaSalida
-              ? new Date(dto.fechaSalida)
-              : null,
-        fechaLlegada:
-          dto.fechaLlegada === undefined
-            ? undefined
-            : dto.fechaLlegada
-              ? new Date(dto.fechaLlegada)
-              : null,
-        gananciaBruta,
-      },
+    const data: Prisma.ViajeUpdateInput = {
+      ...dto,
+      monto:
+        dto.monto !== undefined
+          ? dto.monto
+          : current.monto ?? current.precioCliente ?? undefined,
+      fechaSalida:
+        dto.fechaSalida === undefined
+          ? undefined
+          : dto.fechaSalida
+            ? new Date(dto.fechaSalida)
+            : null,
+      fechaCarga:
+        dto.fechaCarga === undefined
+          ? undefined
+          : dto.fechaCarga
+            ? new Date(dto.fechaCarga)
+            : null,
+      fechaDescarga:
+        dto.fechaDescarga === undefined
+          ? undefined
+          : dto.fechaDescarga
+            ? new Date(dto.fechaDescarga)
+            : null,
+      fechaLlegada:
+        dto.fechaLlegada === undefined
+          ? undefined
+          : dto.fechaLlegada
+            ? new Date(dto.fechaLlegada)
+            : null,
+      patenteTractor:
+        dto.patenteTractor === undefined
+          ? undefined
+          : dto.patenteTractor.trim().toUpperCase(),
+      patenteSemirremolque:
+        dto.patenteSemirremolque === undefined
+          ? undefined
+          : dto.patenteSemirremolque.trim().toUpperCase(),
+      gananciaBruta,
+    } as any;
+    if (precioTransportistaExternoInput !== undefined) {
+      (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
+    }
+    if (current.estado !== 'finalizado' && estadoSiguiente === 'finalizado') {
+      data.fechaFinalizado = new Date();
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.viaje.update({
+        where: { id },
+        data,
+      });
+      if (updated.estado === 'finalizado') {
+        await this.upsertCargoFinalizacion(tx, updated);
+      }
+      return updated;
     });
   }
 

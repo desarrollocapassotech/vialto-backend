@@ -9,6 +9,11 @@ import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
 import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
 import { UpdateTransportistaDto } from '../transportistas/dto/update-transportista.dto';
 import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
+import { generateNumeroViaje } from '../../modules/viajes/generate-viaje-numero';
+import {
+  assertViajeOperacionExclusiva,
+  mergeViajeOperacionIds,
+} from '../../modules/viajes/viaje-operacion-exclusiva';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
 import { createClerkClient } from '@clerk/backend';
 import { Prisma } from '@prisma/client';
@@ -221,7 +226,19 @@ export class PlatformService {
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
-    await this.assertViajeRefs(scopedTenantId, dto);
+    assertViajeOperacionExclusiva({
+      transportistaId: dto.transportistaId,
+      choferId: dto.choferId,
+      vehiculoId: dto.vehiculoId,
+    });
+    const transportistaExterno = dto.transportistaId?.trim();
+    const viajeRefs = {
+      clienteId: dto.clienteId,
+      transportistaId: transportistaExterno || null,
+      choferId: transportistaExterno ? null : dto.choferId?.trim() || null,
+      vehiculoId: transportistaExterno ? null : dto.vehiculoId?.trim() || null,
+    };
+    await this.assertViajeRefs(scopedTenantId, viajeRefs);
     const estado = dto.estado ?? 'pendiente';
     this.assertEstadoValido(estado);
     if (estado === 'finalizado') {
@@ -231,15 +248,17 @@ export class PlatformService {
     }
     const precioTransportistaExterno = dto.precioTransportistaExterno;
     const gananciaBruta = this.calcGanancia(dto.precioCliente, precioTransportistaExterno);
+    const numero =
+      dto.numero?.trim() || (await generateNumeroViaje(this.prisma, scopedTenantId));
     return this.prisma.viaje.create({
       data: {
         tenantId: scopedTenantId,
-        numero: dto.numero,
+        numero,
         estado,
         clienteId: dto.clienteId,
-        transportistaId: dto.transportistaId ?? null,
-        choferId: dto.choferId ?? null,
-        vehiculoId: dto.vehiculoId ?? null,
+        transportistaId: viajeRefs.transportistaId,
+        choferId: viajeRefs.choferId,
+        vehiculoId: viajeRefs.vehiculoId,
         patenteTractor: dto.patenteTractor.trim().toUpperCase(),
         patenteSemirremolque: dto.patenteSemirremolque.trim().toUpperCase(),
         origen: dto.origen ?? null,
@@ -265,12 +284,19 @@ export class PlatformService {
   async updateViaje(tenantId: string | undefined, id: string, dto: UpdateViajeDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     const current = await this.getViajeById(scopedTenantId, id);
+    const op = mergeViajeOperacionIds(
+      {
+        transportistaId: current.transportistaId,
+        choferId: current.choferId,
+        vehiculoId: current.vehiculoId,
+      },
+      dto,
+    );
     const mergedRefs = {
       clienteId: dto.clienteId ?? current.clienteId,
-      transportistaId:
-        dto.transportistaId !== undefined ? dto.transportistaId : current.transportistaId,
-      choferId: dto.choferId !== undefined ? dto.choferId : current.choferId,
-      vehiculoId: dto.vehiculoId !== undefined ? dto.vehiculoId : current.vehiculoId,
+      transportistaId: op.transportistaId,
+      choferId: op.choferId,
+      vehiculoId: op.vehiculoId,
     };
     await this.assertViajeRefs(scopedTenantId, mergedRefs);
     const precioCliente =
@@ -330,6 +356,10 @@ export class PlatformService {
     if (current.estado !== 'finalizado' && estadoSiguiente === 'finalizado') {
       data.fechaFinalizado = new Date();
     }
+
+    (data as any).transportistaId = op.transportistaId;
+    (data as any).choferId = op.choferId;
+    (data as any).vehiculoId = op.vehiculoId;
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.viaje.update({

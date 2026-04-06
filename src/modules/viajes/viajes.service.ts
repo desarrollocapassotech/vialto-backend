@@ -6,6 +6,8 @@ import {
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
+import { generateNumeroViaje } from './generate-viaje-numero';
+import { assertViajeOperacionExclusiva, mergeViajeOperacionIds } from './viaje-operacion-exclusiva';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 import { Prisma } from '@prisma/client';
@@ -175,7 +177,19 @@ export class ViajesService {
   }
 
   async create(tenantId: string, auth: AuthPayload, dto: CreateViajeDto) {
-    await this.assertRefs(tenantId, dto);
+    assertViajeOperacionExclusiva({
+      transportistaId: dto.transportistaId,
+      choferId: dto.choferId,
+      vehiculoId: dto.vehiculoId,
+    });
+    const transportistaExterno = dto.transportistaId?.trim();
+    const refs = {
+      clienteId: dto.clienteId,
+      transportistaId: transportistaExterno || null,
+      choferId: transportistaExterno ? null : dto.choferId?.trim() || null,
+      vehiculoId: transportistaExterno ? null : dto.vehiculoId?.trim() || null,
+    };
+    await this.assertRefs(tenantId, refs);
     const estado = dto.estado ?? 'pendiente';
     this.assertEstadoValido(estado);
     if (estado === 'finalizado') {
@@ -185,15 +199,17 @@ export class ViajesService {
     }
     const precioTransportistaExterno = dto.precioTransportistaExterno;
     const gananciaBruta = calcGanancia(dto.precioCliente, precioTransportistaExterno);
+    const numero =
+      dto.numero?.trim() || (await generateNumeroViaje(this.prisma, tenantId));
     return this.prisma.viaje.create({
       data: {
         tenantId,
-        numero: dto.numero,
+        numero,
         estado,
         clienteId: dto.clienteId,
-        transportistaId: dto.transportistaId ?? null,
-        choferId: dto.choferId ?? null,
-        vehiculoId: dto.vehiculoId ?? null,
+        transportistaId: refs.transportistaId,
+        choferId: refs.choferId,
+        vehiculoId: refs.vehiculoId,
         patenteTractor: dto.patenteTractor.trim().toUpperCase(),
         patenteSemirremolque: dto.patenteSemirremolque.trim().toUpperCase(),
         origen: dto.origen ?? null,
@@ -218,16 +234,19 @@ export class ViajesService {
 
   async update(id: string, tenantId: string, dto: UpdateViajeDto) {
     const current = await this.findOne(id, tenantId);
+    const op = mergeViajeOperacionIds(
+      {
+        transportistaId: current.transportistaId,
+        choferId: current.choferId,
+        vehiculoId: current.vehiculoId,
+      },
+      dto,
+    );
     const merged = {
       clienteId: dto.clienteId ?? current.clienteId,
-      transportistaId:
-        dto.transportistaId !== undefined
-          ? dto.transportistaId
-          : current.transportistaId,
-      choferId:
-        dto.choferId !== undefined ? dto.choferId : current.choferId,
-      vehiculoId:
-        dto.vehiculoId !== undefined ? dto.vehiculoId : current.vehiculoId,
+      transportistaId: op.transportistaId,
+      choferId: op.choferId,
+      vehiculoId: op.vehiculoId,
     };
     await this.assertRefs(tenantId, merged);
 
@@ -288,6 +307,10 @@ export class ViajesService {
     if (current.estado !== 'finalizado' && estadoSiguiente === 'finalizado') {
       data.fechaFinalizado = new Date();
     }
+
+    (data as any).transportistaId = op.transportistaId;
+    (data as any).choferId = op.choferId;
+    (data as any).vehiculoId = op.vehiculoId;
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.viaje.update({

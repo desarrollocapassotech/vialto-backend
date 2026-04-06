@@ -10,7 +10,8 @@ import {
 import { Type } from 'class-transformer';
 
 export class CreateViajeDto {
-  @IsString() @IsNotEmpty() numero: string;
+  /** Si no se envía, el servidor asigna un correlativo (AAAA-NNNNNN). */
+  @IsOptional() @IsString() numero?: string;
 
   @IsOptional()
   @IsIn(['pendiente', 'en_curso', 'finalizado', 'cancelado'])
@@ -18,8 +19,9 @@ export class CreateViajeDto {
 
   @IsString() @IsNotEmpty() clienteId: string;
   @IsOptional() @IsString() transportistaId?: string;
-  @IsString() @IsNotEmpty() choferId: string;
-  @IsOptional() @IsString() vehiculoId?: string;
+  /** Obligatorio junto con vehiculoId si no hay transportista externo. */
+  @IsOptional() @IsString() choferId?: string | null;
+  @IsOptional() @IsString() vehiculoId?: string | null;
 
   @IsString() @IsNotEmpty() patenteTractor: string;
   @IsString() @IsNotEmpty() patenteSemirremolque: string;

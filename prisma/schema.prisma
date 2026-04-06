@@ -139,7 +139,7 @@ model Viaje {
   tenantId         String
   tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero           String
-  estado           String    @default("pendiente") // pendiente | en_curso | finalizado | cancelado
+  estado           String    @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
   clienteId        String
   cliente          Cliente   @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   transportistaId  String?
@@ -154,15 +154,11 @@ model Viaje {
   destino          String?
   fechaCarga       DateTime?
   fechaDescarga    DateTime?
-  fechaSalida      DateTime?
-  fechaLlegada     DateTime?
   mercaderia       String?
   kmRecorridos     Int?
   litrosConsumidos Float?
   monto            Float?
-  precioCliente    Float?
   precioTransportistaExterno Float?
-  gananciaBruta    Float?
   documentacion    String[]  @default([])
   observaciones    String?
   fechaFinalizado  DateTime?

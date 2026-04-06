@@ -15,13 +15,17 @@ import {
   mergeViajeOperacionIds,
 } from '../../modules/viajes/viaje-operacion-exclusiva';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
+import {
+  VIAJE_ESTADOS_SET,
+  esEstadoViajeFinal,
+  normalizarEstadoViaje,
+  type ViajeEstado,
+} from '../../modules/viajes/viaje-estados';
 import { createClerkClient } from '@clerk/backend';
 import { Prisma } from '@prisma/client';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
-const VIAJE_ESTADOS = ['pendiente', 'en_curso', 'finalizado', 'cancelado'] as const;
-type ViajeEstado = (typeof VIAJE_ESTADOS)[number];
 
 function toClerkOrganizationRole(appRole: string): string {
   if (appRole === 'admin') return 'org:admin';
@@ -74,34 +78,16 @@ export class PlatformService {
     return id;
   }
 
-  private calcGanancia(precioCliente?: number | null, precioTransportistaExterno?: number | null) {
-    if (precioCliente == null || precioTransportistaExterno == null) return null;
-    return precioCliente - precioTransportistaExterno;
-  }
-
-  private assertEstadoValido(estado: string): asserts estado is ViajeEstado {
-    if (!VIAJE_ESTADOS.includes(estado as ViajeEstado)) {
+  private parseEstadoViaje(estado: string): ViajeEstado {
+    const n = normalizarEstadoViaje(estado);
+    if (!VIAJE_ESTADOS_SET.has(n)) {
       throw new BadRequestException('Estado de viaje inválido');
     }
+    return n as ViajeEstado;
   }
 
-  private assertTransicionEstado(actual: string, siguiente: string) {
-    this.assertEstadoValido(actual);
-    this.assertEstadoValido(siguiente);
-    if (actual === siguiente) return;
-    if (actual === 'pendiente' && siguiente === 'en_curso') return;
-    if (actual === 'en_curso' && siguiente === 'finalizado') return;
-    if (actual !== 'finalizado' && siguiente === 'cancelado') return;
-    throw new BadRequestException(
-      `Transición de estado inválida: ${actual} -> ${siguiente}`,
-    );
-  }
-
-  private getMontoFinal(viaje: {
-    monto: number | null;
-    precioCliente: number | null;
-  }) {
-    const monto = viaje.monto ?? viaje.precioCliente;
+  private getMontoFinal(viaje: { monto: number | null }) {
+    const monto = viaje.monto;
     if (monto == null || monto <= 0) {
       throw new BadRequestException(
         'Para finalizar un viaje se requiere un monto mayor a 0',
@@ -118,7 +104,6 @@ export class PlatformService {
       clienteId: string;
       numero: string;
       monto: number | null;
-      precioCliente: number | null;
       fechaFinalizado: Date | null;
     },
   ) {
@@ -239,15 +224,13 @@ export class PlatformService {
       vehiculoId: transportistaExterno ? null : dto.vehiculoId?.trim() || null,
     };
     await this.assertViajeRefs(scopedTenantId, viajeRefs);
-    const estado = dto.estado ?? 'pendiente';
-    this.assertEstadoValido(estado);
-    if (estado === 'finalizado') {
+    const estado = this.parseEstadoViaje(dto.estado);
+    if (esEstadoViajeFinal(estado)) {
       throw new BadRequestException(
-        'Un viaje no puede crearse directamente en estado finalizado',
+        'Un viaje no puede crearse en un estado final',
       );
     }
     const precioTransportistaExterno = dto.precioTransportistaExterno;
-    const gananciaBruta = this.calcGanancia(dto.precioCliente, precioTransportistaExterno);
     const numero =
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, scopedTenantId));
     return this.prisma.viaje.create({
@@ -259,21 +242,21 @@ export class PlatformService {
         transportistaId: viajeRefs.transportistaId,
         choferId: viajeRefs.choferId,
         vehiculoId: viajeRefs.vehiculoId,
-        patenteTractor: dto.patenteTractor.trim().toUpperCase(),
-        patenteSemirremolque: dto.patenteSemirremolque.trim().toUpperCase(),
+        patenteTractor: dto.patenteTractor?.trim()
+          ? dto.patenteTractor.trim().toUpperCase()
+          : null,
+        patenteSemirremolque: dto.patenteSemirremolque?.trim()
+          ? dto.patenteSemirremolque.trim().toUpperCase()
+          : null,
         origen: dto.origen ?? null,
         destino: dto.destino ?? null,
-        fechaCarga: new Date(dto.fechaCarga),
-        fechaDescarga: new Date(dto.fechaDescarga),
-        fechaSalida: dto.fechaSalida ? new Date(dto.fechaSalida) : null,
-        fechaLlegada: dto.fechaLlegada ? new Date(dto.fechaLlegada) : null,
+        fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
+        fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
         mercaderia: dto.mercaderia ?? null,
         kmRecorridos: dto.kmRecorridos ?? null,
         litrosConsumidos: dto.litrosConsumidos ?? null,
-        monto: dto.monto ?? dto.precioCliente ?? null,
-        precioCliente: dto.precioCliente ?? null,
+        monto: dto.monto,
         precioTransportistaExterno: precioTransportistaExterno ?? null,
-        gananciaBruta,
         documentacion: dto.documentacion ?? [],
         observaciones: dto.observaciones ?? null,
         createdBy: userId ?? 'superadmin',
@@ -299,29 +282,21 @@ export class PlatformService {
       vehiculoId: op.vehiculoId,
     };
     await this.assertViajeRefs(scopedTenantId, mergedRefs);
-    const precioCliente =
-      dto.precioCliente !== undefined ? dto.precioCliente : current.precioCliente;
     const precioTransportistaExternoInput = dto.precioTransportistaExterno;
-    const precioTransportistaExterno =
-      precioTransportistaExternoInput !== undefined
-        ? precioTransportistaExternoInput
-        : (current as any).precioTransportistaExterno;
-    const gananciaBruta = this.calcGanancia(precioCliente, precioTransportistaExterno);
-    const estadoSiguiente = dto.estado ?? current.estado;
-    this.assertTransicionEstado(current.estado, estadoSiguiente);
+    const currentNorm = this.parseEstadoViaje(
+      current.estado != null && String(current.estado).trim() !== ''
+        ? String(current.estado)
+        : 'pendiente',
+    );
+    const estadoSiguiente =
+      dto.estado != null && String(dto.estado).trim() !== ''
+        ? this.parseEstadoViaje(String(dto.estado))
+        : currentNorm;
 
     const data: Prisma.ViajeUpdateInput = {
       ...dto,
       monto:
-        dto.monto !== undefined
-          ? dto.monto
-          : current.monto ?? current.precioCliente ?? undefined,
-      fechaSalida:
-        dto.fechaSalida === undefined
-          ? undefined
-          : dto.fechaSalida
-            ? new Date(dto.fechaSalida)
-            : null,
+        dto.monto !== undefined ? dto.monto : current.monto ?? undefined,
       fechaCarga:
         dto.fechaCarga === undefined
           ? undefined
@@ -334,12 +309,6 @@ export class PlatformService {
           : dto.fechaDescarga
             ? new Date(dto.fechaDescarga)
             : null,
-      fechaLlegada:
-        dto.fechaLlegada === undefined
-          ? undefined
-          : dto.fechaLlegada
-            ? new Date(dto.fechaLlegada)
-            : null,
       patenteTractor:
         dto.patenteTractor === undefined
           ? undefined
@@ -348,15 +317,18 @@ export class PlatformService {
         dto.patenteSemirremolque === undefined
           ? undefined
           : dto.patenteSemirremolque.trim().toUpperCase(),
-      gananciaBruta,
     } as any;
     if (precioTransportistaExternoInput !== undefined) {
       (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
     }
-    if (current.estado !== 'finalizado' && estadoSiguiente === 'finalizado') {
+    if (
+      !esEstadoViajeFinal(currentNorm) &&
+      esEstadoViajeFinal(estadoSiguiente)
+    ) {
       data.fechaFinalizado = new Date();
     }
 
+    (data as any).estado = estadoSiguiente;
     (data as any).transportistaId = op.transportistaId;
     (data as any).choferId = op.choferId;
     (data as any).vehiculoId = op.vehiculoId;
@@ -366,7 +338,7 @@ export class PlatformService {
         where: { id },
         data,
       });
-      if (updated.estado === 'finalizado') {
+      if (esEstadoViajeFinal(updated.estado)) {
         await this.upsertCargoFinalizacion(tx, updated);
       }
       return updated;

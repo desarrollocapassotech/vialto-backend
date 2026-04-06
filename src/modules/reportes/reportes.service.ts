@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { VIAJE_ESTADOS_FINALES } from '../viajes/viaje-estados';
 
 @Injectable()
 export class ReportesService {
@@ -32,7 +33,7 @@ export class ReportesService {
         this.prisma.viaje.findMany({
           where: {
             tenantId,
-            estado: 'finalizado',
+            estado: 'finalizado_sin_facturar',
             movimientosCuentaCorriente: {
               none: {
                 tipo: 'cargo',
@@ -54,8 +55,8 @@ export class ReportesService {
             tenantId,
             estado: 'en_curso',
             OR: [
-              { fechaSalida: { lte: umbralEnCurso } },
-              { fechaSalida: null, createdAt: { lte: umbralEnCurso } },
+              { fechaCarga: { lte: umbralEnCurso } },
+              { fechaCarga: null, createdAt: { lte: umbralEnCurso } },
             ],
           },
           orderBy: { createdAt: 'asc' },
@@ -65,14 +66,14 @@ export class ReportesService {
             clienteId: true,
             origen: true,
             destino: true,
-            fechaSalida: true,
+            fechaCarga: true,
             createdAt: true,
           },
         }),
         this.prisma.viaje.aggregate({
           where: {
             tenantId,
-            estado: 'finalizado',
+            estado: { in: [...VIAJE_ESTADOS_FINALES] },
             fechaFinalizado: {
               gte: startMesActual,
               lt: startMesSiguiente,
@@ -83,7 +84,7 @@ export class ReportesService {
         this.prisma.viaje.aggregate({
           where: {
             tenantId,
-            estado: 'finalizado',
+            estado: { in: [...VIAJE_ESTADOS_FINALES] },
             fechaFinalizado: {
               gte: startMesAnterior,
               lt: startMesActual,

@@ -791,4 +791,80 @@ export class PlatformService {
     await this.getVehiculoById(scopedTenantId, id);
     return this.prisma.vehiculo.delete({ where: { id } });
   }
+
+  // ── Facturación (superadmin) ─────────────────────────────────────────────
+
+  listFacturas(tenantId?: string) {
+    if (!tenantId?.trim()) return Promise.resolve([]);
+    const id = tenantId.trim();
+    return this.prisma.factura.findMany({
+      where: { tenantId: id },
+      orderBy: { fechaEmision: 'desc' },
+      include: { pagos: true },
+      take: TAKE,
+    });
+  }
+
+  async updateFactura(
+    tenantId: string | undefined,
+    id: string,
+    data: { estado?: string; fechaVencimiento?: string | null },
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    const row = await this.prisma.factura.findFirst({
+      where: { id, tenantId: scopedTenantId },
+    });
+    if (!row) throw new NotFoundException('Factura no encontrada');
+    return this.prisma.factura.update({
+      where: { id },
+      data: {
+        ...(data.estado !== undefined ? { estado: data.estado } : {}),
+        ...(data.fechaVencimiento !== undefined
+          ? {
+              fechaVencimiento: data.fechaVencimiento
+                ? new Date(data.fechaVencimiento)
+                : null,
+            }
+          : {}),
+      },
+    });
+  }
+
+  async createPago(
+    tenantId: string | undefined,
+    dto: { facturaId: string; importe: number; fecha: string; formaPago?: string },
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    const factura = await this.prisma.factura.findFirst({
+      where: { id: dto.facturaId, tenantId: scopedTenantId },
+    });
+    if (!factura) throw new NotFoundException('Factura no encontrada');
+    return this.prisma.pago.create({
+      data: {
+        tenantId: scopedTenantId,
+        facturaId: dto.facturaId,
+        importe: dto.importe,
+        fecha: new Date(dto.fecha),
+        formaPago: dto.formaPago ?? null,
+      },
+    });
+  }
+
+  async deletePago(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    const row = await this.prisma.pago.findFirst({
+      where: { id, tenantId: scopedTenantId },
+    });
+    if (!row) throw new NotFoundException('Pago no encontrado');
+    return this.prisma.pago.delete({ where: { id } });
+  }
+
+  async removeFactura(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    const row = await this.prisma.factura.findFirst({
+      where: { id, tenantId: scopedTenantId },
+    });
+    if (!row) throw new NotFoundException('Factura no encontrada');
+    return this.prisma.factura.delete({ where: { id } });
+  }
 }

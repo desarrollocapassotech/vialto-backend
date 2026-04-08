@@ -231,4 +231,38 @@ export class PlatformController {
   removeVehiculo(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.removeVehiculo(tenantId, id);
   }
+
+  // ── Facturación ────────────────────────────────────────────────────────────
+
+  @Get('facturas')
+  facturas(@Query('tenantId') tenantId?: string) {
+    return this.service.listFacturas(tenantId);
+  }
+
+  @Delete('facturas/:id')
+  removeFactura(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.removeFactura(tenantId, id);
+  }
+
+  @Patch('facturas/:id')
+  updateFactura(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: { estado?: string; fechaVencimiento?: string | null },
+  ) {
+    return this.service.updateFactura(tenantId, id, body);
+  }
+
+  @Post('pagos')
+  createPago(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: { facturaId: string; importe: number; fecha: string; formaPago?: string },
+  ) {
+    return this.service.createPago(tenantId, body);
+  }
+
+  @Delete('pagos/:id')
+  deletePago(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.deletePago(tenantId, id);
+  }
 }

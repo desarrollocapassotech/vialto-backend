@@ -165,7 +165,8 @@ model Viaje {
   createdAt        DateTime  @default(now())
   createdBy        String
 
-  facturas Factura[]
+  facturaId String?
+  factura   Factura? @relation(fields: [facturaId], references: [id], onDelete: SetNull)
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
 
   @@unique([tenantId, numero])
@@ -187,8 +188,7 @@ model Factura {
   tipo             String // cliente | transportista_externo
   clienteId        String?
   cliente          Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
-  viajeId          String?
-  viaje            Viaje?    @relation(fields: [viajeId], references: [id], onDelete: SetNull)
+  viajes           Viaje[]
   importe          Float
   fechaEmision     DateTime
   fechaVencimiento DateTime?

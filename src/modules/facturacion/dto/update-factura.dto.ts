@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsDateString,
   IsIn,
   IsNumber,
@@ -11,8 +12,7 @@ export class UpdateFacturaDto {
   @IsOptional() @IsString() numero?: string;
   @IsOptional() @IsIn(['cliente', 'transportista_externo']) tipo?: string;
   @IsOptional() @IsString() clienteId?: string;
-  @IsOptional() @IsString() viajeId?: string;
-  @IsOptional() @IsNumber() @Type(() => Number) importe?: number;
+  @IsOptional() @IsArray() @IsString({ each: true }) viajeIds?: string[];
   @IsOptional() @IsDateString() fechaEmision?: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;

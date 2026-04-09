@@ -341,12 +341,7 @@ export class PlatformService {
       if (esEstadoViajeFinal(updated.estado)) {
         await this.upsertCargoFinalizacion(tx, updated);
       }
-      if (updated.estado === 'cobrado') {
-        await tx.factura.updateMany({
-          where: { viajeId: id, tenantId: scopedTenantId },
-          data: { estado: 'cobrada' },
-        });
-      }
+      // El estado de la factura se deriva en la capa de servicio (computeEstado)
       return updated;
     });
   }
@@ -800,15 +795,21 @@ export class PlatformService {
 
   // ── Facturación (superadmin) ─────────────────────────────────────────────
 
-  listFacturas(tenantId?: string) {
+  async listFacturas(tenantId?: string) {
     if (!tenantId?.trim()) return Promise.resolve([]);
     const id = tenantId.trim();
-    return this.prisma.factura.findMany({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: any[] = await (this.prisma.factura as any).findMany({
       where: { tenantId: id },
       orderBy: { fechaEmision: 'desc' },
-      include: { pagos: true },
+      include: { viajes: { select: { id: true, estado: true, monto: true } } },
       take: TAKE,
     });
+    return rows.map(({ viajes, ...f }: { viajes: { id: string; monto: number | null }[]; [k: string]: unknown }) => ({
+      ...f,
+      viajeIds: viajes.map((v) => v.id),
+      importe: viajes.reduce((s, v) => s + (v.monto ?? 0), 0),
+    }));
   }
 
   async updateFactura(
@@ -836,12 +837,7 @@ export class PlatformService {
         },
         include: { pagos: true },
       });
-      if (data.estado === 'cobrada' && row.viajeId) {
-        await tx.viaje.update({
-          where: { id: row.viajeId },
-          data: { estado: 'cobrado' },
-        });
-      }
+      // El estado cobrada/vencida/pendiente se deriva automáticamente en la capa de lectura
       return updated;
     });
   }
@@ -881,27 +877,35 @@ export class PlatformService {
       numero: string;
       tipo: string;
       clienteId?: string;
-      viajeId?: string;
-      importe: number;
+      viajeIds?: string[];
+      importe?: number;
       fechaEmision: string;
       fechaVencimiento?: string;
       estado?: string;
     },
   ) {
     const tid = this.requiredTenantId(tenantId);
-    return this.prisma.factura.create({
-      data: {
-        tenantId: tid,
-        numero: dto.numero,
-        tipo: dto.tipo,
-        clienteId: dto.clienteId ?? null,
-        viajeId: dto.viajeId ?? null,
-        importe: dto.importe,
-        fechaEmision: new Date(dto.fechaEmision),
-        fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
-        estado: dto.estado ?? 'pendiente',
-      },
-      include: { pagos: true },
+    const viajeIds = dto.viajeIds ?? [];
+    return this.prisma.$transaction(async (tx) => {
+      const factura = await tx.factura.create({
+        data: {
+          tenantId: tid,
+          numero: dto.numero,
+          tipo: dto.tipo,
+          clienteId: dto.clienteId ?? null,
+          importe: dto.importe ?? 0,
+          fechaEmision: new Date(dto.fechaEmision),
+          fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
+          estado: dto.estado ?? 'pendiente',
+        },
+      });
+      if (viajeIds.length > 0) {
+        await tx.viaje.updateMany({
+          where: { id: { in: viajeIds }, tenantId: tid },
+          data: { facturaId: factura.id },
+        });
+      }
+      return tx.factura.findFirst({ where: { id: factura.id }, include: { pagos: true } });
     });
   }
 

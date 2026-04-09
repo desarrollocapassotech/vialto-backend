@@ -1,10 +1,10 @@
 import {
   IsDateString,
-  IsIn,
   IsNumber,
   IsOptional,
   IsString,
   IsNotEmpty,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -16,8 +16,5 @@ export class CreateFacturaDto {
   @IsNumber() @Type(() => Number) importe: number;
   @IsDateString() fechaEmision: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;
-  @IsOptional()
-  @IsIn(['pendiente', 'cobrada', 'vencida'])
-  estado?: string;
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
 }

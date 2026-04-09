@@ -1,3 +1,8 @@
+## Arquitectura del proyecto
+
+A continuación se incluye el contenido completo del documento de arquitectura
+que debés respetar en todo momento:
+
 # Vialto — Arquitectura del Sistema
 
 > Sistema SaaS modular para empresas de transporte y logística.

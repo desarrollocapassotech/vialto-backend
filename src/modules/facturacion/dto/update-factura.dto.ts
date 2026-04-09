@@ -15,8 +15,5 @@ export class UpdateFacturaDto {
   @IsOptional() @IsNumber() @Type(() => Number) importe?: number;
   @IsOptional() @IsDateString() fechaEmision?: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;
-  @IsOptional()
-  @IsIn(['pendiente', 'cobrada', 'vencida'])
-  estado?: string;
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
 }

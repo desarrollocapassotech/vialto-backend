@@ -239,6 +239,24 @@ export class PlatformController {
     return this.service.listFacturas(tenantId);
   }
 
+  @Post('facturas')
+  createFactura(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body()
+    body: {
+      numero: string;
+      tipo: string;
+      clienteId?: string;
+      viajeId?: string;
+      importe: number;
+      fechaEmision: string;
+      fechaVencimiento?: string;
+      estado?: string;
+    },
+  ) {
+    return this.service.createFactura(tenantId, body);
+  }
+
   @Delete('facturas/:id')
   removeFactura(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.removeFactura(tenantId, id);

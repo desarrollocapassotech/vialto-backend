@@ -341,6 +341,12 @@ export class PlatformService {
       if (esEstadoViajeFinal(updated.estado)) {
         await this.upsertCargoFinalizacion(tx, updated);
       }
+      if (updated.estado === 'cobrado') {
+        await tx.factura.updateMany({
+          where: { viajeId: id, tenantId: scopedTenantId },
+          data: { estado: 'cobrada' },
+        });
+      }
       return updated;
     });
   }
@@ -815,18 +821,28 @@ export class PlatformService {
       where: { id, tenantId: scopedTenantId },
     });
     if (!row) throw new NotFoundException('Factura no encontrada');
-    return this.prisma.factura.update({
-      where: { id },
-      data: {
-        ...(data.estado !== undefined ? { estado: data.estado } : {}),
-        ...(data.fechaVencimiento !== undefined
-          ? {
-              fechaVencimiento: data.fechaVencimiento
-                ? new Date(data.fechaVencimiento)
-                : null,
-            }
-          : {}),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.factura.update({
+        where: { id },
+        data: {
+          ...(data.estado !== undefined ? { estado: data.estado } : {}),
+          ...(data.fechaVencimiento !== undefined
+            ? {
+                fechaVencimiento: data.fechaVencimiento
+                  ? new Date(data.fechaVencimiento)
+                  : null,
+              }
+            : {}),
+        },
+        include: { pagos: true },
+      });
+      if (data.estado === 'cobrada' && row.viajeId) {
+        await tx.viaje.update({
+          where: { id: row.viajeId },
+          data: { estado: 'cobrado' },
+        });
+      }
+      return updated;
     });
   }
 
@@ -857,6 +873,36 @@ export class PlatformService {
     });
     if (!row) throw new NotFoundException('Pago no encontrado');
     return this.prisma.pago.delete({ where: { id } });
+  }
+
+  async createFactura(
+    tenantId: string | undefined,
+    dto: {
+      numero: string;
+      tipo: string;
+      clienteId?: string;
+      viajeId?: string;
+      importe: number;
+      fechaEmision: string;
+      fechaVencimiento?: string;
+      estado?: string;
+    },
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    return this.prisma.factura.create({
+      data: {
+        tenantId: tid,
+        numero: dto.numero,
+        tipo: dto.tipo,
+        clienteId: dto.clienteId ?? null,
+        viajeId: dto.viajeId ?? null,
+        importe: dto.importe,
+        fechaEmision: new Date(dto.fechaEmision),
+        fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
+        estado: dto.estado ?? 'pendiente',
+      },
+      include: { pagos: true },
+    });
   }
 
   async removeFactura(tenantId: string | undefined, id: string) {

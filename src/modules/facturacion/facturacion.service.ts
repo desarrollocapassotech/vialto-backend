@@ -12,6 +12,15 @@ import { CreatePagoDto } from './dto/create-pago.dto';
 export class FacturacionService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private computeEstado(f: {
+    viaje?: { estado: string } | null;
+    fechaVencimiento: Date | null;
+  }): 'cobrada' | 'vencida' | 'pendiente' {
+    if (f.viaje?.estado === 'cobrado') return 'cobrada';
+    if (f.fechaVencimiento && new Date(f.fechaVencimiento) <= new Date()) return 'vencida';
+    return 'pendiente';
+  }
+
   private async assertFacturaCtx(tenantId: string, dto: {
     clienteId?: string | null;
     viajeId?: string | null;
@@ -30,22 +39,30 @@ export class FacturacionService {
     }
   }
 
-  listFacturas(tenantId: string) {
-    return this.prisma.factura.findMany({
+  async listFacturas(tenantId: string) {
+    const rows = await this.prisma.factura.findMany({
       where: { tenantId },
       orderBy: { fechaEmision: 'desc' },
-      include: { pagos: true },
+      include: { pagos: true, viaje: { select: { estado: true } } },
       take: 200,
     });
+    return rows.map(({ viaje, ...f }) => ({
+      ...f,
+      estado: this.computeEstado({ viaje, fechaVencimiento: f.fechaVencimiento }),
+    }));
   }
 
   async findFactura(id: string, tenantId: string) {
     const row = await this.prisma.factura.findFirst({
       where: { id, tenantId },
-      include: { pagos: true },
+      include: { pagos: true, viaje: { select: { estado: true } } },
     });
     if (!row) throw new NotFoundException('Factura no encontrada');
-    return row;
+    const { viaje, ...f } = row;
+    return {
+      ...f,
+      estado: this.computeEstado({ viaje, fechaVencimiento: f.fechaVencimiento }),
+    };
   }
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
@@ -65,7 +82,7 @@ export class FacturacionService {
         fechaVencimiento: dto.fechaVencimiento
           ? new Date(dto.fechaVencimiento)
           : null,
-        estado: dto.estado ?? 'pendiente',
+        estado: 'pendiente',
         diferencia: dto.diferencia ?? null,
       },
     });
@@ -77,7 +94,7 @@ export class FacturacionService {
       clienteId: dto.clienteId,
       viajeId: dto.viajeId,
     });
-    return this.prisma.factura.update({
+    const updated = await this.prisma.factura.update({
       where: { id },
       data: {
         ...dto,
@@ -92,7 +109,13 @@ export class FacturacionService {
               ? new Date(dto.fechaVencimiento)
               : null,
       },
+      include: { pagos: true, viaje: { select: { estado: true } } },
     });
+    const { viaje, ...f } = updated;
+    return {
+      ...f,
+      estado: this.computeEstado({ viaje, fechaVencimiento: f.fechaVencimiento }),
+    };
   }
 
   async removeFactura(id: string, tenantId: string) {

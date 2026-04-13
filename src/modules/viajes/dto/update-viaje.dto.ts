@@ -32,7 +32,9 @@ export class UpdateViajeDto {
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) monto?: number;
+  @IsOptional() @IsIn(['ARS', 'USD']) monedaMonto?: string;
   @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
+  @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) documentacion?: string[];
   @IsOptional() @IsString() observaciones?: string;
 }

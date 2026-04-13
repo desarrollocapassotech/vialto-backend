@@ -169,7 +169,11 @@ model Viaje {
   kmRecorridos     Int?
   litrosConsumidos Float?
   monto            Float?
+  /** ARS | USD */
+  monedaMonto      String    @default("ARS")
   precioTransportistaExterno Float?
+  /** ARS | USD */
+  monedaPrecioTransportistaExterno String @default("ARS")
   documentacion    String[]  @default([])
   observaciones    String?
   fechaFinalizado  DateTime?

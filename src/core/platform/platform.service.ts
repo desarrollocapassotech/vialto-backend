@@ -275,7 +275,10 @@ export class PlatformService {
           kmRecorridos: dto.kmRecorridos ?? null,
           litrosConsumidos: dto.litrosConsumidos ?? null,
           monto: dto.monto,
+          monedaMonto: dto.monedaMonto === 'USD' ? 'USD' : 'ARS',
           precioTransportistaExterno: precioTransportistaExterno ?? null,
+          monedaPrecioTransportistaExterno:
+            dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
           documentacion: dto.documentacion ?? [],
           observaciones: dto.observaciones ?? null,
           createdBy: userId ?? 'superadmin',
@@ -344,6 +347,13 @@ export class PlatformService {
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
     if (precioTransportistaExternoInput !== undefined) {
       (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
+    }
+    if (dto.monedaMonto !== undefined) {
+      (data as any).monedaMonto = dto.monedaMonto === 'USD' ? 'USD' : 'ARS';
+    }
+    if (dto.monedaPrecioTransportistaExterno !== undefined) {
+      (data as any).monedaPrecioTransportistaExterno =
+        dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
     }
     if (
       !esEstadoViajeFinal(currentNorm) &&

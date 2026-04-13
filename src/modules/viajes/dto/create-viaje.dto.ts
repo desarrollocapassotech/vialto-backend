@@ -35,7 +35,11 @@ export class CreateViajeDto {
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
   @IsNumber() @Min(0.01) @Type(() => Number) monto: number;
+  /** ARS (default) o USD. */
+  @IsOptional() @IsIn(['ARS', 'USD']) monedaMonto?: string;
   @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
+  /** ARS (default) o USD. */
+  @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) documentacion?: string[];
   @IsOptional() @IsString() observaciones?: string;
 }

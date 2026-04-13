@@ -16,7 +16,7 @@ import {
   type ViajeConVehiculosViaje,
 } from './viaje-vehiculos.helper';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
-import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
 import { Prisma } from '@prisma/client';
 import {
   VIAJE_ESTADOS_SET,
@@ -126,10 +126,19 @@ export class ViajesService {
     });
   }
 
-  async findAllPaginated(tenantId: string, query: PaginationQueryDto, estado?: string) {
+  async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
-    const where = { tenantId, ...(estado ? { estado } : {}) };
+    const where: Prisma.ViajeWhereInput = { tenantId };
+
+    const est = query.estado?.trim();
+    if (est) where.estado = est;
+
+    const cid = query.clienteId?.trim();
+    if (cid) where.clienteId = cid;
+
+    const tid = query.transportistaId?.trim();
+    if (tid) where.transportistaId = tid;
 
     const [total, items] = await this.prisma.$transaction([
       this.prisma.viaje.count({ where }),

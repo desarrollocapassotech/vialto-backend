@@ -1,6 +1,16 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ViajesService } from './viajes.service';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
@@ -13,7 +23,8 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
-import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { queryParamFromRequest } from '../../shared/util/express-query-string';
+import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
 
 @Controller('viajes')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
@@ -32,11 +43,24 @@ export class ViajesController {
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   listPaginated(
     @CurrentAuth() auth: AuthPayload,
-    @Query() query: PaginationQueryDto,
-    @Query('estado') estado?: string,
+    @Query() query: ViajesPaginatedQueryDto,
+    @Req() req: Request,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.findAllPaginated(auth.tenantId, query, estado);
+    const clienteId =
+      queryParamFromRequest(req, 'clienteId') ??
+      (query.clienteId?.trim() ? query.clienteId.trim() : undefined);
+    const transportistaId =
+      queryParamFromRequest(req, 'transportistaId') ??
+      (query.transportistaId?.trim() ? query.transportistaId.trim() : undefined);
+    /** Objeto plano (sin `...query`): evita rarezas al expandir instancias del DTO y asegura los filtros. */
+    return this.service.findAllPaginated(auth.tenantId, {
+      page: query.page,
+      pageSize: query.pageSize,
+      estado: query.estado,
+      clienteId,
+      transportistaId,
+    });
   }
 
   @Get(':id')

@@ -272,7 +272,7 @@ model Viaje {
   destino         String?
   fechaSalida     DateTime?
   fechaLlegada    DateTime?
-  mercaderia      String?
+  detalleCarga    String?
   kmRecorridos    Int?
   litrosConsumidos Float?
   precioCliente   Float?    // lo que cobra al cliente

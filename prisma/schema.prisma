@@ -165,7 +165,7 @@ model Viaje {
   destino          String?
   fechaCarga       DateTime?
   fechaDescarga    DateTime?
-  mercaderia       String?
+  detalleCarga     String?
   kmRecorridos     Int?
   litrosConsumidos Float?
   monto            Float?

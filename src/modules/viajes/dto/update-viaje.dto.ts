@@ -28,7 +28,7 @@ export class UpdateViajeDto {
   @IsOptional() @IsString() destino?: string;
   @IsOptional() @IsDateString() fechaCarga?: string;
   @IsOptional() @IsDateString() fechaDescarga?: string;
-  @IsOptional() @IsString() mercaderia?: string;
+  @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) monto?: number;

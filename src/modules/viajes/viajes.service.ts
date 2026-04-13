@@ -196,30 +196,29 @@ export class ViajesService {
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, tenantId));
 
     return this.prisma.$transaction(async (tx) => {
-      const viaje = await tx.viaje.create({
-        data: {
-          tenantId,
-          numero,
-          estado,
-          clienteId: dto.clienteId,
-          transportistaId: refs.transportistaId,
-          choferId: refs.choferId,
-          origen: dto.origen ?? null,
-          destino: dto.destino ?? null,
-          fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
-          fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
-          mercaderia: dto.mercaderia ?? null,
-          kmRecorridos: dto.kmRecorridos ?? null,
-          litrosConsumidos: dto.litrosConsumidos ?? null,
-          monto: dto.monto,
-          monedaMonto: dto.monedaMonto === 'USD' ? 'USD' : 'ARS',
-          precioTransportistaExterno: precioTransportistaExterno ?? null,
-          monedaPrecioTransportistaExterno:
-            dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
-          observaciones: dto.observaciones ?? null,
-          createdBy: auth.userId,
-        },
-      });
+      const data: Prisma.ViajeUncheckedCreateInput = {
+        tenantId,
+        numero,
+        estado,
+        clienteId: dto.clienteId,
+        transportistaId: refs.transportistaId,
+        choferId: refs.choferId,
+        origen: dto.origen ?? null,
+        destino: dto.destino ?? null,
+        fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
+        fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
+        detalleCarga: dto.detalleCarga ?? null,
+        kmRecorridos: dto.kmRecorridos ?? null,
+        litrosConsumidos: dto.litrosConsumidos ?? null,
+        monto: dto.monto,
+        monedaMonto: dto.monedaMonto === 'USD' ? 'USD' : 'ARS',
+        precioTransportistaExterno: precioTransportistaExterno ?? null,
+        monedaPrecioTransportistaExterno:
+          dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
+        observaciones: dto.observaciones ?? null,
+        createdBy: auth.userId,
+      };
+      const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id },

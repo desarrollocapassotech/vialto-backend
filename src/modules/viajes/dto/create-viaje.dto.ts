@@ -31,7 +31,7 @@ export class CreateViajeDto {
   @IsString() @IsNotEmpty() destino: string;
   @IsOptional() @IsDateString() fechaCarga?: string;
   @IsOptional() @IsDateString() fechaDescarga?: string;
-  @IsOptional() @IsString() mercaderia?: string;
+  @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
   @IsNumber() @Min(0.01) @Type(() => Number) monto: number;

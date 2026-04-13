@@ -40,6 +40,5 @@ export class CreateViajeDto {
   @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
   /** ARS (default) o USD. */
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
-  @IsOptional() @IsArray() @IsString({ each: true }) documentacion?: string[];
   @IsOptional() @IsString() observaciones?: string;
 }

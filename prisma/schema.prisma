@@ -174,7 +174,6 @@ model Viaje {
   precioTransportistaExterno Float?
   /** ARS | USD */
   monedaPrecioTransportistaExterno String @default("ARS")
-  documentacion    String[]  @default([])
   observaciones    String?
   fechaFinalizado  DateTime?
   createdAt        DateTime  @default(now())

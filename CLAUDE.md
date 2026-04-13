@@ -278,7 +278,6 @@ model Viaje {
   precioCliente   Float?    // lo que cobra al cliente
   precioTransportistaExterno Float? // lo que paga al transportista externo
   gananciaBruta   Float?    // calculado: precioCliente - precioTransportistaExterno
-  documentacion   String[]  // URLs en Cloudinary
   observaciones   String?
   createdAt       DateTime  @default(now())
   createdBy       String

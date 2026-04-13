@@ -216,7 +216,6 @@ export class ViajesService {
           precioTransportistaExterno: precioTransportistaExterno ?? null,
           monedaPrecioTransportistaExterno:
             dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
-          documentacion: dto.documentacion ?? [],
           observaciones: dto.observaciones ?? null,
           createdBy: auth.userId,
         },

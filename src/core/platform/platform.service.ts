@@ -279,7 +279,6 @@ export class PlatformService {
           precioTransportistaExterno: precioTransportistaExterno ?? null,
           monedaPrecioTransportistaExterno:
             dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
-          documentacion: dto.documentacion ?? [],
           observaciones: dto.observaciones ?? null,
           createdBy: userId ?? 'superadmin',
         },

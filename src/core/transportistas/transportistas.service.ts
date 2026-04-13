@@ -14,6 +14,14 @@ export class TransportistasService {
     });
   }
 
+  private async ensureExists(id: string, tenantId: string) {
+    const row = await this.prisma.transportista.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+    if (!row) throw new NotFoundException('Transportista no encontrado');
+  }
+
   async findOne(id: string, tenantId: string) {
     const row = await this.prisma.transportista.findFirst({
       where: { id, tenantId },
@@ -36,7 +44,7 @@ export class TransportistasService {
   }
 
   async update(id: string, tenantId: string, dto: UpdateTransportistaDto) {
-    await this.findOne(id, tenantId);
+    await this.ensureExists(id, tenantId);
     return this.prisma.transportista.update({
       where: { id },
       data: {
@@ -49,7 +57,7 @@ export class TransportistasService {
   }
 
   async remove(id: string, tenantId: string) {
-    await this.findOne(id, tenantId);
+    await this.ensureExists(id, tenantId);
     return this.prisma.transportista.delete({ where: { id } });
   }
 }

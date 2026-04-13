@@ -78,6 +78,14 @@ export class PlatformService {
     return id;
   }
 
+  private async assertTransportistaExists(scopedTenantId: string, id: string) {
+    const row = await this.prisma.transportista.findFirst({
+      where: { id, tenantId: scopedTenantId },
+      select: { id: true },
+    });
+    if (!row) throw new NotFoundException('Transportista no encontrado');
+  }
+
   private parseEstadoViaje(estado: string): ViajeEstado {
     const n = normalizarEstadoViaje(estado);
     if (!VIAJE_ESTADOS_SET.has(n)) {
@@ -466,7 +474,12 @@ export class PlatformService {
     return this.prisma.chofer.update({
       where: { id },
       data: {
-        ...dto,
+        nombre: dto.nombre,
+        dni: dto.dni,
+        licencia: dto.licencia,
+        telefono: dto.telefono,
+        transportistaId:
+          dto.transportistaId === undefined ? undefined : dto.transportistaId,
         licenciaVence:
           dto.licenciaVence === undefined
             ? undefined
@@ -553,7 +566,7 @@ export class PlatformService {
     dto: UpdateTransportistaDto,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    await this.getTransportistaById(scopedTenantId, id);
+    await this.assertTransportistaExists(scopedTenantId, id);
     return this.prisma.transportista.update({
       where: { id },
       data: {
@@ -567,7 +580,7 @@ export class PlatformService {
 
   async removeTransportista(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    await this.getTransportistaById(scopedTenantId, id);
+    await this.assertTransportistaExists(scopedTenantId, id);
     return this.prisma.transportista.delete({ where: { id } });
   }
 
@@ -781,8 +794,14 @@ export class PlatformService {
     return this.prisma.vehiculo.update({
       where: { id },
       data: {
-        ...dto,
         patente: dto.patente ? dto.patente.toUpperCase() : undefined,
+        tipo: dto.tipo,
+        marca: dto.marca,
+        modelo: dto.modelo,
+        anio: dto.anio,
+        kmActual: dto.kmActual,
+        transportistaId:
+          dto.transportistaId === undefined ? undefined : dto.transportistaId,
       },
     });
   }

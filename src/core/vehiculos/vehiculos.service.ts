@@ -87,8 +87,14 @@ export class VehiculosService {
     return this.prisma.vehiculo.update({
       where: { id },
       data: {
-        ...dto,
         patente: dto.patente ? dto.patente.toUpperCase() : undefined,
+        tipo: dto.tipo,
+        marca: dto.marca,
+        modelo: dto.modelo,
+        anio: dto.anio,
+        kmActual: dto.kmActual,
+        transportistaId:
+          dto.transportistaId === undefined ? undefined : dto.transportistaId,
       },
     });
   }

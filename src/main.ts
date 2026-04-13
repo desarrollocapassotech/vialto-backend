@@ -20,8 +20,11 @@ async function bootstrap() {
       'https://registro-combustible-logistica.web.app',
       'https://registro-combustible-logistica.firebaseapp.com',
       /localhost:\d+/,
+      /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
     ],
     credentials: true,
+    allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
   });
 
   app.useGlobalPipes(

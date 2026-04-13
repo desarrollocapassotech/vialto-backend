@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateVehiculoDto {
@@ -12,5 +12,9 @@ export class UpdateVehiculoDto {
   @IsOptional() @IsString() modelo?: string;
   @IsOptional() @IsInt() @Type(() => Number) anio?: number;
   @IsOptional() @IsInt() @Min(0) @Type(() => Number) kmActual?: number;
-  @IsOptional() @IsString() transportistaId?: string;
+  /** null = flota propia; string = id del transportista (cuid). */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @IsString()
+  transportistaId?: string | null;
 }

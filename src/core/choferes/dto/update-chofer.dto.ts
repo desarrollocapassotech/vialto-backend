@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 export class UpdateChoferDto {
   @IsOptional() @IsString() nombre?: string;
@@ -6,5 +6,9 @@ export class UpdateChoferDto {
   @IsOptional() @IsString() licencia?: string;
   @IsOptional() @IsDateString() licenciaVence?: string;
   @IsOptional() @IsString() telefono?: string;
-  @IsOptional() @IsString() transportistaId?: string;
+  /** null = flota propia; string = id del transportista (cuid). */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @IsString()
+  transportistaId?: string | null;
 }

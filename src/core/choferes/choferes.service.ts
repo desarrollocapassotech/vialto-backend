@@ -86,7 +86,12 @@ export class ChoferesService {
     return this.prisma.chofer.update({
       where: { id },
       data: {
-        ...dto,
+        nombre: dto.nombre,
+        dni: dto.dni,
+        licencia: dto.licencia,
+        telefono: dto.telefono,
+        transportistaId:
+          dto.transportistaId === undefined ? undefined : dto.transportistaId,
         licenciaVence:
           dto.licenciaVence === undefined
             ? undefined

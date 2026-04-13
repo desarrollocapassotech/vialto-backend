@@ -14,6 +14,15 @@ import {
   assertViajeOperacionExclusiva,
   mergeViajeOperacionIds,
 } from '../../modules/viajes/viaje-operacion-exclusiva';
+import {
+  assertVehiculosDelViaje,
+  idsVehiculosDelViaje,
+  normalizarVehiculoIds,
+  reemplazarVehiculosDelViaje,
+  VIAJE_INCLUDE_VEHICULOS,
+  VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+  type ViajeConVehiculosViaje,
+} from '../../modules/viajes/viaje-vehiculos.helper';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
 import {
   VIAJE_ESTADOS_SET,
@@ -157,7 +166,6 @@ export class PlatformService {
     clienteId: string;
     transportistaId?: string | null;
     choferId?: string | null;
-    vehiculoId?: string | null;
   }) {
     const c = await this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } });
     if (!c) throw new BadRequestException('Cliente inválido para esta empresa');
@@ -170,10 +178,6 @@ export class PlatformService {
     if (dto.choferId) {
       const ch = await this.prisma.chofer.findFirst({ where: { id: dto.choferId, tenantId } });
       if (!ch) throw new BadRequestException('Chofer inválido');
-    }
-    if (dto.vehiculoId) {
-      const v = await this.prisma.vehiculo.findFirst({ where: { id: dto.vehiculoId, tenantId } });
-      if (!v) throw new BadRequestException('Vehículo inválido');
     }
   }
 
@@ -195,7 +199,10 @@ export class PlatformService {
         where: { tenantId: id },
         take: TAKE,
         orderBy: { createdAt: 'desc' },
-        include: { tenant: { select: { name: true } } },
+        include: {
+          tenant: { select: { name: true } },
+          ...VIAJE_INCLUDE_VEHICULOS,
+        },
       })
       .then((rows) =>
         rows.map(({ tenant, ...rest }) => ({
@@ -205,11 +212,14 @@ export class PlatformService {
       );
   }
 
-  async getViajeById(tenantId: string | undefined, id: string) {
+  async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    const row = await this.prisma.viaje.findFirst({ where: { id, tenantId: scopedTenantId } });
+    const row = await this.prisma.viaje.findFirst({
+      where: { id, tenantId: scopedTenantId },
+      include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+    });
     if (!row) throw new NotFoundException('Viaje no encontrado');
-    return row;
+    return row as unknown as ViajeConVehiculosViaje;
   }
 
   async createViaje(
@@ -219,19 +229,26 @@ export class PlatformService {
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
+    const transportistaExterno = dto.transportistaId?.trim();
+    const vehiculoIds = transportistaExterno
+      ? []
+      : normalizarVehiculoIds(dto.vehiculoIds);
     assertViajeOperacionExclusiva({
       transportistaId: dto.transportistaId,
       choferId: dto.choferId,
-      vehiculoId: dto.vehiculoId,
+      vehiculoIds,
     });
-    const transportistaExterno = dto.transportistaId?.trim();
     const viajeRefs = {
       clienteId: dto.clienteId,
       transportistaId: transportistaExterno || null,
       choferId: transportistaExterno ? null : dto.choferId?.trim() || null,
-      vehiculoId: transportistaExterno ? null : dto.vehiculoId?.trim() || null,
     };
     await this.assertViajeRefs(scopedTenantId, viajeRefs);
+    if (!transportistaExterno) {
+      await assertVehiculosDelViaje(this.prisma, scopedTenantId, vehiculoIds, {
+        requiereFlotaPropia: true,
+      });
+    }
     const estado = this.parseEstadoViaje(dto.estado);
     if (esEstadoViajeFinal(estado)) {
       throw new BadRequestException(
@@ -241,45 +258,47 @@ export class PlatformService {
     const precioTransportistaExterno = dto.precioTransportistaExterno;
     const numero =
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, scopedTenantId));
-    return this.prisma.viaje.create({
-      data: {
-        tenantId: scopedTenantId,
-        numero,
-        estado,
-        clienteId: dto.clienteId,
-        transportistaId: viajeRefs.transportistaId,
-        choferId: viajeRefs.choferId,
-        vehiculoId: viajeRefs.vehiculoId,
-        patenteTractor: dto.patenteTractor?.trim()
-          ? dto.patenteTractor.trim().toUpperCase()
-          : null,
-        patenteSemirremolque: dto.patenteSemirremolque?.trim()
-          ? dto.patenteSemirremolque.trim().toUpperCase()
-          : null,
-        origen: dto.origen ?? null,
-        destino: dto.destino ?? null,
-        fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
-        fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
-        mercaderia: dto.mercaderia ?? null,
-        kmRecorridos: dto.kmRecorridos ?? null,
-        litrosConsumidos: dto.litrosConsumidos ?? null,
-        monto: dto.monto,
-        precioTransportistaExterno: precioTransportistaExterno ?? null,
-        documentacion: dto.documentacion ?? [],
-        observaciones: dto.observaciones ?? null,
-        createdBy: userId ?? 'superadmin',
-      } as any,
+    return this.prisma.$transaction(async (tx) => {
+      const viaje = await tx.viaje.create({
+        data: {
+          tenantId: scopedTenantId,
+          numero,
+          estado,
+          clienteId: dto.clienteId,
+          transportistaId: viajeRefs.transportistaId,
+          choferId: viajeRefs.choferId,
+          origen: dto.origen ?? null,
+          destino: dto.destino ?? null,
+          fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
+          fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
+          mercaderia: dto.mercaderia ?? null,
+          kmRecorridos: dto.kmRecorridos ?? null,
+          litrosConsumidos: dto.litrosConsumidos ?? null,
+          monto: dto.monto,
+          precioTransportistaExterno: precioTransportistaExterno ?? null,
+          documentacion: dto.documentacion ?? [],
+          observaciones: dto.observaciones ?? null,
+          createdBy: userId ?? 'superadmin',
+        },
+      });
+      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds);
+      const out = await tx.viaje.findFirstOrThrow({
+        where: { id: viaje.id },
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      });
+      return out as unknown as ViajeConVehiculosViaje;
     });
   }
 
   async updateViaje(tenantId: string | undefined, id: string, dto: UpdateViajeDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     const current = await this.getViajeById(scopedTenantId, id);
+    const currentIds = idsVehiculosDelViaje(current);
     const op = mergeViajeOperacionIds(
       {
         transportistaId: current.transportistaId,
         choferId: current.choferId,
-        vehiculoId: current.vehiculoId,
+        vehiculoIds: currentIds,
       },
       dto,
     );
@@ -287,9 +306,13 @@ export class PlatformService {
       clienteId: dto.clienteId ?? current.clienteId,
       transportistaId: op.transportistaId,
       choferId: op.choferId,
-      vehiculoId: op.vehiculoId,
     };
     await this.assertViajeRefs(scopedTenantId, mergedRefs);
+    if (!op.transportistaId) {
+      await assertVehiculosDelViaje(this.prisma, scopedTenantId, op.vehiculoIds, {
+        requiereFlotaPropia: true,
+      });
+    }
     const precioTransportistaExternoInput = dto.precioTransportistaExterno;
     const currentNorm = this.parseEstadoViaje(
       current.estado != null && String(current.estado).trim() !== ''
@@ -317,15 +340,8 @@ export class PlatformService {
           : dto.fechaDescarga
             ? new Date(dto.fechaDescarga)
             : null,
-      patenteTractor:
-        dto.patenteTractor === undefined
-          ? undefined
-          : dto.patenteTractor.trim().toUpperCase(),
-      patenteSemirremolque:
-        dto.patenteSemirremolque === undefined
-          ? undefined
-          : dto.patenteSemirremolque.trim().toUpperCase(),
     } as any;
+    delete (data as { vehiculoIds?: unknown }).vehiculoIds;
     if (precioTransportistaExternoInput !== undefined) {
       (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
     }
@@ -339,18 +355,21 @@ export class PlatformService {
     (data as any).estado = estadoSiguiente;
     (data as any).transportistaId = op.transportistaId;
     (data as any).choferId = op.choferId;
-    (data as any).vehiculoId = op.vehiculoId;
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.viaje.update({
+      await tx.viaje.update({
         where: { id },
         data,
       });
-      if (esEstadoViajeFinal(updated.estado)) {
-        await this.upsertCargoFinalizacion(tx, updated);
+      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds);
+      const full = (await tx.viaje.findFirstOrThrow({
+        where: { id },
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      })) as unknown as ViajeConVehiculosViaje;
+      if (esEstadoViajeFinal(full.estado)) {
+        await this.upsertCargoFinalizacion(tx, full);
       }
-      // El estado de la factura se deriva en la capa de servicio (computeEstado)
-      return updated;
+      return full;
     });
   }
 

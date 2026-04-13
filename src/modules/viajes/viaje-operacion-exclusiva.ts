@@ -1,26 +1,27 @@
 import { BadRequestException } from '@nestjs/common';
+import { normalizarVehiculoIds } from './viaje-vehiculos.helper';
 
-/** Transportista externo XOR (chofer + vehículo propio). */
+/** Transportista externo XOR (chofer + al menos un vehículo propio). */
 export function assertViajeOperacionExclusiva(refs: {
   transportistaId?: string | null;
   choferId?: string | null;
-  vehiculoId?: string | null;
+  vehiculoIds: string[];
 }): void {
   const t = refs.transportistaId?.trim() ?? '';
   const ch = refs.choferId?.trim() ?? '';
-  const vh = refs.vehiculoId?.trim() ?? '';
+  const vids = refs.vehiculoIds ?? [];
 
   if (t) {
-    if (ch || vh) {
+    if (ch || vids.length > 0) {
       throw new BadRequestException(
-        'Con transportista externo no debe indicar chofer ni vehículo.',
+        'Con transportista externo no debe indicar chofer ni vehículos.',
       );
     }
     return;
   }
-  if (!ch || !vh) {
+  if (!ch || vids.length === 0) {
     throw new BadRequestException(
-      'Sin transportista externo, debés indicar chofer y vehículo.',
+      'Sin transportista externo, debés indicar chofer y al menos un vehículo.',
     );
   }
 }
@@ -36,31 +37,37 @@ export function mergeViajeOperacionIds(
   current: {
     transportistaId: string | null;
     choferId: string | null;
-    vehiculoId: string | null;
+    vehiculoIds: string[];
   },
   dto: {
     transportistaId?: string | null;
     choferId?: string | null;
-    vehiculoId?: string | null;
+    vehiculoIds?: string[] | null;
   },
-): { transportistaId: string | null; choferId: string | null; vehiculoId: string | null } {
+): {
+  transportistaId: string | null;
+  choferId: string | null;
+  vehiculoIds: string[];
+} {
   let transportistaId =
     dto.transportistaId !== undefined
       ? toNullId(dto.transportistaId)
       : toNullId(current.transportistaId);
   let choferId =
     dto.choferId !== undefined ? toNullId(dto.choferId) : toNullId(current.choferId);
-  let vehiculoId =
-    dto.vehiculoId !== undefined ? toNullId(dto.vehiculoId) : toNullId(current.vehiculoId);
+  let vehiculoIds =
+    dto.vehiculoIds !== undefined
+      ? normalizarVehiculoIds(dto.vehiculoIds)
+      : [...current.vehiculoIds];
 
   if (transportistaId) {
     choferId = null;
-    vehiculoId = null;
+    vehiculoIds = [];
   } else {
     transportistaId = null;
   }
 
-  const merged = { transportistaId, choferId, vehiculoId };
+  const merged = { transportistaId, choferId, vehiculoIds };
   assertViajeOperacionExclusiva(merged);
   return merged;
 }

@@ -8,6 +8,13 @@ import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { generateNumeroViaje } from './generate-viaje-numero';
 import { assertViajeOperacionExclusiva, mergeViajeOperacionIds } from './viaje-operacion-exclusiva';
+import {
+  assertVehiculosDelViaje,
+  normalizarVehiculoIds,
+  reemplazarVehiculosDelViaje,
+  VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+  type ViajeConVehiculosViaje,
+} from './viaje-vehiculos.helper';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 import { Prisma } from '@prisma/client';
@@ -90,7 +97,6 @@ export class ViajesService {
     clienteId: string;
     transportistaId?: string | null;
     choferId?: string | null;
-    vehiculoId?: string | null;
   }) {
     const c = await this.prisma.cliente.findFirst({
       where: { id: dto.clienteId, tenantId },
@@ -109,12 +115,6 @@ export class ViajesService {
       });
       if (!ch) throw new BadRequestException('Chofer inválido');
     }
-    if (dto.vehiculoId) {
-      const v = await this.prisma.vehiculo.findFirst({
-        where: { id: dto.vehiculoId, tenantId },
-      });
-      if (!v) throw new BadRequestException('Vehículo inválido');
-    }
   }
 
   findAll(tenantId: string, estado?: string) {
@@ -122,6 +122,7 @@ export class ViajesService {
       where: { tenantId, ...(estado ? { estado } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
+      include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
     });
   }
 
@@ -137,6 +138,7 @@ export class ViajesService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -153,26 +155,36 @@ export class ViajesService {
     };
   }
 
-  async findOne(id: string, tenantId: string) {
-    const row = await this.prisma.viaje.findFirst({ where: { id, tenantId } });
+  async findOne(id: string, tenantId: string): Promise<ViajeConVehiculosViaje> {
+    const row = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+    });
     if (!row) throw new NotFoundException('Viaje no encontrado');
-    return row;
+    return row as unknown as ViajeConVehiculosViaje;
   }
 
   async create(tenantId: string, auth: AuthPayload, dto: CreateViajeDto) {
+    const transportistaExterno = dto.transportistaId?.trim();
+    const vehiculoIds = transportistaExterno
+      ? []
+      : normalizarVehiculoIds(dto.vehiculoIds);
     assertViajeOperacionExclusiva({
       transportistaId: dto.transportistaId,
       choferId: dto.choferId,
-      vehiculoId: dto.vehiculoId,
+      vehiculoIds,
     });
-    const transportistaExterno = dto.transportistaId?.trim();
     const refs = {
       clienteId: dto.clienteId,
       transportistaId: transportistaExterno || null,
       choferId: transportistaExterno ? null : dto.choferId?.trim() || null,
-      vehiculoId: transportistaExterno ? null : dto.vehiculoId?.trim() || null,
     };
     await this.assertRefs(tenantId, refs);
+    if (!transportistaExterno) {
+      await assertVehiculosDelViaje(this.prisma, tenantId, vehiculoIds, {
+        requiereFlotaPropia: true,
+      });
+    }
     const estado = this.parseEstadoViaje(dto.estado);
     if (esEstadoViajeFinal(estado)) {
       throw new BadRequestException(
@@ -182,44 +194,47 @@ export class ViajesService {
     const precioTransportistaExterno = dto.precioTransportistaExterno;
     const numero =
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, tenantId));
-    return this.prisma.viaje.create({
-      data: {
-        tenantId,
-        numero,
-        estado,
-        clienteId: dto.clienteId,
-        transportistaId: refs.transportistaId,
-        choferId: refs.choferId,
-        vehiculoId: refs.vehiculoId,
-        patenteTractor: dto.patenteTractor?.trim()
-          ? dto.patenteTractor.trim().toUpperCase()
-          : null,
-        patenteSemirremolque: dto.patenteSemirremolque?.trim()
-          ? dto.patenteSemirremolque.trim().toUpperCase()
-          : null,
-        origen: dto.origen ?? null,
-        destino: dto.destino ?? null,
-        fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
-        fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
-        mercaderia: dto.mercaderia ?? null,
-        kmRecorridos: dto.kmRecorridos ?? null,
-        litrosConsumidos: dto.litrosConsumidos ?? null,
-        monto: dto.monto,
-        precioTransportistaExterno: precioTransportistaExterno ?? null,
-        documentacion: dto.documentacion ?? [],
-        observaciones: dto.observaciones ?? null,
-        createdBy: auth.userId,
-      } as any,
+
+    return this.prisma.$transaction(async (tx) => {
+      const viaje = await tx.viaje.create({
+        data: {
+          tenantId,
+          numero,
+          estado,
+          clienteId: dto.clienteId,
+          transportistaId: refs.transportistaId,
+          choferId: refs.choferId,
+          origen: dto.origen ?? null,
+          destino: dto.destino ?? null,
+          fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
+          fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
+          mercaderia: dto.mercaderia ?? null,
+          kmRecorridos: dto.kmRecorridos ?? null,
+          litrosConsumidos: dto.litrosConsumidos ?? null,
+          monto: dto.monto,
+          precioTransportistaExterno: precioTransportistaExterno ?? null,
+          documentacion: dto.documentacion ?? [],
+          observaciones: dto.observaciones ?? null,
+          createdBy: auth.userId,
+        },
+      });
+      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds);
+      const out = await tx.viaje.findFirstOrThrow({
+        where: { id: viaje.id },
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      });
+      return out as unknown as ViajeConVehiculosViaje;
     });
   }
 
   async update(id: string, tenantId: string, dto: UpdateViajeDto) {
     const current = await this.findOne(id, tenantId);
+    const currentIds = current.vehiculosViaje.map((x) => x.vehiculoId);
     const op = mergeViajeOperacionIds(
       {
         transportistaId: current.transportistaId,
         choferId: current.choferId,
-        vehiculoId: current.vehiculoId,
+        vehiculoIds: currentIds,
       },
       dto,
     );
@@ -227,9 +242,13 @@ export class ViajesService {
       clienteId: dto.clienteId ?? current.clienteId,
       transportistaId: op.transportistaId,
       choferId: op.choferId,
-      vehiculoId: op.vehiculoId,
     };
     await this.assertRefs(tenantId, merged);
+    if (!op.transportistaId) {
+      await assertVehiculosDelViaje(this.prisma, tenantId, op.vehiculoIds, {
+        requiereFlotaPropia: true,
+      });
+    }
 
     const precioTransportistaExternoInput = dto.precioTransportistaExterno;
     const currentNorm = this.parseEstadoViaje(
@@ -258,15 +277,9 @@ export class ViajesService {
           : dto.fechaDescarga
             ? new Date(dto.fechaDescarga)
             : null,
-      patenteTractor:
-        dto.patenteTractor === undefined
-          ? undefined
-          : dto.patenteTractor.trim().toUpperCase(),
-      patenteSemirremolque:
-        dto.patenteSemirremolque === undefined
-          ? undefined
-          : dto.patenteSemirremolque.trim().toUpperCase(),
     } as any;
+    delete (data as { vehiculoIds?: unknown }).vehiculoIds;
+
     if (precioTransportistaExternoInput !== undefined) {
       (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
     }
@@ -280,17 +293,21 @@ export class ViajesService {
     (data as any).estado = estadoSiguiente;
     (data as any).transportistaId = op.transportistaId;
     (data as any).choferId = op.choferId;
-    (data as any).vehiculoId = op.vehiculoId;
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.viaje.update({
         where: { id },
         data,
       });
-      if (esEstadoViajeFinal(updated.estado)) {
-        await this.upsertCargoFinalizacion(tx, updated);
+      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds);
+      const full = (await tx.viaje.findFirstOrThrow({
+        where: { id },
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      })) as unknown as ViajeConVehiculosViaje;
+      if (esEstadoViajeFinal(full.estado)) {
+        await this.upsertCargoFinalizacion(tx, full);
       }
-      return updated;
+      return full;
     });
   }
 

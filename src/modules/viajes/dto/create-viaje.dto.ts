@@ -23,12 +23,10 @@ export class CreateViajeDto {
 
   @IsString() @IsNotEmpty() clienteId: string;
   @IsOptional() @IsString() transportistaId?: string;
-  /** Obligatorio junto con vehiculoId si no hay transportista externo. */
+  /** Obligatorio si no hay transportista externo. */
   @IsOptional() @IsString() choferId?: string | null;
-  @IsOptional() @IsString() vehiculoId?: string | null;
-
-  @IsOptional() @IsString() patenteTractor?: string;
-  @IsOptional() @IsString() patenteSemirremolque?: string;
+  /** IDs de vehículos del maestro (orden = orden del array). Requerido al menos 1 sin transportista externo. */
+  @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsString() @IsNotEmpty() origen: string;
   @IsString() @IsNotEmpty() destino: string;
   @IsOptional() @IsDateString() fechaCarga?: string;

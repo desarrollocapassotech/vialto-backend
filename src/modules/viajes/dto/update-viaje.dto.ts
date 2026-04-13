@@ -23,10 +23,7 @@ export class UpdateViajeDto {
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() transportistaId?: string;
   @IsOptional() @IsString() choferId?: string;
-  @IsOptional() @IsString() vehiculoId?: string;
-
-  @IsOptional() @IsString() patenteTractor?: string;
-  @IsOptional() @IsString() patenteSemirremolque?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsOptional() @IsString() origen?: string;
   @IsOptional() @IsString() destino?: string;
   @IsOptional() @IsDateString() fechaCarga?: string;

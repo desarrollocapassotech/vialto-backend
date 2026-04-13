@@ -120,7 +120,7 @@ model Vehiculo {
   transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   createdAt       DateTime @default(now())
 
-  viajes            Viaje[]
+  vehiculosViaje    ViajeVehiculo[]
   cargasCombustible CargaCombustible[]
   intervenciones    Intervencion[]
   remitos           Remito[]
@@ -128,6 +128,20 @@ model Vehiculo {
   @@unique([tenantId, patente])
   @@index([tenantId])
   @@map("vehiculos")
+}
+
+model ViajeVehiculo {
+  id         String   @id @default(cuid())
+  viajeId    String
+  viaje      Viaje    @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  vehiculoId String
+  vehiculo   Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
+  orden      Int      @default(0)
+
+  @@unique([viajeId, vehiculoId])
+  @@index([viajeId])
+  @@index([vehiculoId])
+  @@map("viajes_vehiculos")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -146,10 +160,7 @@ model Viaje {
   transportista    Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   choferId         String?
   chofer           Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  vehiculoId       String?
-  vehiculo         Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
-  patenteTractor   String?
-  patenteSemirremolque String?
+  vehiculosViaje   ViajeVehiculo[]
   origen           String?
   destino          String?
   fechaCarga       DateTime?

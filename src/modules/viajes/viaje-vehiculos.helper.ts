@@ -60,6 +60,8 @@ export async function reemplazarVehiculosDelViaje(
 /** Args validados para el `include` de viajes con `vehiculosViaje` + `vehiculo` (exportado para que TS resuelva bien `ViajeGetPayload<typeof …>`). */
 export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultArgs>()({
   include: {
+    cliente: { select: { id: true, nombre: true } },
+    transportista: { select: { id: true, nombre: true } },
     vehiculosViaje: {
       orderBy: { orden: 'asc' },
       include: { vehiculo: true },

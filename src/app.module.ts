@@ -19,6 +19,7 @@ import { MantenimientoModule } from './modules/mantenimiento/mantenimiento.modul
 import { RemitosModule } from './modules/remitos/remitos.module';
 import { TurnosModule } from './modules/turnos/turnos.module';
 import { ReportesModule } from './modules/reportes/reportes.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthController } from './health.controller';
 import { PlatformModule } from './core/platform/platform.module';
 
@@ -44,6 +45,7 @@ import { PlatformModule } from './core/platform/platform.module';
     RemitosModule,
     TurnosModule,
     ReportesModule,
+    DashboardModule,
     PlatformModule,
   ],
   controllers: [HealthController],

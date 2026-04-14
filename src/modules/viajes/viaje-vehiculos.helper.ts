@@ -62,6 +62,8 @@ export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultAr
   include: {
     cliente: { select: { id: true, nombre: true } },
     transportista: { select: { id: true, nombre: true } },
+    /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */
+    factura: { select: { id: true, numero: true } },
     vehiculosViaje: {
       orderBy: { orden: 'asc' },
       include: { vehiculo: true },

@@ -25,6 +25,20 @@ import {
   type ViajeEstado,
 } from './viaje-estados';
 
+function parseYyyyMmDdInicioUtc(s: string): Date | null {
+  const t = s.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const d = new Date(`${t}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function parseYyyyMmDdFinUtc(s: string): Date | null {
+  const t = s.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const d = new Date(`${t}T23:59:59.999Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 @Injectable()
 export class ViajesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -164,6 +178,60 @@ export class ViajesService {
 
     const tid = query.transportistaId?.trim();
     if (tid) where.transportistaId = tid;
+
+    const tipoFecha = query.tipoFecha?.trim();
+    const fDesde = query.fechaDesde?.trim();
+    const fHasta = query.fechaHasta?.trim();
+    if (tipoFecha === 'carga' || tipoFecha === 'descarga') {
+      const range: Prisma.DateTimeNullableFilter = {};
+      if (fDesde) {
+        const a = parseYyyyMmDdInicioUtc(fDesde);
+        if (a) range.gte = a;
+      }
+      if (fHasta) {
+        const b = parseYyyyMmDdFinUtc(fHasta);
+        if (b) range.lte = b;
+      }
+      if (Object.keys(range).length > 0) {
+        if (tipoFecha === 'carga') {
+          where.fechaCarga = range;
+        } else {
+          where.fechaDescarga = range;
+        }
+      }
+    }
+
+    const tipoUbicacion = query.tipoUbicacion?.trim();
+    const uq = query.ubicacion?.trim();
+    if ((tipoUbicacion === 'origen' || tipoUbicacion === 'destino') && uq) {
+      /**
+       * El listado solo muestra el nombre de ciudad (antes de la primera coma); en BD puede
+       * guardarse la etiqueta completa ("Ciudad, provincia") o solo la ciudad. El combobox
+       * envía la etiqueta completa: OR entre contiene etiqueta, igual a solo ciudad, o
+       * prefijo "Ciudad," para alinear con lo que el usuario ve y con datos viejos.
+       */
+      const campo = tipoUbicacion === 'origen' ? 'origen' : 'destino';
+      const primeraComa = uq.indexOf(',');
+      const soloCiudad =
+        primeraComa === -1 ? uq : uq.slice(0, primeraComa).trim();
+      const mode = Prisma.QueryMode.insensitive;
+
+      const or: Prisma.ViajeWhereInput[] = [
+        { [campo]: { contains: uq, mode } },
+      ];
+      if (soloCiudad.length >= 2) {
+        or.push({ [campo]: { equals: soloCiudad, mode } });
+        or.push({ [campo]: { startsWith: `${soloCiudad},`, mode } });
+      }
+
+      const prevAnd = where.AND;
+      const andArr: Prisma.ViajeWhereInput[] = Array.isArray(prevAnd)
+        ? [...prevAnd]
+        : prevAnd != null
+          ? [prevAnd]
+          : [];
+      where.AND = [...andArr, { OR: or }];
+    }
 
     const [total, items] = await this.prisma.$transaction([
       this.prisma.viaje.count({ where }),

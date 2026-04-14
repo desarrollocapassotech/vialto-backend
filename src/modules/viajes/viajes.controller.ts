@@ -53,6 +53,14 @@ export class ViajesController {
     const transportistaId =
       queryParamFromRequest(req, 'transportistaId') ??
       (query.transportistaId?.trim() ? query.transportistaId.trim() : undefined);
+    const tipoUbicacionRaw =
+      queryParamFromRequest(req, 'tipoUbicacion') ?? query.tipoUbicacion;
+    const tipoUbicacion =
+      tipoUbicacionRaw === 'origen' || tipoUbicacionRaw === 'destino'
+        ? tipoUbicacionRaw
+        : undefined;
+    const ubicacion =
+      queryParamFromRequest(req, 'ubicacion') ?? query.ubicacion?.trim();
     /** Objeto plano (sin `...query`): evita rarezas al expandir instancias del DTO y asegura los filtros. */
     return this.service.findAllPaginated(auth.tenantId, {
       page: query.page,
@@ -60,6 +68,11 @@ export class ViajesController {
       estado: query.estado,
       clienteId,
       transportistaId,
+      tipoFecha: query.tipoFecha,
+      fechaDesde: query.fechaDesde,
+      fechaHasta: query.fechaHasta,
+      tipoUbicacion,
+      ubicacion,
     });
   }
 

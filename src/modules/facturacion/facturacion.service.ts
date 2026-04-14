@@ -64,9 +64,9 @@ export class FacturacionService {
 
   private readonly VIAJE_SELECT = { id: true, estado: true, monto: true } as const;
 
-  async listFacturas(tenantId: string) {
+  async listFacturas(tenantId: string, clienteId?: string) {
     const rows = await this.prisma.factura.findMany({
-      where: { tenantId },
+      where: { tenantId, ...(clienteId ? { clienteId } : {}) },
       orderBy: { fechaEmision: 'desc' },
       include: { viajes: { select: this.VIAJE_SELECT } },
       take: 200,

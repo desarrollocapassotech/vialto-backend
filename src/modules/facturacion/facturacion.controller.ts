@@ -23,9 +23,12 @@ export class FacturacionController {
 
   @Get('facturas')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
-  listFacturas(@CurrentAuth() auth: AuthPayload) {
+  listFacturas(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('clienteId') clienteId?: string,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.listFacturas(auth.tenantId);
+    return this.service.listFacturas(auth.tenantId, clienteId);
   }
 
   @Get('facturas/:id')

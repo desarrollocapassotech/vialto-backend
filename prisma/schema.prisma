@@ -179,8 +179,9 @@ model Viaje {
   createdAt        DateTime  @default(now())
   createdBy        String
 
-  facturaId String?
-  factura   Factura? @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  facturaId  String?
+  factura    Factura? @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  nroFactura String?
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
 
   @@unique([tenantId, numero])

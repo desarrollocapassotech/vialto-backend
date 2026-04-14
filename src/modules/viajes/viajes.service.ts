@@ -117,13 +117,38 @@ export class ViajesService {
     }
   }
 
-  findAll(tenantId: string, estado?: string) {
-    return this.prisma.viaje.findMany({
+  /**
+   * Corrige viajes con factura asignada pero estado incorrecto.
+   * Ejecuta un updateMany y muta el array en memoria para no releer BD.
+   */
+  private async corregirEstadosConFactura(
+    viajes: Array<{ id: string; facturaId: string | null; estado: string }>,
+  ) {
+    const aCorregir = viajes.filter(
+      (v) =>
+        v.facturaId != null &&
+        v.estado !== 'facturado_sin_cobrar' &&
+        v.estado !== 'cobrado',
+    );
+    if (aCorregir.length === 0) return;
+    await this.prisma.viaje.updateMany({
+      where: { id: { in: aCorregir.map((v) => v.id) } },
+      data: { estado: 'facturado_sin_cobrar' },
+    });
+    aCorregir.forEach((v) => {
+      v.estado = 'facturado_sin_cobrar';
+    });
+  }
+
+  async findAll(tenantId: string, estado?: string) {
+    const rows = await this.prisma.viaje.findMany({
       where: { tenantId, ...(estado ? { estado } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
     });
+    await this.corregirEstadosConFactura(rows);
+    return rows;
   }
 
   async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {
@@ -150,6 +175,7 @@ export class ViajesService {
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       }),
     ]);
+    await this.corregirEstadosConFactura(items);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
       items,

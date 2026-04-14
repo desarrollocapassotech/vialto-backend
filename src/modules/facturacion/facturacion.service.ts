@@ -104,9 +104,19 @@ export class FacturacionService {
         },
       });
       if (viajeIds.length > 0) {
+        // Vincular viajes y guardar nro de factura
         await tx.viaje.updateMany({
           where: { id: { in: viajeIds }, tenantId },
-          data: { facturaId: factura.id },
+          data: { facturaId: factura.id, nroFactura: dto.numero },
+        });
+        // Corregir estado: solo los que aún no están en estado de facturación/cobro
+        await tx.viaje.updateMany({
+          where: {
+            id: { in: viajeIds },
+            tenantId,
+            estado: { notIn: ['facturado_sin_cobrar', 'cobrado'] },
+          },
+          data: { estado: 'facturado_sin_cobrar' },
         });
       }
       const updated = await tx.factura.findFirst({
@@ -123,7 +133,7 @@ export class FacturacionService {
 
     return this.prisma.$transaction(async (tx) => {
       // Actualizar campos de la factura
-      await tx.factura.update({
+      const facturaActualizada = await tx.factura.update({
         where: { id },
         data: {
           ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
@@ -136,6 +146,8 @@ export class FacturacionService {
             : {}),
         },
       });
+
+      const nroFacturaVigente = facturaActualizada.numero;
 
       // Revinculación de viajes si se indica
       if (dto.viajeIds !== undefined) {
@@ -152,15 +164,30 @@ export class FacturacionService {
         // Desvincular viajes que ya no pertenecen a esta factura
         await tx.viaje.updateMany({
           where: { facturaId: id, tenantId, id: { notIn: newIds } },
-          data: { facturaId: null },
+          data: { facturaId: null, nroFactura: null },
         });
-        // Vincular nuevos viajes
+        // Vincular y actualizar nroFactura en viajes nuevos y existentes
         if (newIds.length > 0) {
           await tx.viaje.updateMany({
             where: { id: { in: newIds }, tenantId },
-            data: { facturaId: id },
+            data: { facturaId: id, nroFactura: nroFacturaVigente },
+          });
+          // Corregir estado de los viajes recién vinculados que no están en estado correcto
+          await tx.viaje.updateMany({
+            where: {
+              id: { in: newIds },
+              tenantId,
+              estado: { notIn: ['facturado_sin_cobrar', 'cobrado'] },
+            },
+            data: { estado: 'facturado_sin_cobrar' },
           });
         }
+      } else if (dto.numero !== undefined) {
+        // Si solo cambió el número de factura, actualizar nroFactura en todos los viajes vinculados
+        await tx.viaje.updateMany({
+          where: { facturaId: id, tenantId },
+          data: { nroFactura: nroFacturaVigente },
+        });
       }
 
       // Recalcular importe desde los viajes vinculados
@@ -180,10 +207,10 @@ export class FacturacionService {
 
   async removeFactura(id: string, tenantId: string) {
     await this.findFactura(id, tenantId);
-    // Desvincular viajes antes de eliminar
+    // Desvincular viajes y limpiar nroFactura antes de eliminar
     await this.prisma.viaje.updateMany({
       where: { facturaId: id, tenantId },
-      data: { facturaId: null },
+      data: { facturaId: null, nroFactura: null },
     });
     return this.prisma.factura.delete({ where: { id } });
   }

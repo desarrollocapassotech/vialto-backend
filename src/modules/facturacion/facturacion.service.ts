@@ -7,21 +7,16 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
 import { CreatePagoDto } from './dto/create-pago.dto';
+import {
+  computeEstadoFacturaLectura,
+  importeOperativoFactura,
+} from './factura-estado-lectura';
 
 type ViajeSnap = { id: string; estado: string; monto: number | null };
 
 @Injectable()
 export class FacturacionService {
   constructor(private readonly prisma: PrismaService) {}
-
-  private computeEstado(f: {
-    viajes: { estado: string }[];
-    fechaVencimiento: Date | null;
-  }): 'cobrada' | 'vencida' | 'pendiente' {
-    if (f.viajes.length > 0 && f.viajes.every((v) => v.estado === 'cobrado')) return 'cobrada';
-    if (f.fechaVencimiento && new Date(f.fechaVencimiento) <= new Date()) return 'vencida';
-    return 'pendiente';
-  }
 
   private computeImporte(viajes: { monto: number | null }[]): number {
     return viajes.reduce((sum, v) => sum + (v.monto ?? 0), 0);
@@ -33,13 +28,20 @@ export class FacturacionService {
     fechaEmision: Date; fechaVencimiento: Date | null;
     estado: string; diferencia: number | null; createdAt: Date;
     viajes: ViajeSnap[];
+    pagos?: { importe: number }[];
   }) {
-    const { viajes, ...f } = row;
+    const { viajes, pagos = [], ...f } = row;
+    const importe = importeOperativoFactura(f.importe, viajes);
     return {
       ...f,
       viajeIds: viajes.map((v) => v.id),
-      importe: this.computeImporte(viajes),
-      estado: this.computeEstado({ viajes, fechaVencimiento: f.fechaVencimiento }),
+      importe,
+      estado: computeEstadoFacturaLectura({
+        viajes,
+        fechaVencimiento: f.fechaVencimiento,
+        importeGuardado: f.importe,
+        pagos,
+      }),
     };
   }
 
@@ -63,12 +65,16 @@ export class FacturacionService {
   }
 
   private readonly VIAJE_SELECT = { id: true, estado: true, monto: true } as const;
+  private readonly PAGO_SELECT = { importe: true } as const;
 
   async listFacturas(tenantId: string, clienteId?: string) {
     const rows = await this.prisma.factura.findMany({
       where: { tenantId, ...(clienteId ? { clienteId } : {}) },
       orderBy: { fechaEmision: 'desc' },
-      include: { viajes: { select: this.VIAJE_SELECT } },
+      include: {
+        viajes: { select: this.VIAJE_SELECT },
+        pagos: { select: this.PAGO_SELECT },
+      },
       take: 200,
     });
     return rows.map((r) => this.toShape(r));
@@ -77,7 +83,10 @@ export class FacturacionService {
   async findFactura(id: string, tenantId: string) {
     const row = await this.prisma.factura.findFirst({
       where: { id, tenantId },
-      include: { viajes: { select: this.VIAJE_SELECT } },
+      include: {
+        viajes: { select: this.VIAJE_SELECT },
+        pagos: { select: this.PAGO_SELECT },
+      },
     });
     if (!row) throw new NotFoundException('Factura no encontrada');
     return this.toShape(row);
@@ -121,7 +130,10 @@ export class FacturacionService {
       }
       const updated = await tx.factura.findFirst({
         where: { id: factura.id },
-        include: { viajes: { select: this.VIAJE_SELECT } },
+        include: {
+          viajes: { select: this.VIAJE_SELECT },
+          pagos: { select: this.PAGO_SELECT },
+        },
       });
       return this.toShape(updated!);
     });
@@ -199,7 +211,10 @@ export class FacturacionService {
       const updated = await tx.factura.update({
         where: { id },
         data: { importe },
-        include: { viajes: { select: this.VIAJE_SELECT } },
+        include: {
+          viajes: { select: this.VIAJE_SELECT },
+          pagos: { select: this.PAGO_SELECT },
+        },
       });
       return this.toShape(updated);
     });

@@ -30,6 +30,10 @@ import {
   normalizarEstadoViaje,
   type ViajeEstado,
 } from '../../modules/viajes/viaje-estados';
+import {
+  computeEstadoFacturaLectura,
+  importeOperativoFactura,
+} from '../../modules/facturacion/factura-estado-lectura';
 import { createClerkClient } from '@clerk/backend';
 import { Prisma } from '@prisma/client';
 
@@ -848,14 +852,37 @@ export class PlatformService {
     const rows: any[] = await (this.prisma.factura as any).findMany({
       where: { tenantId: id },
       orderBy: { fechaEmision: 'desc' },
-      include: { viajes: { select: { id: true, estado: true, monto: true } } },
+      include: {
+        viajes: { select: { id: true, estado: true, monto: true } },
+        pagos: { select: { importe: true } },
+      },
       take: TAKE,
     });
-    return rows.map(({ viajes, ...f }: { viajes: { id: string; monto: number | null }[]; [k: string]: unknown }) => ({
-      ...f,
-      viajeIds: viajes.map((v) => v.id),
-      importe: viajes.reduce((s, v) => s + (v.monto ?? 0), 0),
-    }));
+    return rows.map(
+      ({
+        viajes,
+        pagos = [],
+        ...f
+      }: {
+        viajes: { id: string; estado: string; monto: number | null }[];
+        pagos?: { importe: number }[];
+        [k: string]: unknown;
+      }) => {
+        const importeGuardado = Number(f.importe ?? 0);
+        const importe = importeOperativoFactura(importeGuardado, viajes);
+        return {
+          ...f,
+          viajeIds: viajes.map((v) => v.id),
+          importe,
+          estado: computeEstadoFacturaLectura({
+            viajes,
+            fechaVencimiento: (f.fechaVencimiento as Date | null) ?? null,
+            importeGuardado,
+            pagos: pagos ?? [],
+          }),
+        };
+      },
+    );
   }
 
   async updateFactura(

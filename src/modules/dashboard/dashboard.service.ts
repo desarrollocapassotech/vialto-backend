@@ -1,10 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import {
   resolveDashboardPeriod,
   type DashboardPeriodKind,
   type ResolvedDashboardPeriod,
 } from './dashboard-period';
+import {
+  DASHBOARD_SIN_FACTURAR_TZ,
+  sinFacturarArHalfOpenRanges,
+  type SinFacturarArHalfOpen,
+} from './dashboard-sin-facturar-ar-range';
+import { VIAJE_ESTADOS_COMPLETADOS_TABLERO } from '../viajes/viaje-estados';
+import {
+  computeEstadoFacturaLectura,
+  importeOperativoFactura,
+} from '../facturacion/factura-estado-lectura';
 
 export type MetricCompare = {
   current: number;
@@ -22,6 +33,8 @@ export type OwnerDashboardResponse = {
     prevEnd: string;
   };
   financiero?: {
+    /** Monto sin facturar atribuible al período (finalizados en ventana + pendiente/en curso por fecha de carga o alta). */
+    sinFacturarPeriodo: MetricCompare;
     facturado: MetricCompare;
     cobrado: MetricCompare;
     aPagarTransportistas: MetricCompare;
@@ -110,6 +123,13 @@ export class DashboardService {
 
     const resolved = resolveDashboardPeriod(periodKind, from, to);
     const meta = this.periodMeta(resolved);
+    const sinFacturarRanges = sinFacturarArHalfOpenRanges(
+      periodKind,
+      resolved,
+      from,
+      to,
+      new Date(),
+    );
 
     const out: OwnerDashboardResponse = { period: meta };
 
@@ -119,9 +139,11 @@ export class DashboardService {
             this.sumFacturadoCliente(tenantId, resolved.start, resolved.end),
             this.sumCobradoCliente(tenantId, resolved.start, resolved.end),
             this.sumAPagarTransportistas(tenantId, resolved.start, resolved.end),
+            this.sumSinFacturarEnPeriodo(tenantId, sinFacturarRanges.current),
             this.sumFacturadoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
             this.sumCobradoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
             this.sumAPagarTransportistas(tenantId, resolved.prevStart, resolved.prevEnd),
+            this.sumSinFacturarEnPeriodo(tenantId, sinFacturarRanges.previous),
             this.hayViajeCostoExternoEnPeriodo(tenantId, resolved.start, resolved.end),
             this.buildAlertas(tenantId),
           ])
@@ -138,13 +160,30 @@ export class DashboardService {
     ]);
 
     if (financieroResult) {
-      const [facturado, cobrado, aPagar, facturadoPrev, cobradoPrev, aPagarPrev, hayCostoExterno, alertas] = financieroResult;
+      const [
+        facturado,
+        cobrado,
+        aPagar,
+        sinFacturarPeriodo,
+        facturadoPrev,
+        cobradoPrev,
+        aPagarPrev,
+        sinFacturarPeriodoPrev,
+        hayCostoExterno,
+        alertas,
+      ] = financieroResult;
       const facturadoM = buildMetric(facturado, facturadoPrev, 'higher_better');
       const cobradoM = buildMetric(cobrado, cobradoPrev, 'higher_better');
       const aPagarM = buildMetric(aPagar, aPagarPrev, 'lower_better');
+      const sinFacturarM = buildMetric(
+        sinFacturarPeriodo,
+        sinFacturarPeriodoPrev,
+        'higher_better',
+      );
       const diff = roundMoney(facturado - aPagar);
       const diffPrev = roundMoney(facturadoPrev - aPagarPrev);
       out.financiero = {
+        sinFacturarPeriodo: sinFacturarM,
         facturado: facturadoM,
         cobrado: cobradoM,
         aPagarTransportistas: aPagarM,
@@ -245,19 +284,16 @@ export class DashboardService {
     start: Date,
     end: Date,
   ): Promise<number> {
-    const facturas = await this.prisma.factura.findMany({
+    const agg = await this.prisma.viaje.aggregate({
       where: {
         tenantId,
-        tipo: 'transportista_externo',
-        fechaEmision: { gte: start, lt: end },
-        estado: { in: ['pendiente', 'vencida'] },
+        transportistaId: { not: null },
+        precioTransportistaExterno: { gt: 0 },
+        createdAt: { gte: start, lt: end },
       },
-      select: { importe: true, pagos: { select: { importe: true } } },
+      _sum: { precioTransportistaExterno: true },
     });
-    return facturas.reduce((acc, f) => {
-      const paid = f.pagos.reduce((s, p) => s + p.importe, 0);
-      return acc + Math.max(0, roundMoney(f.importe - paid));
-    }, 0);
+    return roundMoney(agg._sum.precioTransportistaExterno ?? 0);
   }
 
   private async hayViajeCostoExternoEnPeriodo(
@@ -276,23 +312,39 @@ export class DashboardService {
   }
 
   private async buildAlertas(tenantId: string) {
-    const vencidas = await this.prisma.factura.findMany({
+    const candidatas = await this.prisma.factura.findMany({
       where: {
         tenantId,
         tipo: 'cliente',
-        estado: 'vencida',
+        fechaVencimiento: { not: null, lte: new Date() },
       },
-      select: { importe: true, pagos: { select: { importe: true } } },
+      select: {
+        importe: true,
+        fechaVencimiento: true,
+        pagos: { select: { importe: true } },
+        viajes: { select: { estado: true, monto: true } },
+      },
     });
+    const vencidas = candidatas.filter(
+      (f) =>
+        computeEstadoFacturaLectura({
+          viajes: f.viajes,
+          fechaVencimiento: f.fechaVencimiento,
+          importeGuardado: f.importe,
+          pagos: f.pagos,
+        }) === 'vencida',
+    );
     let montoVencidas = 0;
     for (const f of vencidas) {
       const paid = f.pagos.reduce((s, p) => s + p.importe, 0);
-      const pend = Math.max(0, roundMoney(f.importe - paid));
+      const importeOp = importeOperativoFactura(f.importe, f.viajes);
+      const pend = Math.max(0, roundMoney(importeOp - paid));
       if (pend > 0) montoVencidas += pend;
     }
     const cantVencidas = vencidas.filter((f) => {
       const paid = f.pagos.reduce((s, p) => s + p.importe, 0);
-      return f.importe - paid > 0.0001;
+      const importeOp = importeOperativoFactura(f.importe, f.viajes);
+      return importeOp - paid > 0.0001;
     }).length;
 
     const sinFactura = await this.prisma.viaje.findMany({
@@ -339,10 +391,56 @@ export class DashboardService {
     return this.prisma.viaje.count({
       where: {
         tenantId,
-        estado: { in: ['finalizado_sin_facturar', 'facturado_sin_cobrar', 'cobrado'] },
+        estado: { in: [...VIAJE_ESTADOS_COMPLETADOS_TABLERO] },
         fechaFinalizado: { gte: start, lt: end },
       },
     });
+  }
+
+  /**
+   * Monto sin facturar atribuible al período por **fecha calendario en Argentina**:
+   * - `finalizado_sin_facturar`: `fechaCarga` o, si no hay, `fechaFinalizado`;
+   * - `pendiente` / `en_curso`: `fechaCarga` o, si no hay, `createdAt`.
+   */
+  private async sumSinFacturarEnPeriodo(
+    tenantId: string,
+    range: SinFacturarArHalfOpen,
+  ): Promise<number> {
+    const tz = DASHBOARD_SIN_FACTURAR_TZ;
+    const from = range.fromInclusive;
+    const toEx = range.toExclusive;
+    const rows = await this.prisma.$queryRaw<[{ s: unknown }]>(
+      Prisma.sql`
+        SELECT COALESCE(SUM(v."monto"), 0)::double precision AS s
+        FROM "viajes" v
+        WHERE v."tenantId" = ${tenantId}
+        AND (
+          (
+            v."estado" = 'finalizado_sin_facturar'
+            AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) >= ${from}::date
+            AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) < ${toEx}::date
+          )
+          OR (
+            v."estado" IN ('pendiente', 'en_curso')
+            AND (
+              (
+                v."fechaCarga" IS NOT NULL
+                AND DATE(timezone(${tz}, v."fechaCarga")) >= ${from}::date
+                AND DATE(timezone(${tz}, v."fechaCarga")) < ${toEx}::date
+              )
+              OR (
+                v."fechaCarga" IS NULL
+                AND DATE(timezone(${tz}, v."createdAt")) >= ${from}::date
+                AND DATE(timezone(${tz}, v."createdAt")) < ${toEx}::date
+              )
+            )
+          )
+        )
+      `,
+    );
+    const raw = rows[0]?.s;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    return roundMoney(Number.isFinite(n) ? n : 0);
   }
 
   /** Monto total en viajes aún sin facturar (pipeline operativo actual). */

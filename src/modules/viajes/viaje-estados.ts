@@ -21,6 +21,18 @@ export function esEstadoViajeFinal(estado: string): boolean {
   return (VIAJE_ESTADOS_FINALES as readonly string[]).includes(estado);
 }
 
+/**
+ * Viajes “completados” para métricas (finalizado sin facturar, facturado sin cobrar, cobrado)
+ * más códigos legados que aún pueden existir en filas antiguas de la BD.
+ */
+export const VIAJE_ESTADOS_COMPLETADOS_TABLERO: readonly string[] = [
+  ...VIAJE_ESTADOS_FINALES,
+  'finalizado',
+  'finalizado_facturado',
+  'finalizado_cobrado',
+  'cerrado',
+];
+
 /** Nombres previos a las migraciones de unificación (ver 20260401120000_viajes_estado_cc_tablero). */
 const LEGACY_ESTADO: Record<string, string> = {
   cerrado: 'finalizado_sin_facturar',

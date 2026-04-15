@@ -66,7 +66,9 @@ export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultAr
     factura: { select: { id: true, numero: true } },
     vehiculosViaje: {
       orderBy: { orden: 'asc' },
-      include: { vehiculo: true },
+      include: {
+        vehiculo: { select: { id: true, patente: true, tipo: true } },
+      },
     },
   },
 });

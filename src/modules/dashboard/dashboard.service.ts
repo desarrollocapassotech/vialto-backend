@@ -113,71 +113,51 @@ export class DashboardService {
 
     const out: OwnerDashboardResponse = { period: meta };
 
-    if (hasFacturacion) {
-      const [
-        facturado,
-        cobrado,
-        aPagar,
-        facturadoPrev,
-        cobradoPrev,
-        aPagarPrev,
-        hayCostoExterno,
-        alertas,
-      ] = await Promise.all([
-        this.sumFacturadoCliente(tenantId, resolved.start, resolved.end),
-        this.sumCobradoCliente(tenantId, resolved.start, resolved.end),
-        this.sumAPagarTransportistas(tenantId, resolved.start, resolved.end),
-        this.sumFacturadoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
-        this.sumCobradoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
-        this.sumAPagarTransportistas(tenantId, resolved.prevStart, resolved.prevEnd),
-        this.hayViajeCostoExternoEnPeriodo(tenantId, resolved.start, resolved.end),
-        this.buildAlertas(tenantId),
-      ]);
+    const [financieroResult, viajesResult] = await Promise.all([
+      hasFacturacion
+        ? Promise.all([
+            this.sumFacturadoCliente(tenantId, resolved.start, resolved.end),
+            this.sumCobradoCliente(tenantId, resolved.start, resolved.end),
+            this.sumAPagarTransportistas(tenantId, resolved.start, resolved.end),
+            this.sumFacturadoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
+            this.sumCobradoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
+            this.sumAPagarTransportistas(tenantId, resolved.prevStart, resolved.prevEnd),
+            this.hayViajeCostoExternoEnPeriodo(tenantId, resolved.start, resolved.end),
+            this.buildAlertas(tenantId),
+          ])
+        : null,
+      hasViajes
+        ? Promise.all([
+            this.prisma.viaje.count({ where: { tenantId, estado: 'en_curso' } }),
+            this.countEnCursoAt(tenantId, new Date(resolved.prevEnd.getTime() - 1)),
+            this.countCompletadosEnVentana(tenantId, resolved.start, resolved.end),
+            this.countCompletadosEnVentana(tenantId, resolved.prevStart, resolved.prevEnd),
+            this.sumMontoSinFacturar(tenantId),
+          ])
+        : null,
+    ]);
 
+    if (financieroResult) {
+      const [facturado, cobrado, aPagar, facturadoPrev, cobradoPrev, aPagarPrev, hayCostoExterno, alertas] = financieroResult;
       const facturadoM = buildMetric(facturado, facturadoPrev, 'higher_better');
       const cobradoM = buildMetric(cobrado, cobradoPrev, 'higher_better');
       const aPagarM = buildMetric(aPagar, aPagarPrev, 'lower_better');
-
       const diff = roundMoney(facturado - aPagar);
       const diffPrev = roundMoney(facturadoPrev - aPagarPrev);
-      const diffCompare = buildMetric(diff, diffPrev, 'higher_better');
-
       out.financiero = {
         facturado: facturadoM,
         cobrado: cobradoM,
         aPagarTransportistas: aPagarM,
         mostrarDiferenciaNeta: hayCostoExterno > 0,
         diferenciaNetaEstimada: diff,
-        diferenciaNetaCompare: diffCompare,
+        diferenciaNetaCompare: buildMetric(diff, diffPrev, 'higher_better'),
       };
-
-      const hasAlertas =
-        alertas.facturasVencidas.cantidad > 0 ||
-        alertas.viajesSinFactura.cantidad > 0;
+      const hasAlertas = alertas.facturasVencidas.cantidad > 0 || alertas.viajesSinFactura.cantidad > 0;
       out.alertas = hasAlertas ? alertas : null;
     }
 
-    if (hasViajes) {
-      const [
-        enCursoNow,
-        enCursoSnapshotPrev,
-        completados,
-        completadosPrev,
-        sinFacturarMonto,
-      ] = await Promise.all([
-        this.prisma.viaje.count({
-          where: { tenantId, estado: 'en_curso' },
-        }),
-        this.countEnCursoAt(tenantId, new Date(resolved.prevEnd.getTime() - 1)),
-        this.countCompletadosEnVentana(tenantId, resolved.start, resolved.end),
-        this.countCompletadosEnVentana(
-          tenantId,
-          resolved.prevStart,
-          resolved.prevEnd,
-        ),
-        this.sumMontoSinFacturar(tenantId),
-      ]);
-
+    if (viajesResult) {
+      const [enCursoNow, enCursoSnapshotPrev, completados, completadosPrev, sinFacturarMonto] = viajesResult;
       out.viajes = {
         enCurso: buildMetric(enCursoNow, enCursoSnapshotPrev, 'higher_better'),
         completados: buildMetric(completados, completadosPrev, 'higher_better'),

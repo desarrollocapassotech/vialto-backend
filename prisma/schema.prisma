@@ -4,8 +4,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL_UNPOOLED")  // pooler para runtime
-  directUrl = env("DATABASE_URL")           // directa para migraciones
+  url       = env("DATABASE_URL")           // pooled (PgBouncer) — para runtime
+  directUrl = env("DATABASE_URL_UNPOOLED")  // directa (sin pooler) — solo para migraciones
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -188,6 +188,8 @@ model Viaje {
   @@index([tenantId])
   @@index([tenantId, estado])
   @@index([tenantId, clienteId])
+  @@index([tenantId, fechaCarga])
+  @@index([tenantId, fechaDescarga])
   @@map("viajes")
 }
 

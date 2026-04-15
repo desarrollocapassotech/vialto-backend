@@ -14,5 +14,7 @@ services:
         value: 8080
       - key: DATABASE_URL
         sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
       - key: CLERK_SECRET_KEY
         sync: false

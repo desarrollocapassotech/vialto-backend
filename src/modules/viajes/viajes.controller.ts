@@ -39,6 +39,13 @@ export class ViajesController {
     return this.service.findAll(auth.tenantId, estado);
   }
 
+  @Get('stats')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  stats(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.getStats(auth.tenantId);
+  }
+
   @Get('paginated')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   listPaginated(

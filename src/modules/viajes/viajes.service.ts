@@ -112,57 +112,41 @@ export class ViajesService {
     transportistaId?: string | null;
     choferId?: string | null;
   }) {
-    const c = await this.prisma.cliente.findFirst({
-      where: { id: dto.clienteId, tenantId },
-    });
+    const [c, t, ch] = await Promise.all([
+      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
+      dto.transportistaId
+        ? this.prisma.transportista.findFirst({ where: { id: dto.transportistaId, tenantId, tipo: 'externo' } })
+        : null,
+      dto.choferId
+        ? this.prisma.chofer.findFirst({ where: { id: dto.choferId, tenantId } })
+        : null,
+    ]);
+
     if (!c) throw new BadRequestException('Cliente inválido para este tenant');
-
-    if (dto.transportistaId) {
-      const t = await this.prisma.transportista.findFirst({
-        where: { id: dto.transportistaId, tenantId, tipo: 'externo' },
-      });
-      if (!t) throw new BadRequestException('Transportista inválido');
-    }
-    if (dto.choferId) {
-      const ch = await this.prisma.chofer.findFirst({
-        where: { id: dto.choferId, tenantId },
-      });
-      if (!ch) throw new BadRequestException('Chofer inválido');
-    }
-  }
-
-  /**
-   * Corrige viajes con factura asignada pero estado incorrecto.
-   * Ejecuta un updateMany y muta el array en memoria para no releer BD.
-   */
-  private async corregirEstadosConFactura(
-    viajes: Array<{ id: string; facturaId: string | null; estado: string }>,
-  ) {
-    const aCorregir = viajes.filter(
-      (v) =>
-        v.facturaId != null &&
-        v.estado !== 'facturado_sin_cobrar' &&
-        v.estado !== 'cobrado',
-    );
-    if (aCorregir.length === 0) return;
-    await this.prisma.viaje.updateMany({
-      where: { id: { in: aCorregir.map((v) => v.id) } },
-      data: { estado: 'facturado_sin_cobrar' },
-    });
-    aCorregir.forEach((v) => {
-      v.estado = 'facturado_sin_cobrar';
-    });
+    if (dto.transportistaId && !t) throw new BadRequestException('Transportista inválido');
+    if (dto.choferId && !ch) throw new BadRequestException('Chofer inválido');
   }
 
   async findAll(tenantId: string, estado?: string) {
-    const rows = await this.prisma.viaje.findMany({
+    return this.prisma.viaje.findMany({
       where: { tenantId, ...(estado ? { estado } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
-      include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      include: {
+        cliente:      { select: { id: true, nombre: true } },
+        transportista: { select: { id: true, nombre: true } },
+        factura:      { select: { id: true, numero: true } },
+      },
     });
-    await this.corregirEstadosConFactura(rows);
-    return rows;
+  }
+
+  async getStats(tenantId: string) {
+    const rows = await this.prisma.viaje.groupBy({
+      by: ['estado'],
+      where: { tenantId },
+      _count: { _all: true },
+    });
+    return Object.fromEntries(rows.map((r) => [r.estado, r._count._all]));
   }
 
   async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {
@@ -217,9 +201,9 @@ export class ViajesService {
       const mode = Prisma.QueryMode.insensitive;
 
       const or: Prisma.ViajeWhereInput[] = [
-        { [campo]: { contains: uq, mode } },
+        { [campo]: { startsWith: uq, mode } },
       ];
-      if (soloCiudad.length >= 2) {
+      if (soloCiudad.length >= 2 && soloCiudad !== uq) {
         or.push({ [campo]: { equals: soloCiudad, mode } });
         or.push({ [campo]: { startsWith: `${soloCiudad},`, mode } });
       }
@@ -243,7 +227,6 @@ export class ViajesService {
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       }),
     ]);
-    await this.corregirEstadosConFactura(items);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
       items,

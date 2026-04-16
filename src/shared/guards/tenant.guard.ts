@@ -17,6 +17,7 @@ export class TenantGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const auth = context.switchToHttp().getRequest().auth;
     if (!auth?.tenantId) return true;
+    if (auth.role === 'superadmin') return true;
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: auth.tenantId },

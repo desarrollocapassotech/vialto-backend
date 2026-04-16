@@ -37,6 +37,8 @@ model Tenant {
   cargasCombustible       CargaCombustible[]
   intervenciones          Intervencion[]
   remitos                 Remito[]
+  importTemplates         ImportTemplate[]
+  importLogs              ImportLog[]
 
   @@map("tenants")
 }
@@ -376,4 +378,65 @@ model Remito {
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@map("remitos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: importaciones
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ImportTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  modulo    String   // viajes | clientes | choferes | vehiculos | stock | etc.
+  nombre    String
+  config    Json     // TemplateConfig: sheet, headerRow, columns[]
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logs     ImportLog[]
+  sessions ImportSession[]
+
+  @@unique([tenantId, modulo])
+  @@index([tenantId])
+  @@map("import_templates")
+}
+
+model ImportSession {
+  id            String         @id @default(cuid())
+  tenantId      String
+  templateId    String
+  template      ImportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  modulo        String
+  nombreArchivo String
+  filasValidas  Json           // ValidatedRow[] — listas para insertar
+  errores       Json           // RowError[]
+  totalFilas    Int
+  expiresAt     DateTime
+  createdAt     DateTime       @default(now())
+
+  @@index([tenantId])
+  @@map("import_sessions")
+}
+
+model ImportLog {
+  id            String          @id @default(cuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  templateId    String?
+  template      ImportTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  modulo        String
+  nombreArchivo String
+  estado        String          @default("completado") // completado | con_errores | fallido
+  totalFilas    Int
+  exitosas      Int             @default(0)
+  errores       Int             @default(0)
+  detalles      Json            // [{ fila: 2, estado: "ok", id: "..." }, { fila: 3, estado: "error", mensaje: "..." }]
+  createdAt     DateTime        @default(now())
+  createdBy     String
+
+  @@index([tenantId])
+  @@index([tenantId, modulo])
+  @@map("import_logs")
 }

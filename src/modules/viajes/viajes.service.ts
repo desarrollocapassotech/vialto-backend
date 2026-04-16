@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { ViajesAutoEstadoService } from './viajes-auto-estado.service';
 import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { generateNumeroViaje } from './generate-viaje-numero';
@@ -41,7 +42,10 @@ function parseYyyyMmDdFinUtc(s: string): Date | null {
 
 @Injectable()
 export class ViajesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly autoEstado: ViajesAutoEstadoService,
+  ) {}
 
   /** Acepta legado `finalizado` y valida contra {@link VIAJE_ESTADOS}. */
   private parseEstadoViaje(estado: string): ViajeEstado {
@@ -150,6 +154,9 @@ export class ViajesService {
   }
 
   async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {
+    // Lazy update: sincroniza estados por fecha antes de devolver resultados
+    await this.autoEstado.actualizarEstadosPorFecha(tenantId);
+
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const where: Prisma.ViajeWhereInput = { tenantId };

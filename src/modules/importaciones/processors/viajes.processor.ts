@@ -19,6 +19,18 @@ export class ViajesProcessor implements IImportProcessor {
     const clienteId = row.clienteId as string;
     const fechaCarga = (row.fechaCarga as Date | null) ?? null;
 
+    // Determinar estado según fechas
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const fechaDescarga = (row.fechaDescarga as Date | null) ?? null;
+    const estado = (() => {
+      if (fechaDescarga && fechaDescarga <= hoy) {
+        return row.nroFactura ? 'facturado_sin_cobrar' : 'finalizado_sin_facturar';
+      }
+      if (fechaCarga && fechaCarga <= hoy) return 'en_curso';
+      return 'pendiente';
+    })();
+
     // Crear factura del cliente si hay número de factura
     let facturaClienteId: string | null = null;
     if (row.nroFactura) {
@@ -43,14 +55,14 @@ export class ViajesProcessor implements IImportProcessor {
       data: {
         tenantId,
         numero,
-        estado: 'pendiente',
+        estado,
         clienteId,
         transportistaId: (row.transportistaId as string | null) ?? null,
         choferId: (row.choferId as string | null) ?? null,
         origen: (row.origen as string | null) ?? null,
         destino: (row.destino as string | null) ?? null,
         fechaCarga,
-        fechaDescarga: (row.fechaDescarga as Date | null) ?? null,
+        fechaDescarga,
         detalleCarga: (row.detalleCarga as string | null) ?? null,
         kmRecorridos: row.kmRecorridos != null ? Number(row.kmRecorridos) : null,
         monto: row.monto != null ? Number(row.monto) : null,

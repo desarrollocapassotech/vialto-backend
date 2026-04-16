@@ -38,6 +38,7 @@ export type OwnerDashboardResponse = {
     facturado: MetricCompare;
     cobrado: MetricCompare;
     aPagarTransportistas: MetricCompare;
+    margen: MetricCompare;
     mostrarDiferenciaNeta: boolean;
     diferenciaNetaEstimada: number;
     diferenciaNetaCompare: MetricCompare;
@@ -118,8 +119,8 @@ export class DashboardService {
     });
     const modules = tenant?.modules ?? [];
     const mod = new Set(modules.map((m) => m.toLowerCase()));
-    const hasFacturacion = mod.has('facturacion');
     const hasViajes = mod.has('viajes');
+    const hasFacturacion = mod.has('facturacion') || hasViajes;
 
     const resolved = resolveDashboardPeriod(periodKind, from, to);
     const meta = this.periodMeta(resolved);
@@ -180,6 +181,8 @@ export class DashboardService {
         sinFacturarPeriodoPrev,
         'higher_better',
       );
+      const margen = roundMoney(cobrado - aPagar);
+      const margenPrev = roundMoney(cobradoPrev - aPagarPrev);
       const diff = roundMoney(facturado - aPagar);
       const diffPrev = roundMoney(facturadoPrev - aPagarPrev);
       out.financiero = {
@@ -187,6 +190,7 @@ export class DashboardService {
         facturado: facturadoM,
         cobrado: cobradoM,
         aPagarTransportistas: aPagarM,
+        margen: buildMetric(margen, margenPrev, 'higher_better'),
         mostrarDiferenciaNeta: hayCostoExterno > 0,
         diferenciaNetaEstimada: diff,
         diferenciaNetaCompare: buildMetric(diff, diffPrev, 'higher_better'),

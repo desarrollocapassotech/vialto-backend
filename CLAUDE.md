@@ -88,6 +88,7 @@ metadata Json @default("{}")
 Ejemplos de uso:
 - Fernández: `{ "mic": "25AR319519Y", "crt": "AR1135010120", "kgCarga": 30760, "kgDescarga": 30100, "valorTnUsd": 280 }`
 - Riedel: `{ "despacho": "IC05 030782P", "contenedor": "OOCU 478298 0", "remitoFisico": true, "escaneado": false }`
+- Venturini (NyM): `{ "ctg": "10130658234", "cartaDePorte": "CP 1-3726", "grano": "Soja", "tnOrigen": 31420, "tnDestino": 31400, "tarifaPorTn": 48000 }`
 
 ### Reglas de uso
 
@@ -225,6 +226,7 @@ src/
     combustible/            ← 🔲 Fase 4 — Wichi Toledo, Altamirano
     mantenimiento/          ← 🔲 Fase 4 — Wichi Toledo
     remitos/                ← 🔲 Fase 3 — Melisa
+    liquidaciones-arca/     ← 🔲 Fase NyM — NyM Logística (CVLP tipo 60 + facturas A/B vía AfipSDK)
     turnos/                 ← 🔲 Fase 7 — Pereyra (módulo aislado)
     reportes/               ← 🔲 Fase 8 — cross-módulo
 
@@ -474,27 +476,29 @@ model Remito {
 | Sebastián Fernández | ✅ Cerrado | viajes | 1 — construir ya |
 | Matías Riedel | ⏳ Cierra mañana | stock, cuenta-corriente | 2 |
 | Melisa (Desagotes) | ⏳ Muy probable | remitos, cuenta-corriente | 3 |
-| Wichi Toledo SRL | ⏳ Muy probable | mantenimiento, combustible | 4 |
-| Gabriel González e Hijo | 🔲 Interesado | facturacion (viajes + cobranzas) | 5 |
-| Javier Altamirano | 🔲 Pendiente | viajes, facturacion, combustible | 6 |
-| Mailen Matilla | 🔲 Pendiente | viajes, facturacion | 7 |
-| Hernán Pereyra | 🔲 Pendiente | turnos (PWA) | 8 — módulo aislado |
+| Marcos Venturini (NyM Logística) | ⏳ Presupuesto enviado | liquidaciones-arca, viajes | 4 |
+| Wichi Toledo SRL | ⏳ Muy probable | mantenimiento, combustible | 5 |
+| Gabriel González e Hijo | 🔲 Interesado | facturacion (viajes + cobranzas) | 6 |
+| Javier Altamirano | 🔲 Pendiente | viajes, facturacion, combustible | 7 |
+| Mailen Matilla | 🔲 Pendiente | viajes, facturacion | 8 |
+| Hernán Pereyra | 🔲 Pendiente | turnos (PWA) | 9 — módulo aislado |
 
 ---
 
 ## Mapa de módulos por cliente
 
-| Módulo | Fernández | Riedel | Melisa | González | Wichi Toledo | Altamirano | Matilla | Pereyra |
-|---|---|---|---|---|---|---|---|---|
-| viajes | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ |
-| facturacion | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | — |
-| cuenta-corriente | — | ✓ | ✓ | ✓ | — | — | — | — |
-| choferes / vehículos | — | — | — | — | — | ✓ | ✓ | ✓ |
-| mantenimiento | — | — | — | — | ✓ | — | — | — |
-| combustible | — | — | — | — | ✓ | ✓ | — | — |
-| stock | — | ✓ | — | — | — | — | — | — |
-| remitos | — | — | ✓ | — | — | — | — | — |
-| turnos | — | — | — | — | — | — | — | ✓ |
+| Módulo | Fernández | Riedel | Melisa | González | Wichi Toledo | Altamirano | Matilla | Pereyra | NyM |
+|---|---|---|---|---|---|---|---|---|---|
+| viajes | ✓ | — | — | ✓ | — | ✓ | ✓ | ✓ | ✓ |
+| facturacion | ✓ | — | ✓ | ✓ | — | ✓ | ✓ | — | — |
+| cuenta-corriente | — | ✓ | ✓ | ✓ | — | — | — | — | — |
+| choferes / vehículos | — | — | — | — | — | ✓ | ✓ | ✓ | — |
+| mantenimiento | — | — | — | — | ✓ | — | — | — | — |
+| combustible | — | — | — | — | ✓ | ✓ | — | — | — |
+| stock | — | ✓ | — | — | — | — | — | — | — |
+| remitos | — | — | ✓ | — | — | — | — | — | — |
+| turnos | — | — | — | — | — | — | — | ✓ | — |
+| liquidaciones-arca | — | — | — | — | — | — | — | — | ✓ |
 
 ---
 
@@ -534,6 +538,15 @@ FASE 6 — Altamirano / Matilla
 FASE 7 — Pereyra
   → módulo: turnos (PWA para choferes, panel admin, listas de turno)
   → Módulo aislado, no depende de los anteriores
+
+FASE NyM — Venturini (NyM Logística)
+  → módulo: liquidaciones-arca
+  → Campos de granel en metadata del viaje: ctg, cartaDePorte, grano, tnOrigen, tnDestino, tarifaPorTn
+  → Feature flag: liquidaciones.habilitarGranel = true para este tenant
+  → Motor de liquidación CVLP: agrupamiento por transportista, cálculo comisión, líquido producto, IVA
+  → Integración AfipSDK: emisión comprobante tipo 60 con CAE vía WSFEv1
+  → Facturas A/B a clientes vía AfipSDK
+  → PDF del comprobante con formato NyM Logística
 
 FASE 8 — Transversal
   → módulo: reportes (dashboards cross-módulo, exportación, KPIs)

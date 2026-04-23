@@ -17,6 +17,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [
+      'https://vialto-frontend.onrender.com',
       'https://registro-combustible-logistica.web.app',
       'https://registro-combustible-logistica.firebaseapp.com',
       /localhost:\d+/,

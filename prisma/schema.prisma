@@ -109,18 +109,23 @@ model Chofer {
 }
 
 model Vehiculo {
-  id              String   @id @default(cuid())
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  patente         String
-  tipo            String // tractor | semirremolque | camion | utilitario | otro
-  marca           String?
-  modelo          String?
-  anio            Int?
-  kmActual        Int      @default(0)
-  transportistaId String?
-  transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
-  createdAt       DateTime @default(now())
+  id                 String    @id @default(cuid())
+  tenantId           String
+  tenant             Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  patente            String
+  tipo               String    // tractor | semirremolque | camion | utilitario | otro
+  marca              String?
+  modelo             String?
+  anio               Int?
+  kmActual           Int       @default(0)
+  nroChasis          String?
+  poliza             String?
+  vencimientoPoliza  DateTime?
+  tara               Float?
+  precinto           String?
+  transportistaId    String?
+  transportista      Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  createdAt          DateTime  @default(now())
 
   vehiculosViaje    ViajeVehiculo[]
   cargasCombustible CargaCombustible[]

@@ -74,6 +74,11 @@ export class VehiculosService {
         modelo: dto.modelo ?? null,
         anio: dto.anio ?? null,
         kmActual: dto.kmActual ?? 0,
+        nroChasis: dto.nroChasis ?? null,
+        poliza: dto.poliza ?? null,
+        vencimientoPoliza: dto.vencimientoPoliza ? new Date(dto.vencimientoPoliza) : null,
+        tara: dto.tara ?? null,
+        precinto: dto.precinto ?? null,
         transportistaId: dto.transportistaId ?? null,
       },
     });
@@ -93,6 +98,13 @@ export class VehiculosService {
         modelo: dto.modelo,
         anio: dto.anio,
         kmActual: dto.kmActual,
+        nroChasis: dto.nroChasis,
+        poliza: dto.poliza,
+        vencimientoPoliza: dto.vencimientoPoliza !== undefined
+          ? (dto.vencimientoPoliza ? new Date(dto.vencimientoPoliza) : null)
+          : undefined,
+        tara: dto.tara,
+        precinto: dto.precinto,
         transportistaId:
           dto.transportistaId === undefined ? undefined : dto.transportistaId,
       },

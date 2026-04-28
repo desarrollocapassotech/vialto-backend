@@ -58,6 +58,7 @@ export class ClientesService {
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
         direccion: dto.direccion ?? null,
+        pais: dto.pais ?? null,
       },
     });
   }

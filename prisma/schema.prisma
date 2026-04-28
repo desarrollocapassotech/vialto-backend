@@ -56,6 +56,7 @@ model Cliente {
   email     String?
   telefono  String?
   direccion String?
+  pais      String?
   createdAt DateTime @default(now())
 
   viajes           Viaje[]

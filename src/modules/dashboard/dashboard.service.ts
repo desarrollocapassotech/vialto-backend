@@ -22,6 +22,8 @@ export type MetricCompare = {
   previous: number;
   changePct: number | null;
   sentiment: 'positive' | 'negative' | 'neutral';
+  /** Desglose por moneda del período actual. Solo presente en métricas derivadas de viajes. */
+  currencies?: { ARS?: number; USD?: number };
 };
 
 export type OwnerDashboardResponse = {
@@ -65,6 +67,7 @@ function buildMetric(
   current: number,
   previous: number,
   mode: CompareMode,
+  currencies?: { ARS?: number; USD?: number },
 ): MetricCompare {
   const c = roundMoney(current);
   const p = roundMoney(previous);
@@ -90,17 +93,21 @@ function buildMetric(
   const raw = ((c - p) / p) * 100;
   const changePct = Math.round(raw * 10) / 10;
   const same = c === p;
-  if (same) {
-    return { current: c, previous: p, changePct: 0, sentiment: 'neutral' };
+  const cur: MetricCompare = same
+    ? { current: c, previous: p, changePct: 0, sentiment: 'neutral' }
+    : {
+        current: c,
+        previous: p,
+        changePct,
+        sentiment: (mode === 'higher_better' ? c > p : c < p) ? 'positive' : 'negative',
+      };
+  if (currencies) {
+    cur.currencies = {
+      ...(currencies.ARS != null && currencies.ARS > 0 ? { ARS: currencies.ARS } : {}),
+      ...(currencies.USD != null && currencies.USD > 0 ? { USD: currencies.USD } : {}),
+    };
   }
-  const improved =
-    mode === 'higher_better' ? c > p : c < p;
-  return {
-    current: c,
-    previous: p,
-    changePct,
-    sentiment: improved ? 'positive' : 'negative',
-  };
+  return cur;
 }
 
 @Injectable()
@@ -137,16 +144,18 @@ export class DashboardService {
     const [financieroResult, viajesResult] = await Promise.all([
       hasFacturacion
         ? Promise.all([
-            this.sumFacturadoCliente(tenantId, resolved.start, resolved.end),
-            this.sumCobradoCliente(tenantId, resolved.start, resolved.end),
-            this.sumAPagarTransportistas(tenantId, resolved.start, resolved.end),
-            this.sumSinFacturarEnPeriodo(tenantId, sinFacturarRanges.current),
-            this.sumFacturadoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
-            this.sumCobradoCliente(tenantId, resolved.prevStart, resolved.prevEnd),
-            this.sumAPagarTransportistas(tenantId, resolved.prevStart, resolved.prevEnd),
-            this.sumSinFacturarEnPeriodo(tenantId, sinFacturarRanges.previous),
-            this.hayViajeCostoExternoEnPeriodo(tenantId, resolved.start, resolved.end),
-            this.buildAlertas(tenantId),
+            this.sumFacturadoCliente(tenantId, resolved.start, resolved.end),           // 0
+            this.sumCobradoCliente(tenantId, resolved.start, resolved.end),             // 1
+            this.sumAPagarTransportistas(tenantId, resolved.start, resolved.end),       // 2
+            this.sumSinFacturarEnPeriodo(tenantId, sinFacturarRanges.current),          // 3
+            this.sumFacturadoCliente(tenantId, resolved.prevStart, resolved.prevEnd),   // 4
+            this.sumCobradoCliente(tenantId, resolved.prevStart, resolved.prevEnd),     // 5
+            this.sumAPagarTransportistas(tenantId, resolved.prevStart, resolved.prevEnd), // 6
+            this.sumSinFacturarEnPeriodo(tenantId, sinFacturarRanges.previous),         // 7
+            this.hayViajeCostoExternoEnPeriodo(tenantId, resolved.start, resolved.end), // 8
+            this.buildAlertas(tenantId),                                                // 9
+            this.sumAPagarPorMoneda(tenantId, resolved.start, resolved.end),            // 10
+            this.sumSinFacturarEnPeriodoMoneda(tenantId, sinFacturarRanges.current, 'USD'), // 11
           ])
         : null,
       hasViajes
@@ -172,14 +181,25 @@ export class DashboardService {
         sinFacturarPeriodoPrev,
         hayCostoExterno,
         alertas,
+        aPagarMoneda,
+        sinFacturarUSD,
       ] = financieroResult;
+      const sinFacturarARS = roundMoney(sinFacturarPeriodo - (sinFacturarUSD as number));
       const facturadoM = buildMetric(facturado, facturadoPrev, 'higher_better');
       const cobradoM = buildMetric(cobrado, cobradoPrev, 'higher_better');
-      const aPagarM = buildMetric(aPagar, aPagarPrev, 'lower_better');
+      const aPagarMon = aPagarMoneda as { ARS: number; USD: number };
+      const aPagarM = buildMetric(aPagar, aPagarPrev, 'lower_better', {
+        ARS: aPagarMon.ARS,
+        USD: aPagarMon.USD,
+      });
       const sinFacturarM = buildMetric(
         sinFacturarPeriodo,
         sinFacturarPeriodoPrev,
         'higher_better',
+        {
+          ARS: sinFacturarARS,
+          USD: sinFacturarUSD as number,
+        },
       );
       const margen = roundMoney(cobrado - aPagar);
       const margenPrev = roundMoney(cobradoPrev - aPagarPrev);
@@ -281,6 +301,72 @@ export class DashboardService {
       extra += v.monto ?? 0;
     }
     return roundMoney((pagosSum._sum.importe ?? 0) + extra);
+  }
+
+  private async sumAPagarPorMoneda(
+    tenantId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ ARS: number; USD: number }> {
+    const groups = await this.prisma.viaje.groupBy({
+      by: ['monedaPrecioTransportistaExterno'],
+      where: {
+        tenantId,
+        transportistaId: { not: null },
+        precioTransportistaExterno: { gt: 0 },
+        createdAt: { gte: start, lt: end },
+      },
+      _sum: { precioTransportistaExterno: true },
+    });
+    const byMoneda: Record<string, number> = {};
+    for (const g of groups) {
+      const m = g.monedaPrecioTransportistaExterno ?? 'ARS';
+      byMoneda[m] = roundMoney(g._sum.precioTransportistaExterno ?? 0);
+    }
+    return { ARS: byMoneda['ARS'] ?? 0, USD: byMoneda['USD'] ?? 0 };
+  }
+
+  private async sumSinFacturarEnPeriodoMoneda(
+    tenantId: string,
+    range: SinFacturarArHalfOpen,
+    moneda: string,
+  ): Promise<number> {
+    const tz = DASHBOARD_SIN_FACTURAR_TZ;
+    const from = range.fromInclusive;
+    const toEx = range.toExclusive;
+    const rows = await this.prisma.$queryRaw<[{ s: unknown }]>(
+      Prisma.sql`
+        SELECT COALESCE(SUM(v."monto"), 0)::double precision AS s
+        FROM "viajes" v
+        WHERE v."tenantId" = ${tenantId}
+        AND v."monedaMonto" = ${moneda}
+        AND (
+          (
+            v."estado" = 'finalizado_sin_facturar'
+            AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) >= ${from}::date
+            AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) < ${toEx}::date
+          )
+          OR (
+            v."estado" IN ('pendiente', 'en_curso')
+            AND (
+              (
+                v."fechaCarga" IS NOT NULL
+                AND DATE(timezone(${tz}, v."fechaCarga")) >= ${from}::date
+                AND DATE(timezone(${tz}, v."fechaCarga")) < ${toEx}::date
+              )
+              OR (
+                v."fechaCarga" IS NULL
+                AND DATE(timezone(${tz}, v."createdAt")) >= ${from}::date
+                AND DATE(timezone(${tz}, v."createdAt")) < ${toEx}::date
+              )
+            )
+          )
+        )
+      `,
+    );
+    const raw = rows[0]?.s;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    return roundMoney(Number.isFinite(n) ? n : 0);
   }
 
   private async sumAPagarTransportistas(

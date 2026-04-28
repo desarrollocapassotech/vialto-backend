@@ -292,8 +292,12 @@ model Viaje {
   @@index([tenantId])
   @@index([tenantId, estado])
   @@index([tenantId, clienteId])
+  @@index([tenantId, transportistaId])
   @@index([tenantId, fechaCarga])
   @@index([tenantId, fechaDescarga])
+  @@index([tenantId, fechaFinalizado])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, estado, fechaDescarga])
   @@map("viajes")
 }
 
@@ -325,6 +329,7 @@ model Factura {
   @@index([tenantId, clienteId])
   @@index([tenantId, transportistaId])
   @@index([tenantId, estado])
+  @@index([tenantId, fechaEmision])
   @@map("facturas")
 }
 
@@ -366,6 +371,7 @@ model MovimientoCuentaCorriente {
 
   @@index([tenantId])
   @@index([tenantId, clienteId])
+  @@index([tenantId, clienteId, tipo])
   @@index([tenantId, fecha])
   @@index([tenantId, origen])
   @@index([tenantId, viajeId])
@@ -411,6 +417,7 @@ model MovimientoStock {
   @@index([tenantId, productoId])
   @@index([tenantId, clienteId])
   @@index([tenantId, remitoId])
+  @@index([tenantId, fecha])
   @@map("movimientos_stock")
 }
 
@@ -437,6 +444,9 @@ model CargaCombustible {
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
+  @@index([tenantId, choferId])
+  @@index([tenantId, fecha])
+  @@index([tenantId, createdBy])
   @@map("cargas_combustible")
 }
 
@@ -460,6 +470,7 @@ model Intervencion {
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
+  @@index([tenantId, fecha])
   @@map("intervenciones")
 }
 // ═══════════════════════════════════════════════════════════════════════════
@@ -486,6 +497,7 @@ model Remito {
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@index([tenantId, estado])
+  @@index([tenantId, fecha])
   @@map("remitos")
 }
 

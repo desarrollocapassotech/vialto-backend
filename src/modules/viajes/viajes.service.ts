@@ -312,7 +312,7 @@ export class ViajesService {
         createdBy: auth.userId,
       };
       const viaje = await tx.viaje.create({ data });
-      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds);
+      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -400,7 +400,7 @@ export class ViajesService {
         where: { id },
         data,
       });
-      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds);
+      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,

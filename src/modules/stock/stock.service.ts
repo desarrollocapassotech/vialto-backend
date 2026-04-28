@@ -55,6 +55,12 @@ export class StockService {
     if (!c) throw new BadRequestException('Cliente inválido');
   }
 
+  private async assertRemito(tenantId: string, remitoId?: string | null) {
+    if (!remitoId) return;
+    const r = await this.prisma.remito.findFirst({ where: { id: remitoId, tenantId } });
+    if (!r) throw new BadRequestException('Remito inválido');
+  }
+
   listMovimientos(tenantId: string, productoId?: string, clienteId?: string) {
     return this.prisma.movimientoStock.findMany({
       where: {
@@ -77,6 +83,7 @@ export class StockService {
 
   async createMovimiento(tenantId: string, dto: CreateMovimientoStockDto) {
     await this.assertProductoCliente(tenantId, dto.productoId, dto.clienteId);
+    await this.assertRemito(tenantId, dto.remitoId);
     return this.prisma.movimientoStock.create({
       data: {
         tenantId,
@@ -96,6 +103,7 @@ export class StockService {
     const pid = dto.productoId ?? cur.productoId;
     const cid = dto.clienteId ?? cur.clienteId;
     await this.assertProductoCliente(tenantId, pid, cid);
+    await this.assertRemito(tenantId, dto.remitoId);
     return this.prisma.movimientoStock.update({
       where: { id },
       data: {

@@ -235,6 +235,7 @@ model Vehiculo {
 
 model ViajeVehiculo {
   id         String   @id @default(cuid())
+  tenantId   String
   viajeId    String
   viaje      Viaje    @relation(fields: [viajeId], references: [id], onDelete: Cascade)
   vehiculoId String
@@ -242,6 +243,7 @@ model ViajeVehiculo {
   orden      Int      @default(0)
 
   @@unique([viajeId, vehiculoId])
+  @@index([tenantId])
   @@index([viajeId])
   @@index([vehiculoId])
   @@map("viajes_vehiculos")

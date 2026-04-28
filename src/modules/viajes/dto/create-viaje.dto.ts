@@ -29,8 +29,8 @@ export class CreateViajeDto {
   @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsString() @IsNotEmpty() origen: string;
   @IsString() @IsNotEmpty() destino: string;
-  @IsOptional() @IsDateString() fechaCarga?: string;
-  @IsOptional() @IsDateString() fechaDescarga?: string;
+  @IsDateString() fechaCarga: string;
+  @IsDateString() fechaDescarga: string;
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;

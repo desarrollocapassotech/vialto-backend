@@ -18,11 +18,14 @@ export class ViajesProcessor implements IImportProcessor {
 
     const clienteId = row.clienteId as string;
     const fechaCarga = (row.fechaCarga as Date | null) ?? null;
+    const fechaDescarga = (row.fechaDescarga as Date | null) ?? null;
+
+    if (!fechaCarga) throw new Error('La fecha de carga es requerida');
+    if (!fechaDescarga) throw new Error('La fecha de descarga es requerida');
 
     // Determinar estado según fechas
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
-    const fechaDescarga = (row.fechaDescarga as Date | null) ?? null;
     const estado = (() => {
       if (fechaDescarga && fechaDescarga <= hoy) {
         return row.nroFactura ? 'facturado_sin_cobrar' : 'finalizado_sin_facturar';

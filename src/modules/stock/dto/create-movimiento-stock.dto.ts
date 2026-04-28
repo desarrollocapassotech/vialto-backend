@@ -7,6 +7,6 @@ export class CreateMovimientoStockDto {
   @IsIn(['ingreso', 'egreso', 'division']) tipo: string;
   @IsNumber() @Type(() => Number) cantidad: number;
   @IsOptional() @IsNumber() @Type(() => Number) pesoKg?: number;
-  @IsOptional() @IsString() remito?: string;
+  @IsOptional() @IsString() remitoId?: string;
   @IsDateString() fecha: string;
 }

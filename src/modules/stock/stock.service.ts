@@ -85,7 +85,7 @@ export class StockService {
         tipo: dto.tipo,
         cantidad: dto.cantidad,
         pesoKg: dto.pesoKg ?? null,
-        remito: dto.remito ?? null,
+        remitoId: dto.remitoId ?? null,
         fecha: new Date(dto.fecha),
       },
     });

@@ -61,7 +61,6 @@ export class ImportacionesService {
       data: {
         tenantId,
         templateId: template.id,
-        modulo,
         nombreArchivo: file.originalname,
         filasValidas: valid as unknown as object[],
         errores: errors as unknown as object[],
@@ -93,6 +92,7 @@ export class ImportacionesService {
   async confirm(tenantId: string, sessionId: string, createdBy: string) {
     const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, tenantId },
+      include: { template: { select: { modulo: true } } },
     });
 
     if (!session) throw new NotFoundException('Sesión de importación no encontrada');
@@ -101,9 +101,9 @@ export class ImportacionesService {
       throw new GoneException('La sesión expiró. Volvé a subir el archivo para generar una nueva previsualización');
     }
 
-    const processor = this.processors[session.modulo];
+    const processor = this.processors[session.template.modulo];
     if (!processor) {
-      throw new BadRequestException(`No hay processor para el módulo "${session.modulo}"`);
+      throw new BadRequestException(`No hay processor para el módulo "${session.template.modulo}"`);
     }
 
     const filasValidas = session.filasValidas as unknown as ValidatedRow[];
@@ -130,7 +130,7 @@ export class ImportacionesService {
       data: {
         tenantId,
         templateId: session.templateId,
-        modulo: session.modulo,
+        modulo: session.template.modulo,
         nombreArchivo: session.nombreArchivo,
         estado,
         totalFilas: session.totalFilas,

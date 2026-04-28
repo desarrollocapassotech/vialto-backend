@@ -19,19 +19,11 @@ export class ViajesProcessor implements IImportProcessor {
     const clienteId = row.clienteId as string;
     const fechaCarga = (row.fechaCarga as Date | null) ?? null;
 
-    // Determinar estado según fechas
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
     const fechaDescarga = (row.fechaDescarga as Date | null) ?? null;
-    const estado = (() => {
-      if (fechaDescarga && fechaDescarga <= hoy) {
-        return row.nroFactura ? 'facturado_sin_cobrar' : 'finalizado_sin_facturar';
-      }
-      if (fechaCarga && fechaCarga <= hoy) return 'en_curso';
-      return 'pendiente';
-    })();
 
-    // Crear factura del cliente si hay número de factura
+    // Crear factura del cliente si hay número de factura (antes de calcular estado)
     let facturaClienteId: string | null = null;
     if (row.nroFactura) {
       const fechaEmision = (row.fechaEmisionFactura as Date | null) ?? fechaCarga ?? new Date();
@@ -51,6 +43,15 @@ export class ViajesProcessor implements IImportProcessor {
       facturaClienteId = factura.id;
     }
 
+    // Determinar estado según fechas y factura
+    const estado = (() => {
+      if (fechaDescarga && fechaDescarga <= hoy) {
+        return facturaClienteId ? 'facturado_sin_cobrar' : 'finalizado_sin_facturar';
+      }
+      if (fechaCarga && fechaCarga <= hoy) return 'en_curso';
+      return 'pendiente';
+    })();
+
     const viaje = await this.prisma.viaje.create({
       data: {
         tenantId,
@@ -66,7 +67,6 @@ export class ViajesProcessor implements IImportProcessor {
         detalleCarga: (row.detalleCarga as string | null) ?? null,
         kmRecorridos: row.kmRecorridos != null ? Number(row.kmRecorridos) : null,
         monto: row.monto != null ? Number(row.monto) : null,
-        nroFactura: (row.nroFactura as string | null) ?? null,
         precioTransportistaExterno: row.precioTransportistaExterno != null ? Number(row.precioTransportistaExterno) : null,
         facturaId: facturaClienteId,
         observaciones,

@@ -34,7 +34,7 @@ export class MantenimientoService {
     return row;
   }
 
-  async create(tenantId: string, dto: CreateIntervencionDto) {
+  async create(tenantId: string, userId: string, dto: CreateIntervencionDto) {
     await this.assertVehiculo(tenantId, dto.vehiculoId);
     return this.prisma.intervencion.create({
       data: {
@@ -45,6 +45,7 @@ export class MantenimientoService {
         km: dto.km ?? null,
         proximoKm: dto.proximoKm ?? null,
         fecha: new Date(dto.fecha),
+        createdBy: userId,
       },
     });
   }

@@ -22,24 +22,24 @@ export class ViajesAutoEstadoService {
     const base = tenantId ? { tenantId } : {};
 
     const [finalizados, facturados, enCurso] = await Promise.all([
-      // pendiente/en_curso + fechaDescarga <= hoy + sin nroFactura → finalizado_sin_facturar
+      // pendiente/en_curso + fechaDescarga <= hoy + sin factura → finalizado_sin_facturar
       this.prisma.viaje.updateMany({
         where: {
           ...base,
           estado: { in: ['pendiente', 'en_curso'] },
           fechaDescarga: { lte: hoy },
-          nroFactura: null,
+          facturaId: null,
         },
         data: { estado: 'finalizado_sin_facturar', fechaFinalizado: new Date() },
       }),
 
-      // pendiente/en_curso + fechaDescarga <= hoy + con nroFactura → facturado_sin_cobrar
+      // pendiente/en_curso + fechaDescarga <= hoy + con factura → facturado_sin_cobrar
       this.prisma.viaje.updateMany({
         where: {
           ...base,
           estado: { in: ['pendiente', 'en_curso'] },
           fechaDescarga: { lte: hoy },
-          nroFactura: { not: null },
+          facturaId: { not: null },
         },
         data: { estado: 'facturado_sin_cobrar', fechaFinalizado: new Date() },
       }),

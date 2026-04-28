@@ -38,7 +38,6 @@ export class TransportistasService {
         cuit: dto.cuit ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
-        tipo: 'externo',
       },
     });
   }

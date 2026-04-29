@@ -298,8 +298,8 @@ export class ViajesService {
         choferId: refs.choferId,
         origen: dto.origen ?? null,
         destino: dto.destino ?? null,
-        fechaCarga: dto.fechaCarga ? new Date(dto.fechaCarga) : null,
-        fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
+        fechaCarga: new Date(dto.fechaCarga),
+        fechaDescarga: new Date(dto.fechaDescarga),
         detalleCarga: dto.detalleCarga ?? null,
         kmRecorridos: dto.kmRecorridos ?? null,
         litrosConsumidos: dto.litrosConsumidos ?? null,
@@ -338,6 +338,10 @@ export class ViajesService {
       choferId: op.choferId,
     };
     await this.assertRefs(tenantId, merged);
+    if (dto.fechaCarga !== undefined && !dto.fechaCarga)
+      throw new BadRequestException('La fecha de carga es requerida');
+    if (dto.fechaDescarga !== undefined && !dto.fechaDescarga)
+      throw new BadRequestException('La fecha de descarga es requerida');
     if (!op.transportistaId) {
       await assertVehiculosDelViaje(this.prisma, tenantId, op.vehiculoIds, {
         requiereFlotaPropia: true,

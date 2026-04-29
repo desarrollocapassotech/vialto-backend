@@ -5,9 +5,11 @@ import {
   IsOptional,
   IsString,
   IsDateString,
+  ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
+import { OtroGastoDto } from './create-viaje.dto';
 
 export class UpdateViajeDto {
   @IsOptional() @IsString() numero?: string;
@@ -36,4 +38,5 @@ export class UpdateViajeDto {
   @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
   @IsOptional() @IsString() observaciones?: string;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];
 }

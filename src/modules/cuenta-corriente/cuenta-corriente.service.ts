@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+
 import { CreateMovimientoCcDto } from './dto/create-movimiento-cc.dto';
 import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
@@ -78,7 +78,7 @@ export class CuentaCorrienteService {
       data: {
         tenantId,
         clienteId: dto.clienteId,
-        tipo: dto.tipo as $Enums.TipoMovimientoCuentaCorriente,
+        tipo: dto.tipo,
         origen: 'manual',
         concepto,
         importe,
@@ -104,7 +104,7 @@ export class CuentaCorrienteService {
       where: { id },
       data: {
         clienteId: dto.clienteId,
-        tipo: dto.tipo as $Enums.TipoMovimientoCuentaCorriente | undefined,
+        tipo: dto.tipo,
         concepto: dto.concepto?.trim(),
         importe:
           dto.importe === undefined ? undefined : this.normalizeImporte(dto.importe),

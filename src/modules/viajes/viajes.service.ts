@@ -18,7 +18,7 @@ import {
 } from './viaje-vehiculos.helper';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
-import { Prisma, $Enums } from '@prisma/client';
+import { Prisma} from '@prisma/client';
 import {
   VIAJE_ESTADOS_SET,
   esEstadoViajeFinal,
@@ -133,7 +133,7 @@ export class ViajesService {
 
   async findAll(tenantId: string, estado?: string) {
     return this.prisma.viaje.findMany({
-      where: { tenantId, ...(estado ? { estado: estado as $Enums.EstadoViaje } : {}) },
+      where: { tenantId, ...(estado ? { estado: estado } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: {
@@ -162,7 +162,7 @@ export class ViajesService {
     const where: Prisma.ViajeWhereInput = { tenantId };
 
     const est = query.estado?.trim();
-    if (est) where.estado = est as $Enums.EstadoViaje;
+    if (est) where.estado = est;
 
     const cid = query.clienteId?.trim();
     if (cid) where.clienteId = cid;

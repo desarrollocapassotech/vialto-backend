@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { createClerkClient } from '@clerk/backend';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { ListTenantsDto } from './dto/list-tenants.dto';
@@ -149,7 +149,7 @@ export class TenantsService {
       where: { clerkOrgId },
       data: {
         ...dto,
-        billingStatus: dto.billingStatus as $Enums.BillingStatus | undefined,
+        billingStatus: dto.billingStatus,
         billingRenewsAt:
           dto.billingRenewsAt === undefined
             ? undefined

@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { $Enums } from '@prisma/client';
+
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
@@ -70,7 +70,7 @@ export class VehiculosService {
       data: {
         tenantId,
         patente: dto.patente.toUpperCase(),
-        tipo: dto.tipo as $Enums.TipoVehiculo,
+        tipo: dto.tipo,
         marca: dto.marca ?? null,
         modelo: dto.modelo ?? null,
         anio: dto.anio ?? null,
@@ -94,7 +94,7 @@ export class VehiculosService {
       where: { id },
       data: {
         patente: dto.patente ? dto.patente.toUpperCase() : undefined,
-        tipo: dto.tipo as $Enums.TipoVehiculo | undefined,
+        tipo: dto.tipo,
         marca: dto.marca,
         modelo: dto.modelo,
         anio: dto.anio,

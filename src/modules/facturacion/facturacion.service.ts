@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
 import { CreatePagoDto } from './dto/create-pago.dto';
@@ -112,7 +112,7 @@ export class FacturacionService {
         data: {
           tenantId,
           numero: dto.numero,
-          tipo: dto.tipo as $Enums.TipoFactura,
+          tipo: dto.tipo,
           clienteId: dto.clienteId ?? null,
           transportistaId: dto.transportistaId ?? null,
           importe,
@@ -160,7 +160,7 @@ export class FacturacionService {
         where: { id },
         data: {
           ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
-          ...(dto.tipo !== undefined ? { tipo: dto.tipo as $Enums.TipoFactura } : {}),
+          ...(dto.tipo !== undefined ? { tipo: dto.tipo } : {}),
           ...(dto.clienteId !== undefined ? { clienteId: dto.clienteId || null } : {}),
           ...(dto.transportistaId !== undefined ? { transportistaId: dto.transportistaId || null } : {}),
           ...(dto.diferencia !== undefined ? { diferencia: dto.diferencia } : {}),
@@ -251,7 +251,7 @@ export class FacturacionService {
         facturaId: dto.facturaId,
         importe: dto.importe,
         fecha: new Date(dto.fecha),
-        formaPago: (dto.formaPago ?? null) as $Enums.FormaPago | null,
+        formaPago: (dto.formaPago ?? null),
       },
     });
   }

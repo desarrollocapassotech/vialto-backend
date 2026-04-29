@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, $Enums } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import {
   resolveDashboardPeriod,
@@ -481,7 +481,7 @@ export class DashboardService {
     return this.prisma.viaje.count({
       where: {
         tenantId,
-        estado: { in: [...VIAJE_ESTADOS_COMPLETADOS_TABLERO] as $Enums.EstadoViaje[] },
+        estado: { in: [...VIAJE_ESTADOS_COMPLETADOS_TABLERO] },
         fechaFinalizado: { gte: start, lt: end },
       },
     });

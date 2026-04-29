@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
@@ -32,7 +32,7 @@ export class StockService {
       data: {
         tenantId,
         nombre: dto.nombre,
-        unidad: dto.unidad as $Enums.UnidadProducto,
+        unidad: dto.unidad,
       },
     });
   }
@@ -90,7 +90,7 @@ export class StockService {
         tenantId,
         productoId: dto.productoId,
         clienteId: dto.clienteId,
-        tipo: dto.tipo as $Enums.TipoMovimientoStock,
+        tipo: dto.tipo,
         cantidad: dto.cantidad,
         pesoKg: dto.pesoKg ?? null,
         remitoId: dto.remitoId ?? null,

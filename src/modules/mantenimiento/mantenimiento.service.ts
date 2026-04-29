@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+
 import { CreateIntervencionDto } from './dto/create-intervencion.dto';
 import { UpdateIntervencionDto } from './dto/update-intervencion.dto';
 
@@ -41,7 +41,7 @@ export class MantenimientoService {
       data: {
         tenantId,
         vehiculoId: dto.vehiculoId,
-        tipo: dto.tipo as $Enums.TipoIntervencion,
+        tipo: dto.tipo,
         descripcion: dto.descripcion ?? null,
         km: dto.km ?? null,
         proximoKm: dto.proximoKm ?? null,

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+
 import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
@@ -85,7 +85,7 @@ export class CombustibleService {
         litros: dto.litros,
         importe: dto.importe,
         km: dto.km,
-        formaPago: (dto.formaPago ?? null) as $Enums.FormaPago | null,
+        formaPago: (dto.formaPago ?? null),
         fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
         createdBy: auth.userId,
       },
@@ -112,7 +112,7 @@ export class CombustibleService {
         litros: dto.litros,
         importe: dto.importe,
         km: dto.km,
-        formaPago: dto.formaPago as $Enums.FormaPago | null | undefined,
+        formaPago: dto.formaPago,
         fecha: dto.fecha === undefined ? undefined : dto.fecha ? new Date(dto.fecha) : undefined,
       },
     });

@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+
 import { CreateRemitoDto } from './dto/create-remito.dto';
 import { UpdateRemitoDto } from './dto/update-remito.dto';
 
@@ -60,7 +60,7 @@ export class RemitosService {
         descripcion: dto.descripcion,
         fecha: new Date(dto.fecha),
         firmaUrl: dto.firmaUrl ?? null,
-        estado: (dto.estado ?? 'emitido') as $Enums.EstadoRemito,
+        estado: (dto.estado ?? 'emitido'),
       },
     });
   }

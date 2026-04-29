@@ -35,7 +35,7 @@ import {
   importeOperativoFactura,
 } from '../../modules/facturacion/factura-estado-lectura';
 import { createClerkClient } from '@clerk/backend';
-import { Prisma, $Enums } from '@prisma/client';
+import { Prisma} from '@prisma/client';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -227,7 +227,7 @@ export class PlatformService {
   }
 
   async createViaje(
-    tenantId: string | undefined,
+    tenantId: string,
     dto: CreateViajeDto,
     userId?: string,
   ) {
@@ -592,7 +592,7 @@ export class PlatformService {
   }
 
   async updateTransportista(
-    tenantId: string | undefined,
+    tenantId: string,
     id: string,
     dto: UpdateTransportistaDto,
   ) {
@@ -661,7 +661,7 @@ export class PlatformService {
   }
 
   async inviteUser(
-    tenantId: string | undefined,
+    tenantId: string,
     name: string,
     emailAddress: string,
     password: string,
@@ -806,7 +806,7 @@ export class PlatformService {
       data: {
         tenantId: scopedTenantId,
         patente: dto.patente.toUpperCase(),
-        tipo: dto.tipo as $Enums.TipoVehiculo,
+        tipo: dto.tipo,
         marca: dto.marca ?? null,
         modelo: dto.modelo ?? null,
         anio: dto.anio ?? null,
@@ -826,7 +826,7 @@ export class PlatformService {
       where: { id },
       data: {
         patente: dto.patente ? dto.patente.toUpperCase() : undefined,
-        tipo: dto.tipo as $Enums.TipoVehiculo | undefined,
+        tipo: dto.tipo,
         marca: dto.marca,
         modelo: dto.modelo,
         anio: dto.anio,
@@ -886,7 +886,7 @@ export class PlatformService {
   }
 
   async updateFactura(
-    tenantId: string | undefined,
+    tenantId: string,
     id: string,
     data: { estado?: string; fechaVencimiento?: string | null },
   ) {
@@ -899,7 +899,7 @@ export class PlatformService {
       const updated = await tx.factura.update({
         where: { id },
         data: {
-          ...(data.estado !== undefined ? { estado: data.estado as $Enums.EstadoFactura } : {}),
+          ...(data.estado !== undefined ? { estado: data.estado } : {}),
           ...(data.fechaVencimiento !== undefined
             ? {
                 fechaVencimiento: data.fechaVencimiento
@@ -916,7 +916,7 @@ export class PlatformService {
   }
 
   async createPago(
-    tenantId: string | undefined,
+    tenantId: string,
     dto: { facturaId: string; importe: number; fecha: string; formaPago?: string },
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
@@ -930,7 +930,7 @@ export class PlatformService {
         facturaId: dto.facturaId,
         importe: dto.importe,
         fecha: new Date(dto.fecha),
-        formaPago: (dto.formaPago ?? null) as $Enums.FormaPago | null,
+        formaPago: (dto.formaPago ?? null),
       },
     });
   }
@@ -945,7 +945,7 @@ export class PlatformService {
   }
 
   async createFactura(
-    tenantId: string | undefined,
+    tenantId: string,
     dto: {
       numero: string;
       tipo: string;
@@ -964,12 +964,12 @@ export class PlatformService {
         data: {
           tenantId: tid,
           numero: dto.numero,
-          tipo: dto.tipo as $Enums.TipoFactura,
+          tipo: dto.tipo,
           clienteId: dto.clienteId ?? null,
           importe: dto.importe ?? 0,
           fechaEmision: new Date(dto.fechaEmision),
           fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
-          estado: (dto.estado ?? 'pendiente') as $Enums.EstadoFactura,
+          estado: (dto.estado ?? 'pendiente'),
         },
       });
       if (viajeIds.length > 0) {

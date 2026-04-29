@@ -9,100 +9,6 @@ datasource db {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Enums
-// ═══════════════════════════════════════════════════════════════════════════
-
-enum BillingStatus {
-  trial
-  active
-  suspended
-  expired
-}
-
-enum TipoVehiculo {
-  tractor
-  semirremolque
-  camion
-  utilitario
-  otro
-}
-
-enum EstadoViaje {
-  pendiente
-  en_curso
-  finalizado_sin_facturar
-  facturado_sin_cobrar
-  cobrado
-  cancelado
-}
-
-enum Moneda {
-  ARS
-  USD
-}
-
-enum TipoFactura {
-  cliente
-  transportista_externo
-}
-
-enum EstadoFactura {
-  pendiente
-  cobrada
-  vencida
-}
-
-enum FormaPago {
-  transferencia
-  cheque
-  efectivo
-}
-
-enum TipoMovimientoCuentaCorriente {
-  cargo
-  pago
-}
-
-enum OrigenMovimientoCuentaCorriente {
-  manual
-  viaje
-}
-
-enum UnidadProducto {
-  kg
-  unidad
-  palet
-  rollo
-  otro
-}
-
-enum TipoMovimientoStock {
-  ingreso
-  egreso
-  division
-}
-
-enum TipoIntervencion {
-  service
-  aceite
-  filtro
-  cubiertas
-  otro
-}
-
-enum EstadoRemito {
-  emitido
-  firmado
-  facturado
-}
-
-enum EstadoImportLog {
-  completado
-  con_errores
-  fallido
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Tenant — una fila por organización Clerk (tenantId en tablas = clerkOrgId)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -113,7 +19,7 @@ model Tenant {
   cuit             String?  @unique
   modules          String[] @default([])
   maxUsers         Int      @default(10)
-  billingStatus    BillingStatus   @default(trial)
+  billingStatus    String   @default("trial") // trial | active | suspended | expired
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
   createdAt        DateTime @default(now())
@@ -172,6 +78,7 @@ model Transportista {
   cuit      String?
   email     String?
   telefono  String?
+  tipo      String   @default("externo") // siempre externo
   createdAt DateTime @default(now())
 
   choferes  Chofer[]
@@ -209,7 +116,7 @@ model Vehiculo {
   tenantId           String
   tenant             Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   patente            String
-  tipo               TipoVehiculo
+  tipo               String    // tractor | semirremolque | camion | utilitario | otro
   marca              String?
   modelo             String?
   anio               Int?
@@ -258,7 +165,7 @@ model Viaje {
   tenantId         String
   tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero           String
-  estado           EstadoViaje @default(pendiente)
+  estado           String    @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
   clienteId        String
   cliente          Cliente   @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   transportistaId  String?
@@ -274,11 +181,9 @@ model Viaje {
   kmRecorridos     Int?
   litrosConsumidos Float?
   monto            Float?
-  /** ARS | USD */
-  monedaMonto      Moneda    @default(ARS)
+  monedaMonto      String    @default("ARS") // ARS | USD
   precioTransportistaExterno Float?
-  /** ARS | USD */
-  monedaPrecioTransportistaExterno Moneda @default(ARS)
+  monedaPrecioTransportistaExterno String @default("ARS") // ARS | USD
   observaciones    String?
   fechaFinalizado  DateTime?
   createdAt        DateTime  @default(now())
@@ -286,6 +191,7 @@ model Viaje {
 
   facturaId  String?
   factura    Factura? @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  nroFactura String?
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
 
   @@unique([tenantId, numero])
@@ -310,7 +216,7 @@ model Factura {
   tenantId         String
   tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero           String
-  tipo             TipoFactura
+  tipo             String    // cliente | transportista_externo
   clienteId        String?
   cliente          Cliente?       @relation(fields: [clienteId], references: [id], onDelete: SetNull)
   transportistaId  String?
@@ -319,7 +225,7 @@ model Factura {
   importe          Float
   fechaEmision     DateTime
   fechaVencimiento DateTime?
-  estado           EstadoFactura @default(pendiente)
+  estado           String    @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
   createdAt        DateTime  @default(now())
   pagos            Pago[]
@@ -341,7 +247,7 @@ model Pago {
   factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
   importe   Float
   fecha     DateTime
-  formaPago FormaPago?
+  formaPago String?  // transferencia | cheque | efectivo
   createdAt DateTime @default(now())
 
   @@index([tenantId])
@@ -361,8 +267,8 @@ model MovimientoCuentaCorriente {
   cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   viajeId    String?
   viaje      Viaje?  @relation(fields: [viajeId], references: [id], onDelete: SetNull)
-  tipo       TipoMovimientoCuentaCorriente
-  origen     OrigenMovimientoCuentaCorriente @default(manual)
+  tipo       String   // cargo | pago
+  origen     String   @default("manual") // manual | viaje
   concepto   String
   importe    Float
   fecha      DateTime
@@ -388,7 +294,7 @@ model Producto {
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre    String
-  unidad    UnidadProducto
+  unidad    String   // kg | unidad | palet | rollo | otro
   createdAt DateTime @default(now())
 
   movimientos MovimientoStock[]
@@ -405,7 +311,7 @@ model MovimientoStock {
   producto   Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
   clienteId  String
   cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  tipo       TipoMovimientoStock
+  tipo       String   // ingreso | egreso | division
   cantidad   Float
   pesoKg     Float?
   remitoId   String?
@@ -437,7 +343,7 @@ model CargaCombustible {
   litros     Float
   importe    Float
   km         Int
-  formaPago  FormaPago?
+  formaPago  String?  // transferencia | cheque | efectivo
   fecha      DateTime
   createdAt  DateTime @default(now())
   createdBy  String
@@ -460,7 +366,7 @@ model Intervencion {
   tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   vehiculoId  String
   vehiculo    Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
-  tipo        TipoIntervencion
+  tipo        String   // service | aceite | filtro | cubiertas | otro
   descripcion String?
   km          Int?
   proximoKm   Int?
@@ -473,6 +379,9 @@ model Intervencion {
   @@index([tenantId, fecha])
   @@map("intervenciones")
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: remitos
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Remito {
@@ -489,7 +398,7 @@ model Remito {
   descripcion String
   fecha       DateTime
   firmaUrl    String?
-  estado      EstadoRemito @default(emitido)
+  estado      String   @default("emitido") // emitido | firmado | facturado
   createdAt   DateTime @default(now())
   movimientosStock MovimientoStock[]
 
@@ -549,7 +458,7 @@ model ImportLog {
   template      ImportTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   modulo        String
   nombreArchivo String
-  estado        EstadoImportLog @default(completado)
+  estado        String          @default("completado") // completado | con_errores | fallido
   totalFilas    Int
   exitosas      Int             @default(0)
   errores       Int             @default(0)

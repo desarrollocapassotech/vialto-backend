@@ -35,7 +35,7 @@ import {
   importeOperativoFactura,
 } from '../../modules/facturacion/factura-estado-lectura';
 import { createClerkClient } from '@clerk/backend';
-import { Prisma } from '@prisma/client';
+import { Prisma, $Enums } from '@prisma/client';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -175,7 +175,7 @@ export class PlatformService {
     if (!c) throw new BadRequestException('Cliente inválido para esta empresa');
     if (dto.transportistaId) {
       const t = await this.prisma.transportista.findFirst({
-        where: { id: dto.transportistaId, tenantId, tipo: 'externo' },
+        where: { id: dto.transportistaId, tenantId },
       });
       if (!t) throw new BadRequestException('Transportista inválido');
     }
@@ -188,7 +188,7 @@ export class PlatformService {
   private async assertTransportista(tenantId: string, transportistaId?: string) {
     if (!transportistaId) return;
     const t = await this.prisma.transportista.findFirst({
-      where: { id: transportistaId, tenantId, tipo: 'externo' },
+      where: { id: transportistaId, tenantId },
     });
     if (!t) throw new BadRequestException('Transportista inválido para esta empresa');
   }
@@ -286,7 +286,7 @@ export class PlatformService {
         createdBy: userId ?? 'superadmin',
       };
       const viaje = await tx.viaje.create({ data });
-      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds);
+      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, scopedTenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -373,7 +373,7 @@ export class PlatformService {
         where: { id },
         data,
       });
-      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds);
+      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, scopedTenantId);
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -587,7 +587,6 @@ export class PlatformService {
         cuit: dto.cuit ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
-        tipo: 'externo',
       },
     });
   }
@@ -807,7 +806,7 @@ export class PlatformService {
       data: {
         tenantId: scopedTenantId,
         patente: dto.patente.toUpperCase(),
-        tipo: dto.tipo,
+        tipo: dto.tipo as $Enums.TipoVehiculo,
         marca: dto.marca ?? null,
         modelo: dto.modelo ?? null,
         anio: dto.anio ?? null,
@@ -827,7 +826,7 @@ export class PlatformService {
       where: { id },
       data: {
         patente: dto.patente ? dto.patente.toUpperCase() : undefined,
-        tipo: dto.tipo,
+        tipo: dto.tipo as $Enums.TipoVehiculo | undefined,
         marca: dto.marca,
         modelo: dto.modelo,
         anio: dto.anio,
@@ -900,7 +899,7 @@ export class PlatformService {
       const updated = await tx.factura.update({
         where: { id },
         data: {
-          ...(data.estado !== undefined ? { estado: data.estado } : {}),
+          ...(data.estado !== undefined ? { estado: data.estado as $Enums.EstadoFactura } : {}),
           ...(data.fechaVencimiento !== undefined
             ? {
                 fechaVencimiento: data.fechaVencimiento
@@ -931,7 +930,7 @@ export class PlatformService {
         facturaId: dto.facturaId,
         importe: dto.importe,
         fecha: new Date(dto.fecha),
-        formaPago: dto.formaPago ?? null,
+        formaPago: (dto.formaPago ?? null) as $Enums.FormaPago | null,
       },
     });
   }
@@ -965,12 +964,12 @@ export class PlatformService {
         data: {
           tenantId: tid,
           numero: dto.numero,
-          tipo: dto.tipo,
+          tipo: dto.tipo as $Enums.TipoFactura,
           clienteId: dto.clienteId ?? null,
           importe: dto.importe ?? 0,
           fechaEmision: new Date(dto.fechaEmision),
           fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
-          estado: dto.estado ?? 'pendiente',
+          estado: (dto.estado ?? 'pendiente') as $Enums.EstadoFactura,
         },
       });
       if (viajeIds.length > 0) {

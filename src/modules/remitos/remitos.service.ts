@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { $Enums } from '@prisma/client';
 import { CreateRemitoDto } from './dto/create-remito.dto';
 import { UpdateRemitoDto } from './dto/update-remito.dto';
 
@@ -59,7 +60,7 @@ export class RemitosService {
         descripcion: dto.descripcion,
         fecha: new Date(dto.fecha),
         firmaUrl: dto.firmaUrl ?? null,
-        estado: dto.estado ?? 'emitido',
+        estado: (dto.estado ?? 'emitido') as $Enums.EstadoRemito,
       },
     });
   }
@@ -73,10 +74,11 @@ export class RemitosService {
     });
     return this.prisma.remito.update({
       where: { id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: {
         ...dto,
         fecha: dto.fecha === undefined ? undefined : new Date(dto.fecha),
-      },
+      } as any,
     });
   }
 

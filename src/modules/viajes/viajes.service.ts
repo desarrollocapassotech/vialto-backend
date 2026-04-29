@@ -18,7 +18,7 @@ import {
 } from './viaje-vehiculos.helper';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, $Enums } from '@prisma/client';
 import {
   VIAJE_ESTADOS_SET,
   esEstadoViajeFinal,
@@ -119,7 +119,7 @@ export class ViajesService {
     const [c, t, ch] = await Promise.all([
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
       dto.transportistaId
-        ? this.prisma.transportista.findFirst({ where: { id: dto.transportistaId, tenantId, tipo: 'externo' } })
+        ? this.prisma.transportista.findFirst({ where: { id: dto.transportistaId, tenantId } })
         : null,
       dto.choferId
         ? this.prisma.chofer.findFirst({ where: { id: dto.choferId, tenantId } })
@@ -133,7 +133,7 @@ export class ViajesService {
 
   async findAll(tenantId: string, estado?: string) {
     return this.prisma.viaje.findMany({
-      where: { tenantId, ...(estado ? { estado } : {}) },
+      where: { tenantId, ...(estado ? { estado: estado as $Enums.EstadoViaje } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: {
@@ -162,7 +162,7 @@ export class ViajesService {
     const where: Prisma.ViajeWhereInput = { tenantId };
 
     const est = query.estado?.trim();
-    if (est) where.estado = est;
+    if (est) where.estado = est as $Enums.EstadoViaje;
 
     const cid = query.clienteId?.trim();
     if (cid) where.clienteId = cid;
@@ -312,7 +312,7 @@ export class ViajesService {
         createdBy: auth.userId,
       };
       const viaje = await tx.viaje.create({ data });
-      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds);
+      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -404,7 +404,7 @@ export class ViajesService {
         where: { id },
         data,
       });
-      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds);
+      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,

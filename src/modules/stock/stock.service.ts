@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { $Enums } from '@prisma/client';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
@@ -31,14 +32,14 @@ export class StockService {
       data: {
         tenantId,
         nombre: dto.nombre,
-        unidad: dto.unidad,
+        unidad: dto.unidad as $Enums.UnidadProducto,
       },
     });
   }
 
   async updateProducto(id: string, tenantId: string, dto: UpdateProductoDto) {
     await this.findProducto(id, tenantId);
-    return this.prisma.producto.update({ where: { id }, data: dto });
+    return this.prisma.producto.update({ where: { id }, data: dto as any });
   }
 
   async removeProducto(id: string, tenantId: string) {
@@ -53,6 +54,12 @@ export class StockService {
     ]);
     if (!p) throw new BadRequestException('Producto inválido');
     if (!c) throw new BadRequestException('Cliente inválido');
+  }
+
+  private async assertRemito(tenantId: string, remitoId?: string | null) {
+    if (!remitoId) return;
+    const r = await this.prisma.remito.findFirst({ where: { id: remitoId, tenantId } });
+    if (!r) throw new BadRequestException('Remito inválido');
   }
 
   listMovimientos(tenantId: string, productoId?: string, clienteId?: string) {
@@ -77,15 +84,16 @@ export class StockService {
 
   async createMovimiento(tenantId: string, dto: CreateMovimientoStockDto) {
     await this.assertProductoCliente(tenantId, dto.productoId, dto.clienteId);
+    await this.assertRemito(tenantId, dto.remitoId);
     return this.prisma.movimientoStock.create({
       data: {
         tenantId,
         productoId: dto.productoId,
         clienteId: dto.clienteId,
-        tipo: dto.tipo,
+        tipo: dto.tipo as $Enums.TipoMovimientoStock,
         cantidad: dto.cantidad,
         pesoKg: dto.pesoKg ?? null,
-        remito: dto.remito ?? null,
+        remitoId: dto.remitoId ?? null,
         fecha: new Date(dto.fecha),
       },
     });
@@ -96,12 +104,14 @@ export class StockService {
     const pid = dto.productoId ?? cur.productoId;
     const cid = dto.clienteId ?? cur.clienteId;
     await this.assertProductoCliente(tenantId, pid, cid);
+    await this.assertRemito(tenantId, dto.remitoId);
     return this.prisma.movimientoStock.update({
       where: { id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: {
         ...dto,
         fecha: dto.fecha === undefined ? undefined : new Date(dto.fecha),
-      },
+      } as any,
     });
   }
 

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { $Enums } from '@prisma/client';
 import { CreateIntervencionDto } from './dto/create-intervencion.dto';
 import { UpdateIntervencionDto } from './dto/update-intervencion.dto';
 
@@ -34,17 +35,18 @@ export class MantenimientoService {
     return row;
   }
 
-  async create(tenantId: string, dto: CreateIntervencionDto) {
+  async create(tenantId: string, userId: string, dto: CreateIntervencionDto) {
     await this.assertVehiculo(tenantId, dto.vehiculoId);
     return this.prisma.intervencion.create({
       data: {
         tenantId,
         vehiculoId: dto.vehiculoId,
-        tipo: dto.tipo,
+        tipo: dto.tipo as $Enums.TipoIntervencion,
         descripcion: dto.descripcion ?? null,
         km: dto.km ?? null,
         proximoKm: dto.proximoKm ?? null,
         fecha: new Date(dto.fecha),
+        createdBy: userId,
       },
     });
   }
@@ -55,10 +57,11 @@ export class MantenimientoService {
     await this.assertVehiculo(tenantId, vid);
     return this.prisma.intervencion.update({
       where: { id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: {
         ...dto,
         fecha: dto.fecha === undefined ? undefined : new Date(dto.fecha),
-      },
+      } as any,
     });
   }
 

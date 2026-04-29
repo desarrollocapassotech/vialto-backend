@@ -56,7 +56,7 @@ export class ChoferesService {
   private async assertTransportista(tenantId: string, transportistaId?: string) {
     if (!transportistaId) return;
     const t = await this.prisma.transportista.findFirst({
-      where: { id: transportistaId, tenantId, tipo: 'externo' },
+      where: { id: transportistaId, tenantId },
     });
     if (!t) {
       throw new BadRequestException('Transportista no pertenece al tenant');

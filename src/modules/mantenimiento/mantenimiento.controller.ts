@@ -41,7 +41,7 @@ export class MantenimientoController {
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateIntervencionDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    return this.service.create(auth.tenantId, dto);
+    return this.service.create(auth.tenantId, auth.userId, dto);
   }
 
   @Patch('intervenciones/:id')

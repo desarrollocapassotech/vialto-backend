@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { $Enums } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
@@ -56,7 +57,7 @@ export class VehiculosService {
   private async assertTransportista(tenantId: string, transportistaId?: string) {
     if (!transportistaId) return;
     const t = await this.prisma.transportista.findFirst({
-      where: { id: transportistaId, tenantId, tipo: 'externo' },
+      where: { id: transportistaId, tenantId },
     });
     if (!t) {
       throw new BadRequestException('Transportista no pertenece al tenant');
@@ -69,7 +70,7 @@ export class VehiculosService {
       data: {
         tenantId,
         patente: dto.patente.toUpperCase(),
-        tipo: dto.tipo,
+        tipo: dto.tipo as $Enums.TipoVehiculo,
         marca: dto.marca ?? null,
         modelo: dto.modelo ?? null,
         anio: dto.anio ?? null,
@@ -93,7 +94,7 @@ export class VehiculosService {
       where: { id },
       data: {
         patente: dto.patente ? dto.patente.toUpperCase() : undefined,
-        tipo: dto.tipo,
+        tipo: dto.tipo as $Enums.TipoVehiculo | undefined,
         marca: dto.marca,
         modelo: dto.modelo,
         anio: dto.anio,

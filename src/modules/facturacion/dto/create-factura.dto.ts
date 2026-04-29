@@ -13,6 +13,7 @@ export class CreateFacturaDto {
   @IsString() @IsNotEmpty() numero: string;
   @IsIn(['cliente', 'transportista_externo']) tipo: string;
   @IsOptional() @IsString() clienteId?: string;
+  @IsOptional() @IsString() transportistaId?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) viajeIds?: string[];
   @IsDateString() fechaEmision: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;

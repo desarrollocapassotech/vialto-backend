@@ -45,11 +45,13 @@ export async function reemplazarVehiculosDelViaje(
   db: Prisma.TransactionClient,
   viajeId: string,
   vehiculoIds: string[],
+  tenantId: string,
 ): Promise<void> {
   await db.viajeVehiculo.deleteMany({ where: { viajeId } });
   if (vehiculoIds.length === 0) return;
   await db.viajeVehiculo.createMany({
     data: vehiculoIds.map((vehiculoId, orden) => ({
+      tenantId,
       viajeId,
       vehiculoId,
       orden,

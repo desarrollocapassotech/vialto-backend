@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { $Enums } from '@prisma/client';
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
 import { CreatePagoDto } from './dto/create-pago.dto';
@@ -24,7 +25,7 @@ export class FacturacionService {
 
   private toShape(row: {
     id: string; tenantId: string; numero: string; tipo: string;
-    clienteId: string | null; importe: number;
+    clienteId: string | null; transportistaId: string | null; importe: number;
     fechaEmision: Date; fechaVencimiento: Date | null;
     estado: string; diferencia: number | null; createdAt: Date;
     viajes: ViajeSnap[];
@@ -49,6 +50,13 @@ export class FacturacionService {
     if (clienteId) {
       const c = await this.prisma.cliente.findFirst({ where: { id: clienteId, tenantId } });
       if (!c) throw new BadRequestException('Cliente inválido');
+    }
+  }
+
+  private async assertTransportistaCtx(tenantId: string, transportistaId?: string | null) {
+    if (transportistaId) {
+      const t = await this.prisma.transportista.findFirst({ where: { id: transportistaId, tenantId } });
+      if (!t) throw new BadRequestException('Transportista inválido');
     }
   }
 
@@ -94,6 +102,7 @@ export class FacturacionService {
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
     await this.assertClienteCtx(tenantId, dto.clienteId);
+    await this.assertTransportistaCtx(tenantId, dto.transportistaId);
     const viajeIds = dto.viajeIds ?? [];
     const viajes = await this.resolveViajes(tenantId, viajeIds);
     const importe = this.computeImporte(viajes);
@@ -103,8 +112,9 @@ export class FacturacionService {
         data: {
           tenantId,
           numero: dto.numero,
-          tipo: dto.tipo,
+          tipo: dto.tipo as $Enums.TipoFactura,
           clienteId: dto.clienteId ?? null,
+          transportistaId: dto.transportistaId ?? null,
           importe,
           fechaEmision: new Date(dto.fechaEmision),
           fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
@@ -116,7 +126,7 @@ export class FacturacionService {
         // Vincular viajes y guardar nro de factura
         await tx.viaje.updateMany({
           where: { id: { in: viajeIds }, tenantId },
-          data: { facturaId: factura.id, nroFactura: dto.numero },
+          data: { facturaId: factura.id },
         });
         // Corregir estado: solo los que aún no están en estado de facturación/cobro
         await tx.viaje.updateMany({
@@ -142,6 +152,7 @@ export class FacturacionService {
   async updateFactura(id: string, tenantId: string, dto: UpdateFacturaDto) {
     await this.findFactura(id, tenantId);
     await this.assertClienteCtx(tenantId, dto.clienteId);
+    await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 
     return this.prisma.$transaction(async (tx) => {
       // Actualizar campos de la factura
@@ -149,17 +160,17 @@ export class FacturacionService {
         where: { id },
         data: {
           ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
-          ...(dto.tipo !== undefined ? { tipo: dto.tipo } : {}),
+          ...(dto.tipo !== undefined ? { tipo: dto.tipo as $Enums.TipoFactura } : {}),
           ...(dto.clienteId !== undefined ? { clienteId: dto.clienteId || null } : {}),
+          ...(dto.transportistaId !== undefined ? { transportistaId: dto.transportistaId || null } : {}),
           ...(dto.diferencia !== undefined ? { diferencia: dto.diferencia } : {}),
           ...(dto.fechaEmision !== undefined ? { fechaEmision: new Date(dto.fechaEmision) } : {}),
           ...(dto.fechaVencimiento !== undefined
             ? { fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null }
             : {}),
-        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
       });
-
-      const nroFacturaVigente = facturaActualizada.numero;
 
       // Revinculación de viajes si se indica
       if (dto.viajeIds !== undefined) {
@@ -176,13 +187,13 @@ export class FacturacionService {
         // Desvincular viajes que ya no pertenecen a esta factura
         await tx.viaje.updateMany({
           where: { facturaId: id, tenantId, id: { notIn: newIds } },
-          data: { facturaId: null, nroFactura: null },
+          data: { facturaId: null },
         });
-        // Vincular y actualizar nroFactura en viajes nuevos y existentes
+        // Vincular viajes nuevos y existentes
         if (newIds.length > 0) {
           await tx.viaje.updateMany({
             where: { id: { in: newIds }, tenantId },
-            data: { facturaId: id, nroFactura: nroFacturaVigente },
+            data: { facturaId: id },
           });
           // Corregir estado de los viajes recién vinculados que no están en estado correcto
           await tx.viaje.updateMany({
@@ -194,12 +205,6 @@ export class FacturacionService {
             data: { estado: 'facturado_sin_cobrar' },
           });
         }
-      } else if (dto.numero !== undefined) {
-        // Si solo cambió el número de factura, actualizar nroFactura en todos los viajes vinculados
-        await tx.viaje.updateMany({
-          where: { facturaId: id, tenantId },
-          data: { nroFactura: nroFacturaVigente },
-        });
       }
 
       // Recalcular importe desde los viajes vinculados
@@ -222,10 +227,10 @@ export class FacturacionService {
 
   async removeFactura(id: string, tenantId: string) {
     await this.findFactura(id, tenantId);
-    // Desvincular viajes y limpiar nroFactura antes de eliminar
+    // Desvincular viajes antes de eliminar
     await this.prisma.viaje.updateMany({
       where: { facturaId: id, tenantId },
-      data: { facturaId: null, nroFactura: null },
+      data: { facturaId: null },
     });
     return this.prisma.factura.delete({ where: { id } });
   }
@@ -246,7 +251,7 @@ export class FacturacionService {
         facturaId: dto.facturaId,
         importe: dto.importe,
         fecha: new Date(dto.fecha),
-        formaPago: dto.formaPago ?? null,
+        formaPago: (dto.formaPago ?? null) as $Enums.FormaPago | null,
       },
     });
   }

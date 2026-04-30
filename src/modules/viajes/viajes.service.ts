@@ -8,6 +8,7 @@ import { ViajesAutoEstadoService } from './viajes-auto-estado.service';
 import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { AddGastoDto } from './dto/add-gasto.dto';
+import { AddPagoTransportistaDto } from './dto/add-pago-transportista.dto';
 import { generateNumeroViaje } from './generate-viaje-numero';
 import { assertViajeOperacionExclusiva, mergeViajeOperacionIds } from './viaje-operacion-exclusiva';
 import {
@@ -392,6 +393,9 @@ export class ViajesService {
     if (dto.otrosGastos !== undefined) {
       (data as any).otrosGastos = dto.otrosGastos as unknown as Prisma.InputJsonValue;
     }
+    if (dto.pagosTransportista !== undefined) {
+      (data as any).pagosTransportista = dto.pagosTransportista as unknown as Prisma.InputJsonValue;
+    }
 
     if (precioTransportistaExternoInput !== undefined) {
       (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
@@ -471,6 +475,100 @@ export class ViajesService {
       }
 
       return full;
+    });
+  }
+
+  async addPagoTransportista(id: string, tenantId: string, auth: AuthPayload, dto: AddPagoTransportistaDto) {
+    const viaje = await this.findOne(id, tenantId);
+
+    if (viaje.estado === 'cancelado') {
+      throw new BadRequestException('No se pueden registrar pagos en un viaje cancelado.');
+    }
+    if (!viaje.transportistaId) {
+      throw new BadRequestException('Este viaje no tiene transportista externo asignado.');
+    }
+
+    const pagosActuales = Array.isArray(viaje.pagosTransportista)
+      ? (viaje.pagosTransportista as Array<Record<string, unknown>>)
+      : [];
+
+    const nuevoPago: Record<string, unknown> = {
+      monto: dto.monto,
+      moneda: dto.moneda,
+      fecha: dto.fecha,
+      createdBy: auth.userId,
+      createdAt: new Date().toISOString(),
+    };
+    if (dto.observaciones?.trim()) nuevoPago.observaciones = dto.observaciones.trim();
+    if (dto.comprobante?.trim()) nuevoPago.comprobante = dto.comprobante.trim();
+
+    const pagosActualizados = [...pagosActuales, nuevoPago];
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.viaje.update({
+        where: { id },
+        data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
+      });
+      return (await tx.viaje.findFirstOrThrow({
+        where: { id },
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      })) as unknown as ViajeConVehiculosViaje;
+    });
+  }
+
+  async deletePagoTransportista(id: string, tenantId: string, auth: AuthPayload, index: number) {
+    const viaje = await this.findOne(id, tenantId);
+
+    if (viaje.estado === 'cancelado') {
+      throw new BadRequestException('No se pueden eliminar pagos en un viaje cancelado.');
+    }
+    if (!viaje.transportistaId) {
+      throw new BadRequestException('Este viaje no tiene transportista externo asignado.');
+    }
+
+    const pagosActuales = Array.isArray(viaje.pagosTransportista)
+      ? (viaje.pagosTransportista as Array<Record<string, unknown>>)
+      : [];
+
+    if (index < 0 || index >= pagosActuales.length) {
+      throw new BadRequestException('Pago inválido.');
+    }
+
+    const pagosActualizados = pagosActuales.filter((_, idx) => idx !== index);
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.viaje.update({
+        where: { id },
+        data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
+      });
+      return (await tx.viaje.findFirstOrThrow({
+        where: { id },
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      })) as unknown as ViajeConVehiculosViaje;
+    });
+  }
+
+  async getViajesSaldoPendienteTransportista(tenantId: string) {
+    const viajes = await this.prisma.viaje.findMany({
+      where: { tenantId, transportistaId: { not: null }, precioTransportistaExterno: { gt: 0 } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        cliente: { select: { id: true, nombre: true } },
+        transportista: { select: { id: true, nombre: true } },
+        factura: { select: { id: true, numero: true } },
+      },
+    });
+
+    return viajes.filter((v) => {
+      const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
+      const acordado = v.precioTransportistaExterno ?? 0;
+      const pagos = Array.isArray(v.pagosTransportista)
+        ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
+        : [];
+      const pagado = pagos
+        .filter((p) => ((p.moneda ?? 'ARS') === 'USD' ? 'USD' : 'ARS') === moneda)
+        .reduce((acc, p) => acc + (typeof p.monto === 'number' ? p.monto : 0), 0);
+      return pagado < acordado;
     });
   }
 

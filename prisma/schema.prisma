@@ -185,7 +185,8 @@ model Viaje {
   precioTransportistaExterno Float?
   monedaPrecioTransportistaExterno String @default("ARS") // ARS | USD
   observaciones    String?
-  otrosGastos      Json      @default("[]")
+  otrosGastos         Json      @default("[]")
+  pagosTransportista  Json      @default("[]")
   fechaFinalizado  DateTime?
   createdAt        DateTime  @default(now())
   createdBy        String

@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
   Query,
@@ -15,6 +16,7 @@ import { ViajesService } from './viajes.service';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { AddGastoDto } from './dto/add-gasto.dto';
+import { AddPagoTransportistaDto } from './dto/add-pago-transportista.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -84,6 +86,13 @@ export class ViajesController {
     });
   }
 
+  @Get('saldo-pendiente-transportista')
+  @Roles('admin', 'supervisor', 'superadmin')
+  saldoPendienteTransportista(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.getViajesSaldoPendienteTransportista(auth.tenantId);
+  }
+
   @Get(':id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -107,6 +116,28 @@ export class ViajesController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.update(id, auth.tenantId, dto);
+  }
+
+  @Post(':id/pagos-transportista')
+  @Roles('admin', 'supervisor', 'superadmin')
+  addPagoTransportista(
+    @Param('id') id: string,
+    @Body() dto: AddPagoTransportistaDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.addPagoTransportista(id, auth.tenantId, auth, dto);
+  }
+
+  @Delete(':id/pagos-transportista/:index')
+  @Roles('admin', 'supervisor', 'superadmin')
+  deletePagoTransportista(
+    @Param('id') id: string,
+    @Param('index', ParseIntPipe) index: number,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.deletePagoTransportista(id, auth.tenantId, auth, index);
   }
 
   @Post(':id/gastos')

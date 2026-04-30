@@ -11,6 +11,21 @@ import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
 import { OtroGastoDto } from './create-viaje.dto';
 
+export class PagoTransportistaDto {
+  @IsNumber()
+  monto!: number;
+
+  @IsIn(['ARS', 'USD'])
+  moneda!: string;
+
+  @IsDateString()
+  fecha!: string;
+
+  @IsOptional()
+  @IsString()
+  observaciones?: string;
+}
+
 export class UpdateViajeDto {
   @IsOptional() @IsString() numero?: string;
   @IsOptional()
@@ -39,4 +54,5 @@ export class UpdateViajeDto {
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
   @IsOptional() @IsString() observaciones?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PagoTransportistaDto) pagosTransportista?: PagoTransportistaDto[];
 }

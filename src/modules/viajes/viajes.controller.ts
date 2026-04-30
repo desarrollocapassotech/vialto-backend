@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { ViajesService } from './viajes.service';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
+import { AddGastoDto } from './dto/add-gasto.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -106,6 +107,17 @@ export class ViajesController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.update(id, auth.tenantId, dto);
+  }
+
+  @Post(':id/gastos')
+  @Roles('admin', 'supervisor', 'superadmin')
+  addGasto(
+    @Param('id') id: string,
+    @Body() dto: AddGastoDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.addGasto(id, auth.tenantId, auth, dto);
   }
 
   @Delete(':id')

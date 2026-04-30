@@ -7,6 +7,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ViajesAutoEstadoService } from './viajes-auto-estado.service';
 import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
+import { AddGastoDto } from './dto/add-gasto.dto';
 import { generateNumeroViaje } from './generate-viaje-numero';
 import { assertViajeOperacionExclusiva, mergeViajeOperacionIds } from './viaje-operacion-exclusiva';
 import {
@@ -426,6 +427,49 @@ export class ViajesService {
       if (esEstadoViajeFinal(full.estado)) {
         await this.upsertCargoFinalizacion(tx, full);
       }
+      return full;
+    });
+  }
+
+  async addGasto(id: string, tenantId: string, auth: AuthPayload, dto: AddGastoDto) {
+    const viaje = await this.findOne(id, tenantId);
+
+    const ESTADOS_BLOQUEADOS = ['facturado_sin_cobrar', 'cobrado', 'cancelado'];
+    if (ESTADOS_BLOQUEADOS.includes(viaje.estado)) {
+      throw new BadRequestException(
+        'No se pueden agregar gastos a un viaje facturado o cancelado.',
+      );
+    }
+
+    const gastosActuales = Array.isArray(viaje.otrosGastos)
+      ? (viaje.otrosGastos as Array<Record<string, unknown>>)
+      : [];
+
+    const nuevoGasto: Record<string, unknown> = {
+      descripcion: dto.descripcion.trim(),
+      monto: dto.monto,
+      moneda: dto.moneda,
+      createdBy: auth.userId,
+    };
+    if (dto.fecha) nuevoGasto.fecha = dto.fecha;
+
+    const gastosActualizados = [...gastosActuales, nuevoGasto];
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.viaje.update({
+        where: { id },
+        data: { otrosGastos: gastosActualizados as unknown as Prisma.InputJsonValue },
+      });
+
+      const full = (await tx.viaje.findFirstOrThrow({
+        where: { id },
+        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      })) as unknown as ViajeConVehiculosViaje;
+
+      if (esEstadoViajeFinal(full.estado)) {
+        await this.upsertCargoFinalizacion(tx, full);
+      }
+
       return full;
     });
   }

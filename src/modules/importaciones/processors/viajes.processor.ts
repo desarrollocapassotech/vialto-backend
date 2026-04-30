@@ -25,14 +25,6 @@ export class ViajesProcessor implements IImportProcessor {
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
-    const fechaDescarga = (row.fechaDescarga as Date | null) ?? null;
-    const estado = (() => {
-      if (fechaDescarga && fechaDescarga <= hoy) {
-        return row.nroFactura ? 'facturado_sin_cobrar' : 'finalizado_sin_facturar';
-      }
-      if (fechaCarga && fechaCarga <= hoy) return 'en_curso';
-      return 'pendiente';
-    })();
 
     // Crear factura del cliente si hay número de factura (antes de calcular estado)
     let facturaClienteId: string | null = null;

@@ -73,6 +73,7 @@ export class ViajesProcessor implements IImportProcessor {
         precioTransportistaExterno: row.precioTransportistaExterno != null ? Number(row.precioTransportistaExterno) : null,
         facturaId: facturaClienteId,
         observaciones,
+        otrosGastos: this.extractOtrosGastos(row),
         createdBy,
       },
       select: { id: true },
@@ -95,5 +96,30 @@ export class ViajesProcessor implements IImportProcessor {
     }
 
     return viaje.id;
+  }
+
+  /** Extrae hasta 5 "otros gastos" desde campos con nombre otroGasto1Desc / otroGasto1Monto, etc. */
+  private extractOtrosGastos(row: ValidatedRow): object[] {
+    const gastos: object[] = [];
+    for (let i = 1; i <= 5; i++) {
+      const desc = row[`otroGasto${i}Desc`];
+      const monto = row[`otroGasto${i}Monto`];
+      if (!desc && monto == null) continue;
+      const monedaRaw = String(row[`otroGasto${i}Moneda`] ?? 'ARS').trim().toUpperCase();
+      const moneda = monedaRaw === 'USD' ? 'USD' : 'ARS';
+      const fechaVal = row[`otroGasto${i}Fecha`];
+      const gasto: Record<string, unknown> = {
+        descripcion: String(desc ?? '').trim(),
+        monto: monto != null ? Number(monto) : 0,
+        moneda,
+      };
+      if (fechaVal instanceof Date) {
+        gasto.fecha = fechaVal.toISOString().slice(0, 10);
+      } else if (fechaVal) {
+        gasto.fecha = String(fechaVal).trim();
+      }
+      gastos.push(gasto);
+    }
+    return gastos;
   }
 }

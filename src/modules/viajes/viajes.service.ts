@@ -56,14 +56,22 @@ export class ViajesService {
     return n as ViajeEstado;
   }
 
-  private getMontoFinal(viaje: { monto: number | null }) {
+  private getMontoFinal(viaje: { monto: number | null; monedaMonto?: string | null; otrosGastos?: unknown }) {
     const monto = viaje.monto;
     if (monto == null || monto <= 0) {
       throw new BadRequestException(
         'Para finalizar un viaje se requiere un monto mayor a 0',
       );
     }
-    return monto;
+    // Sumar otrosGastos en la misma moneda que monto
+    const moneda = (viaje.monedaMonto ?? 'ARS') === 'USD' ? 'USD' : 'ARS';
+    const gastos = Array.isArray(viaje.otrosGastos)
+      ? (viaje.otrosGastos as Array<{ monto?: number; moneda?: string }>)
+      : [];
+    const extraMismaMmoneda = gastos
+      .filter((g) => ((g.moneda ?? 'ARS') === 'USD' ? 'USD' : 'ARS') === moneda)
+      .reduce((acc, g) => acc + (typeof g.monto === 'number' ? g.monto : 0), 0);
+    return monto + extraMismaMmoneda;
   }
 
   private async upsertCargoFinalizacion(
@@ -74,6 +82,8 @@ export class ViajesService {
       clienteId: string;
       numero: string;
       monto: number | null;
+      monedaMonto?: string | null;
+      otrosGastos?: unknown;
       fechaFinalizado: Date | null;
     },
   ) {
@@ -309,6 +319,7 @@ export class ViajesService {
         monedaPrecioTransportistaExterno:
           dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
         observaciones: dto.observaciones ?? null,
+        otrosGastos: dto.otrosGastos ? (dto.otrosGastos as unknown as Prisma.InputJsonValue) : [],
         createdBy: auth.userId,
       };
       const viaje = await tx.viaje.create({ data });
@@ -377,6 +388,9 @@ export class ViajesService {
             : null,
     } as any;
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
+    if (dto.otrosGastos !== undefined) {
+      (data as any).otrosGastos = dto.otrosGastos as unknown as Prisma.InputJsonValue;
+    }
 
     if (precioTransportistaExternoInput !== undefined) {
       (data as any).precioTransportistaExterno = precioTransportistaExternoInput;

@@ -23,6 +23,8 @@ import { CreateTransportistaDto } from '../transportistas/dto/create-transportis
 import { UpdateTransportistaDto } from '../transportistas/dto/update-transportista.dto';
 import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
+import { CargasPaginatedQueryDto } from '../../modules/viajes/dto/cargas-paginated-query.dto';
+import { CreateCargaDto } from '../../modules/viajes/dto/create-carga.dto';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 
@@ -67,6 +69,22 @@ export class PlatformController {
   @Delete('viajes/:id')
   removeViaje(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.removeViaje(tenantId, id);
+  }
+
+  @Get('cargas/paginated')
+  cargasPaginated(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query() query: CargasPaginatedQueryDto,
+  ) {
+    return this.service.listCargasPaginated(tenantId, query);
+  }
+
+  @Post('cargas')
+  createCarga(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateCargaDto,
+  ) {
+    return this.service.createCarga(tenantId, dto);
   }
 
   @Get('clientes')

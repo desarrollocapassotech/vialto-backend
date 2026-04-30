@@ -16,8 +16,10 @@ import {
 } from '../../modules/viajes/viaje-operacion-exclusiva';
 import {
   assertVehiculosDelViaje,
+  idsCargasDelViaje,
   idsVehiculosDelViaje,
   normalizarVehiculoIds,
+  reemplazarCargasDelViaje,
   reemplazarVehiculosDelViaje,
   VIAJE_INCLUDE_VEHICULOS,
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -36,6 +38,13 @@ import {
 } from '../../modules/facturacion/factura-estado-lectura';
 import { createClerkClient } from '@clerk/backend';
 import { Prisma} from '@prisma/client';
+import {
+  assertCargasAsignables,
+  normalizarCargaIds,
+} from '../../shared/util/carga-viaje';
+import { CargasService } from '../../modules/viajes/cargas.service';
+import { CargasPaginatedQueryDto } from '../../modules/viajes/dto/cargas-paginated-query.dto';
+import { CreateCargaDto } from '../../modules/viajes/dto/create-carga.dto';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -81,7 +90,10 @@ async function getUserPlatformRole(userId: string | null): Promise<string | null
 
 @Injectable()
 export class PlatformService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cargasService: CargasService,
+  ) {}
 
   private requiredTenantId(tenantId?: string) {
     const id = tenantId?.trim();
@@ -216,6 +228,20 @@ export class PlatformService {
       );
   }
 
+  listCargasPaginated(
+    tenantId: string | undefined,
+    query: CargasPaginatedQueryDto,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.cargasService.findAllPaginated(scopedTenantId, query);
+  }
+
+  async createCarga(tenantId: string | undefined, dto: CreateCargaDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.assertTenantExists(scopedTenantId);
+    return this.cargasService.create(scopedTenantId, dto);
+  }
+
   async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
     const scopedTenantId = this.requiredTenantId(tenantId);
     const row = await this.prisma.viaje.findFirst({
@@ -253,6 +279,10 @@ export class PlatformService {
         requiereFlotaPropia: true,
       });
     }
+    const cargaIdsNorm = normalizarCargaIds(dto.cargaIds);
+    await assertCargasAsignables(this.prisma, scopedTenantId, cargaIdsNorm, {
+      modo: 'create',
+    });
     const estado = this.parseEstadoViaje(dto.estado);
     if (esEstadoViajeFinal(estado)) {
       throw new BadRequestException(
@@ -287,6 +317,7 @@ export class PlatformService {
       };
       const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, scopedTenantId);
+      await reemplazarCargasDelViaje(tx, viaje.id, cargaIdsNorm, scopedTenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -318,6 +349,13 @@ export class PlatformService {
         requiereFlotaPropia: true,
       });
     }
+    if (dto.cargaIds !== undefined) {
+      const nextCargas = normalizarCargaIds(dto.cargaIds);
+      await assertCargasAsignables(this.prisma, scopedTenantId, nextCargas, {
+        modo: 'update',
+        currentCargaIds: new Set(idsCargasDelViaje(current)),
+      });
+    }
     const precioTransportistaExternoInput = dto.precioTransportistaExterno;
     const currentNorm = this.parseEstadoViaje(
       current.estado != null && String(current.estado).trim() !== ''
@@ -347,6 +385,7 @@ export class PlatformService {
             : null,
     } as any;
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
+    delete (data as { cargaIds?: unknown }).cargaIds;
     if (precioTransportistaExternoInput !== undefined) {
       (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
     }
@@ -374,6 +413,14 @@ export class PlatformService {
         data,
       });
       await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, scopedTenantId);
+      if (dto.cargaIds !== undefined) {
+        await reemplazarCargasDelViaje(
+          tx,
+          id,
+          normalizarCargaIds(dto.cargaIds),
+          scopedTenantId,
+        );
+      }
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,

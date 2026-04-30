@@ -45,6 +45,8 @@ export class UpdateViajeDto {
   @IsOptional() @IsString() destino?: string;
   @IsOptional() @IsDateString() fechaCarga?: string;
   @IsOptional() @IsDateString() fechaDescarga?: string;
+  /** Reemplaza todas las cargas del viaje (vacío = sin cargas). */
+  @IsOptional() @IsArray() @IsString({ each: true }) cargaIds?: string[];
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;

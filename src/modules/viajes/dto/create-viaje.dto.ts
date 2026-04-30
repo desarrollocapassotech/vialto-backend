@@ -39,6 +39,8 @@ export class CreateViajeDto {
   @IsString() @IsNotEmpty() destino: string;
   @IsDateString() fechaCarga: string;
   @IsDateString() fechaDescarga: string;
+  /** IDs del catálogo de cargas (orden = orden del array). */
+  @IsOptional() @IsArray() @IsString({ each: true }) cargaIds?: string[];
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;

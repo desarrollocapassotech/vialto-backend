@@ -59,6 +59,30 @@ export async function reemplazarVehiculosDelViaje(
   });
 }
 
+export async function reemplazarCargasDelViaje(
+  db: Prisma.TransactionClient,
+  viajeId: string,
+  cargaIds: string[],
+  tenantId: string,
+): Promise<void> {
+  await db.viajeCarga.deleteMany({ where: { viajeId } });
+  if (cargaIds.length === 0) return;
+  await db.viajeCarga.createMany({
+    data: cargaIds.map((cargaId, orden) => ({
+      tenantId,
+      viajeId,
+      cargaId,
+      orden,
+    })),
+  });
+}
+
+export function idsCargasDelViaje(v: {
+  cargasViaje: Array<{ cargaId: string; orden: number }>;
+}): string[] {
+  return [...v.cargasViaje].sort((a, b) => a.orden - b.orden).map((x) => x.cargaId);
+}
+
 /** Args validados para el `include` de viajes con `vehiculosViaje` + `vehiculo` (exportado para que TS resuelva bien `ViajeGetPayload<typeof …>`). */
 export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultArgs>()({
   include: {
@@ -66,6 +90,14 @@ export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultAr
     transportista: { select: { id: true, nombre: true } },
     /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */
     factura: { select: { id: true, numero: true } },
+    cargasViaje: {
+      orderBy: { orden: 'asc' },
+      include: {
+        carga: {
+          select: { id: true, nombre: true, activo: true, unidadMedida: true },
+        },
+      },
+    },
     vehiculosViaje: {
       orderBy: { orden: 'asc' },
       include: {

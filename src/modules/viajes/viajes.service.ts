@@ -13,7 +13,9 @@ import { generateNumeroViaje } from './generate-viaje-numero';
 import { assertViajeOperacionExclusiva, mergeViajeOperacionIds } from './viaje-operacion-exclusiva';
 import {
   assertVehiculosDelViaje,
+  idsCargasDelViaje,
   normalizarVehiculoIds,
+  reemplazarCargasDelViaje,
   reemplazarVehiculosDelViaje,
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
   type ViajeConVehiculosViaje,
@@ -27,6 +29,10 @@ import {
   normalizarEstadoViaje,
   type ViajeEstado,
 } from './viaje-estados';
+import {
+  assertCargasAsignables,
+  normalizarCargaIds,
+} from '../../shared/util/carga-viaje';
 
 function parseYyyyMmDdInicioUtc(s: string): Date | null {
   const t = s.trim();
@@ -290,6 +296,10 @@ export class ViajesService {
         requiereFlotaPropia: true,
       });
     }
+    const cargaIdsNorm = normalizarCargaIds(dto.cargaIds);
+    await assertCargasAsignables(this.prisma, tenantId, cargaIdsNorm, {
+      modo: 'create',
+    });
     const estado = this.parseEstadoViaje(dto.estado);
     if (esEstadoViajeFinal(estado)) {
       throw new BadRequestException(
@@ -326,6 +336,7 @@ export class ViajesService {
       };
       const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
+      await reemplazarCargasDelViaje(tx, viaje.id, cargaIdsNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -361,6 +372,14 @@ export class ViajesService {
       });
     }
 
+    if (dto.cargaIds !== undefined) {
+      const nextCargas = normalizarCargaIds(dto.cargaIds);
+      await assertCargasAsignables(this.prisma, tenantId, nextCargas, {
+        modo: 'update',
+        currentCargaIds: new Set(idsCargasDelViaje(current)),
+      });
+    }
+
     const precioTransportistaExternoInput = dto.precioTransportistaExterno;
     const currentNorm = this.parseEstadoViaje(
       current.estado != null && String(current.estado).trim() !== ''
@@ -390,6 +409,7 @@ export class ViajesService {
             : null,
     } as any;
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
+    delete (data as { cargaIds?: unknown }).cargaIds;
     if (dto.otrosGastos !== undefined) {
       (data as any).otrosGastos = dto.otrosGastos as unknown as Prisma.InputJsonValue;
     }
@@ -424,6 +444,14 @@ export class ViajesService {
         data,
       });
       await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
+      if (dto.cargaIds !== undefined) {
+        await reemplazarCargasDelViaje(
+          tx,
+          id,
+          normalizarCargaIds(dto.cargaIds),
+          tenantId,
+        );
+      }
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,

@@ -40,6 +40,7 @@ model Tenant {
   importTemplates         ImportTemplate[]
   importLogs              ImportLog[]
   importSessions          ImportSession[]
+  cargas                  Carga[]
 
   @@map("tenants")
 }
@@ -156,9 +157,50 @@ model ViajeVehiculo {
   @@map("viajes_vehiculos")
 }
 
+model ViajeCarga {
+  id       String @id @default(cuid())
+  tenantId String
+  viajeId  String
+  viaje    Viaje  @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  cargaId  String
+  carga    Carga  @relation(fields: [cargaId], references: [id], onDelete: Restrict)
+  orden    Int    @default(0)
+
+  @@unique([viajeId, cargaId])
+  @@index([tenantId])
+  @@index([viajeId])
+  @@index([cargaId])
+  @@map("viajes_cargas")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-// Módulo: viajes
+// Módulo: viajes — catálogo de cargas transportables
+// Extensión futura Stock: preferir nuevos campos opcionales o metadata JSON
+// antes de romper filas existentes (ver docs/tipos-carga-integracion-stock.md).
 // ═══════════════════════════════════════════════════════════════════════════
+
+model Carga {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre              String
+  /** lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive). */
+  nombreNormalizado   String
+  descripcion         String?
+  unidadMedida        String?
+  activo              Boolean  @default(true)
+  /** Reservado p. ej. productoStockId, sku, categoría, stockMínimo hasta migrar a columnas. */
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  viajesCarga ViajeCarga[]
+
+  @@unique([tenantId, nombreNormalizado])
+  @@index([tenantId])
+  @@index([tenantId, activo])
+  @@map("cargas")
+}
 
 model Viaje {
   id               String    @id @default(cuid())
@@ -177,6 +219,7 @@ model Viaje {
   destino          String?
   fechaCarga       DateTime?
   fechaDescarga    DateTime?
+  cargasViaje      ViajeCarga[]
   detalleCarga     String?
   kmRecorridos     Int?
   litrosConsumidos Float?

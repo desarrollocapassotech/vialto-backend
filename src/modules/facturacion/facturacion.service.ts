@@ -209,7 +209,7 @@ export class FacturacionService {
 
       // Recalcular importe desde los viajes vinculados
       const viajes = await tx.viaje.findMany({
-        where: { facturaId: id },
+        where: { facturaId: id, tenantId },
         select: this.VIAJE_SELECT,
       });
       const importe = this.computeImporte(viajes);

@@ -337,7 +337,7 @@ export class ViajesService {
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
       await reemplazarCargasDelViaje(tx, viaje.id, cargaIdsNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
-        where: { id: viaje.id },
+        where: { id: viaje.id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       });
       return out as unknown as ViajeConVehiculosViaje;
@@ -452,7 +452,7 @@ export class ViajesService {
         );
       }
       const full = (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
       if (esEstadoViajeFinal(full.estado)) {
@@ -493,7 +493,7 @@ export class ViajesService {
       });
 
       const full = (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
 
@@ -537,7 +537,7 @@ export class ViajesService {
         data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
       });
       return (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
     });
@@ -569,7 +569,7 @@ export class ViajesService {
         data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
       });
       return (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
     });

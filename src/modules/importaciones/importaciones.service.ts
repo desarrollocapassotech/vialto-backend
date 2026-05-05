@@ -43,12 +43,13 @@ export class ImportacionesService {
   async preview(
     tenantId: string,
     modulo: string,
-    file: Express.Multer.File,
+    buffer: Buffer,
+    originalname: string,
   ): Promise<PreviewResult> {
     const template = await this.getActiveTemplate(tenantId, modulo);
     const config = template.config as unknown as TemplateConfig;
 
-    const parsed = this.parser.parse(file.buffer, config);
+    const parsed = this.parser.parse(buffer, config);
     if (parsed.length === 0) {
       throw new BadRequestException('El archivo no contiene filas de datos');
     }
@@ -61,7 +62,7 @@ export class ImportacionesService {
       data: {
         tenantId,
         templateId: template.id,
-        nombreArchivo: file.originalname,
+        nombreArchivo: originalname,
         filasValidas: valid as unknown as object[],
         errores: errors as unknown as object[],
         totalFilas: parsed.length,
@@ -73,7 +74,7 @@ export class ImportacionesService {
     const result: PreviewResult = {
       sessionId: session.id,
       modulo,
-      nombreArchivo: file.originalname,
+      nombreArchivo: originalname,
       totalFilas: parsed.length,
       exitosas: valid.length,
       errores: errors.length,

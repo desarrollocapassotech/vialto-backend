@@ -57,20 +57,15 @@ export class ViajesController {
     @Req() req: Request,
   ) {
     assertTenantId(auth.tenantId);
-    const clienteId =
-      queryParamFromRequest(req, 'clienteId') ??
-      (query.clienteId?.trim() ? query.clienteId.trim() : undefined);
-    const transportistaId =
-      queryParamFromRequest(req, 'transportistaId') ??
-      (query.transportistaId?.trim() ? query.transportistaId.trim() : undefined);
-    const tipoUbicacionRaw =
-      queryParamFromRequest(req, 'tipoUbicacion') ?? query.tipoUbicacion;
+    // queryParamFromRequest: respaldo para entornos donde req.query no alimenta el DTO
+    const clienteId = queryParamFromRequest(req, 'clienteId') ?? query.clienteId;
+    const transportistaId = queryParamFromRequest(req, 'transportistaId') ?? query.transportistaId;
+    const tipoUbicacionRaw = queryParamFromRequest(req, 'tipoUbicacion') ?? query.tipoUbicacion;
     const tipoUbicacion =
       tipoUbicacionRaw === 'origen' || tipoUbicacionRaw === 'destino'
         ? tipoUbicacionRaw
         : undefined;
-    const ubicacion =
-      queryParamFromRequest(req, 'ubicacion') ?? query.ubicacion?.trim();
+    const ubicacion = queryParamFromRequest(req, 'ubicacion') ?? query.ubicacion;
     /** Objeto plano (sin `...query`): evita rarezas al expandir instancias del DTO y asegura los filtros. */
     return this.service.findAllPaginated(auth.tenantId, {
       page: query.page,
@@ -104,7 +99,7 @@ export class ViajesController {
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateViajeDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    return this.service.create(auth.tenantId, auth, dto);
+    return this.service.create(auth.tenantId, auth.userId, dto);
   }
 
   @Patch(':id')
@@ -126,7 +121,7 @@ export class ViajesController {
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.addPagoTransportista(id, auth.tenantId, auth, dto);
+    return this.service.addPagoTransportista(id, auth.tenantId, auth.userId, dto);
   }
 
   @Delete(':id/pagos-transportista/:index')
@@ -137,7 +132,7 @@ export class ViajesController {
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.deletePagoTransportista(id, auth.tenantId, auth, index);
+    return this.service.deletePagoTransportista(id, auth.tenantId, auth.userId, index);
   }
 
   @Post(':id/gastos')
@@ -148,7 +143,7 @@ export class ViajesController {
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.addGasto(id, auth.tenantId, auth, dto);
+    return this.service.addGasto(id, auth.tenantId, auth.userId, dto);
   }
 
   @Delete(':id')

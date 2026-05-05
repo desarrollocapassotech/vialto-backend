@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
 import { ReportesService } from './reportes.service';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -27,12 +27,9 @@ export class ReportesController {
   @Roles('admin', 'supervisor', 'superadmin')
   tableroGeneral(
     @CurrentAuth() auth: AuthPayload,
-    @Query('horasEnCurso') horasEnCurso?: string,
+    @Query('horasEnCurso', new ParseIntPipe({ optional: true })) horasEnCurso?: number,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.tableroGeneral(
-      auth.tenantId,
-      horasEnCurso ? Number(horasEnCurso) : undefined,
-    );
+    return this.service.tableroGeneral(auth.tenantId, horasEnCurso);
   }
 }

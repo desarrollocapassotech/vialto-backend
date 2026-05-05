@@ -2,10 +2,8 @@ import { Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
 import { BillingService } from './billing.service';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { OwnTenantOrAdminGuard } from '../auth/own-tenant-or-admin.guard';
 import { Roles } from '../auth/roles.decorator';
-import { CurrentAuth } from '../auth/current-auth.decorator';
-import { AuthPayload } from '../auth/clerk-auth.guard';
-import { ForbiddenException } from '@nestjs/common';
 
 @Controller('billing')
 @UseGuards(ClerkAuthGuard, RolesGuard)
@@ -13,10 +11,8 @@ export class BillingController {
   constructor(private readonly service: BillingService) {}
 
   @Get(':orgId')
-  getSubscription(@Param('orgId') orgId: string, @CurrentAuth() auth: AuthPayload) {
-    if (auth.role !== 'superadmin' && auth.tenantId !== orgId) {
-      throw new ForbiddenException('Solo podés ver la suscripción de tu propio tenant');
-    }
+  @UseGuards(OwnTenantOrAdminGuard)
+  getSubscription(@Param('orgId') orgId: string) {
     return this.service.getSubscription(orgId);
   }
 

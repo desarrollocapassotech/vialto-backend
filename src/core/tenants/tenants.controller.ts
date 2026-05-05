@@ -16,10 +16,10 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { ListTenantsDto } from './dto/list-tenants.dto';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { OwnTenantOrAdminGuard } from '../auth/own-tenant-or-admin.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
-import { ForbiddenException } from '@nestjs/common';
 
 @Controller('tenants')
 @UseGuards(ClerkAuthGuard, RolesGuard)
@@ -39,10 +39,8 @@ export class TenantsController {
   }
 
   @Get(':orgId')
-  findOne(@Param('orgId') orgId: string, @CurrentAuth() auth: AuthPayload) {
-    if (auth.role !== 'superadmin' && auth.tenantId !== orgId) {
-      throw new ForbiddenException('Solo podés ver tu propio tenant');
-    }
+  @UseGuards(OwnTenantOrAdminGuard)
+  findOne(@Param('orgId') orgId: string) {
     return this.service.findOne(orgId);
   }
 

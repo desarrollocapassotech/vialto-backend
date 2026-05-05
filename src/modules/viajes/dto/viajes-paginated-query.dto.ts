@@ -34,11 +34,13 @@ export class ViajesPaginatedQueryDto {
   estado?: string;
 
   @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
   @IsString()
   clienteId?: string;
 
   /** Transportista externo asignado al viaje (`viaje.transportistaId`). */
   @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
   @IsString()
   transportistaId?: string;
 
@@ -57,8 +59,11 @@ export class ViajesPaginatedQueryDto {
 
   /** Filtrar por `origen` o `destino` igual a esta etiqueta (ciudad elegida en el combobox). */
   @IsOptional()
-  @Transform(({ value }) => firstQueryString(value))
-  @IsIn(['origen', 'destino'])
+  @Transform(({ value }) => {
+    const s = firstQueryString(value);
+    if (s === 'origen' || s === 'destino') return s;
+    return undefined;
+  })
   tipoUbicacion?: 'origen' | 'destino';
 
   @IsOptional()

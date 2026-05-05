@@ -268,6 +268,7 @@ model Factura {
   transportista    Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   viajes           Viaje[]
   importe          Float
+  moneda           String    @default("ARS") // ARS | USD
   fechaEmision     DateTime
   fechaVencimiento DateTime?
   estado           String    @default("pendiente") // pendiente | cobrada | vencida

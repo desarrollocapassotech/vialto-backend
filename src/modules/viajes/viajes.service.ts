@@ -34,6 +34,16 @@ import {
   normalizarCargaIds,
 } from '../../shared/util/carga-viaje';
 
+function assertFechaDescargaValida(fechaCarga: Date, fechaDescarga: Date): void {
+  const fc = new Date(fechaCarga.toISOString().slice(0, 10));
+  const fd = new Date(fechaDescarga.toISOString().slice(0, 10));
+  if (fd < fc) {
+    throw new BadRequestException(
+      'La fecha de descarga no puede ser anterior a la fecha de carga.',
+    );
+  }
+}
+
 function parseYyyyMmDdInicioUtc(s: string): Date | null {
   const t = s.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
@@ -300,6 +310,7 @@ export class ViajesService {
     await assertCargasAsignables(this.prisma, tenantId, cargaIdsNorm, {
       modo: 'create',
     });
+    assertFechaDescargaValida(new Date(dto.fechaCarga), new Date(dto.fechaDescarga));
     const estado = this.parseEstadoViaje(dto.estado);
     if (esEstadoViajeFinal(estado)) {
       throw new BadRequestException(
@@ -366,6 +377,9 @@ export class ViajesService {
       throw new BadRequestException('La fecha de carga es requerida');
     if (dto.fechaDescarga !== undefined && !dto.fechaDescarga)
       throw new BadRequestException('La fecha de descarga es requerida');
+    const fcResolved = dto.fechaCarga ? new Date(dto.fechaCarga) : current.fechaCarga;
+    const fdResolved = dto.fechaDescarga ? new Date(dto.fechaDescarga) : current.fechaDescarga;
+    if (fcResolved && fdResolved) assertFechaDescargaValida(fcResolved, fdResolved);
     if (!op.transportistaId) {
       await assertVehiculosDelViaje(this.prisma, tenantId, op.vehiculoIds, {
         requiereFlotaPropia: true,
@@ -519,6 +533,17 @@ export class ViajesService {
     const pagosActuales = Array.isArray(viaje.pagosTransportista)
       ? (viaje.pagosTransportista as Array<Record<string, unknown>>)
       : [];
+
+    const totalAcordado = viaje.precioTransportistaExterno ?? 0;
+    const totalPagado = pagosActuales
+      .filter((p) => p.moneda === dto.moneda)
+      .reduce((acc, p) => acc + (typeof p.monto === 'number' ? p.monto : 0), 0);
+    const saldo = totalAcordado - totalPagado;
+    if (dto.monto > saldo) {
+      throw new BadRequestException(
+        'El monto ingresado supera el saldo pendiente con el transportista.',
+      );
+    }
 
     const nuevoPago: Record<string, unknown> = {
       monto: dto.monto,

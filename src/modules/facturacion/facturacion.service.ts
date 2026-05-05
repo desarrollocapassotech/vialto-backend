@@ -13,7 +13,7 @@ import {
   importeOperativoFactura,
 } from './factura-estado-lectura';
 
-type ViajeSnap = { id: string; estado: string; monto: number | null };
+type ViajeSnap = { id: string; estado: string; monto: number | null; monedaMonto: string };
 
 @Injectable()
 export class FacturacionService {
@@ -26,6 +26,7 @@ export class FacturacionService {
   private toShape(row: {
     id: string; tenantId: string; numero: string; tipo: string;
     clienteId: string | null; transportistaId: string | null; importe: number;
+    moneda: string;
     fechaEmision: Date; fechaVencimiento: Date | null;
     estado: string; diferencia: number | null; createdAt: Date;
     viajes: ViajeSnap[];
@@ -64,7 +65,7 @@ export class FacturacionService {
     if (viajeIds.length === 0) return [];
     const rows = await this.prisma.viaje.findMany({
       where: { id: { in: viajeIds }, tenantId },
-      select: { id: true, estado: true, monto: true },
+      select: { id: true, estado: true, monto: true, monedaMonto: true },
     });
     if (rows.length !== viajeIds.length) {
       throw new BadRequestException('Uno o más viajes inválidos para este tenant');
@@ -72,7 +73,18 @@ export class FacturacionService {
     return rows;
   }
 
-  private readonly VIAJE_SELECT = { id: true, estado: true, monto: true } as const;
+  private assertMonedaUnica(viajes: { monedaMonto: string }[]): string {
+    if (viajes.length === 0) return 'ARS';
+    const monedas = new Set(viajes.map((v) => v.monedaMonto ?? 'ARS'));
+    if (monedas.size > 1) {
+      throw new BadRequestException(
+        'Una factura no puede contener viajes en distintas monedas. Generá una factura por moneda.',
+      );
+    }
+    return [...monedas][0];
+  }
+
+  private readonly VIAJE_SELECT = { id: true, estado: true, monto: true, monedaMonto: true } as const;
   private readonly PAGO_SELECT = { importe: true } as const;
 
   async listFacturas(tenantId: string, clienteId?: string) {
@@ -105,6 +117,7 @@ export class FacturacionService {
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
     const viajeIds = dto.viajeIds ?? [];
     const viajes = await this.resolveViajes(tenantId, viajeIds);
+    const moneda = this.assertMonedaUnica(viajes);
     const importe = this.computeImporte(viajes);
 
     return this.prisma.$transaction(async (tx) => {
@@ -116,6 +129,7 @@ export class FacturacionService {
           clienteId: dto.clienteId ?? null,
           transportistaId: dto.transportistaId ?? null,
           importe,
+          moneda,
           fechaEmision: new Date(dto.fechaEmision),
           fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
           estado: 'pendiente',
@@ -154,6 +168,18 @@ export class FacturacionService {
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 
+    let monedaNueva: string | undefined;
+    if (dto.viajeIds !== undefined && dto.viajeIds.length > 0) {
+      const viajesNuevos = await this.prisma.viaje.findMany({
+        where: { id: { in: dto.viajeIds }, tenantId },
+        select: { id: true, monedaMonto: true },
+      });
+      if (viajesNuevos.length !== dto.viajeIds.length) {
+        throw new BadRequestException('Uno o más viajes inválidos');
+      }
+      monedaNueva = this.assertMonedaUnica(viajesNuevos);
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // Actualizar campos de la factura
       const facturaActualizada = await tx.factura.update({
@@ -175,15 +201,6 @@ export class FacturacionService {
       // Revinculación de viajes si se indica
       if (dto.viajeIds !== undefined) {
         const newIds = dto.viajeIds;
-        if (newIds.length > 0) {
-          const found = await tx.viaje.findMany({
-            where: { id: { in: newIds }, tenantId },
-            select: { id: true },
-          });
-          if (found.length !== newIds.length) {
-            throw new BadRequestException('Uno o más viajes inválidos');
-          }
-        }
         // Desvincular viajes que ya no pertenecen a esta factura
         await tx.viaje.updateMany({
           where: { facturaId: id, tenantId, id: { notIn: newIds } },
@@ -207,7 +224,7 @@ export class FacturacionService {
         }
       }
 
-      // Recalcular importe desde los viajes vinculados
+      // Recalcular importe y moneda desde los viajes vinculados
       const viajes = await tx.viaje.findMany({
         where: { facturaId: id },
         select: this.VIAJE_SELECT,
@@ -215,7 +232,7 @@ export class FacturacionService {
       const importe = this.computeImporte(viajes);
       const updated = await tx.factura.update({
         where: { id },
-        data: { importe },
+        data: { importe, ...(monedaNueva !== undefined ? { moneda: monedaNueva } : {}) },
         include: {
           viajes: { select: this.VIAJE_SELECT },
           pagos: { select: this.PAGO_SELECT },

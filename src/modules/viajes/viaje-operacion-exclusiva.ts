@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { normalizarVehiculoIds } from './viaje-vehiculos.helper';
 
-/** Transportista externo XOR (chofer + al menos un vehículo propio). */
+/** Con transportista externo, chofer y vehículo son opcionales. Sin transportista externo, ambos son obligatorios. */
 export function assertViajeOperacionExclusiva(refs: {
   transportistaId?: string | null;
   choferId?: string | null;
@@ -12,11 +12,6 @@ export function assertViajeOperacionExclusiva(refs: {
   const vids = refs.vehiculoIds ?? [];
 
   if (t) {
-    if (ch || vids.length > 0) {
-      throw new BadRequestException(
-        'Con transportista externo no debe indicar chofer ni vehículos.',
-      );
-    }
     return;
   }
   if (!ch || vids.length === 0) {
@@ -60,10 +55,7 @@ export function mergeViajeOperacionIds(
       ? normalizarVehiculoIds(dto.vehiculoIds)
       : [...current.vehiculoIds];
 
-  if (transportistaId) {
-    choferId = null;
-    vehiculoIds = [];
-  } else {
+  if (!transportistaId) {
     transportistaId = null;
   }
 

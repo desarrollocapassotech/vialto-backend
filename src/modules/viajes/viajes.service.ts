@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ViajesAutoEstadoService } from './viajes-auto-estado.service';
-import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { AddGastoDto } from './dto/add-gasto.dto';
 import { AddPagoTransportistaDto } from './dto/add-pago-transportista.dto';
@@ -285,7 +284,7 @@ export class ViajesService {
     return row as unknown as ViajeConVehiculosViaje;
   }
 
-  async create(tenantId: string, auth: AuthPayload, dto: CreateViajeDto) {
+  async create(tenantId: string, userId: string, dto: CreateViajeDto) {
     const transportistaExterno = dto.transportistaId?.trim();
     const vehiculoIds = transportistaExterno
       ? []
@@ -343,13 +342,13 @@ export class ViajesService {
           dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
         observaciones: dto.observaciones ?? null,
         otrosGastos: dto.otrosGastos ? (dto.otrosGastos as unknown as Prisma.InputJsonValue) : [],
-        createdBy: auth.userId,
+        createdBy: userId,
       };
       const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
       await reemplazarCargasDelViaje(tx, viaje.id, cargaIdsNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
-        where: { id: viaje.id },
+        where: { id: viaje.id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       });
       return out as unknown as ViajeConVehiculosViaje;
@@ -467,7 +466,7 @@ export class ViajesService {
         );
       }
       const full = (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
       if (esEstadoViajeFinal(full.estado)) {
@@ -477,7 +476,7 @@ export class ViajesService {
     });
   }
 
-  async addGasto(id: string, tenantId: string, auth: AuthPayload, dto: AddGastoDto) {
+  async addGasto(id: string, tenantId: string, userId: string, dto: AddGastoDto) {
     const viaje = await this.findOne(id, tenantId);
 
     const ESTADOS_BLOQUEADOS = ['facturado_sin_cobrar', 'cobrado', 'cancelado'];
@@ -495,7 +494,7 @@ export class ViajesService {
       descripcion: dto.descripcion.trim(),
       monto: dto.monto,
       moneda: dto.moneda,
-      createdBy: auth.userId,
+      createdBy: userId,
     };
     if (dto.fecha) nuevoGasto.fecha = dto.fecha;
 
@@ -508,7 +507,7 @@ export class ViajesService {
       });
 
       const full = (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
 
@@ -520,7 +519,7 @@ export class ViajesService {
     });
   }
 
-  async addPagoTransportista(id: string, tenantId: string, auth: AuthPayload, dto: AddPagoTransportistaDto) {
+  async addPagoTransportista(id: string, tenantId: string, userId: string, dto: AddPagoTransportistaDto) {
     const viaje = await this.findOne(id, tenantId);
 
     if (viaje.estado === 'cancelado') {
@@ -549,7 +548,7 @@ export class ViajesService {
       monto: dto.monto,
       moneda: dto.moneda,
       fecha: dto.fecha,
-      createdBy: auth.userId,
+      createdBy: userId,
       createdAt: new Date().toISOString(),
     };
     if (dto.observaciones?.trim()) nuevoPago.observaciones = dto.observaciones.trim();
@@ -563,13 +562,13 @@ export class ViajesService {
         data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
       });
       return (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
     });
   }
 
-  async deletePagoTransportista(id: string, tenantId: string, auth: AuthPayload, index: number) {
+  async deletePagoTransportista(id: string, tenantId: string, userId: string, index: number) {
     const viaje = await this.findOne(id, tenantId);
 
     if (viaje.estado === 'cancelado') {
@@ -595,7 +594,7 @@ export class ViajesService {
         data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
       });
       return (await tx.viaje.findFirstOrThrow({
-        where: { id },
+        where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
     });

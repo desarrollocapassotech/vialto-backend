@@ -6,9 +6,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 
-import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
+
+/** Datos mínimos de contexto de autenticación que el servicio necesita. */
+interface CombustibleAuth {
+  tenantId: string | null;
+  userId: string;
+  role: string | null;
+}
 
 @Injectable()
 export class CombustibleService {
@@ -32,7 +38,7 @@ export class CombustibleService {
   }
 
   async findAll(
-    auth: AuthPayload,
+    auth: CombustibleAuth,
     vehiculoId?: string,
     choferId?: string,
     month?: string,
@@ -63,7 +69,7 @@ export class CombustibleService {
     return { cargas, count: cargas.length };
   }
 
-  async findOne(id: string, auth: AuthPayload) {
+  async findOne(id: string, auth: CombustibleAuth) {
     const carga = await this.prisma.cargaCombustible.findFirst({
       where: { id, tenantId: auth.tenantId },
     });
@@ -74,7 +80,7 @@ export class CombustibleService {
     return carga;
   }
 
-  async create(dto: CreateCargaDto, auth: AuthPayload) {
+  async create(dto: CreateCargaDto, auth: CombustibleAuth) {
     await this.assertVehiculoChofer(auth.tenantId, dto.vehiculoId, dto.choferId);
     return this.prisma.cargaCombustible.create({
       data: {
@@ -92,7 +98,7 @@ export class CombustibleService {
     });
   }
 
-  async update(id: string, dto: UpdateCargaDto, auth: AuthPayload) {
+  async update(id: string, dto: UpdateCargaDto, auth: CombustibleAuth) {
     const carga = await this.findOne(id, auth);
     const nextVehiculo = dto.vehiculoId ?? carga.vehiculoId;
     const nextChofer =
@@ -118,13 +124,13 @@ export class CombustibleService {
     });
   }
 
-  async remove(id: string, auth: AuthPayload) {
+  async remove(id: string, auth: CombustibleAuth) {
     await this.findOne(id, auth);
     await this.prisma.cargaCombustible.delete({ where: { id } });
     return { deleted: id };
   }
 
-  async getStats(auth: AuthPayload, month?: string) {
+  async getStats(auth: CombustibleAuth, month?: string) {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
 
     if (month) {

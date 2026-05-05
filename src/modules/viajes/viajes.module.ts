@@ -8,6 +8,6 @@ import { CargasService } from './cargas.service';
 @Module({
   controllers: [ViajesController, CargasController],
   providers: [ViajesService, ViajesAutoEstadoService, CargasService],
-  exports: [CargasService],
+  exports: [ViajesService, CargasService],
 })
 export class ViajesModule {}

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -28,6 +29,16 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 export class ImportacionesController {
   constructor(private readonly service: ImportacionesService) {}
 
+  /** Resuelve el tenantId efectivo: superadmin puede operar sobre cualquier tenant. */
+  private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
+    const tenantId =
+      auth.role === 'superadmin' && overrideTenantId
+        ? overrideTenantId
+        : auth.tenantId;
+    assertTenantId(tenantId);
+    return tenantId as string;
+  }
+
   /**
    * Sube un archivo Excel, lo valida y devuelve una previsualización.
    * No guarda nada en las tablas de negocio.
@@ -40,13 +51,9 @@ export class ImportacionesController {
     @Query() query: PreviewImportDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
-    // Superadmin puede operar sobre cualquier tenant pasando tenantId en la query
-    const tenantId = auth.role === 'superadmin' && query.tenantId
-      ? query.tenantId
-      : auth.tenantId;
-    assertTenantId(tenantId);
-    if (!file) throw new Error('Se requiere un archivo Excel');
-    return this.service.preview(tenantId, query.modulo, file);
+    if (!file) throw new BadRequestException('Se requiere un archivo Excel');
+    const tenantId = this.resolveTenantId(auth, query.tenantId);
+    return this.service.preview(tenantId, query.modulo, file.buffer, file.originalname);
   }
 
   /**
@@ -55,10 +62,7 @@ export class ImportacionesController {
   @Post('confirm')
   @Roles('admin', 'superadmin')
   confirm(@Body() dto: ConfirmImportDto, @CurrentAuth() auth: AuthPayload) {
-    const tenantId = auth.role === 'superadmin' && dto.tenantId
-      ? dto.tenantId
-      : auth.tenantId;
-    assertTenantId(tenantId);
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
     return this.service.confirm(tenantId, dto.sessionId, auth.userId);
   }
 
@@ -94,9 +98,7 @@ export class ImportacionesController {
     @CurrentAuth() auth: AuthPayload,
     @Query('tenantId') queryTenantId?: string,
   ) {
-    const tenantId =
-      auth.role === 'superadmin' && queryTenantId ? queryTenantId : auth.tenantId;
-    assertTenantId(tenantId);
+    const tenantId = this.resolveTenantId(auth, queryTenantId);
     return this.service.getTemplates(tenantId);
   }
 }

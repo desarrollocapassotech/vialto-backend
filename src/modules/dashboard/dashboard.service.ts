@@ -15,7 +15,7 @@ import { VIAJE_ESTADOS_COMPLETADOS_TABLERO } from '../viajes/viaje-estados';
 import {
   computeEstadoFacturaLectura,
   importeOperativoFactura,
-} from '../facturacion/factura-estado-lectura';
+} from '../../shared/util/factura-estado-lectura';
 
 export type MetricCompare = {
   current: number;

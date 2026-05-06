@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 
 export class UpdateTenantDto {
   @IsOptional() @IsString() name?: string;
-  @IsOptional() @IsString() cuit?: string;
+  @IsOptional() @IsString() idFiscal?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) modules?: string[];
   @IsOptional() @IsInt() @Type(() => Number) maxUsers?: number;
   @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;

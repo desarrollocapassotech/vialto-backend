@@ -1,12 +1,8 @@
-import { IsEmail, IsOptional, IsString, Matches } from 'class-validator';
+import { IsEmail, IsOptional, IsString } from 'class-validator';
 
 export class UpdateTransportistaDto {
   @IsOptional() @IsString() nombre?: string;
-
-  @IsOptional() @IsString()
-  @Matches(/^\d{10,11}$/, { message: 'CUIT debe tener 10 u 11 dígitos' })
-  cuit?: string;
-
+  @IsOptional() @IsString() idFiscal?: string;
   @IsOptional() @IsEmail({}, { message: 'Email inválido' }) email?: string;
   @IsOptional() @IsString() telefono?: string;
 }

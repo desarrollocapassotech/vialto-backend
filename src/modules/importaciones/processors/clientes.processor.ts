@@ -12,7 +12,7 @@ export class ClientesProcessor implements IImportProcessor {
       data: {
         tenantId,
         nombre: row.nombre as string,
-        cuit: (row.cuit as string | null) ?? null,
+        idFiscal: (row.idFiscal as string | null) ?? null,
         email: (row.email as string | null) ?? null,
         telefono: (row.telefono as string | null) ?? null,
         direccion: (row.direccion as string | null) ?? null,

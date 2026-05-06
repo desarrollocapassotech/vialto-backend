@@ -197,7 +197,7 @@ export class PlatformService {
       data: {
         tenantId: scopedTenantId,
         nombre: dto.nombre,
-        cuit: dto.cuit ?? null,
+        idFiscal: dto.idFiscal ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
         direccion: dto.direccion ?? null,
@@ -354,7 +354,7 @@ export class PlatformService {
       data: {
         tenantId: scopedTenantId,
         nombre: dto.nombre,
-        cuit: dto.cuit ?? null,
+        idFiscal: dto.idFiscal ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
       },
@@ -372,7 +372,7 @@ export class PlatformService {
       where: { id },
       data: {
         nombre: dto.nombre,
-        cuit: dto.cuit,
+        idFiscal: dto.idFiscal,
         email: dto.email,
         telefono: dto.telefono,
       },

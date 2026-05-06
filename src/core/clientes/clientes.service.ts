@@ -54,7 +54,7 @@ export class ClientesService {
       data: {
         tenantId,
         nombre: dto.nombre,
-        cuit: dto.cuit ?? null,
+        idFiscal: dto.idFiscal ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
         direccion: dto.direccion ?? null,

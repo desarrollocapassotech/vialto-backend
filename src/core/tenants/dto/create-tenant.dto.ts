@@ -1,7 +1,6 @@
 import {
   IsString,
   IsNotEmpty,
-  Matches,
   IsOptional,
   IsArray,
   ValidateIf,
@@ -15,8 +14,7 @@ export class CreateTenantDto {
   @IsOptional()
   @ValidateIf((_, v) => v != null && v !== '')
   @IsString()
-  @Matches(/^\d{10,11}$/, { message: 'CUIT debe tener 10 u 11 dígitos' })
-  cuit?: string;
+  idFiscal?: string;
 
   @IsOptional()
   @ValidateIf((_, v) => v != null && v !== '')

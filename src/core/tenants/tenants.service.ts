@@ -59,7 +59,7 @@ export class TenantsService {
           OR: [
             { name: { contains: search, mode: 'insensitive' as const } },
             { clerkOrgId: { contains: search, mode: 'insensitive' as const } },
-            { cuit: { contains: search, mode: 'insensitive' as const } },
+            { idFiscal: { contains: search, mode: 'insensitive' as const } },
           ],
         }
       : undefined;
@@ -96,11 +96,11 @@ export class TenantsService {
   }
 
   async create(dto: CreateTenantDto, requesterUserId?: string) {
-    if (dto.cuit) {
+    if (dto.idFiscal) {
       const existing = await this.prisma.tenant.findFirst({
-        where: { cuit: dto.cuit },
+        where: { idFiscal: dto.idFiscal },
       });
-      if (existing) throw new ConflictException('Ya existe un tenant con ese CUIT');
+      if (existing) throw new ConflictException('Ya existe un tenant con ese ID fiscal');
     }
 
     let clerkOrgId = dto.clerkOrgId?.trim();
@@ -126,7 +126,7 @@ export class TenantsService {
         data: {
           clerkOrgId,
           name: dto.name,
-          cuit: dto.cuit ?? null,
+          idFiscal: dto.idFiscal ?? null,
           modules: dto.modules ?? [],
           maxUsers: 10,
         },

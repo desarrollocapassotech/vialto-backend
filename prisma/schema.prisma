@@ -16,7 +16,7 @@ model Tenant {
   id               String   @id @default(cuid())
   clerkOrgId       String   @unique
   name             String
-  cuit             String?  @unique
+  idFiscal         String?  @unique
   modules          String[] @default([])
   maxUsers         Int      @default(10)
   billingStatus    String   @default("trial") // trial | active | suspended | expired
@@ -54,7 +54,7 @@ model Cliente {
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre    String
-  cuit      String?
+  idFiscal  String?
   email     String?
   telefono  String?
   direccion String?
@@ -76,7 +76,7 @@ model Transportista {
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre    String
-  cuit      String?
+  idFiscal  String?
   email     String?
   telefono  String?
   tipo      String   @default("externo") // siempre externo

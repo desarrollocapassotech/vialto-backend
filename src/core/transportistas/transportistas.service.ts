@@ -38,6 +38,11 @@ export class TransportistasService {
         idFiscal: dto.idFiscal ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
+        paut: dto.paut ?? null,
+        permisoInternacional: dto.permisoInternacional ?? null,
+        fechaVencimientoPermiso: dto.fechaVencimientoPermiso ? new Date(dto.fechaVencimientoPermiso) : null,
+        domicilio: dto.domicilio ?? null,
+        bandera: dto.bandera ?? null,
       },
     });
   }
@@ -51,6 +56,16 @@ export class TransportistasService {
         idFiscal: dto.idFiscal,
         email: dto.email,
         telefono: dto.telefono,
+        paut: dto.paut,
+        permisoInternacional: dto.permisoInternacional,
+        fechaVencimientoPermiso:
+          dto.fechaVencimientoPermiso === undefined
+            ? undefined
+            : dto.fechaVencimientoPermiso
+              ? new Date(dto.fechaVencimientoPermiso)
+              : null,
+        domicilio: dto.domicilio,
+        bandera: dto.bandera,
       },
     });
   }

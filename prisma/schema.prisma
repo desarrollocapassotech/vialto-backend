@@ -72,15 +72,20 @@ model Cliente {
 }
 
 model Transportista {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre    String
-  idFiscal  String?
-  email     String?
-  telefono  String?
-  tipo      String   @default("externo") // siempre externo
-  createdAt DateTime @default(now())
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  tenant                   Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre                   String
+  idFiscal                 String?
+  email                    String?
+  telefono                 String?
+  tipo                     String    @default("externo") // siempre externo
+  paut                     String?   // número de PAUT
+  permisoInternacional     String?   // número de permiso internacional
+  fechaVencimientoPermiso  DateTime? // vencimiento del permiso internacional
+  domicilio                String?   // domicilio legal del transportista
+  bandera                  String?   // país/bandera (ej: ARGENTINA)
+  createdAt                DateTime  @default(now())
 
   choferes  Chofer[]
   vehiculos Vehiculo[]
@@ -97,6 +102,7 @@ model Chofer {
   tenant          Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre          String
   dni             String?
+  cuit            String?   // CUIT del chofer (requerido para PAUT)
   licencia        String?
   licenciaVence   DateTime?
   telefono        String?

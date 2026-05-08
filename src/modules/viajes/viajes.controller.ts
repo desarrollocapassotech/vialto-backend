@@ -15,6 +15,7 @@ import {
 import type { Request, Response } from 'express';
 import { ViajesService } from './viajes.service';
 import { MicCrtService } from './mic-crt.service';
+import { PautService } from './paut.service';
 import { CreateViajeDto } from './dto/create-viaje.dto';
 import { UpdateViajeDto } from './dto/update-viaje.dto';
 import { AddGastoDto } from './dto/add-gasto.dto';
@@ -38,6 +39,7 @@ export class ViajesController {
   constructor(
     private readonly service: ViajesService,
     private readonly micCrt: MicCrtService,
+    private readonly paut: PautService,
   ) {}
 
   @Get()
@@ -116,6 +118,33 @@ export class ViajesController {
         res.status(e.status).json(e.response ?? { message: e.message });
       } else {
         console.error('[MIC-CRT] Stack:', (err as Error)?.stack);
+        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+      }
+    }
+  }
+
+  @Get(':id/paut')
+  @Roles('admin', 'supervisor', 'superadmin')
+  async generatePaut(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    try {
+      const pdf = await this.paut.generate(id, auth.tenantId);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="PAUT-${id}.pdf"`,
+        'Content-Length': String(pdf.length),
+      });
+      res.end(pdf);
+    } catch (err: unknown) {
+      const e = err as { status?: number; message?: string; response?: unknown };
+      if (e?.status === 404) {
+        res.status(404).json(e.response ?? { message: e.message });
+      } else {
+        console.error('[PAUT] Error al generar PDF:', e?.message);
         res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
       }
     }

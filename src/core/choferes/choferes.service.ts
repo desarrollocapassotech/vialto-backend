@@ -70,6 +70,7 @@ export class ChoferesService {
         tenantId,
         nombre: dto.nombre,
         dni: dto.dni ?? null,
+        cuit: dto.cuit ?? null,
         licencia: dto.licencia ?? null,
         licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
         telefono: dto.telefono ?? null,
@@ -88,6 +89,7 @@ export class ChoferesService {
       data: {
         nombre: dto.nombre,
         dni: dto.dni,
+        cuit: dto.cuit,
         licencia: dto.licencia,
         telefono: dto.telefono,
         transportistaId:

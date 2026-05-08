@@ -141,8 +141,8 @@ export class ViajesController {
       res.end(pdf);
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string; response?: unknown };
-      if (e?.status === 404) {
-        res.status(404).json(e.response ?? { message: e.message });
+      if (e?.status === 400 || e?.status === 404) {
+        res.status(e.status).json(e.response ?? { message: e.message });
       } else {
         console.error('[PAUT] Error al generar PDF:', e?.message);
         res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });

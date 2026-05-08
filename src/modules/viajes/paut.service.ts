@@ -4,6 +4,7 @@ const PDFDocument: new (opts?: PDFKit.PDFDocumentOptions) => PDFKit.PDFDocument 
 import { PrismaService } from '../../shared/prisma/prisma.service';
 
 type PautVehiculo = {
+  id: string;
   patente: string;
   tipo: string;
   marca: string | null;
@@ -19,6 +20,7 @@ type PautVehiculo = {
 type PautViaje = {
   numero: string;
   transportista: {
+    id: string;
     nombre: string;
     idFiscal: string | null;
     paut: string | null;
@@ -28,12 +30,15 @@ type PautViaje = {
     bandera: string | null;
   } | null;
   chofer: {
+    id: string;
     nombre: string;
     dni: string | null;
     cuit: string | null;
   } | null;
   vehiculosViaje: Array<{ orden: number; vehiculo: PautVehiculo }>;
 };
+
+type MissingGroup = { fields: string[]; entityId?: string };
 
 @Injectable()
 export class PautService {
@@ -45,6 +50,7 @@ export class PautService {
       include: {
         transportista: {
           select: {
+            id: true,
             nombre: true,
             idFiscal: true,
             paut: true,
@@ -54,12 +60,13 @@ export class PautService {
             bandera: true,
           },
         },
-        chofer: { select: { nombre: true, dni: true, cuit: true } },
+        chofer: { select: { id: true, nombre: true, dni: true, cuit: true } },
         vehiculosViaje: {
           orderBy: { orden: 'asc' },
           include: {
             vehiculo: {
               select: {
+                id: true,
                 patente: true,
                 tipo: true,
                 marca: true,
@@ -79,32 +86,63 @@ export class PautService {
 
     if (!viaje) throw new NotFoundException('Viaje no encontrado');
 
-    const missingGroups: Record<string, string[]> = {};
+    const missingGroups: Record<string, MissingGroup> = {};
+    const viajeFields: string[] = [];
 
+    // Transportista
     if (!viaje.transportista) {
-      missingGroups['Viaje'] = ['Transportista asignado'];
+      viajeFields.push('Transportista asignado');
     } else {
       const t: string[] = [];
+      if (!viaje.transportista.idFiscal?.trim()) t.push('CUIT');
       if (!viaje.transportista.paut?.trim()) t.push('N° PAUT');
       if (!viaje.transportista.permisoInternacional?.trim()) t.push('Permiso Internacional');
       if (!viaje.transportista.fechaVencimientoPermiso) t.push('Vencimiento del Permiso Internacional');
       if (!viaje.transportista.domicilio?.trim()) t.push('Domicilio');
       if (!viaje.transportista.bandera?.trim()) t.push('Bandera (país)');
-      if (t.length > 0) missingGroups['Transportista'] = t;
+      if (t.length > 0) missingGroups['Transportista'] = { fields: t, entityId: viaje.transportista.id };
     }
 
-    if (viaje.vehiculosViaje.length === 0) {
-      missingGroups['Viaje'] = [...(missingGroups['Viaje'] ?? []), 'Al menos un vehículo asignado'];
+    // Vehículos — se calcula aquí para validar campos Y reutilizar en el PDF
+    const sorted = [...viaje.vehiculosViaje].sort((a, b) => a.orden - b.orden);
+    const camion = sorted[0]?.vehiculo ?? null;
+    const semi =
+      sorted.length > 1
+        ? (sorted.slice(1).find((vv) => vv.vehiculo.tipo === 'semirremolque')?.vehiculo ??
+           sorted[1]?.vehiculo ??
+           null)
+        : null;
+
+    if (sorted.length === 0) {
+      viajeFields.push('Al menos un vehículo asignado');
+    } else {
+      const checkVehiculo = (v: PautVehiculo, key: string) => {
+        const f: string[] = [];
+        if (!v.marca?.trim()) f.push('Marca');
+        if (!v.modelo?.trim()) f.push('Modelo');
+        if (v.anio == null) f.push('Año');
+        if (!v.nroChasis?.trim()) f.push('N° Chasis');
+        if (!v.poliza?.trim()) f.push('Póliza de seguro');
+        if (!v.vencimientoPoliza) f.push('Vencimiento de póliza');
+        if (v.tara == null) f.push('Tara');
+        if (!v.precinto?.trim()) f.push('Precinto');
+        if (f.length > 0) missingGroups[key] = { fields: f, entityId: v.id };
+      };
+      if (camion) checkVehiculo(camion, 'Camión');
+      if (semi) checkVehiculo(semi, 'Semirremolque');
     }
 
+    // Chofer
     if (!viaje.chofer) {
-      missingGroups['Viaje'] = [...(missingGroups['Viaje'] ?? []), 'Chofer asignado'];
+      viajeFields.push('Chofer asignado');
     } else {
       const c: string[] = [];
       if (!viaje.chofer.dni?.trim()) c.push('DNI');
       if (!viaje.chofer.cuit?.trim()) c.push('CUIT');
-      if (c.length > 0) missingGroups['Chofer'] = c;
+      if (c.length > 0) missingGroups['Chofer'] = { fields: c, entityId: viaje.chofer.id };
     }
+
+    if (viajeFields.length > 0) missingGroups['Viaje'] = { fields: viajeFields };
 
     if (Object.keys(missingGroups).length > 0) {
       throw new BadRequestException({
@@ -112,12 +150,6 @@ export class PautService {
         missingGroups,
       });
     }
-
-    const sorted = [...viaje.vehiculosViaje].sort((a, b) => a.orden - b.orden);
-    const camion = sorted[0]?.vehiculo ?? null;
-    const semi =
-      sorted.find((vv) => vv.vehiculo.tipo === 'semirremolque')?.vehiculo ??
-      (sorted.length > 1 ? sorted[1]?.vehiculo : null);
 
     return this.buildPdf(viaje, camion, semi);
   }

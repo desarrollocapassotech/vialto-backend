@@ -4,7 +4,7 @@
   "description": "Backend API para Vialto — SaaS de logística y transporte",
   "main": "dist/main",
   "engines": {
-    "node": ">=18.0.0"
+    "node": "22.x"
   },
   "scripts": {
     "postinstall": "prisma generate",

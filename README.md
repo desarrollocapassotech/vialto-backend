@@ -190,9 +190,9 @@ En `src/main.ts`, `enableCors` lista orígenes permitidos. Si el front corre en 
 ## 10. Despliegue (ej. Render)
 
 - Mismas variables que en local (`DATABASE_URL`, `CLERK_SECRET_KEY`, `NODE_ENV=production`, `PORT`).
-- Build: `npm install && npx prisma generate && npm run build`.
-- Antes o al arrancar: **`npx prisma migrate deploy`** contra la DB de producción.
-- Start: `node dist/main` (o el comando que use el host).
+- Build: `npm install && npm run build` (en Render: ver `render.yaml`; no hace falta DB en el build).
+- Migraciones: **`npm run start:prod`** ejecuta `prisma migrate deploy` antes de `node dist/main`.
+- Start: `node dist/main` solo en entornos donde ya aplicaste migraciones a mano.
 
 ---
 

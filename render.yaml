@@ -4,9 +4,10 @@ services:
     runtime: node
     region: ohio
     plan: free
-    buildCommand: npm install && npm run build && npx prisma generate && npx prisma migrate deploy
+    # Migraciones en `start:prod` (package.json): el build no necesita alcanzar Neon.
+    buildCommand: npm install && npm run build
     startCommand: npm run start:prod
-    healthCheckPath: /health
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production

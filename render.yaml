@@ -6,7 +6,7 @@ services:
     runtime: node
     region: ohio
     plan: free
-    buildCommand: npm install && npx prisma generate && npx nest build
+    buildCommand: NPM_CONFIG_PRODUCTION=false npm install && npx prisma generate && npx nest build
     startCommand: npm run start:prod
     healthCheckPath: /api/health
     envVars:

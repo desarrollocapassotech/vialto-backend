@@ -22,8 +22,8 @@ export type MetricCompare = {
   previous: number;
   changePct: number | null;
   sentiment: 'positive' | 'negative' | 'neutral';
-  /** Desglose por moneda del período actual. Solo presente en métricas derivadas de viajes. */
-  currencies?: { ARS?: number; USD?: number };
+  /** Desglose por moneda del período actual (sin conversión entre monedas). */
+  currencies?: { ARS: number; USD: number };
 };
 
 export type OwnerDashboardResponse = {
@@ -46,8 +46,18 @@ export type OwnerDashboardResponse = {
     diferenciaNetaCompare: MetricCompare;
   };
   alertas?: {
-    facturasVencidas: { cantidad: number; montoTotal: number };
-    viajesSinFactura: { cantidad: number; montoTotal: number };
+    facturasVencidas: {
+      cantidad: number;
+      montoTotal: number;
+      montosPorMoneda: { ARS: number; USD: number };
+      items: Array<{ id: string; numero: string }>;
+    };
+    viajesSinFactura: {
+      cantidad: number;
+      montoTotal: number;
+      montosPorMoneda: { ARS: number; USD: number };
+      items: Array<{ id: string; numero: string }>;
+    };
   } | null;
   viajes?: {
     enCurso: MetricCompare;
@@ -63,32 +73,52 @@ function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function withCurrencies(
+  m: MetricCompare,
+  currencies?: { ARS: number; USD: number },
+): MetricCompare {
+  if (!currencies) return m;
+  return {
+    ...m,
+    currencies: {
+      ARS: roundMoney(currencies.ARS ?? 0),
+      USD: roundMoney(currencies.USD ?? 0),
+    },
+  };
+}
+
 function buildMetric(
   current: number,
   previous: number,
   mode: CompareMode,
-  currencies?: { ARS?: number; USD?: number },
+  currencies?: { ARS: number; USD: number },
 ): MetricCompare {
   const c = roundMoney(current);
   const p = roundMoney(previous);
   if (p === 0 && c === 0) {
-    return { current: c, previous: p, changePct: 0, sentiment: 'neutral' };
+    return withCurrencies({ current: c, previous: p, changePct: 0, sentiment: 'neutral' }, currencies);
   }
   if (p === 0) {
     if (mode === 'higher_better') {
-      return {
+      return withCurrencies(
+        {
+          current: c,
+          previous: p,
+          changePct: null,
+          sentiment: c > 0 ? 'positive' : 'neutral',
+        },
+        currencies,
+      );
+    }
+    return withCurrencies(
+      {
         current: c,
         previous: p,
         changePct: null,
-        sentiment: c > 0 ? 'positive' : 'neutral',
-      };
-    }
-    return {
-      current: c,
-      previous: p,
-      changePct: null,
-      sentiment: c > 0 ? 'negative' : 'neutral',
-    };
+        sentiment: c > 0 ? 'negative' : 'neutral',
+      },
+      currencies,
+    );
   }
   const raw = ((c - p) / p) * 100;
   const changePct = Math.round(raw * 10) / 10;
@@ -101,13 +131,7 @@ function buildMetric(
         changePct,
         sentiment: (mode === 'higher_better' ? c > p : c < p) ? 'positive' : 'negative',
       };
-  if (currencies) {
-    cur.currencies = {
-      ...(currencies.ARS != null && currencies.ARS > 0 ? { ARS: currencies.ARS } : {}),
-      ...(currencies.USD != null && currencies.USD > 0 ? { USD: currencies.USD } : {}),
-    };
-  }
-  return cur;
+  return withCurrencies(cur, currencies);
 }
 
 @Injectable()
@@ -156,6 +180,9 @@ export class DashboardService {
             this.buildAlertas(tenantId),                                                // 9
             this.sumAPagarPorMoneda(tenantId, resolved.start, resolved.end),            // 10
             this.sumSinFacturarEnPeriodoMoneda(tenantId, sinFacturarRanges.current, 'USD'), // 11
+            this.sumSinFacturarEnPeriodoMoneda(tenantId, sinFacturarRanges.current, 'ARS'), // 12
+            this.sumFacturadoPorMoneda(tenantId, resolved.start, resolved.end),         // 13
+            this.sumCobradoPorMoneda(tenantId, resolved.start, resolved.end),           // 14
           ])
         : null,
       hasViajes
@@ -183,10 +210,14 @@ export class DashboardService {
         alertas,
         aPagarMoneda,
         sinFacturarUSD,
+        sinFacturarARS,
+        facturadoMon,
+        cobradoMon,
       ] = financieroResult;
-      const sinFacturarARS = roundMoney(sinFacturarPeriodo - (sinFacturarUSD as number));
-      const facturadoM = buildMetric(facturado, facturadoPrev, 'higher_better');
-      const cobradoM = buildMetric(cobrado, cobradoPrev, 'higher_better');
+      const facturadoMonTyped = facturadoMon as { ARS: number; USD: number };
+      const cobradoMonTyped = cobradoMon as { ARS: number; USD: number };
+      const facturadoM = buildMetric(facturado, facturadoPrev, 'higher_better', facturadoMonTyped);
+      const cobradoM = buildMetric(cobrado, cobradoPrev, 'higher_better', cobradoMonTyped);
       const aPagarMon = aPagarMoneda as { ARS: number; USD: number };
       const aPagarM = buildMetric(aPagar, aPagarPrev, 'lower_better', {
         ARS: aPagarMon.ARS,
@@ -197,7 +228,7 @@ export class DashboardService {
         sinFacturarPeriodoPrev,
         'higher_better',
         {
-          ARS: sinFacturarARS,
+          ARS: sinFacturarARS as number,
           USD: sinFacturarUSD as number,
         },
       );
@@ -255,6 +286,78 @@ export class DashboardService {
       _sum: { importe: true },
     });
     return agg._sum.importe ?? 0;
+  }
+
+  private async sumFacturadoPorMoneda(
+    tenantId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ ARS: number; USD: number }> {
+    const groups = await this.prisma.factura.groupBy({
+      by: ['moneda'],
+      where: {
+        tenantId,
+        tipo: 'cliente',
+        fechaEmision: { gte: start, lt: end },
+      },
+      _sum: { importe: true },
+    });
+    const byMoneda: Record<string, number> = {};
+    for (const g of groups) {
+      const m = g.moneda === 'USD' ? 'USD' : 'ARS';
+      byMoneda[m] = roundMoney(g._sum.importe ?? 0);
+    }
+    return { ARS: byMoneda['ARS'] ?? 0, USD: byMoneda['USD'] ?? 0 };
+  }
+
+  private async sumCobradoPorMoneda(
+    tenantId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ ARS: number; USD: number }> {
+    const [pagosRows, cobradosViaje] = await Promise.all([
+      this.prisma.pago.findMany({
+        where: {
+          tenantId,
+          fecha: { gte: start, lt: end },
+          factura: { tipo: 'cliente' },
+        },
+        select: { importe: true, factura: { select: { moneda: true } } },
+      }),
+      this.prisma.viaje.findMany({
+        where: {
+          tenantId,
+          estado: 'cobrado',
+          facturaId: { not: null },
+          factura: { tipo: 'cliente' },
+          OR: [
+            { factura: { fechaEmision: { gte: start, lt: end } } },
+            { fechaFinalizado: { gte: start, lt: end } },
+          ],
+        },
+        select: {
+          monto: true,
+          monedaMonto: true,
+          facturaId: true,
+          factura: { select: { pagos: { select: { id: true } } } },
+        },
+      }),
+    ]);
+    let ars = 0;
+    let usd = 0;
+    for (const p of pagosRows) {
+      if (p.factura.moneda === 'USD') usd += p.importe;
+      else ars += p.importe;
+    }
+    for (const v of cobradosViaje) {
+      if (!v.facturaId) continue;
+      if ((v.factura?.pagos?.length ?? 0) > 0) continue;
+      const m = v.monedaMonto === 'USD' ? 'USD' : 'ARS';
+      const amt = v.monto ?? 0;
+      if (m === 'USD') usd += amt;
+      else ars += amt;
+    }
+    return { ARS: roundMoney(ars), USD: roundMoney(usd) };
   }
 
   /**
@@ -409,7 +512,10 @@ export class DashboardService {
         fechaVencimiento: { not: null, lte: new Date() },
       },
       select: {
+        id: true,
+        numero: true,
         importe: true,
+        moneda: true,
         fechaVencimiento: true,
         pagos: { select: { importe: true } },
         viajes: { select: { estado: true, monto: true } },
@@ -425,38 +531,69 @@ export class DashboardService {
         }) === 'vencida',
     );
     let montoVencidas = 0;
+    let montoVencidasARS = 0;
+    let montoVencidasUSD = 0;
     for (const f of vencidas) {
       const paid = f.pagos.reduce((s, p) => s + p.importe, 0);
       const importeOp = importeOperativoFactura(f.importe, f.viajes);
       const pend = Math.max(0, roundMoney(importeOp - paid));
-      if (pend > 0) montoVencidas += pend;
+      if (pend > 0) {
+        montoVencidas += pend;
+        if (f.moneda === 'USD') montoVencidasUSD += pend;
+        else montoVencidasARS += pend;
+      }
     }
-    const cantVencidas = vencidas.filter((f) => {
+    const itemsVencidas: { id: string; numero: string }[] = [];
+    for (const f of vencidas) {
       const paid = f.pagos.reduce((s, p) => s + p.importe, 0);
       const importeOp = importeOperativoFactura(f.importe, f.viajes);
-      return importeOp - paid > 0.0001;
-    }).length;
+      if (importeOp - paid > 0.0001) {
+        itemsVencidas.push({ id: f.id, numero: f.numero });
+      }
+    }
+    const cantVencidas = itemsVencidas.length;
 
     const sinFactura = await this.prisma.viaje.findMany({
       where: {
         tenantId,
         estado: 'finalizado_sin_facturar',
       },
-      select: { monto: true },
+      select: { id: true, numero: true, monto: true, monedaMonto: true },
     });
-    const montoSinFactura = sinFactura.reduce(
-      (a, v) => a + (v.monto ?? 0),
-      0,
-    );
+    let montoSinFacturaARS = 0;
+    let montoSinFacturaUSD = 0;
+    for (const v of sinFactura) {
+      const amt = v.monto ?? 0;
+      if (v.monedaMonto === 'USD') montoSinFacturaUSD += amt;
+      else montoSinFacturaARS += amt;
+    }
+    montoSinFacturaARS = roundMoney(montoSinFacturaARS);
+    montoSinFacturaUSD = roundMoney(montoSinFacturaUSD);
+    const montoSinFactura = roundMoney(montoSinFacturaARS + montoSinFacturaUSD);
+
+    const itemsSinFactura = sinFactura.map((v) => ({
+      id: v.id,
+      numero: v.numero ?? '',
+    }));
 
     return {
       facturasVencidas: {
         cantidad: cantVencidas,
         montoTotal: roundMoney(montoVencidas),
+        montosPorMoneda: {
+          ARS: roundMoney(montoVencidasARS),
+          USD: roundMoney(montoVencidasUSD),
+        },
+        items: itemsVencidas,
       },
       viajesSinFactura: {
         cantidad: sinFactura.length,
-        montoTotal: roundMoney(montoSinFactura),
+        montoTotal: montoSinFactura,
+        montosPorMoneda: {
+          ARS: montoSinFacturaARS,
+          USD: montoSinFacturaUSD,
+        },
+        items: itemsSinFactura,
       },
     };
   }

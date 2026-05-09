@@ -172,12 +172,84 @@ export class ViajesService {
   }
 
   async getStats(tenantId: string) {
-    const rows = await this.prisma.viaje.groupBy({
-      by: ['estado'],
-      where: { tenantId },
-      _count: { _all: true },
-    });
-    return Object.fromEntries(rows.map((r) => [r.estado, r._count._all]));
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // null monedaMonto/monedaPrecioTransportistaExterno is treated as ARS (same convention
+    // used throughout the codebase, e.g. getViajesSaldoPendienteTransportista).
+    const baseWhere = { tenantId, createdAt: { gte: monthStart } };
+
+    const [
+      estadoRows,
+      ingresosARS,
+      ingresosUSD,
+      gastosARS,
+      gastosUSD,
+      saldoViajes,
+    ] = await Promise.all([
+      this.prisma.viaje.groupBy({
+        by: ['estado'],
+        where: { tenantId },
+        _count: { _all: true },
+      }),
+      this.prisma.viaje.aggregate({
+        where: { ...baseWhere, monto: { not: null }, monedaMonto: { not: 'USD' } },
+        _sum: { monto: true },
+      }),
+      this.prisma.viaje.aggregate({
+        where: { ...baseWhere, monto: { not: null }, monedaMonto: 'USD' },
+        _sum: { monto: true },
+      }),
+      this.prisma.viaje.aggregate({
+        where: { ...baseWhere, precioTransportistaExterno: { not: null }, monedaPrecioTransportistaExterno: { not: 'USD' } },
+        _sum: { precioTransportistaExterno: true },
+      }),
+      this.prisma.viaje.aggregate({
+        where: { ...baseWhere, precioTransportistaExterno: { not: null }, monedaPrecioTransportistaExterno: 'USD' },
+        _sum: { precioTransportistaExterno: true },
+      }),
+      this.prisma.viaje.findMany({
+        where: { tenantId, transportistaId: { not: null }, precioTransportistaExterno: { gt: 0 } },
+        select: {
+          precioTransportistaExterno: true,
+          monedaPrecioTransportistaExterno: true,
+          pagosTransportista: true,
+        },
+      }),
+    ]);
+
+    let pendienteARS = 0;
+    let pendienteUSD = 0;
+    for (const v of saldoViajes) {
+      const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
+      const acordado = v.precioTransportistaExterno ?? 0;
+      const pagos = Array.isArray(v.pagosTransportista)
+        ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
+        : [];
+      const pagado = pagos
+        .filter((p) => ((p.moneda ?? 'ARS') === 'USD' ? 'USD' : 'ARS') === moneda)
+        .reduce((sum, p) => sum + (typeof p.monto === 'number' ? p.monto : 0), 0);
+      const saldo = acordado - pagado;
+      if (saldo > 0) {
+        if (moneda === 'ARS') pendienteARS += saldo;
+        else pendienteUSD += saldo;
+      }
+    }
+
+    return {
+      ...Object.fromEntries(estadoRows.map((r) => [r.estado, r._count._all])),
+      montos: {
+        ingresos: {
+          ARS: ingresosARS._sum.monto ?? 0,
+          USD: ingresosUSD._sum.monto ?? 0,
+        },
+        gastos: {
+          ARS: gastosARS._sum.precioTransportistaExterno ?? 0,
+          USD: gastosUSD._sum.precioTransportistaExterno ?? 0,
+        },
+        pendiente: { ARS: pendienteARS, USD: pendienteUSD },
+      },
+    };
   }
 
   async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {

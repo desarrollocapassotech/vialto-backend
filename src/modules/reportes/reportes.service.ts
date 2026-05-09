@@ -6,6 +6,30 @@ import { VIAJE_ESTADOS_FINALES } from '../viajes/viaje-estados';
 export class ReportesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Suma de montos de viajes en estados finales del mes, por `monedaMonto` (sin conversión). */
+  private async sumViajesFinalesPorMoneda(
+    tenantId: string,
+    desde: Date,
+    hastaExclusivo: Date,
+  ): Promise<{ ARS: number; USD: number }> {
+    const groups = await this.prisma.viaje.groupBy({
+      by: ['monedaMonto'],
+      where: {
+        tenantId,
+        estado: { in: [...VIAJE_ESTADOS_FINALES] },
+        fechaFinalizado: { gte: desde, lt: hastaExclusivo },
+      },
+      _sum: { monto: true },
+    });
+    const by: Record<string, number> = {};
+    for (const g of groups) {
+      const key = g.monedaMonto === 'USD' ? 'USD' : 'ARS';
+      const val = g._sum.monto ?? 0;
+      by[key] = Math.round(val * 100) / 100;
+    }
+    return { ARS: by['ARS'] ?? 0, USD: by['USD'] ?? 0 };
+  }
+
   private getMonthRanges() {
     const now = new Date();
     const startMesActual = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -70,28 +94,8 @@ export class ReportesService {
             createdAt: true,
           },
         }),
-        this.prisma.viaje.aggregate({
-          where: {
-            tenantId,
-            estado: { in: [...VIAJE_ESTADOS_FINALES] },
-            fechaFinalizado: {
-              gte: startMesActual,
-              lt: startMesSiguiente,
-            },
-          },
-          _sum: { monto: true },
-        }),
-        this.prisma.viaje.aggregate({
-          where: {
-            tenantId,
-            estado: { in: [...VIAJE_ESTADOS_FINALES] },
-            fechaFinalizado: {
-              gte: startMesAnterior,
-              lt: startMesActual,
-            },
-          },
-          _sum: { monto: true },
-        }),
+        this.sumViajesFinalesPorMoneda(tenantId, startMesActual, startMesSiguiente),
+        this.sumViajesFinalesPorMoneda(tenantId, startMesAnterior, startMesActual),
       ]);
 
     const nombreCliente = new Map(clientes.map((c) => [c.id, c.nombre]));
@@ -126,8 +130,8 @@ export class ReportesService {
         viajesEnCursoHaceMasDeXHoras: viajesEnCursoLargos,
       },
       facturacion: {
-        mesActual: facturadoMesActual._sum.monto ?? 0,
-        mesAnterior: facturadoMesAnterior._sum.monto ?? 0,
+        mesActual: facturadoMesActual,
+        mesAnterior: facturadoMesAnterior,
       },
     };
   }

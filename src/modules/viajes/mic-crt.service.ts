@@ -25,7 +25,10 @@ type MicVehiculo = {
   nroChasis: string | null;
 };
 
+type MissingGroup = { fields: string[]; entityId?: string };
+
 type MicViaje = {
+  id: string;
   numero: string;
   origen: string | null;
   destino: string | null;
@@ -38,7 +41,7 @@ type MicViaje = {
   metadata: unknown;
   cliente: { nombre: string; idFiscal: string | null; direccion: string | null } | null;
   transportista: { nombre: string; idFiscal: string | null } | null;
-  chofer: { nombre: string; dni: string | null; licencia: string | null } | null;
+  chofer: { id: string; nombre: string; dni: string | null; licencia: string | null } | null;
   vehiculosViaje: Array<{ orden: number; vehiculo: MicVehiculo }>;
 };
 
@@ -47,13 +50,12 @@ export class MicCrtService {
   constructor(private readonly prisma: PrismaService) {}
 
   async generate(viajeId: string, tenantId: string): Promise<Buffer> {
-    console.log('[MIC-CRT] generate() llamado para viaje:', viajeId, 'tenant:', tenantId);
     const viaje = (await this.prisma.viaje.findFirst({
       where: { id: viajeId, tenantId },
       include: {
         cliente: { select: { nombre: true, idFiscal: true, direccion: true } },
         transportista: { select: { nombre: true, idFiscal: true } },
-        chofer: { select: { nombre: true, dni: true, licencia: true } },
+        chofer: { select: { id: true, nombre: true, dni: true, licencia: true } },
         vehiculosViaje: {
           orderBy: { orden: 'asc' },
           include: {
@@ -72,26 +74,31 @@ export class MicCrtService {
       },
     })) as unknown as MicViaje | null;
 
-    console.log('[MIC-CRT] viaje encontrado:', !!viaje);
     if (!viaje) throw new NotFoundException('Viaje no encontrado');
 
-    const missing: string[] = [];
-    if (!viaje.origen?.trim()) missing.push('Origen del viaje');
-    if (!viaje.destino?.trim()) missing.push('Destino del viaje');
-    if (!viaje.detalleCarga?.trim()) missing.push('Detalle de carga');
-    if (!viaje.chofer) missing.push('Chofer asignado al viaje');
-    else {
-      if (!viaje.chofer.nombre?.trim()) missing.push('Nombre del chofer');
-      if (!viaje.chofer.dni?.trim()) missing.push('DNI / CI del chofer');
-    }
-    if (viaje.vehiculosViaje.length === 0)
-      missing.push('Al menos un vehículo asignado al viaje (patente del camión)');
-    if (!viaje.cliente) missing.push('Cliente del viaje');
+    const missingGroups: Record<string, MissingGroup> = {};
 
-    if (missing.length > 0) {
+    const viajeFields: string[] = [];
+    if (!viaje.origen?.trim()) viajeFields.push('Origen');
+    if (!viaje.destino?.trim()) viajeFields.push('Destino');
+    if (!viaje.detalleCarga?.trim()) viajeFields.push('Detalle de carga');
+    if (!viaje.cliente) viajeFields.push('Cliente asignado');
+    if (!viaje.chofer) viajeFields.push('Chofer asignado');
+    if (viaje.vehiculosViaje.length === 0) viajeFields.push('Vehículo asignado');
+    if (viajeFields.length > 0) missingGroups['Viaje'] = { fields: viajeFields, entityId: viaje.id };
+
+    // Chofer entity fields (only if assigned)
+    if (viaje.chofer) {
+      const c: string[] = [];
+      if (!viaje.chofer.nombre?.trim()) c.push('Nombre');
+      if (!viaje.chofer.dni?.trim()) c.push('DNI');
+      if (c.length > 0) missingGroups['Chofer'] = { fields: c, entityId: viaje.chofer.id };
+    }
+
+    if (Object.keys(missingGroups).length > 0) {
       throw new BadRequestException({
         message: 'Faltan datos obligatorios para generar el MIC/CRT',
-        missing,
+        missingGroups,
       });
     }
 
@@ -99,10 +106,12 @@ export class MicCrtService {
     const sorted = [...viaje.vehiculosViaje].sort((a, b) => a.orden - b.orden);
     const camion = sorted[0]?.vehiculo ?? null;
     const semi =
-      sorted.find((vv) => vv.vehiculo.tipo === 'semirremolque')?.vehiculo ??
-      (sorted.length > 1 ? sorted[1]?.vehiculo : null);
+      sorted.length > 1
+        ? (sorted.slice(1).find((vv) => vv.vehiculo.tipo === 'semirremolque')?.vehiculo ??
+           sorted[1]?.vehiculo ??
+           null)
+        : null;
 
-    console.log('[MIC-CRT] Datos OK, generando PDF. missing:', missing.length, 'camion:', camion?.patente);
     return this.buildPdf(viaje, meta, camion, semi);
   }
 
@@ -114,29 +123,17 @@ export class MicCrtService {
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
-        console.log('[MIC-CRT] Creando PDFDocument...');
         const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: true });
         const chunks: Buffer[] = [];
         doc.on('data', (c: Buffer) => chunks.push(c));
-        doc.on('end', () => {
-          console.log('[MIC-CRT] PDF generado OK, chunks:', chunks.length);
-          resolve(Buffer.concat(chunks));
-        });
-        doc.on('error', (e) => {
-          console.error('[MIC-CRT] Error en stream del PDF:', e);
-          reject(e);
-        });
-
-        console.log('[MIC-CRT] Dibujando MIC/DTA...');
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
         this.drawMicDta(doc, v, meta, camion, semi);
-        console.log('[MIC-CRT] Dibujando CRT...');
         doc.addPage();
         this.drawCrt(doc, v, meta, camion, semi);
-        console.log('[MIC-CRT] Finalizando PDF...');
         doc.end();
-      } catch (syncErr) {
-        console.error('[MIC-CRT] Error síncrono en buildPdf:', syncErr);
-        reject(syncErr);
+      } catch (e) {
+        reject(e);
       }
     });
   }

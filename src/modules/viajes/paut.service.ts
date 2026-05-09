@@ -18,6 +18,7 @@ type PautVehiculo = {
 };
 
 type PautViaje = {
+  id: string;
   numero: string;
   transportista: {
     id: string;
@@ -114,7 +115,7 @@ export class PautService {
         : null;
 
     if (sorted.length === 0) {
-      viajeFields.push('Al menos un vehículo asignado');
+      viajeFields.push('Vehículo asignado');
     } else {
       const checkVehiculo = (v: PautVehiculo, key: string) => {
         const f: string[] = [];
@@ -142,7 +143,7 @@ export class PautService {
       if (c.length > 0) missingGroups['Chofer'] = { fields: c, entityId: viaje.chofer.id };
     }
 
-    if (viajeFields.length > 0) missingGroups['Viaje'] = { fields: viajeFields };
+    if (viajeFields.length > 0) missingGroups['Viaje'] = { fields: viajeFields, entityId: viajeId };
 
     if (Object.keys(missingGroups).length > 0) {
       throw new BadRequestException({

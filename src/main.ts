@@ -12,13 +12,14 @@ if (process.env.SENTRY_DSN) {
   });
 }
 
-function corsOrigins(): (string | RegExp)[] {
+function corsOriginMatchers(): (string | RegExp)[] {
   const fromEnv = (process.env.CORS_ORIGINS?.split(',') ?? [])
     .map((s) => s.trim())
     .filter(Boolean);
   return [
     'https://vialto-frontend.onrender.com',
     'https://admin.vialto.uno',
+    'https://www.admin.vialto.uno',
     'https://registro-combustible-logistica.web.app',
     'https://registro-combustible-logistica.firebaseapp.com',
     /localhost:\d+/,
@@ -27,13 +28,26 @@ function corsOrigins(): (string | RegExp)[] {
   ];
 }
 
+function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  return corsOriginMatchers().some((rule) =>
+    typeof rule === 'string' ? rule === origin : rule.test(origin),
+  );
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({
-    origin: corsOrigins(),
+    origin: (origin, cb) => {
+      if (!origin) {
+        cb(null, true);
+        return;
+      }
+      cb(null, isOriginAllowed(origin) ? origin : false);
+    },
     credentials: true,
-    allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
+    /** Sin lista fija: el preflight puede pedir cabeceras extra (p. ej. Sentry, Clerk). El paquete `cors` replica `Access-Control-Request-Headers`. */
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
   });
 

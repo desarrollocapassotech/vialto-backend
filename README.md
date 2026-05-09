@@ -183,7 +183,7 @@ npm run start:dev
 
 ## 9. CORS
 
-En `src/main.ts`, `enableCors` lista orígenes permitidos. Si el front corre en otro dominio/puerto, agregá esa URL.
+En `src/main.ts`, `enableCors` lista orígenes permitidos y usa callback para devolver el `Origin` exacto (necesario con `credentials: 'include'` en el front). No se fija una lista corta de `allowedHeaders`: el preflight puede pedir cabeceras extra (p. ej. trazas). Dominios extra: variable `CORS_ORIGINS` (URLs separadas por coma).
 
 ---
 

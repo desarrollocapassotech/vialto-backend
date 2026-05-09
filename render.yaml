@@ -1,11 +1,11 @@
+# Monorepo: Render usa el blueprint de la RAÍZ → `../render.yaml` (rootDir: vialto-backend).
+# Si este backend es el repo entero, este archivo sirve igual sin rootDir.
 services:
   - type: web
     name: vialto-backend
     runtime: node
     region: ohio
     plan: free
-    # Sin `prisma migrate deploy` aquí (va en start:prod). Sin `npm run build` para evitar
-    # comandos duplicados si el panel de Render tuviera algo distinto guardado antes.
     buildCommand: npm install && npx prisma generate && npx nest build
     startCommand: npm run start:prod
     healthCheckPath: /api/health

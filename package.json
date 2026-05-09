@@ -8,7 +8,7 @@
   },
   "scripts": {
     "postinstall": "prisma generate",
-    "build": "prisma generate && npx nest build",
+    "build": "npx nest build",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "start:prod": "prisma migrate deploy && node dist/main",

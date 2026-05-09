@@ -4,8 +4,9 @@ services:
     runtime: node
     region: ohio
     plan: free
-    # Migraciones en `start:prod` (package.json): el build no necesita alcanzar Neon.
-    buildCommand: npm install && npm run build
+    # Sin `prisma migrate deploy` aquí (va en start:prod). Sin `npm run build` para evitar
+    # comandos duplicados si el panel de Render tuviera algo distinto guardado antes.
+    buildCommand: npm install && npx prisma generate && npx nest build
     startCommand: npm run start:prod
     healthCheckPath: /api/health
     envVars:

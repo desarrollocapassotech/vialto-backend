@@ -190,7 +190,7 @@ En `src/main.ts`, `enableCors` lista orígenes permitidos. Si el front corre en 
 ## 10. Despliegue (ej. Render)
 
 - Mismas variables que en local (`DATABASE_URL`, `CLERK_SECRET_KEY`, `NODE_ENV=production`, `PORT`).
-- Build: `npm install && npm run build` (en Render: ver `render.yaml`; no hace falta DB en el build).
+- Build en Render: ver `render.yaml` (`npm install && npx prisma generate && npx nest build`). **No** debe incluir `prisma migrate deploy` en el build (si el panel de Render tiene un “Build Command” manual, tiene prioridad sobre el blueprint y puede seguir llamando a la DB).
 - Migraciones: **`npm run start:prod`** ejecuta `prisma migrate deploy` antes de `node dist/main`.
 - Start: `node dist/main` solo en entornos donde ya aplicaste migraciones a mano.
 
@@ -206,6 +206,7 @@ Workflow: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) — `npm ci`,
 
 | Síntoma | Causa probable |
 |---------|----------------|
+| `P1001` durante el **build** en Render | Suele ser `prisma migrate deploy` (u otro comando que conecta) en el **Build Command** del servicio en el panel de Render, o Neon inaccesible desde la red de build. El build solo debe compilar y `prisma generate` (no necesita DB). |
 | `403` — *No tenés permisos* en `POST /api/tenants` | Falta `metadata.vialtoRole: superadmin` en el JWT o token viejo. |
 | `403` — *organización activa* | `tenantId` null: token sin org, o falta `o.id`/`org_id`; o usuario no miembro de la org. |
 | `403` — *organización no registrada* | No existe fila en `tenants` con ese `clerkOrgId`. |

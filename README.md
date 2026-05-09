@@ -191,7 +191,7 @@ En `src/main.ts`, `enableCors` lista orígenes permitidos. Si el front corre en 
 
 - Mismas variables que en local (`DATABASE_URL`, `CLERK_SECRET_KEY`, `NODE_ENV=production`, `PORT`).
 - **Monorepo:** el blueprint que Render detecta por defecto está en **`render.yaml` en la raíz del repositorio** (no solo en `vialto-backend/render.yaml`). Ahí va `rootDir: vialto-backend` y el `buildCommand` sin migraciones. Si el servicio se creó a mano, abrí **Settings → Build & Deploy** y comprobá que el **Build Command** no tenga `prisma migrate deploy` ni `npm run build && …migrate` al final (eso imprime `Datasource "db"` y puede fallar con P1001 aunque Neon esté bien).
-- Build típico: `NPM_CONFIG_PRODUCTION=false npm install && npx prisma generate && npx nest build` (si en Render tenés `NODE_ENV=production`, sin esto `npm install` no instala devDependencies y falla `npx nest build`). El `npm run build` del `package.json` solo compila Nest; `postinstall` ya ejecuta `prisma generate`.
+- Build típico: `NPM_CONFIG_PRODUCTION=false npm install && npx prisma generate && npx @nestjs/cli build` (evitá `npx nest build` en CI/Render: sin el CLI en `node_modules/.bin` npm no sabe qué ejecutar). El `npm run build` del `package.json` compila con `npx @nestjs/cli build`; `postinstall` ejecuta `prisma generate`.
 - Migraciones: **`npm run start:prod`** ejecuta `prisma migrate deploy` antes de `node dist/main`.
 - Start: `node dist/main` solo en entornos donde ya aplicaste migraciones a mano.
 

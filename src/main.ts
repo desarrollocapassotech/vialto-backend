@@ -12,17 +12,26 @@ if (process.env.SENTRY_DSN) {
   });
 }
 
+function corsOrigins(): (string | RegExp)[] {
+  const fromEnv = (process.env.CORS_ORIGINS?.split(',') ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [
+    'https://vialto-frontend.onrender.com',
+    'https://admin.vialto.uno',
+    'https://registro-combustible-logistica.web.app',
+    'https://registro-combustible-logistica.firebaseapp.com',
+    /localhost:\d+/,
+    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+    ...fromEnv,
+  ];
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({
-    origin: [
-      'https://vialto-frontend.onrender.com',
-      'https://registro-combustible-logistica.web.app',
-      'https://registro-combustible-logistica.firebaseapp.com',
-      /localhost:\d+/,
-      /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-    ],
+    origin: corsOrigins(),
     credentials: true,
     allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],

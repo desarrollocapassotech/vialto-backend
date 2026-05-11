@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import * as Sentry from '@sentry/node';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 if (process.env.SENTRY_DSN) {
@@ -56,6 +57,40 @@ async function bootstrap() {
   );
 
   app.setGlobalPrefix('api');
+
+  const swaggerPassword = process.env.SWAGGER_PASSWORD;
+  if (swaggerPassword) {
+    const swaggerUser = process.env.SWAGGER_USER ?? 'admin';
+    app.use('/docs', (req: any, res: any, next: any) => {
+      const authHeader: string | undefined = req.headers['authorization'];
+      if (!authHeader?.startsWith('Basic ')) {
+        res.setHeader('WWW-Authenticate', 'Basic realm="Vialto API Docs"');
+        res.status(401).send('Unauthorized');
+        return;
+      }
+      const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
+      const sep = decoded.indexOf(':');
+      const user = decoded.slice(0, sep);
+      const pass = decoded.slice(sep + 1);
+      if (user !== swaggerUser || pass !== swaggerPassword) {
+        res.setHeader('WWW-Authenticate', 'Basic realm="Vialto API Docs"');
+        res.status(401).send('Unauthorized');
+        return;
+      }
+      next();
+    });
+  }
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Vialto API')
+    .setDescription('API del backend SaaS de logística Vialto')
+    .setVersion('1.0')
+    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'clerk-jwt')
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('docs', app, document, {
+    swaggerOptions: { persistAuthorization: true },
+  });
 
   const port = process.env.PORT ?? 8080;
   await app.listen(port);

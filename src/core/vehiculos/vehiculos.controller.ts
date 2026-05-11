@@ -1,6 +1,7 @@
 import {
   Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { VehiculosService } from './vehiculos.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
@@ -13,11 +14,14 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
+@ApiTags('Core — Vehículos')
+@ApiBearerAuth('clerk-jwt')
 @Controller('vehiculos')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class VehiculosController {
   constructor(private readonly service: VehiculosService) {}
 
+  @ApiOperation({ summary: 'Listar todos los vehículos' })
   @Get()
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
@@ -25,6 +29,7 @@ export class VehiculosController {
     return this.service.findAll(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Listar vehículos paginado con búsqueda' })
   @Get('paginated')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findAllPaginated(
@@ -35,6 +40,7 @@ export class VehiculosController {
     return this.service.findAllPaginated(auth.tenantId, query);
   }
 
+  @ApiOperation({ summary: 'Obtener vehículo por ID' })
   @Get(':id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -42,6 +48,7 @@ export class VehiculosController {
     return this.service.findOne(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Registrar vehículo' })
   @Post()
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateVehiculoDto, @CurrentAuth() auth: AuthPayload) {
@@ -49,6 +56,7 @@ export class VehiculosController {
     return this.service.create(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Actualizar datos del vehículo' })
   @Patch(':id')
   @Roles('admin', 'supervisor', 'superadmin')
   update(
@@ -60,6 +68,7 @@ export class VehiculosController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar vehículo' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

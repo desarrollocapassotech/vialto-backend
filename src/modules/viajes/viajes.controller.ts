@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ViajesService } from './viajes.service';
 import { MicCrtService } from './mic-crt.service';
 import { PautService } from './paut.service';
@@ -32,6 +33,8 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 import { queryParamFromRequest } from '../../shared/util/express-query-string';
 import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
 
+@ApiTags('Módulo: Viajes')
+@ApiBearerAuth('clerk-jwt')
 @Controller('viajes')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('viajes')
@@ -42,6 +45,7 @@ export class ViajesController {
     private readonly paut: PautService,
   ) {}
 
+  @ApiOperation({ summary: 'Listar viajes (opcionalmente filtrar por estado)' })
   @Get()
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   list(@CurrentAuth() auth: AuthPayload, @Query('estado') estado?: string) {
@@ -49,6 +53,7 @@ export class ViajesController {
     return this.service.findAll(auth.tenantId, estado);
   }
 
+  @ApiOperation({ summary: 'Estadísticas de viajes del tenant (conteo por estado, totales)' })
   @Get('stats')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   stats(@CurrentAuth() auth: AuthPayload) {
@@ -56,6 +61,7 @@ export class ViajesController {
     return this.service.getStats(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Listar viajes paginado con filtros avanzados' })
   @Get('paginated')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   listPaginated(
@@ -88,6 +94,7 @@ export class ViajesController {
     });
   }
 
+  @ApiOperation({ summary: 'Viajes con saldo pendiente de pago al transportista' })
   @Get('saldo-pendiente-transportista')
   @Roles('admin', 'supervisor', 'superadmin')
   saldoPendienteTransportista(@CurrentAuth() auth: AuthPayload) {
@@ -95,6 +102,7 @@ export class ViajesController {
     return this.service.getViajesSaldoPendienteTransportista(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Generar PDF MIC/CRT del viaje (para cargas internacionales)' })
   @Get(':id/mic-crt')
   @Roles('admin', 'supervisor', 'superadmin')
   async generateMicCrt(
@@ -123,6 +131,7 @@ export class ViajesController {
     }
   }
 
+  @ApiOperation({ summary: 'Generar PDF PAUT del viaje' })
   @Get(':id/paut')
   @Roles('admin', 'supervisor', 'superadmin')
   async generatePaut(
@@ -150,6 +159,7 @@ export class ViajesController {
     }
   }
 
+  @ApiOperation({ summary: 'Obtener viaje por ID' })
   @Get(':id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -157,6 +167,7 @@ export class ViajesController {
     return this.service.findOne(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Crear viaje' })
   @Post()
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateViajeDto, @CurrentAuth() auth: AuthPayload) {
@@ -164,6 +175,7 @@ export class ViajesController {
     return this.service.create(auth.tenantId, auth.userId, dto);
   }
 
+  @ApiOperation({ summary: 'Actualizar viaje' })
   @Patch(':id')
   @Roles('admin', 'supervisor', 'superadmin')
   update(
@@ -175,6 +187,7 @@ export class ViajesController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Registrar pago al transportista en un viaje' })
   @Post(':id/pagos-transportista')
   @Roles('admin', 'supervisor', 'superadmin')
   addPagoTransportista(
@@ -186,6 +199,7 @@ export class ViajesController {
     return this.service.addPagoTransportista(id, auth.tenantId, auth.userId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar pago al transportista por índice' })
   @Delete(':id/pagos-transportista/:index')
   @Roles('admin', 'supervisor', 'superadmin')
   deletePagoTransportista(
@@ -197,6 +211,7 @@ export class ViajesController {
     return this.service.deletePagoTransportista(id, auth.tenantId, auth.userId, index);
   }
 
+  @ApiOperation({ summary: 'Registrar gasto adicional en un viaje' })
   @Post(':id/gastos')
   @Roles('admin', 'supervisor', 'superadmin')
   addGasto(
@@ -208,6 +223,7 @@ export class ViajesController {
     return this.service.addGasto(id, auth.tenantId, auth.userId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar viaje' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

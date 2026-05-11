@@ -1,6 +1,7 @@
 import {
   Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ChoferesService } from './choferes.service';
 import { CreateChoferDto } from './dto/create-chofer.dto';
 import { UpdateChoferDto } from './dto/update-chofer.dto';
@@ -13,11 +14,14 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
+@ApiTags('Core — Choferes')
+@ApiBearerAuth('clerk-jwt')
 @Controller('choferes')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class ChoferesController {
   constructor(private readonly service: ChoferesService) {}
 
+  @ApiOperation({ summary: 'Listar todos los choferes' })
   @Get()
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
@@ -25,6 +29,7 @@ export class ChoferesController {
     return this.service.findAll(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Listar choferes paginado con búsqueda' })
   @Get('paginated')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findAllPaginated(
@@ -35,6 +40,7 @@ export class ChoferesController {
     return this.service.findAllPaginated(auth.tenantId, query);
   }
 
+  @ApiOperation({ summary: 'Obtener chofer por ID' })
   @Get(':id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -42,6 +48,7 @@ export class ChoferesController {
     return this.service.findOne(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Crear chofer' })
   @Post()
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateChoferDto, @CurrentAuth() auth: AuthPayload) {
@@ -49,6 +56,7 @@ export class ChoferesController {
     return this.service.create(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Actualizar datos del chofer' })
   @Patch(':id')
   @Roles('admin', 'supervisor', 'superadmin')
   update(
@@ -60,6 +68,7 @@ export class ChoferesController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar chofer' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

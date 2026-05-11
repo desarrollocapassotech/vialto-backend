@@ -1,6 +1,7 @@
 import {
   Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CuentaCorrienteService } from './cuenta-corriente.service';
 import { CreateMovimientoCcDto } from './dto/create-movimiento-cc.dto';
 import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
@@ -16,12 +17,15 @@ import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
+@ApiTags('Módulo: Cuenta Corriente')
+@ApiBearerAuth('clerk-jwt')
 @Controller('cuenta-corriente')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('cuenta-corriente')
 export class CuentaCorrienteController {
   constructor(private readonly service: CuentaCorrienteService) {}
 
+  @ApiOperation({ summary: 'Listar movimientos de cuenta corriente (opcionalmente por cliente)' })
   @Get('movimientos')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   list(
@@ -32,6 +36,7 @@ export class CuentaCorrienteController {
     return this.service.findAll(auth.tenantId, clienteId);
   }
 
+  @ApiOperation({ summary: 'Exportar movimientos a Excel' })
   @Get('movimientos/exportar')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   exportar(
@@ -42,6 +47,7 @@ export class CuentaCorrienteController {
     return this.service.exportarMovimientos(auth.tenantId, query);
   }
 
+  @ApiOperation({ summary: 'Obtener movimiento por ID' })
   @Get('movimientos/:id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -49,6 +55,7 @@ export class CuentaCorrienteController {
     return this.service.findOne(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Registrar movimiento de cuenta corriente' })
   @Post('movimientos')
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateMovimientoCcDto, @CurrentAuth() auth: AuthPayload) {
@@ -56,6 +63,7 @@ export class CuentaCorrienteController {
     return this.service.create(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Registrar pago de cliente (genera movimiento automáticamente)' })
   @Post('pagos')
   @Roles('admin', 'supervisor', 'superadmin')
   registrarPago(@Body() dto: RegistrarPagoDto, @CurrentAuth() auth: AuthPayload) {
@@ -63,6 +71,7 @@ export class CuentaCorrienteController {
     return this.service.registrarPago(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Saldo actual de un cliente en cuenta corriente' })
   @Get('saldo/:clienteId')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   saldoCliente(
@@ -73,6 +82,7 @@ export class CuentaCorrienteController {
     return this.service.saldoCliente(auth.tenantId, clienteId);
   }
 
+  @ApiOperation({ summary: 'Actualizar movimiento de cuenta corriente' })
   @Patch('movimientos/:id')
   @Roles('admin', 'supervisor', 'superadmin')
   update(
@@ -84,6 +94,7 @@ export class CuentaCorrienteController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar movimiento de cuenta corriente' })
   @Delete('movimientos/:id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

@@ -1,4 +1,5 @@
 import { Controller, Get, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ReportesService } from './reportes.service';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -10,12 +11,15 @@ import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
+@ApiTags('[Próximamente] Reportes')
+@ApiBearerAuth('clerk-jwt')
 @Controller('reportes')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('reportes')
 export class ReportesController {
   constructor(private readonly service: ReportesService) {}
 
+  @ApiOperation({ summary: 'Resumen cross-módulo · Fase 8 — aún no implementado' })
   @Get('resumen')
   @Roles('admin', 'supervisor', 'superadmin')
   resumen(@CurrentAuth() auth: AuthPayload) {
@@ -23,6 +27,7 @@ export class ReportesController {
     return this.service.resumen(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Tablero general cross-módulo · Fase 8 — aún no implementado' })
   @Get('tablero-general')
   @Roles('admin', 'supervisor', 'superadmin')
   tableroGeneral(

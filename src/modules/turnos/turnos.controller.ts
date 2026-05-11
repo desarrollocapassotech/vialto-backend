@@ -1,4 +1,5 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -13,10 +14,13 @@ import { AuthPayload } from '../../core/auth/clerk-auth.guard';
  * Módulo aislado (Fase 7 — Pereyra). La entidad de turnos vive principalmente
  * en PWA/Clerk; este endpoint fija el contrato API hasta el modelo en Postgres.
  */
+@ApiTags('[Próximamente] Turnos')
+@ApiBearerAuth('clerk-jwt')
 @Controller('turnos')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('turnos')
 export class TurnosController {
+  @ApiOperation({ summary: 'Estado del módulo · Fase 7 (PWA) — aún no implementado' })
   @Get('estado')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   estadoModulo(@CurrentAuth() auth: AuthPayload) {

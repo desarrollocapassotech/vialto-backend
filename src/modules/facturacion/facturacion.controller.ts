@@ -1,6 +1,7 @@
 import {
   Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FacturacionService } from './facturacion.service';
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
@@ -15,12 +16,15 @@ import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
+@ApiTags('Módulo: Facturación')
+@ApiBearerAuth('clerk-jwt')
 @Controller('facturacion')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('facturacion')
 export class FacturacionController {
   constructor(private readonly service: FacturacionService) {}
 
+  @ApiOperation({ summary: 'Listar facturas (opcionalmente filtrar por cliente)' })
   @Get('facturas')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   listFacturas(
@@ -31,6 +35,7 @@ export class FacturacionController {
     return this.service.listFacturas(auth.tenantId, clienteId);
   }
 
+  @ApiOperation({ summary: 'Obtener factura por ID' })
   @Get('facturas/:id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   getFactura(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -38,6 +43,7 @@ export class FacturacionController {
     return this.service.findFactura(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Crear factura' })
   @Post('facturas')
   @Roles('admin', 'supervisor', 'superadmin')
   createFactura(@Body() dto: CreateFacturaDto, @CurrentAuth() auth: AuthPayload) {
@@ -45,6 +51,7 @@ export class FacturacionController {
     return this.service.createFactura(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Actualizar factura (estado, vencimiento)' })
   @Patch('facturas/:id')
   @Roles('admin', 'supervisor', 'superadmin')
   updateFactura(
@@ -56,6 +63,7 @@ export class FacturacionController {
     return this.service.updateFactura(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar factura' })
   @Delete('facturas/:id')
   @Roles('admin', 'superadmin')
   removeFactura(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -63,6 +71,7 @@ export class FacturacionController {
     return this.service.removeFactura(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Listar pagos (opcionalmente filtrar por factura)' })
   @Get('pagos')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   listPagos(
@@ -73,6 +82,7 @@ export class FacturacionController {
     return this.service.listPagos(auth.tenantId, facturaId);
   }
 
+  @ApiOperation({ summary: 'Registrar pago sobre una factura' })
   @Post('pagos')
   @Roles('admin', 'supervisor', 'superadmin')
   createPago(@Body() dto: CreatePagoDto, @CurrentAuth() auth: AuthPayload) {
@@ -80,6 +90,7 @@ export class FacturacionController {
     return this.service.createPago(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar pago' })
   @Delete('pagos/:id')
   @Roles('admin', 'superadmin')
   removePago(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

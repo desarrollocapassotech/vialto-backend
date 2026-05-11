@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -32,6 +33,8 @@ import { AuthPayload } from '../auth/clerk-auth.guard';
  * Datos por tenant (query `tenantId` = clerkOrgId) — solo superadmin.
  * Sin `tenantId` la respuesta es lista vacía.
  */
+@ApiTags('Admin — Platform')
+@ApiBearerAuth('clerk-jwt')
 @Controller('platform')
 @UseGuards(ClerkAuthGuard, RolesGuard)
 @Roles('superadmin')

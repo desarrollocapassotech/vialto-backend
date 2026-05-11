@@ -1,6 +1,7 @@
 import {
   Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ClientesService } from './clientes.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
@@ -13,11 +14,14 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
+@ApiTags('Core — Clientes')
+@ApiBearerAuth('clerk-jwt')
 @Controller('clientes')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class ClientesController {
   constructor(private readonly service: ClientesService) {}
 
+  @ApiOperation({ summary: 'Listar todos los clientes' })
   @Get()
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
@@ -25,6 +29,7 @@ export class ClientesController {
     return this.service.findAll(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Listar clientes paginado con búsqueda' })
   @Get('paginated')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findAllPaginated(
@@ -35,6 +40,7 @@ export class ClientesController {
     return this.service.findAllPaginated(auth.tenantId, query);
   }
 
+  @ApiOperation({ summary: 'Obtener cliente por ID' })
   @Get(':id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -42,6 +48,7 @@ export class ClientesController {
     return this.service.findOne(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Crear cliente' })
   @Post()
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateClienteDto, @CurrentAuth() auth: AuthPayload) {
@@ -49,6 +56,7 @@ export class ClientesController {
     return this.service.create(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Actualizar datos del cliente' })
   @Patch(':id')
   @Roles('admin', 'supervisor', 'superadmin')
   update(
@@ -60,6 +68,7 @@ export class ClientesController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar cliente' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

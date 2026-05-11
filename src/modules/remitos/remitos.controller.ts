@@ -1,6 +1,7 @@
 import {
   Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { RemitosService } from './remitos.service';
 import { CreateRemitoDto } from './dto/create-remito.dto';
 import { UpdateRemitoDto } from './dto/update-remito.dto';
@@ -14,12 +15,15 @@ import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
+@ApiTags('[Próximamente] Remitos')
+@ApiBearerAuth('clerk-jwt')
 @Controller('remitos')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('remitos')
 export class RemitosController {
   constructor(private readonly service: RemitosService) {}
 
+  @ApiOperation({ summary: 'Listar remitos · Fase 3 — aún no activo' })
   @Get()
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   list(
@@ -30,6 +34,7 @@ export class RemitosController {
     return this.service.findAll(auth.tenantId, clienteId);
   }
 
+  @ApiOperation({ summary: 'Obtener remito por ID · Fase 3 — aún no activo' })
   @Get(':id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -37,6 +42,7 @@ export class RemitosController {
     return this.service.findOne(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Crear remito · Fase 3 — aún no activo' })
   @Post()
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateRemitoDto, @CurrentAuth() auth: AuthPayload) {
@@ -44,6 +50,7 @@ export class RemitosController {
     return this.service.create(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Actualizar remito · Fase 3 — aún no activo' })
   @Patch(':id')
   @Roles('admin', 'supervisor', 'superadmin')
   update(
@@ -55,6 +62,7 @@ export class RemitosController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar remito · Fase 3 — aún no activo' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

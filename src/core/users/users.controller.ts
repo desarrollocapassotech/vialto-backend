@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -8,11 +9,14 @@ import { AuthPayload } from '../auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
+@ApiTags('Core — Usuarios')
+@ApiBearerAuth('clerk-jwt')
 @Controller('users')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class UsersController {
   constructor(private readonly service: UsersService) {}
 
+  @ApiOperation({ summary: 'Listar usuarios de la organización' })
   @Get()
   @Roles('admin', 'supervisor', 'superadmin')
   list(@CurrentAuth() auth: AuthPayload) {
@@ -20,6 +24,7 @@ export class UsersController {
     return this.service.listByTenant(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Invitar usuario a la organización' })
   @Post('invite')
   @Roles('admin', 'superadmin')
   invite(
@@ -31,6 +36,7 @@ export class UsersController {
     return this.service.inviteToOrg(auth.tenantId, email, role);
   }
 
+  @ApiOperation({ summary: 'Cambiar rol de un usuario' })
   @Patch(':userId/role')
   @Roles('admin', 'superadmin')
   updateRole(
@@ -42,6 +48,7 @@ export class UsersController {
     return this.service.updateRole(auth.tenantId, userId, role);
   }
 
+  @ApiOperation({ summary: 'Eliminar usuario de la organización' })
   @Delete(':userId')
   @Roles('admin', 'superadmin')
   remove(@CurrentAuth() auth: AuthPayload, @Param('userId') userId: string) {

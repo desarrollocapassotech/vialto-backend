@@ -10,6 +10,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ImportacionesService } from './importaciones.service';
@@ -24,6 +25,8 @@ import { CurrentAuth } from '../../core/auth/current-auth.decorator';
 import { type AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
+@ApiTags('Admin — Importaciones')
+@ApiBearerAuth('clerk-jwt')
 @Controller('importaciones')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class ImportacionesController {
@@ -43,6 +46,9 @@ export class ImportacionesController {
    * Sube un archivo Excel, lo valida y devuelve una previsualización.
    * No guarda nada en las tablas de negocio.
    */
+  @ApiOperation({ summary: 'Previsualizar importación de Excel (sin guardar datos)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
   @Post('preview')
   @Roles('admin', 'superadmin')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
@@ -59,6 +65,7 @@ export class ImportacionesController {
   /**
    * Confirma la importación a partir de una sesión de previsualización.
    */
+  @ApiOperation({ summary: 'Confirmar importación a partir de sesión de previsualización' })
   @Post('confirm')
   @Roles('admin', 'superadmin')
   confirm(@Body() dto: ConfirmImportDto, @CurrentAuth() auth: AuthPayload) {
@@ -67,6 +74,7 @@ export class ImportacionesController {
   }
 
   /** Historial de importaciones del tenant */
+  @ApiOperation({ summary: 'Historial de importaciones del tenant' })
   @Get('logs')
   @Roles('admin', 'supervisor', 'superadmin')
   getLogs(@CurrentAuth() auth: AuthPayload, @Query('modulo') modulo?: string) {
@@ -75,6 +83,7 @@ export class ImportacionesController {
   }
 
   /** Detalle de un log específico (incluye resultado por fila) */
+  @ApiOperation({ summary: 'Detalle de un log de importación (resultado por fila)' })
   @Get('logs/:id')
   @Roles('admin', 'supervisor', 'superadmin')
   getLog(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -85,6 +94,7 @@ export class ImportacionesController {
   // ── Admin (superadmin): gestión de templates ───────────────────────────
 
   /** Crea o actualiza el template de un módulo para un tenant */
+  @ApiOperation({ summary: 'Crear o actualizar template de importación para un módulo y tenant' })
   @Post('templates')
   @Roles('superadmin')
   createTemplate(@Body() dto: CreateTemplateDto) {
@@ -92,6 +102,7 @@ export class ImportacionesController {
   }
 
   /** Lista los templates del tenant actual (superadmin puede pasar tenantId en query) */
+  @ApiOperation({ summary: 'Listar templates de importación del tenant' })
   @Get('templates')
   @Roles('admin', 'superadmin')
   getTemplates(

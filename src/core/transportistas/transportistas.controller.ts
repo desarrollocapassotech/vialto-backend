@@ -8,6 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TransportistasService } from './transportistas.service';
 import { CreateTransportistaDto } from './dto/create-transportista.dto';
 import { UpdateTransportistaDto } from './dto/update-transportista.dto';
@@ -19,11 +20,14 @@ import { AuthPayload } from '../auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
+@ApiTags('Core — Transportistas')
+@ApiBearerAuth('clerk-jwt')
 @Controller('transportistas')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class TransportistasController {
   constructor(private readonly service: TransportistasService) {}
 
+  @ApiOperation({ summary: 'Listar todos los transportistas' })
   @Get()
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
@@ -31,6 +35,7 @@ export class TransportistasController {
     return this.service.findAll(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Obtener transportista por ID' })
   @Get(':id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -38,6 +43,7 @@ export class TransportistasController {
     return this.service.findOne(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Crear transportista' })
   @Post()
   @Roles('admin', 'supervisor', 'superadmin')
   create(@Body() dto: CreateTransportistaDto, @CurrentAuth() auth: AuthPayload) {
@@ -45,6 +51,7 @@ export class TransportistasController {
     return this.service.create(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Actualizar datos del transportista' })
   @Patch(':id')
   @Roles('admin', 'supervisor', 'superadmin')
   update(
@@ -56,6 +63,7 @@ export class TransportistasController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar transportista' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

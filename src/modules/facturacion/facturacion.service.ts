@@ -201,11 +201,27 @@ export class FacturacionService {
       // Revinculación de viajes si se indica
       if (dto.viajeIds !== undefined) {
         const newIds = dto.viajeIds;
-        // Desvincular viajes que ya no pertenecen a esta factura
-        await tx.viaje.updateMany({
+
+        // Obtener IDs de viajes que se van a desvincular
+        const desvinculados = await tx.viaje.findMany({
           where: { facturaId: id, tenantId, id: { notIn: newIds } },
-          data: { facturaId: null },
+          select: { id: true },
         });
+        const idsDesvinculados = desvinculados.map((v) => v.id);
+
+        if (idsDesvinculados.length > 0) {
+          // Revertir estado a 'finalizado' solo si estaban en 'facturado_sin_cobrar'
+          await tx.viaje.updateMany({
+            where: { id: { in: idsDesvinculados }, tenantId, estado: 'facturado_sin_cobrar' },
+            data: { estado: 'finalizado_sin_facturar' },
+          });
+          // Desvincular todos
+          await tx.viaje.updateMany({
+            where: { id: { in: idsDesvinculados }, tenantId },
+            data: { facturaId: null },
+          });
+        }
+
         // Vincular viajes nuevos y existentes
         if (newIds.length > 0) {
           await tx.viaje.updateMany({
@@ -244,7 +260,12 @@ export class FacturacionService {
 
   async removeFactura(id: string, tenantId: string) {
     await this.findFactura(id, tenantId);
-    // Desvincular viajes antes de eliminar
+    // Revertir estado de viajes facturados_sin_cobrar a finalizado
+    await this.prisma.viaje.updateMany({
+      where: { facturaId: id, tenantId, estado: 'facturado_sin_cobrar' },
+      data: { estado: 'finalizado_sin_facturar' },
+    });
+    // Desvincular todos los viajes
     await this.prisma.viaje.updateMany({
       where: { facturaId: id, tenantId },
       data: { facturaId: null },

@@ -20,10 +20,6 @@ import {
 } from '../../shared/util/factura-estado-lectura';
 import { createClerkClient } from '@clerk/backend';
 import { ViajesService } from '../../modules/viajes/viajes.service';
-import { CargasService } from '../../modules/viajes/cargas.service';
-import { CargasPaginatedQueryDto } from '../../modules/viajes/dto/cargas-paginated-query.dto';
-import { CreateCargaDto } from '../../modules/viajes/dto/create-carga.dto';
-import { UpdateCargaDto } from '../../modules/viajes/dto/update-carga.dto';
 import { StockService } from '../../modules/stock/stock.service';
 import { ProductosPaginatedQueryDto } from '../../modules/stock/dto/productos-paginated-query.dto';
 import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
@@ -78,7 +74,6 @@ export class PlatformService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly viajesService: ViajesService,
-    private readonly cargasService: CargasService,
     private readonly stockService: StockService,
   ) {}
 
@@ -134,29 +129,6 @@ export class PlatformService {
       );
   }
 
-  listCargasPaginated(
-    tenantId: string | undefined,
-    query: CargasPaginatedQueryDto,
-  ) {
-    const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.cargasService.findAllPaginated(scopedTenantId, query);
-  }
-
-  async createCarga(tenantId: string | undefined, dto: CreateCargaDto) {
-    const scopedTenantId = this.requiredTenantId(tenantId);
-    await this.assertTenantExists(scopedTenantId);
-    return this.cargasService.create(scopedTenantId, dto);
-  }
-
-  getCarga(tenantId: string | undefined, id: string) {
-    const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.cargasService.findOne(id, scopedTenantId);
-  }
-
-  updateCarga(tenantId: string | undefined, id: string, dto: UpdateCargaDto) {
-    const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.cargasService.update(id, scopedTenantId, dto);
-  }
 
   async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
     const scopedTenantId = this.requiredTenantId(tenantId);

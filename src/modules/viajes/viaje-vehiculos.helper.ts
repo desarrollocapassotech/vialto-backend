@@ -59,28 +59,30 @@ export async function reemplazarVehiculosDelViaje(
   });
 }
 
-export async function reemplazarCargasDelViaje(
+export async function reemplazarProductosDelViaje(
   db: Prisma.TransactionClient,
   viajeId: string,
-  cargaIds: string[],
+  items: Array<{ productoId: string; cantidad?: number; pesoKg?: number }>,
   tenantId: string,
 ): Promise<void> {
-  await db.viajeCarga.deleteMany({ where: { viajeId } });
-  if (cargaIds.length === 0) return;
-  await db.viajeCarga.createMany({
-    data: cargaIds.map((cargaId, orden) => ({
+  await db.viajeProducto.deleteMany({ where: { viajeId } });
+  if (items.length === 0) return;
+  await db.viajeProducto.createMany({
+    data: items.map(({ productoId, cantidad, pesoKg }, orden) => ({
       tenantId,
       viajeId,
-      cargaId,
+      productoId,
       orden,
+      cantidad: cantidad ?? null,
+      pesoKg: pesoKg ?? null,
     })),
   });
 }
 
-export function idsCargasDelViaje(v: {
-  cargasViaje: Array<{ cargaId: string; orden: number }>;
+export function idsProductosDelViaje(v: {
+  productosViaje: Array<{ productoId: string; orden: number }>;
 }): string[] {
-  return [...v.cargasViaje].sort((a, b) => a.orden - b.orden).map((x) => x.cargaId);
+  return [...v.productosViaje].sort((a, b) => a.orden - b.orden).map((x) => x.productoId);
 }
 
 /** Args validados para el `include` de viajes con `vehiculosViaje` + `vehiculo` (exportado para que TS resuelva bien `ViajeGetPayload<typeof …>`). */
@@ -90,10 +92,10 @@ export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultAr
     transportista: { select: { id: true, nombre: true } },
     /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */
     factura: { select: { id: true, numero: true } },
-    cargasViaje: {
+    productosViaje: {
       orderBy: { orden: 'asc' },
       include: {
-        carga: {
+        producto: {
           select: { id: true, nombre: true, activo: true, unidadMedida: true },
         },
       },

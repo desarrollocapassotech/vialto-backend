@@ -10,6 +10,7 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
 import { OtroGastoDto } from './create-viaje.dto';
+import { ViajeProductoItemDto } from './viaje-producto-item.dto';
 
 export class PagoTransportistaDto {
   @IsNumber()
@@ -45,8 +46,8 @@ export class UpdateViajeDto {
   @IsOptional() @IsString() destino?: string;
   @IsOptional() @IsDateString() fechaCarga?: string;
   @IsOptional() @IsDateString() fechaDescarga?: string;
-  /** Reemplaza todas las cargas del viaje (vacío = sin cargas). */
-  @IsOptional() @IsArray() @IsString({ each: true }) cargaIds?: string[];
+  /** Reemplaza todos los productos del viaje (vacío = sin productos). */
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ViajeProductoItemDto) productoItems?: ViajeProductoItemDto[];
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;

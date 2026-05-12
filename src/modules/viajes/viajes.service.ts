@@ -12,9 +12,9 @@ import { generateNumeroViaje } from './generate-viaje-numero';
 import { assertViajeOperacionExclusiva, mergeViajeOperacionIds } from './viaje-operacion-exclusiva';
 import {
   assertVehiculosDelViaje,
-  idsCargasDelViaje,
+  idsProductosDelViaje,
   normalizarVehiculoIds,
-  reemplazarCargasDelViaje,
+  reemplazarProductosDelViaje,
   reemplazarVehiculosDelViaje,
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
   type ViajeConVehiculosViaje,
@@ -28,10 +28,49 @@ import {
   normalizarEstadoViaje,
   type ViajeEstado,
 } from './viaje-estados';
-import {
-  assertCargasAsignables,
-  normalizarCargaIds,
-} from '../../shared/util/carga-viaje';
+
+type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
+
+function normalizarProductoItems(raw: ProductoItem[] | undefined | null): ProductoItem[] {
+  if (!raw?.length) return [];
+  const seen = new Set<string>();
+  const out: ProductoItem[] = [];
+  for (const item of raw) {
+    const id = String(item.productoId ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ productoId: id, cantidad: item.cantidad, pesoKg: item.pesoKg });
+  }
+  return out;
+}
+
+async function assertProductosAsignables(
+  prisma: PrismaService,
+  tenantId: string,
+  items: ProductoItem[],
+  opts: { modo: 'create' | 'update'; currentProductoIds?: ReadonlySet<string> },
+): Promise<void> {
+  if (items.length === 0) return;
+  const ids = items.map((i) => i.productoId);
+  const rows = await prisma.producto.findMany({
+    where: { tenantId, id: { in: ids } },
+    select: { id: true, activo: true },
+  });
+  if (rows.length !== ids.length) {
+    throw new BadRequestException('Algún producto no existe o no pertenece a esta empresa.');
+  }
+  const current = opts.currentProductoIds ?? new Set<string>();
+  for (const row of rows) {
+    if (!row.activo) {
+      const conserva = opts.modo === 'update' && current.has(row.id);
+      if (opts.modo === 'create' || !conserva) {
+        throw new BadRequestException(
+          'Ese producto está inactivo. Elegí otro o reactivalo desde Productos.',
+        );
+      }
+    }
+  }
+}
 
 function assertFechaDescargaValida(fechaCarga: Date, fechaDescarga: Date): void {
   const fc = new Date(fechaCarga.toISOString().slice(0, 10));
@@ -377,8 +416,8 @@ export class ViajesService {
         requiereFlotaPropia: true,
       });
     }
-    const cargaIdsNorm = normalizarCargaIds(dto.cargaIds);
-    await assertCargasAsignables(this.prisma, tenantId, cargaIdsNorm, {
+    const productoItemsNorm = normalizarProductoItems(dto.productoItems);
+    await assertProductosAsignables(this.prisma, tenantId, productoItemsNorm, {
       modo: 'create',
     });
     assertFechaDescargaValida(new Date(dto.fechaCarga), new Date(dto.fechaDescarga));
@@ -418,7 +457,7 @@ export class ViajesService {
       };
       const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
-      await reemplazarCargasDelViaje(tx, viaje.id, cargaIdsNorm, tenantId);
+      await reemplazarProductosDelViaje(tx, viaje.id, productoItemsNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -457,11 +496,11 @@ export class ViajesService {
       });
     }
 
-    if (dto.cargaIds !== undefined) {
-      const nextCargas = normalizarCargaIds(dto.cargaIds);
-      await assertCargasAsignables(this.prisma, tenantId, nextCargas, {
+    if (dto.productoItems !== undefined) {
+      const nextProductos = normalizarProductoItems(dto.productoItems);
+      await assertProductosAsignables(this.prisma, tenantId, nextProductos, {
         modo: 'update',
-        currentCargaIds: new Set(idsCargasDelViaje(current)),
+        currentProductoIds: new Set(idsProductosDelViaje(current)),
       });
     }
 
@@ -494,7 +533,7 @@ export class ViajesService {
             : null,
     } as any;
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
-    delete (data as { cargaIds?: unknown }).cargaIds;
+    delete (data as { productoItems?: unknown }).productoItems;
     if (dto.otrosGastos !== undefined) {
       (data as any).otrosGastos = dto.otrosGastos as unknown as Prisma.InputJsonValue;
     }
@@ -529,11 +568,11 @@ export class ViajesService {
         data,
       });
       await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
-      if (dto.cargaIds !== undefined) {
-        await reemplazarCargasDelViaje(
+      if (dto.productoItems !== undefined) {
+        await reemplazarProductosDelViaje(
           tx,
           id,
-          normalizarCargaIds(dto.cargaIds),
+          normalizarProductoItems(dto.productoItems),
           tenantId,
         );
       }

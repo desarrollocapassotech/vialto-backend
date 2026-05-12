@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
+import { ViajeProductoItemDto } from './viaje-producto-item.dto';
 
 export class OtroGastoDto {
   @IsString() @IsNotEmpty() descripcion: string;
@@ -39,8 +40,8 @@ export class CreateViajeDto {
   @IsString() @IsNotEmpty() destino: string;
   @IsDateString() fechaCarga: string;
   @IsDateString() fechaDescarga: string;
-  /** IDs del catálogo de cargas (orden = orden del array). */
-  @IsOptional() @IsArray() @IsString({ each: true }) cargaIds?: string[];
+  /** Productos a transportar (orden = orden del array). */
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ViajeProductoItemDto) productoItems?: ViajeProductoItemDto[];
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;

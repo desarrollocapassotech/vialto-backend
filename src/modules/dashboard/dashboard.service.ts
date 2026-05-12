@@ -64,6 +64,10 @@ export type OwnerDashboardResponse = {
     completados: MetricCompare;
     /** Suma de montos (snapshot actual, no filtrado por el período del selector). */
     sinFacturarMonto: number;
+    /** Conteos snapshot por estado (pipeline actual). */
+    sinFacturar: number;
+    sinCobrar: number;
+    cobrados: number;
   };
 };
 
@@ -187,11 +191,14 @@ export class DashboardService {
         : null,
       hasViajes
         ? Promise.all([
-            this.prisma.viaje.count({ where: { tenantId, estado: 'en_curso' } }),
-            this.countEnCursoAt(tenantId, new Date(resolved.prevEnd.getTime() - 1)),
+            this.countEstadoEnVentana(tenantId, 'en_curso', resolved.start, resolved.end),
+            this.countEstadoEnVentana(tenantId, 'en_curso', resolved.prevStart, resolved.prevEnd),
             this.countCompletadosEnVentana(tenantId, resolved.start, resolved.end),
             this.countCompletadosEnVentana(tenantId, resolved.prevStart, resolved.prevEnd),
             this.sumMontoSinFacturar(tenantId),
+            this.countEstadoEnVentana(tenantId, 'finalizado_sin_facturar', resolved.start, resolved.end),
+            this.countEstadoEnVentana(tenantId, 'facturado_sin_cobrar', resolved.start, resolved.end),
+            this.countEstadoEnVentana(tenantId, 'cobrado', resolved.start, resolved.end),
           ])
         : null,
     ]);
@@ -251,11 +258,14 @@ export class DashboardService {
     }
 
     if (viajesResult) {
-      const [enCursoNow, enCursoSnapshotPrev, completados, completadosPrev, sinFacturarMonto] = viajesResult;
+      const [enCursoNow, enCursoSnapshotPrev, completados, completadosPrev, sinFacturarMonto, sinFacturar, sinCobrar, cobrados] = viajesResult;
       out.viajes = {
         enCurso: buildMetric(enCursoNow, enCursoSnapshotPrev, 'higher_better'),
         completados: buildMetric(completados, completadosPrev, 'higher_better'),
         sinFacturarMonto: roundMoney(sinFacturarMonto),
+        sinFacturar,
+        sinCobrar,
+        cobrados,
       };
     }
 
@@ -596,6 +606,29 @@ export class DashboardService {
         items: itemsSinFactura,
       },
     };
+  }
+
+  /**
+   * Cuenta viajes con el estado dado cuya fecha de atribución al período cae en [start, end).
+   * Atribución: fechaCarga → fechaFinalizado → createdAt (primer campo no nulo).
+   */
+  private async countEstadoEnVentana(
+    tenantId: string,
+    estado: string,
+    start: Date,
+    end: Date,
+  ): Promise<number> {
+    return this.prisma.viaje.count({
+      where: {
+        tenantId,
+        estado,
+        OR: [
+          { fechaCarga: { gte: start, lt: end } },
+          { fechaCarga: null, fechaFinalizado: { gte: start, lt: end } },
+          { fechaCarga: null, fechaFinalizado: null, createdAt: { gte: start, lt: end } },
+        ],
+      },
+    });
   }
 
   /** Viajes “en curso” en el instante `at` (estado actual en BD + ventana temporal). */

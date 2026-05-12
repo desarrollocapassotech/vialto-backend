@@ -1,51 +1,238 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
+import { ProductosPaginatedQueryDto } from './dto/productos-paginated-query.dto';
+import { CreatePresentacionDto } from './dto/create-presentacion.dto';
+import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers de normalización (mismo patrón que Carga)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function normalizarNombre(nombre: string): string {
+  return String(nombre ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function displayNombre(nombre: string): string {
+  return String(nombre ?? '').trim().replace(/\s+/g, ' ');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shapes públicas
+// ─────────────────────────────────────────────────────────────────────────────
+
+const productoSelect = {
+  id: true,
+  tenantId: true,
+  nombre: true,
+  descripcion: true,
+  unidadMedida: true,
+  activo: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+const productoWithPresentacionesSelect = {
+  ...productoSelect,
+  presentaciones: {
+    select: {
+      id: true,
+      productoId: true,
+      nombre: true,
+      cantidadEquivalente: true,
+      unidadEquivalente: true,
+      pesoKg: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+    orderBy: { nombre: 'asc' as const },
+  },
+} as const;
 
 @Injectable()
 export class StockService {
   constructor(private readonly prisma: PrismaService) {}
 
-  listProductos(tenantId: string) {
-    return this.prisma.producto.findMany({
-      where: { tenantId },
-      orderBy: { nombre: 'asc' },
-    });
+  // ───────────────── PRODUCTOS ──────────────────────────────────────────────
+
+  async findAllProductosPaginated(tenantId: string, query: ProductosPaginatedQueryDto) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    const where: Prisma.ProductoWhereInput = { tenantId };
+
+    const q = query.q?.trim();
+    if (q) {
+      where.nombre = { contains: q, mode: 'insensitive' };
+    }
+
+    const fa = query.filtroActivo ?? 'todos';
+    if (fa === 'activos') where.activo = true;
+    else if (fa === 'inactivos') where.activo = false;
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.producto.count({ where }),
+      this.prisma.producto.findMany({
+        where,
+        orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: productoSelect,
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return {
+      items: rows,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async findProducto(id: string, tenantId: string) {
-    const row = await this.prisma.producto.findFirst({ where: { id, tenantId } });
+    const row = await this.prisma.producto.findFirst({
+      where: { id, tenantId },
+      select: productoWithPresentacionesSelect,
+    });
     if (!row) throw new NotFoundException('Producto no encontrado');
     return row;
   }
 
-  createProducto(tenantId: string, dto: CreateProductoDto) {
-    return this.prisma.producto.create({
+  async createProducto(tenantId: string, dto: CreateProductoDto) {
+    const nombre = displayNombre(dto.nombre);
+    if (!nombre) throw new ConflictException('El nombre no puede quedar vacío.');
+    const nombreNormalizado = normalizarNombre(nombre);
+
+    try {
+      return await this.prisma.producto.create({
+        data: {
+          tenantId,
+          nombre,
+          nombreNormalizado,
+          descripcion: dto.descripcion?.trim() || null,
+          unidadMedida: dto.unidadMedida?.trim() || '',
+          activo: dto.activo ?? true,
+        },
+        select: productoSelect,
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un producto con ese nombre (sin distinguir mayúsculas).');
+      }
+      throw e;
+    }
+  }
+
+  async updateProducto(id: string, tenantId: string, dto: UpdateProductoDto) {
+    const current = await this.prisma.producto.findFirst({ where: { id, tenantId } });
+    if (!current) throw new NotFoundException('Producto no encontrado');
+
+    const nombre =
+      dto.nombre !== undefined ? displayNombre(dto.nombre) : current.nombre;
+    if (dto.nombre !== undefined && !nombre) {
+      throw new ConflictException('El nombre no puede quedar vacío.');
+    }
+    const nombreNormalizado =
+      dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
+
+    try {
+      return await this.prisma.producto.update({
+        where: { id },
+        data: {
+          ...(dto.nombre !== undefined ? { nombre, nombreNormalizado } : {}),
+          ...(dto.descripcion !== undefined
+            ? { descripcion: dto.descripcion?.trim() || null }
+            : {}),
+          ...(dto.unidadMedida !== undefined
+            ? { unidadMedida: dto.unidadMedida?.trim() || '' }
+            : {}),
+          ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
+        },
+        select: productoSelect,
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un producto con ese nombre (sin distinguir mayúsculas).');
+      }
+      throw e;
+    }
+  }
+
+  // ───────────────── PRESENTACIONES ─────────────────────────────────────────
+
+  async listPresentaciones(productoId: string, tenantId: string) {
+    await this.findProducto(productoId, tenantId);
+    return this.prisma.presentacion.findMany({
+      where: { productoId },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
+  async createPresentacion(productoId: string, tenantId: string, dto: CreatePresentacionDto) {
+    await this.findProducto(productoId, tenantId);
+    return this.prisma.presentacion.create({
       data: {
         tenantId,
-        nombre: dto.nombre,
-        unidad: dto.unidad,
+        productoId,
+        nombre: dto.nombre.trim(),
+        cantidadEquivalente: dto.cantidadEquivalente,
+        unidadEquivalente: dto.unidadEquivalente.trim(),
+        pesoKg: dto.pesoKg ?? null,
       },
     });
   }
 
-  async updateProducto(id: string, tenantId: string, dto: UpdateProductoDto) {
-    await this.findProducto(id, tenantId);
-    return this.prisma.producto.update({ where: { id }, data: dto as any });
+  async updatePresentacion(
+    productoId: string,
+    presentacionId: string,
+    tenantId: string,
+    dto: UpdatePresentacionDto,
+  ) {
+    await this.findProducto(productoId, tenantId);
+    const p = await this.prisma.presentacion.findFirst({
+      where: { id: presentacionId, productoId },
+    });
+    if (!p) throw new NotFoundException('Presentación no encontrada');
+
+    return this.prisma.presentacion.update({
+      where: { id: presentacionId },
+      data: {
+        ...(dto.nombre !== undefined ? { nombre: dto.nombre.trim() } : {}),
+        ...(dto.cantidadEquivalente !== undefined
+          ? { cantidadEquivalente: dto.cantidadEquivalente }
+          : {}),
+        ...(dto.unidadEquivalente !== undefined
+          ? { unidadEquivalente: dto.unidadEquivalente.trim() }
+          : {}),
+        ...(dto.pesoKg !== undefined ? { pesoKg: dto.pesoKg } : {}),
+      },
+    });
   }
 
-  async removeProducto(id: string, tenantId: string) {
-    await this.findProducto(id, tenantId);
-    return this.prisma.producto.delete({ where: { id } });
+  async removePresentacion(productoId: string, presentacionId: string, tenantId: string) {
+    await this.findProducto(productoId, tenantId);
+    const p = await this.prisma.presentacion.findFirst({
+      where: { id: presentacionId, productoId },
+    });
+    if (!p) throw new NotFoundException('Presentación no encontrada');
+    return this.prisma.presentacion.delete({ where: { id: presentacionId } });
   }
+
+  // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
   private async assertProductoCliente(tenantId: string, productoId: string, clienteId: string) {
     const [p, c] = await Promise.all([

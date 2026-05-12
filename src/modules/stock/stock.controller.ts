@@ -5,6 +5,9 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { StockService } from './stock.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
+import { ProductosPaginatedQueryDto } from './dto/productos-paginated-query.dto';
+import { CreatePresentacionDto } from './dto/create-presentacion.dto';
+import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
@@ -25,15 +28,20 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 export class StockController {
   constructor(private readonly service: StockService) {}
 
-  @ApiOperation({ summary: 'Listar productos del catálogo' })
-  @Get('productos')
+  // ───────────────── PRODUCTOS ──────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Listar productos paginado con búsqueda y filtro' })
+  @Get('productos/paginated')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
-  listProductos(@CurrentAuth() auth: AuthPayload) {
+  findProductosPaginated(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: ProductosPaginatedQueryDto,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.listProductos(auth.tenantId);
+    return this.service.findAllProductosPaginated(auth.tenantId, query);
   }
 
-  @ApiOperation({ summary: 'Obtener producto por ID' })
+  @ApiOperation({ summary: 'Obtener producto por ID (incluye presentaciones)' })
   @Get('productos/:id')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   getProducto(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -49,7 +57,7 @@ export class StockController {
     return this.service.createProducto(auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar producto del catálogo' })
+  @ApiOperation({ summary: 'Actualizar producto (incluye desactivar: { activo: false })' })
   @Patch('productos/:id')
   @Roles('admin', 'supervisor', 'superadmin')
   updateProducto(
@@ -61,13 +69,57 @@ export class StockController {
     return this.service.updateProducto(id, auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Eliminar producto del catálogo' })
-  @Delete('productos/:id')
-  @Roles('admin', 'superadmin')
-  removeProducto(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+  // ───────────────── PRESENTACIONES ─────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Listar presentaciones de un producto' })
+  @Get('productos/:productoId/presentaciones')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listPresentaciones(
+    @Param('productoId') productoId: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.removeProducto(id, auth.tenantId);
+    return this.service.listPresentaciones(productoId, auth.tenantId);
   }
+
+  @ApiOperation({ summary: 'Agregar presentación a un producto' })
+  @Post('productos/:productoId/presentaciones')
+  @Roles('admin', 'supervisor', 'superadmin')
+  createPresentacion(
+    @Param('productoId') productoId: string,
+    @Body() dto: CreatePresentacionDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.createPresentacion(productoId, auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Actualizar presentación' })
+  @Patch('productos/:productoId/presentaciones/:id')
+  @Roles('admin', 'supervisor', 'superadmin')
+  updatePresentacion(
+    @Param('productoId') productoId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdatePresentacionDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.updatePresentacion(productoId, id, auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Eliminar presentación' })
+  @Delete('productos/:productoId/presentaciones/:id')
+  @Roles('admin', 'supervisor', 'superadmin')
+  removePresentacion(
+    @Param('productoId') productoId: string,
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.removePresentacion(productoId, id, auth.tenantId);
+  }
+
+  // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
   @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente)' })
   @Get('movimientos')

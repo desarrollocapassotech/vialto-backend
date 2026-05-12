@@ -342,17 +342,42 @@ model MovimientoCuentaCorriente {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Producto {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre    String
-  unidad    String   // kg | unidad | palet | rollo | otro
-  createdAt DateTime @default(now())
+  id                String   @id @default(cuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre            String
+  /** lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive). */
+  nombreNormalizado String
+  descripcion       String?
+  unidadMedida      String   // kg | tn | unidades | rollos | pallets | m3 | litros | otro
+  activo            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  movimientos MovimientoStock[]
+  movimientos    MovimientoStock[]
+  presentaciones Presentacion[]
+
+  @@unique([tenantId, nombreNormalizado])
+  @@index([tenantId])
+  @@index([tenantId, activo])
+  @@map("productos")
+}
+
+model Presentacion {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  productoId          String
+  producto            Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  nombre              String   // ej. "Palet de 8 rollos"
+  cantidadEquivalente Float
+  unidadEquivalente   String   // unidad de la cantidad equivalente
+  pesoKg              Float?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([tenantId])
-  @@map("productos")
+  @@index([productoId])
+  @@map("presentaciones")
 }
 
 model MovimientoStock {

@@ -23,6 +23,13 @@ import { ViajesService } from '../../modules/viajes/viajes.service';
 import { CargasService } from '../../modules/viajes/cargas.service';
 import { CargasPaginatedQueryDto } from '../../modules/viajes/dto/cargas-paginated-query.dto';
 import { CreateCargaDto } from '../../modules/viajes/dto/create-carga.dto';
+import { UpdateCargaDto } from '../../modules/viajes/dto/update-carga.dto';
+import { StockService } from '../../modules/stock/stock.service';
+import { ProductosPaginatedQueryDto } from '../../modules/stock/dto/productos-paginated-query.dto';
+import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
+import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
+import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
+import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -72,6 +79,7 @@ export class PlatformService {
     private readonly prisma: PrismaService,
     private readonly viajesService: ViajesService,
     private readonly cargasService: CargasService,
+    private readonly stockService: StockService,
   ) {}
 
   private requiredTenantId(tenantId?: string) {
@@ -138,6 +146,16 @@ export class PlatformService {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
     return this.cargasService.create(scopedTenantId, dto);
+  }
+
+  getCarga(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.cargasService.findOne(id, scopedTenantId);
+  }
+
+  updateCarga(tenantId: string | undefined, id: string, dto: UpdateCargaDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.cargasService.update(id, scopedTenantId, dto);
   }
 
   async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
@@ -759,5 +777,48 @@ export class PlatformService {
     });
     if (!row) throw new NotFoundException('Factura no encontrada');
     return this.prisma.factura.delete({ where: { id } });
+  }
+
+  // ─── Productos (módulo stock) ────────────────────────────────────────────────
+
+  listProductosPaginated(tenantId: string | undefined, query: ProductosPaginatedQueryDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findAllProductosPaginated(scopedTenantId, query);
+  }
+
+  getProducto(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findProducto(id, scopedTenantId);
+  }
+
+  async createProducto(tenantId: string | undefined, dto: CreateProductoDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.assertTenantExists(scopedTenantId);
+    return this.stockService.createProducto(scopedTenantId, dto);
+  }
+
+  updateProducto(tenantId: string | undefined, id: string, dto: UpdateProductoDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.updateProducto(id, scopedTenantId, dto);
+  }
+
+  listPresentaciones(tenantId: string | undefined, productoId: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listPresentaciones(productoId, scopedTenantId);
+  }
+
+  createPresentacion(tenantId: string | undefined, productoId: string, dto: CreatePresentacionDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.createPresentacion(productoId, scopedTenantId, dto);
+  }
+
+  updatePresentacion(tenantId: string | undefined, productoId: string, id: string, dto: UpdatePresentacionDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.updatePresentacion(productoId, id, scopedTenantId, dto);
+  }
+
+  removePresentacion(tenantId: string | undefined, productoId: string, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.removePresentacion(productoId, id, scopedTenantId);
   }
 }

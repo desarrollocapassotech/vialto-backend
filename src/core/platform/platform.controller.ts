@@ -26,6 +26,12 @@ import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
 import { CargasPaginatedQueryDto } from '../../modules/viajes/dto/cargas-paginated-query.dto';
 import { CreateCargaDto } from '../../modules/viajes/dto/create-carga.dto';
+import { UpdateCargaDto } from '../../modules/viajes/dto/update-carga.dto';
+import { ProductosPaginatedQueryDto } from '../../modules/stock/dto/productos-paginated-query.dto';
+import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
+import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
+import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
+import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 
@@ -88,6 +94,20 @@ export class PlatformController {
     @Body() dto: CreateCargaDto,
   ) {
     return this.service.createCarga(tenantId, dto);
+  }
+
+  @Get('cargas/:id')
+  cargaById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getCarga(tenantId, id);
+  }
+
+  @Patch('cargas/:id')
+  updateCarga(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateCargaDto,
+  ) {
+    return this.service.updateCarga(tenantId, id, dto);
   }
 
   @Get('clientes')
@@ -303,5 +323,81 @@ export class PlatformController {
   @Delete('pagos/:id')
   deletePago(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.deletePago(tenantId, id);
+  }
+
+  // ─── Productos (módulo stock) ────────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Listar productos paginado (superadmin)' })
+  @Get('stock/productos/paginated')
+  productosPaginated(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query() query: ProductosPaginatedQueryDto,
+  ) {
+    return this.service.listProductosPaginated(tenantId, query);
+  }
+
+  @ApiOperation({ summary: 'Obtener producto por ID (superadmin)' })
+  @Get('stock/productos/:id')
+  productoById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getProducto(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Crear producto (superadmin)' })
+  @Post('stock/productos')
+  createProducto(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateProductoDto,
+  ) {
+    return this.service.createProducto(tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Actualizar producto (superadmin)' })
+  @Patch('stock/productos/:id')
+  updateProducto(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateProductoDto,
+  ) {
+    return this.service.updateProducto(tenantId, id, dto);
+  }
+
+  @ApiOperation({ summary: 'Listar presentaciones de producto (superadmin)' })
+  @Get('stock/productos/:productoId/presentaciones')
+  listPresentaciones(
+    @Param('productoId') productoId: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.listPresentaciones(tenantId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Agregar presentación a producto (superadmin)' })
+  @Post('stock/productos/:productoId/presentaciones')
+  createPresentacion(
+    @Param('productoId') productoId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreatePresentacionDto,
+  ) {
+    return this.service.createPresentacion(tenantId, productoId, dto);
+  }
+
+  @ApiOperation({ summary: 'Actualizar presentación (superadmin)' })
+  @Patch('stock/productos/:productoId/presentaciones/:id')
+  updatePresentacion(
+    @Param('productoId') productoId: string,
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdatePresentacionDto,
+  ) {
+    return this.service.updatePresentacion(tenantId, productoId, id, dto);
+  }
+
+  @ApiOperation({ summary: 'Eliminar presentación (superadmin)' })
+  @Delete('stock/productos/:productoId/presentaciones/:id')
+  removePresentacion(
+    @Param('productoId') productoId: string,
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.removePresentacion(tenantId, productoId, id);
   }
 }

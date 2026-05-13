@@ -16,6 +16,8 @@ export class ClerkVialtoRoleService {
     { value: string | undefined; at: number }
   >();
 
+  private readonly displayCache = new Map<string, { value: string | null; at: number }>();
+
   private readonly ttlMs = 5 * 60 * 1000;
 
   /** IDs de usuario Clerk (separados por coma) con rol superadmin — sin llamada a API. */
@@ -51,6 +53,43 @@ export class ClerkVialtoRoleService {
       return value;
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * Nombre o correo legible para mostrar en UI (p. ej. auditoría de movimientos).
+   * Caché separada de `getVialtoRoleFromApi` para no mezclar TTL con datos distintos.
+   */
+  async getUserDisplayLabel(userId: string | null | undefined): Promise<string | null> {
+    const id = userId?.trim();
+    if (!id) return null;
+
+    const now = Date.now();
+    const hit = this.displayCache.get(id);
+    if (hit && now - hit.at < this.ttlMs) {
+      return hit.value;
+    }
+
+    if (!process.env.CLERK_SECRET_KEY) {
+      return null;
+    }
+
+    try {
+      const user = await this.clerk.users.getUser(id);
+      const fn = user.firstName?.trim() ?? '';
+      const ln = user.lastName?.trim() ?? '';
+      const full = [fn, ln].filter(Boolean).join(' ').trim();
+      const email =
+        user.primaryEmailAddress?.emailAddress?.trim() ||
+        user.emailAddresses?.[0]?.emailAddress?.trim() ||
+        '';
+      const un = user.username?.trim() || '';
+      const label = full || email || un || null;
+      this.displayCache.set(id, { value: label, at: now });
+      return label;
+    } catch {
+      this.displayCache.set(id, { value: null, at: now });
+      return null;
     }
   }
 }

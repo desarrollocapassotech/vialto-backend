@@ -30,6 +30,8 @@ import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
 import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
+import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
+import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 
@@ -397,5 +399,61 @@ export class PlatformController {
     @Query('productoId') productoId?: string,
   ) {
     return this.service.listStockDisponible(tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Formato número de remito egresos (superadmin)' })
+  @Get('stock/egresos/remito-config')
+  getEgresoRemitoConfig(@Query('tenantId') tenantId?: string) {
+    return this.service.getEgresoRemitoConfig(tenantId);
+  }
+
+  @ApiOperation({ summary: 'Actualizar formato número de remito egresos (superadmin)' })
+  @Patch('stock/egresos/remito-config')
+  patchEgresoRemitoConfig(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateStockEgresoRemitoConfigDto,
+  ) {
+    return this.service.upsertEgresoRemitoConfig(tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Registrar egreso (superadmin)' })
+  @Post('stock/egresos')
+  createEgreso(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateEgresoDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.createEgreso(tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar egresos (superadmin)' })
+  @Get('stock/egresos')
+  listEgresos(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    return this.service.listEgresos(tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Listar movimientos de stock (superadmin)' })
+  @Get('stock/movimientos')
+  listMovimientosStock(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('productoId') productoId?: string,
+    @Query('clienteId') clienteId?: string,
+    @Query('soloIngresoEgreso') soloIngresoEgresoRaw?: string,
+  ) {
+    const soloIngresoEgreso =
+      soloIngresoEgresoRaw === '1' ||
+      soloIngresoEgresoRaw === 'true' ||
+      soloIngresoEgresoRaw === 'yes';
+    return this.service.listMovimientosStock(tenantId, productoId, clienteId, soloIngresoEgreso);
+  }
+
+  @ApiOperation({ summary: 'Obtener movimiento de stock por ID (superadmin)' })
+  @Get('stock/movimientos/:id')
+  getMovimientoStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getMovimientoStock(tenantId, id);
   }
 }

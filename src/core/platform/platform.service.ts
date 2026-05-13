@@ -27,6 +27,8 @@ import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
 import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
+import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
+import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -808,5 +810,42 @@ export class PlatformService {
   listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId);
+  }
+
+  getEgresoRemitoConfig(tenantId: string | undefined) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.getEgresoRemitoConfig(scopedTenantId);
+  }
+
+  upsertEgresoRemitoConfig(tenantId: string | undefined, dto: UpdateStockEgresoRemitoConfigDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.upsertEgresoRemitoConfig(scopedTenantId, dto);
+  }
+
+  createEgreso(tenantId: string | undefined, dto: CreateEgresoDto, createdBy: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
+  }
+
+  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId);
+  }
+
+  listMovimientosStock(
+    tenantId: string | undefined,
+    productoId?: string,
+    clienteId?: string,
+    soloIngresoEgreso?: boolean,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listMovimientos(scopedTenantId, productoId, clienteId, {
+      soloIngresoEgreso: soloIngresoEgreso === true,
+    });
+  }
+
+  getMovimientoStock(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findMovimiento(id, scopedTenantId);
   }
 }

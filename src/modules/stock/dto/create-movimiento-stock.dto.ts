@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsNumber, IsOptional, IsString, IsNotEmpty } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, IsNotEmpty } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateMovimientoStockDto {
@@ -7,5 +7,7 @@ export class CreateMovimientoStockDto {
   @IsIn(['ingreso', 'egreso', 'division']) tipo: string;
   @IsNumber() @Type(() => Number) cantidad: number;
   @IsOptional() @IsString() remitoId?: string;
-  @IsDateString() fecha: string;
+  @IsString() @IsNotEmpty()
+  /** ISO 8601 (recomendado) o solo `YYYY-MM-DD` (medianoche Argentina). */
+  fecha: string;
 }

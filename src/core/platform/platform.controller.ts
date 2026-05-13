@@ -29,6 +29,7 @@ import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
 import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
 import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
+import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 
@@ -366,5 +367,35 @@ export class PlatformController {
     @Query('tenantId') tenantId?: string,
   ) {
     return this.service.removePresentacion(tenantId, productoId, id);
+  }
+
+  @ApiOperation({ summary: 'Registrar ingreso al depósito (superadmin)' })
+  @Post('stock/ingresos')
+  createIngreso(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateIngresoDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.createIngreso(tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar ingresos al depósito (superadmin)' })
+  @Get('stock/ingresos')
+  listIngresos(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    return this.service.listIngresos(tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Stock disponible (superadmin)' })
+  @Get('stock/disponible')
+  listStockDisponible(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    return this.service.listStockDisponible(tenantId, clienteId, productoId);
   }
 }

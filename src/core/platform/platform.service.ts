@@ -26,6 +26,7 @@ import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
 import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
 import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
+import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -792,5 +793,20 @@ export class PlatformService {
   removePresentacion(tenantId: string | undefined, productoId: string, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.removePresentacion(productoId, id, scopedTenantId);
+  }
+
+  createIngreso(tenantId: string | undefined, dto: CreateIngresoDto, createdBy: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
+  }
+
+  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId);
+  }
+
+  listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId);
   }
 }

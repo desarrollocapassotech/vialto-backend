@@ -34,6 +34,7 @@ model Tenant {
   movimientosCc           MovimientoCuentaCorriente[]
   productos               Producto[]
   movimientosStock        MovimientoStock[]
+  stockItems              StockItem[]
   cargasCombustible       CargaCombustible[]
   intervenciones          Intervencion[]
   remitos                 Remito[]
@@ -63,6 +64,7 @@ model Cliente {
   facturas         Factura[]
   movimientosCc    MovimientoCuentaCorriente[]
   movimientosStock MovimientoStock[]
+  stockItems       StockItem[]
   remitos          Remito[]
 
   @@index([tenantId])
@@ -328,6 +330,7 @@ model Producto {
   movimientos    MovimientoStock[]
   presentaciones Presentacion[]
   viajesProducto ViajeProducto[]
+  stockItems     StockItem[]
 
   @@unique([tenantId, nombreNormalizado])
   @@index([tenantId])
@@ -343,9 +346,11 @@ model Presentacion {
   nombre              String   // ej. "Palet de 8 rollos"
   cantidadEquivalente Float
   unidadEquivalente   String   // unidad de la cantidad equivalente
-  pesoKg              Float?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  movimientos MovimientoStock[]
+  stockItems  StockItem[]
 
   @@index([tenantId])
   @@index([productoId])
@@ -353,27 +358,53 @@ model Presentacion {
 }
 
 model MovimientoStock {
-  id         String   @id @default(cuid())
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  productoId String
-  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  clienteId  String
-  cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  tipo       String   // ingreso | egreso | division
-  cantidad   Float
-  pesoKg     Float?
-  remitoId   String?
-  remito     Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
-  fecha      DateTime
-  createdAt  DateTime @default(now())
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  productoId      String
+  producto        Producto      @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  presentacionId  String?
+  presentacion    Presentacion? @relation(fields: [presentacionId], references: [id], onDelete: SetNull)
+  clienteId       String
+  cliente         Cliente       @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  tipo            String        // ingreso | egreso | division
+  cantidad        Float
+  remitoId        String?
+  remito          Remito?       @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  remitoUrl       String?
+  observaciones   String?
+  createdBy       String        @default("")
+  fecha           DateTime
+  createdAt       DateTime      @default(now())
 
   @@index([tenantId])
   @@index([tenantId, productoId])
+  @@index([tenantId, presentacionId])
   @@index([tenantId, clienteId])
   @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
+  @@index([tenantId, createdAt(sort: Desc)])
   @@map("movimientos_stock")
+}
+
+model StockItem {
+  id             String       @id @default(cuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  productoId     String
+  producto       Producto     @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  presentacionId String
+  presentacion   Presentacion @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
+  clienteId      String
+  cliente        Cliente      @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  cantidad       Float        @default(0)
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([productoId, presentacionId, clienteId])
+  @@index([tenantId])
+  @@index([tenantId, clienteId])
+  @@index([tenantId, productoId])
+  @@map("stock_items")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

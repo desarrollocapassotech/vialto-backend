@@ -10,6 +10,7 @@ import { CreatePresentacionDto } from './dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
+import { CreateIngresoDto } from './dto/create-ingreso.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -167,5 +168,39 @@ export class StockController {
   removeMovimiento(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.removeMovimiento(id, auth.tenantId);
+  }
+
+  // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────
+
+  @ApiOperation({ summary: 'Registrar ingreso de mercadería al depósito (actualiza stock)' })
+  @Post('ingresos')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  createIngreso(@Body() dto: CreateIngresoDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.createIngreso(auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar ingresos al depósito' })
+  @Get('ingresos')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listIngresos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listIngresos(auth.tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Stock disponible por producto/presentación/cliente' })
+  @Get('disponible')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listStockDisponible(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listStockDisponible(auth.tenantId, clienteId, productoId);
   }
 }

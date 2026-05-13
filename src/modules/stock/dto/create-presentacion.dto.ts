@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, MaxLength, Min } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsPositive, IsString, MaxLength } from 'class-validator';
 
 export class CreatePresentacionDto {
   @IsString()
@@ -15,8 +15,4 @@ export class CreatePresentacionDto {
   @MaxLength(50)
   unidadEquivalente!: string;
 
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  pesoKg?: number;
 }

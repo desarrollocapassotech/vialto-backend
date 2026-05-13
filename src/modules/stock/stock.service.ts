@@ -13,6 +13,7 @@ import { CreatePresentacionDto } from './dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
+import { CreateIngresoDto } from './dto/create-ingreso.dto';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers de normalización (mismo patrón que Carga)
@@ -50,7 +51,6 @@ const productoWithPresentacionesSelect = {
       nombre: true,
       cantidadEquivalente: true,
       unidadEquivalente: true,
-      pesoKg: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -191,7 +191,6 @@ export class StockService {
         nombre: dto.nombre.trim(),
         cantidadEquivalente: dto.cantidadEquivalente,
         unidadEquivalente: dto.unidadEquivalente.trim(),
-        pesoKg: dto.pesoKg ?? null,
       },
     });
   }
@@ -218,7 +217,6 @@ export class StockService {
         ...(dto.unidadEquivalente !== undefined
           ? { unidadEquivalente: dto.unidadEquivalente.trim() }
           : {}),
-        ...(dto.pesoKg !== undefined ? { pesoKg: dto.pesoKg } : {}),
       },
     });
   }
@@ -279,7 +277,6 @@ export class StockService {
         clienteId: dto.clienteId,
         tipo: dto.tipo,
         cantidad: dto.cantidad,
-        pesoKg: dto.pesoKg ?? null,
         remitoId: dto.remitoId ?? null,
         fecha: new Date(dto.fecha),
       },
@@ -305,5 +302,94 @@ export class StockService {
   async removeMovimiento(id: string, tenantId: string) {
     await this.findMovimiento(id, tenantId);
     return this.prisma.movimientoStock.delete({ where: { id } });
+  }
+
+  // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────
+
+  async createIngreso(tenantId: string, dto: CreateIngresoDto, createdBy: string) {
+    const [producto, presentacion, cliente] = await Promise.all([
+      this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
+      this.prisma.presentacion.findFirst({ where: { id: dto.presentacionId, productoId: dto.productoId } }),
+      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
+    ]);
+    if (!producto) throw new BadRequestException('Producto inválido');
+    if (!presentacion) throw new BadRequestException('Presentación inválida');
+    if (!cliente) throw new BadRequestException('Cliente inválido');
+
+    return this.prisma.$transaction(async (tx) => {
+      const movimiento = await tx.movimientoStock.create({
+        data: {
+          tenantId,
+          productoId: dto.productoId,
+          presentacionId: dto.presentacionId,
+          clienteId: dto.clienteId,
+          tipo: 'ingreso',
+          cantidad: dto.cantidad,
+
+          observaciones: dto.observaciones?.trim() || null,
+          createdBy,
+          fecha: new Date(dto.fecha),
+        },
+        include: {
+          producto: { select: { id: true, nombre: true, unidadMedida: true } },
+          presentacion: { select: { id: true, nombre: true } },
+          cliente: { select: { id: true, nombre: true } },
+        },
+      });
+
+      await tx.stockItem.upsert({
+        where: {
+          productoId_presentacionId_clienteId: {
+            productoId: dto.productoId,
+            presentacionId: dto.presentacionId,
+            clienteId: dto.clienteId,
+          },
+        },
+        update: { cantidad: { increment: dto.cantidad }, tenantId },
+        create: {
+          tenantId,
+          productoId: dto.productoId,
+          presentacionId: dto.presentacionId,
+          clienteId: dto.clienteId,
+          cantidad: dto.cantidad,
+        },
+      });
+
+      return movimiento;
+    });
+  }
+
+  listIngresos(tenantId: string, clienteId?: string, productoId?: string) {
+    return this.prisma.movimientoStock.findMany({
+      where: {
+        tenantId,
+        tipo: 'ingreso',
+        ...(clienteId ? { clienteId } : {}),
+        ...(productoId ? { productoId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        producto: { select: { id: true, nombre: true, unidadMedida: true } },
+        presentacion: { select: { id: true, nombre: true } },
+        cliente: { select: { id: true, nombre: true } },
+      },
+    });
+  }
+
+  listStockDisponible(tenantId: string, clienteId?: string, productoId?: string) {
+    return this.prisma.stockItem.findMany({
+      where: {
+        tenantId,
+        ...(clienteId ? { clienteId } : {}),
+        ...(productoId ? { productoId } : {}),
+      },
+      orderBy: [{ clienteId: 'asc' }, { productoId: 'asc' }],
+      include: {
+        producto: { select: { id: true, nombre: true, unidadMedida: true } },
+        presentacion: { select: { id: true, nombre: true } },
+        cliente: { select: { id: true, nombre: true } },
+      },
+    });
   }
 }

@@ -41,6 +41,9 @@ model Tenant {
   importTemplates         ImportTemplate[]
   importLogs              ImportLog[]
   importSessions          ImportSession[]
+  stockRemitoSecuencias   StockRemitoSecuencia[]
+  stockEgresoRemitoConfig StockEgresoRemitoConfig?
+
   @@map("tenants")
 }
 
@@ -369,8 +372,11 @@ model MovimientoStock {
   cliente         Cliente       @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   tipo            String        // ingreso | egreso | division
   cantidad        Float
+  /** Número de remito interno generado al egresar (ej. R-2026-00001). Distinto del módulo Remito. */
+  numeroRemito    String?
   remitoId        String?
   remito          Remito?       @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  /** URL del remito escaneado (p. ej. Cloudinary) — preparado para carga futura. */
   remitoUrl       String?
   observaciones   String?
   createdBy       String        @default("")
@@ -384,7 +390,31 @@ model MovimientoStock {
   @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
   @@index([tenantId, createdAt(sort: Desc)])
+  @@unique([tenantId, numeroRemito])
   @@map("movimientos_stock")
+}
+
+/** Contador por año para numeración de remitos de egreso (transaccional). */
+model StockRemitoSecuencia {
+  id        String @id @default(cuid())
+  tenantId  String
+  tenant    Tenant @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  year      Int
+  lastValue Int    @default(0)
+
+  @@unique([tenantId, year])
+  @@map("stock_remito_secuencias")
+}
+
+/** Formato del número de remito de egreso por tenant (prefijo y ancho numérico). */
+model StockEgresoRemitoConfig {
+  tenantId      String   @id
+  tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  remitoPrefix  String   @default("R")
+  remitoDigitos Int      @default(5)
+  updatedAt     DateTime @updatedAt
+
+  @@map("stock_egreso_remito_configs")
 }
 
 model StockItem {

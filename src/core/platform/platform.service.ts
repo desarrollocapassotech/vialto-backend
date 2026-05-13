@@ -14,10 +14,15 @@ import {
   type ViajeConVehiculosViaje,
 } from '../../modules/viajes/viaje-vehiculos.helper';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
-import {
-  computeEstadoFacturaLectura,
-  importeOperativoFactura,
-} from '../../shared/util/factura-estado-lectura';
+import { AddGastoDto } from '../../modules/viajes/dto/add-gasto.dto';
+import { AddPagoTransportistaDto } from '../../modules/viajes/dto/add-pago-transportista.dto';
+import { ViajesPaginatedQueryDto } from '../../modules/viajes/dto/viajes-paginated-query.dto';
+import { MicCrtService } from '../../modules/viajes/mic-crt.service';
+import { PautService } from '../../modules/viajes/paut.service';
+import { FacturacionService } from '../../modules/facturacion/facturacion.service';
+import { CreateFacturaDto } from '../../modules/facturacion/dto/create-factura.dto';
+import { UpdateFacturaDto } from '../../modules/facturacion/dto/update-factura.dto';
+import { CreatePagoDto } from '../../modules/facturacion/dto/create-pago.dto';
 import { createClerkClient } from '@clerk/backend';
 import { ViajesService } from '../../modules/viajes/viajes.service';
 import { StockService } from '../../modules/stock/stock.service';
@@ -27,6 +32,8 @@ import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
 import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
+import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
+import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -76,6 +83,9 @@ export class PlatformService {
     private readonly prisma: PrismaService,
     private readonly viajesService: ViajesService,
     private readonly stockService: StockService,
+    private readonly facturacionService: FacturacionService,
+    private readonly micCrt: MicCrtService,
+    private readonly paut: PautService,
   ) {}
 
   private requiredTenantId(tenantId?: string) {
@@ -130,6 +140,45 @@ export class PlatformService {
       );
   }
 
+  viajesPaginated(tenantId: string | undefined, query: ViajesPaginatedQueryDto) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.findAllPaginated(scoped, query);
+  }
+
+  addViajeGasto(tenantId: string | undefined, viajeId: string, userId: string, dto: AddGastoDto) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.addGasto(viajeId, scoped, userId, dto);
+  }
+
+  addViajePagoTransportista(
+    tenantId: string | undefined,
+    viajeId: string,
+    userId: string,
+    dto: AddPagoTransportistaDto,
+  ) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.addPagoTransportista(viajeId, scoped, userId, dto);
+  }
+
+  deleteViajePagoTransportista(
+    tenantId: string | undefined,
+    viajeId: string,
+    userId: string,
+    index: number,
+  ) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.deletePagoTransportista(viajeId, scoped, userId, index);
+  }
+
+  micCrtPdf(tenantId: string | undefined, viajeId: string) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.micCrt.generate(viajeId, scoped);
+  }
+
+  pautPdf(tenantId: string | undefined, viajeId: string) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.paut.generate(viajeId, scoped);
+  }
 
   async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
     const scopedTenantId = this.requiredTenantId(tenantId);
@@ -606,150 +655,35 @@ export class PlatformService {
 
   // ── Facturación (superadmin) ─────────────────────────────────────────────
 
-  async listFacturas(tenantId?: string) {
+  async listFacturas(tenantId?: string, clienteId?: string) {
     if (!tenantId?.trim()) return Promise.resolve([]);
-    const id = tenantId.trim();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows: any[] = await (this.prisma.factura as any).findMany({
-      where: { tenantId: id },
-      orderBy: { fechaEmision: 'desc' },
-      include: {
-        viajes: { select: { id: true, estado: true, monto: true } },
-        pagos: { select: { importe: true } },
-      },
-      take: TAKE,
-    });
-    return rows.map(
-      ({
-        viajes,
-        pagos = [],
-        ...f
-      }: {
-        viajes: { id: string; estado: string; monto: number | null }[];
-        pagos?: { importe: number }[];
-        [k: string]: unknown;
-      }) => {
-        const importeGuardado = Number(f.importe ?? 0);
-        const importe = importeOperativoFactura(importeGuardado, viajes);
-        return {
-          ...f,
-          viajeIds: viajes.map((v) => v.id),
-          importe,
-          estado: computeEstadoFacturaLectura({
-            viajes,
-            fechaVencimiento: (f.fechaVencimiento as Date | null) ?? null,
-            importeGuardado,
-            pagos: pagos ?? [],
-          }),
-        };
-      },
-    );
+    return this.facturacionService.listFacturas(tenantId.trim(), clienteId?.trim() || undefined);
   }
 
-  async updateFactura(
-    tenantId: string,
-    id: string,
-    data: { estado?: string; fechaVencimiento?: string | null },
-  ) {
+  async updateFactura(tenantId: string | undefined, id: string, dto: UpdateFacturaDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    const row = await this.prisma.factura.findFirst({
-      where: { id, tenantId: scopedTenantId },
-    });
-    if (!row) throw new NotFoundException('Factura no encontrada');
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.factura.update({
-        where: { id },
-        data: {
-          ...(data.estado !== undefined ? { estado: data.estado } : {}),
-          ...(data.fechaVencimiento !== undefined
-            ? {
-                fechaVencimiento: data.fechaVencimiento
-                  ? new Date(data.fechaVencimiento)
-                  : null,
-              }
-            : {}),
-        },
-        include: { pagos: true },
-      });
-      // El estado cobrada/vencida/pendiente se deriva automáticamente en la capa de lectura
-      return updated;
-    });
+    return this.facturacionService.updateFactura(id, scopedTenantId, dto);
   }
 
-  async createPago(
-    tenantId: string,
-    dto: { facturaId: string; importe: number; fecha: string; formaPago?: string },
-  ) {
-    const scopedTenantId = this.requiredTenantId(tenantId);
-    const factura = await this.prisma.factura.findFirst({
-      where: { id: dto.facturaId, tenantId: scopedTenantId },
-    });
-    if (!factura) throw new NotFoundException('Factura no encontrada');
-    return this.prisma.pago.create({
-      data: {
-        tenantId: scopedTenantId,
-        facturaId: dto.facturaId,
-        importe: dto.importe,
-        fecha: new Date(dto.fecha),
-        formaPago: (dto.formaPago ?? null),
-      },
-    });
-  }
-
-  async deletePago(tenantId: string | undefined, id: string) {
-    const scopedTenantId = this.requiredTenantId(tenantId);
-    const row = await this.prisma.pago.findFirst({
-      where: { id, tenantId: scopedTenantId },
-    });
-    if (!row) throw new NotFoundException('Pago no encontrado');
-    return this.prisma.pago.delete({ where: { id } });
-  }
-
-  async createFactura(
-    tenantId: string,
-    dto: {
-      numero: string;
-      tipo: string;
-      clienteId?: string;
-      viajeIds?: string[];
-      importe?: number;
-      fechaEmision: string;
-      fechaVencimiento?: string;
-      estado?: string;
-    },
-  ) {
+  async createFactura(tenantId: string, dto: CreateFacturaDto) {
     const tid = this.requiredTenantId(tenantId);
-    const viajeIds = dto.viajeIds ?? [];
-    return this.prisma.$transaction(async (tx) => {
-      const factura = await tx.factura.create({
-        data: {
-          tenantId: tid,
-          numero: dto.numero,
-          tipo: dto.tipo,
-          clienteId: dto.clienteId ?? null,
-          importe: dto.importe ?? 0,
-          fechaEmision: new Date(dto.fechaEmision),
-          fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
-          estado: (dto.estado ?? 'pendiente'),
-        },
-      });
-      if (viajeIds.length > 0) {
-        await tx.viaje.updateMany({
-          where: { id: { in: viajeIds }, tenantId: tid },
-          data: { facturaId: factura.id },
-        });
-      }
-      return tx.factura.findFirst({ where: { id: factura.id }, include: { pagos: true } });
-    });
+    await this.assertTenantExists(tid);
+    return this.facturacionService.createFactura(tid, dto);
   }
 
   async removeFactura(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    const row = await this.prisma.factura.findFirst({
-      where: { id, tenantId: scopedTenantId },
-    });
-    if (!row) throw new NotFoundException('Factura no encontrada');
-    return this.prisma.factura.delete({ where: { id } });
+    return this.facturacionService.removeFactura(id, scopedTenantId);
+  }
+
+  async createPago(tenantId: string | undefined, dto: CreatePagoDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.facturacionService.createPago(scopedTenantId, dto);
+  }
+
+  async deletePago(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.facturacionService.removePago(id, scopedTenantId);
   }
 
   // ─── Productos (módulo stock) ────────────────────────────────────────────────
@@ -808,5 +742,42 @@ export class PlatformService {
   listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId);
+  }
+
+  getEgresoRemitoConfig(tenantId: string | undefined) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.getEgresoRemitoConfig(scopedTenantId);
+  }
+
+  upsertEgresoRemitoConfig(tenantId: string | undefined, dto: UpdateStockEgresoRemitoConfigDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.upsertEgresoRemitoConfig(scopedTenantId, dto);
+  }
+
+  createEgreso(tenantId: string | undefined, dto: CreateEgresoDto, createdBy: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
+  }
+
+  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId);
+  }
+
+  listMovimientosStock(
+    tenantId: string | undefined,
+    productoId?: string,
+    clienteId?: string,
+    soloIngresoEgreso?: boolean,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listMovimientos(scopedTenantId, productoId, clienteId, {
+      soloIngresoEgreso: soloIngresoEgreso === true,
+    });
+  }
+
+  getMovimientoStock(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findMovimiento(id, scopedTenantId);
   }
 }

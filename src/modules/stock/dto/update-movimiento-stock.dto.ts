@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateMovimientoStockDto {
@@ -7,5 +7,5 @@ export class UpdateMovimientoStockDto {
   @IsOptional() @IsIn(['ingreso', 'egreso', 'division']) tipo?: string;
   @IsOptional() @IsNumber() @Type(() => Number) cantidad?: number;
   @IsOptional() @IsString() remitoId?: string;
-  @IsOptional() @IsDateString() fecha?: string;
+  @IsOptional() @IsString() fecha?: string;
 }

@@ -11,6 +11,8 @@ import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { CreateIngresoDto } from './dto/create-ingreso.dto';
+import { CreateEgresoDto } from './dto/create-egreso.dto';
+import { UpdateStockEgresoRemitoConfigDto } from './dto/update-stock-egreso-remito-config.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -122,16 +124,23 @@ export class StockController {
 
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
-  @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente)' })
+  @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente). Con soloIngresoEgreso=1 ordena por fecha de movimiento descendente e incluye solo ingreso y egreso.' })
   @Get('movimientos')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
+    @Query('soloIngresoEgreso') soloIngresoEgresoRaw?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listMovimientos(auth.tenantId, productoId, clienteId);
+    const soloIngresoEgreso =
+      soloIngresoEgresoRaw === '1' ||
+      soloIngresoEgresoRaw === 'true' ||
+      soloIngresoEgresoRaw === 'yes';
+    return this.service.listMovimientos(auth.tenantId, productoId, clienteId, {
+      soloIngresoEgreso,
+    });
   }
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID' })
@@ -168,6 +177,47 @@ export class StockController {
   removeMovimiento(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.removeMovimiento(id, auth.tenantId);
+  }
+
+  // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
+
+  @ApiOperation({ summary: 'Formato del número de remito en egresos (prefijo y dígitos)' })
+  @Get('egresos/remito-config')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  getEgresoRemitoConfig(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.getEgresoRemitoConfig(auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Actualizar formato del número de remito en egresos' })
+  @Patch('egresos/remito-config')
+  @Roles('admin', 'supervisor', 'superadmin')
+  patchEgresoRemitoConfig(
+    @Body() dto: UpdateStockEgresoRemitoConfigDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.upsertEgresoRemitoConfig(auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Registrar egreso / despacho (descuenta stock y asigna número de remito)' })
+  @Post('egresos')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  createEgreso(@Body() dto: CreateEgresoDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.createEgreso(auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar egresos recientes' })
+  @Get('egresos')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listEgresos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listEgresos(auth.tenantId, clienteId, productoId);
   }
 
   // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────

@@ -5,9 +5,10 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  MaxLength,
 } from 'class-validator';
 
-export class CreateIngresoDto {
+export class CreateEgresoDto {
   @IsString()
   @IsNotEmpty()
   productoId: string;
@@ -33,4 +34,10 @@ export class CreateIngresoDto {
   @IsOptional()
   @IsString()
   observaciones?: string;
+
+  /** URL del remito escaneado (p. ej. tras subida a Cloudinary). Opcional. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  remitoEscaneadoUrl?: string;
 }

@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
@@ -14,6 +15,10 @@ import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { CreateIngresoDto } from './dto/create-ingreso.dto';
+import { CreateEgresoDto } from './dto/create-egreso.dto';
+import { UpdateStockEgresoRemitoConfigDto } from './dto/update-stock-egreso-remito-config.dto';
+import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
+import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers de normalización (mismo patrón que Carga)
@@ -58,9 +63,18 @@ const productoWithPresentacionesSelect = {
   },
 } as const;
 
+const movimientoStockRelations = {
+  producto: { select: { id: true, nombre: true, unidadMedida: true } },
+  presentacion: { select: { id: true, nombre: true } },
+  cliente: { select: { id: true, nombre: true } },
+} as const;
+
 @Injectable()
 export class StockService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clerkUsers: ClerkVialtoRoleService,
+  ) {}
 
   // ───────────────── PRODUCTOS ──────────────────────────────────────────────
 
@@ -77,6 +91,11 @@ export class StockService {
     const fa = query.filtroActivo ?? 'todos';
     if (fa === 'activos') where.activo = true;
     else if (fa === 'inactivos') where.activo = false;
+
+    const um = query.unidadMedida?.trim();
+    if (um) {
+      where.unidadMedida = um;
+    }
 
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.producto.count({ where }),
@@ -247,29 +266,43 @@ export class StockService {
     if (!r) throw new BadRequestException('Remito inválido');
   }
 
-  listMovimientos(tenantId: string, productoId?: string, clienteId?: string) {
+  listMovimientos(
+    tenantId: string,
+    productoId?: string,
+    clienteId?: string,
+    options?: { soloIngresoEgreso?: boolean },
+  ) {
+    const soloIe = options?.soloIngresoEgreso === true;
     return this.prisma.movimientoStock.findMany({
       where: {
         tenantId,
+        ...(soloIe ? { tipo: { in: ['ingreso', 'egreso'] } } : {}),
         ...(productoId ? { productoId } : {}),
         ...(clienteId ? { clienteId } : {}),
       },
-      orderBy: { fecha: 'desc' },
+      orderBy: soloIe
+        ? [{ fecha: 'desc' }, { createdAt: 'desc' }]
+        : [{ createdAt: 'desc' }, { fecha: 'desc' }],
       take: 500,
+      include: movimientoStockRelations,
     });
   }
 
   async findMovimiento(id: string, tenantId: string) {
     const row = await this.prisma.movimientoStock.findFirst({
       where: { id, tenantId },
+      include: movimientoStockRelations,
     });
     if (!row) throw new NotFoundException('Movimiento de stock no encontrado');
-    return row;
+    const createdByLabel = await this.clerkUsers.getUserDisplayLabel(row.createdBy);
+    return { ...row, createdByLabel };
   }
 
   async createMovimiento(tenantId: string, dto: CreateMovimientoStockDto) {
     await this.assertProductoCliente(tenantId, dto.productoId, dto.clienteId);
     await this.assertRemito(tenantId, dto.remitoId);
+    const fechaMov = parseFechaMovimientoStock(dto.fecha);
+    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
     return this.prisma.movimientoStock.create({
       data: {
         tenantId,
@@ -278,7 +311,7 @@ export class StockService {
         tipo: dto.tipo,
         cantidad: dto.cantidad,
         remitoId: dto.remitoId ?? null,
-        fecha: new Date(dto.fecha),
+        fecha: fechaMov,
       },
     });
   }
@@ -289,12 +322,17 @@ export class StockService {
     const cid = dto.clienteId ?? cur.clienteId;
     await this.assertProductoCliente(tenantId, pid, cid);
     await this.assertRemito(tenantId, dto.remitoId);
+    let fechaParsed: Date | undefined;
+    if (dto.fecha !== undefined) {
+      fechaParsed = parseFechaMovimientoStock(dto.fecha);
+      if (Number.isNaN(fechaParsed.getTime())) throw new BadRequestException('Fecha inválida');
+    }
     return this.prisma.movimientoStock.update({
       where: { id },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: {
         ...dto,
-        fecha: dto.fecha === undefined ? undefined : new Date(dto.fecha),
+        fecha: fechaParsed,
       } as any,
     });
   }
@@ -316,6 +354,9 @@ export class StockService {
     if (!presentacion) throw new BadRequestException('Presentación inválida');
     if (!cliente) throw new BadRequestException('Cliente inválido');
 
+    const fechaMov = parseFechaMovimientoStock(dto.fecha);
+    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
+
     return this.prisma.$transaction(async (tx) => {
       const movimiento = await tx.movimientoStock.create({
         data: {
@@ -328,7 +369,7 @@ export class StockService {
 
           observaciones: dto.observaciones?.trim() || null,
           createdBy,
-          fecha: new Date(dto.fecha),
+          fecha: fechaMov,
         },
         include: {
           producto: { select: { id: true, nombre: true, unidadMedida: true } },
@@ -390,6 +431,163 @@ export class StockService {
         presentacion: { select: { id: true, nombre: true } },
         cliente: { select: { id: true, nombre: true } },
       },
+    });
+  }
+
+  // ───────────────── CONFIG NÚMERO DE REMITO (EGRESOS) ───────────────────────
+
+  async getEgresoRemitoConfig(tenantId: string) {
+    const row = await this.prisma.stockEgresoRemitoConfig.findUnique({
+      where: { tenantId },
+      select: { remitoPrefix: true, remitoDigitos: true },
+    });
+    return {
+      remitoPrefix: row?.remitoPrefix?.trim() || 'R',
+      remitoDigitos: row?.remitoDigitos ?? 5,
+    };
+  }
+
+  async upsertEgresoRemitoConfig(tenantId: string, dto: UpdateStockEgresoRemitoConfigDto) {
+    const current = await this.getEgresoRemitoConfig(tenantId);
+    const remitoPrefix = dto.remitoPrefix !== undefined ? dto.remitoPrefix.trim() : current.remitoPrefix;
+    const remitoDigitos = dto.remitoDigitos !== undefined ? dto.remitoDigitos : current.remitoDigitos;
+    return this.prisma.stockEgresoRemitoConfig.upsert({
+      where: { tenantId },
+      create: { tenantId, remitoPrefix, remitoDigitos },
+      update: { remitoPrefix, remitoDigitos },
+      select: { remitoPrefix: true, remitoDigitos: true },
+    });
+  }
+
+  private formatoNumeroRemito(prefix: string, year: number, seq: number, digitos: number) {
+    const p = (prefix || 'R').trim() || 'R';
+    const d = Math.min(12, Math.max(3, digitos || 5));
+    return `${p}-${year}-${String(seq).padStart(d, '0')}`;
+  }
+
+  /** Atomático dentro de la transacción: incrementa contador anual y devuelve el nuevo valor. */
+  private async nextSecuenciaRemitoTx(tx: Prisma.TransactionClient, tenantId: string, year: number) {
+    const id = randomUUID().replace(/-/g, '').slice(0, 25);
+    const rows = await tx.$queryRaw<{ lastValue: number }[]>(
+      Prisma.sql`
+        INSERT INTO "stock_remito_secuencias" ("id", "tenantId", "year", "lastValue")
+        VALUES (${id}, ${tenantId}, ${year}, 1)
+        ON CONFLICT ("tenantId", "year")
+        DO UPDATE SET "lastValue" = "stock_remito_secuencias"."lastValue" + 1
+        RETURNING "lastValue"
+      `,
+    );
+    const n = rows[0]?.lastValue;
+    if (n === undefined || n === null) {
+      throw new BadRequestException('No se pudo generar el número de remito.');
+    }
+    return n;
+  }
+
+  // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
+
+  async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
+    const [producto, presentacion, cliente] = await Promise.all([
+      this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
+      this.prisma.presentacion.findFirst({ where: { id: dto.presentacionId, productoId: dto.productoId } }),
+      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
+    ]);
+    if (!producto) throw new BadRequestException('Producto inválido');
+    if (!presentacion) throw new BadRequestException('Presentación inválida');
+    if (!cliente) throw new BadRequestException('Cliente inválido');
+
+    const fechaMov = parseFechaMovimientoStock(dto.fecha);
+    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
+
+    return this.prisma.$transaction(async (tx) => {
+      const cfg = await tx.stockEgresoRemitoConfig.findUnique({
+        where: { tenantId },
+        select: { remitoPrefix: true, remitoDigitos: true },
+      });
+      const prefix = cfg?.remitoPrefix?.trim() || 'R';
+      const digitos = cfg?.remitoDigitos ?? 5;
+
+      const year = yearInBuenosAires(fechaMov);
+
+      const item = await tx.stockItem.findUnique({
+        where: {
+          productoId_presentacionId_clienteId: {
+            productoId: dto.productoId,
+            presentacionId: dto.presentacionId,
+            clienteId: dto.clienteId,
+          },
+        },
+      });
+      const disponible = item?.cantidad ?? 0;
+      if (disponible < dto.cantidad) {
+        throw new BadRequestException(
+          `Stock insuficiente para esta empresa, producto y presentación. Disponible: ${disponible}.`,
+        );
+      }
+
+      const dec = await tx.stockItem.updateMany({
+        where: {
+          tenantId,
+          productoId: dto.productoId,
+          presentacionId: dto.presentacionId,
+          clienteId: dto.clienteId,
+          cantidad: { gte: dto.cantidad },
+        },
+        data: { cantidad: { decrement: dto.cantidad } },
+      });
+      if (dec.count === 0) {
+        throw new BadRequestException(
+          `Stock insuficiente para esta empresa, producto y presentación. Disponible: ${disponible}.`,
+        );
+      }
+
+      const remitoUrl = dto.remitoEscaneadoUrl?.trim() || null;
+
+      const seq = await this.nextSecuenciaRemitoTx(tx, tenantId, year);
+      let numeroRemito = this.formatoNumeroRemito(prefix, year, seq, digitos);
+
+      const tryCreate = async (numero: string) =>
+        tx.movimientoStock.create({
+          data: {
+            tenantId,
+            productoId: dto.productoId,
+            presentacionId: dto.presentacionId,
+            clienteId: dto.clienteId,
+            tipo: 'egreso',
+            cantidad: dto.cantidad,
+            numeroRemito: numero,
+            observaciones: dto.observaciones?.trim() || null,
+            remitoUrl,
+            createdBy,
+            fecha: fechaMov,
+          },
+          include: movimientoStockRelations,
+        });
+
+      try {
+        return await tryCreate(numeroRemito);
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          const seqRetry = await this.nextSecuenciaRemitoTx(tx, tenantId, year);
+          numeroRemito = this.formatoNumeroRemito(prefix, year, seqRetry, digitos);
+          return await tryCreate(numeroRemito);
+        }
+        throw e;
+      }
+    });
+  }
+
+  listEgresos(tenantId: string, clienteId?: string, productoId?: string) {
+    return this.prisma.movimientoStock.findMany({
+      where: {
+        tenantId,
+        tipo: 'egreso',
+        ...(clienteId ? { clienteId } : {}),
+        ...(productoId ? { productoId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: movimientoStockRelations,
     });
   }
 }

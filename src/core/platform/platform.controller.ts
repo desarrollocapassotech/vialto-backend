@@ -4,11 +4,15 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
   Query,
+  Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -30,6 +34,15 @@ import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
 import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
+import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
+import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
+import { ViajesPaginatedQueryDto } from '../../modules/viajes/dto/viajes-paginated-query.dto';
+import { AddGastoDto } from '../../modules/viajes/dto/add-gasto.dto';
+import { AddPagoTransportistaDto } from '../../modules/viajes/dto/add-pago-transportista.dto';
+import { CreateFacturaDto } from '../../modules/facturacion/dto/create-factura.dto';
+import { UpdateFacturaDto } from '../../modules/facturacion/dto/update-factura.dto';
+import { CreatePagoDto } from '../../modules/facturacion/dto/create-pago.dto';
+import { queryParamFromRequest } from '../../shared/util/express-query-string';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 
@@ -45,9 +58,83 @@ import { AuthPayload } from '../auth/clerk-auth.guard';
 export class PlatformController {
   constructor(private readonly service: PlatformService) {}
 
+  @Get('viajes/paginated')
+  viajesPaginated(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query() query: ViajesPaginatedQueryDto,
+    @Req() req: Request,
+  ) {
+    const clienteId = queryParamFromRequest(req, 'clienteId') ?? query.clienteId;
+    const transportistaId = queryParamFromRequest(req, 'transportistaId') ?? query.transportistaId;
+    const tipoUbicacionRaw = queryParamFromRequest(req, 'tipoUbicacion') ?? query.tipoUbicacion;
+    const tipoUbicacion =
+      tipoUbicacionRaw === 'origen' || tipoUbicacionRaw === 'destino' ? tipoUbicacionRaw : undefined;
+    const ubicacion = queryParamFromRequest(req, 'ubicacion') ?? query.ubicacion;
+    return this.service.viajesPaginated(tenantId, {
+      page: query.page,
+      pageSize: query.pageSize,
+      estado: query.estado,
+      clienteId,
+      transportistaId,
+      tipoFecha: query.tipoFecha,
+      fechaDesde: query.fechaDesde,
+      fechaHasta: query.fechaHasta,
+      tipoUbicacion,
+      ubicacion,
+    });
+  }
+
   @Get('viajes')
   viajes(@Query('tenantId') tenantId?: string) {
     return this.service.listViajes(tenantId);
+  }
+
+  @Get('viajes/:id/mic-crt')
+  async viajeMicCrt(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const pdf = await this.service.micCrtPdf(tenantId, id);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="MIC-CRT-${id}.pdf"`,
+        'Content-Length': String(pdf.length),
+      });
+      res.end(pdf);
+    } catch (err: unknown) {
+      const e = err as { status?: number; message?: string; response?: unknown };
+      if (e?.status === 400 || e?.status === 404) {
+        res.status(e.status).json(e.response ?? { message: e.message });
+      } else {
+        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+      }
+    }
+  }
+
+  @Get('viajes/:id/paut')
+  async viajePaut(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const pdf = await this.service.pautPdf(tenantId, id);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="PAUT-${id}.pdf"`,
+        'Content-Length': String(pdf.length),
+      });
+      res.end(pdf);
+    } catch (err: unknown) {
+      const e = err as { status?: number; message?: string; response?: unknown };
+      if (e?.status === 400 || e?.status === 404) {
+        res.status(e.status).json(e.response ?? { message: e.message });
+      } else {
+        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+      }
+    }
   }
 
   @Get('viajes/:id')
@@ -76,6 +163,36 @@ export class PlatformController {
   @Delete('viajes/:id')
   removeViaje(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.removeViaje(tenantId, id);
+  }
+
+  @Post('viajes/:id/gastos')
+  addViajeGasto(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: AddGastoDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.addViajeGasto(tenantId, id, auth.userId, dto);
+  }
+
+  @Post('viajes/:id/pagos-transportista')
+  addViajePagoTransportista(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: AddPagoTransportistaDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.addViajePagoTransportista(tenantId, id, auth.userId, dto);
+  }
+
+  @Delete('viajes/:id/pagos-transportista/:index')
+  deleteViajePagoTransportista(
+    @Param('id') id: string,
+    @Param('index', ParseIntPipe) index: number,
+    @Query('tenantId') tenantId: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.deleteViajePagoTransportista(tenantId, id, auth.userId, index);
   }
 
   @Get('clientes')
@@ -244,26 +361,16 @@ export class PlatformController {
   // ── Facturación ────────────────────────────────────────────────────────────
 
   @Get('facturas')
-  facturas(@Query('tenantId') tenantId?: string) {
-    return this.service.listFacturas(tenantId);
+  facturas(@Query('tenantId') tenantId?: string, @Query('clienteId') clienteId?: string) {
+    return this.service.listFacturas(tenantId, clienteId);
   }
 
   @Post('facturas')
   createFactura(
     @Query('tenantId') tenantId: string | undefined,
-    @Body()
-    body: {
-      numero: string;
-      tipo: string;
-      clienteId?: string;
-      viajeId?: string;
-      importe: number;
-      fechaEmision: string;
-      fechaVencimiento?: string;
-      estado?: string;
-    },
+    @Body() dto: CreateFacturaDto,
   ) {
-    return this.service.createFactura(tenantId, body);
+    return this.service.createFactura(tenantId ?? '', dto);
   }
 
   @Delete('facturas/:id')
@@ -275,17 +382,14 @@ export class PlatformController {
   updateFactura(
     @Param('id') id: string,
     @Query('tenantId') tenantId: string | undefined,
-    @Body() body: { estado?: string; fechaVencimiento?: string | null },
+    @Body() dto: UpdateFacturaDto,
   ) {
-    return this.service.updateFactura(tenantId, id, body);
+    return this.service.updateFactura(tenantId, id, dto);
   }
 
   @Post('pagos')
-  createPago(
-    @Query('tenantId') tenantId: string | undefined,
-    @Body() body: { facturaId: string; importe: number; fecha: string; formaPago?: string },
-  ) {
-    return this.service.createPago(tenantId, body);
+  createPago(@Query('tenantId') tenantId: string | undefined, @Body() dto: CreatePagoDto) {
+    return this.service.createPago(tenantId, dto);
   }
 
   @Delete('pagos/:id')
@@ -397,5 +501,61 @@ export class PlatformController {
     @Query('productoId') productoId?: string,
   ) {
     return this.service.listStockDisponible(tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Formato número de remito egresos (superadmin)' })
+  @Get('stock/egresos/remito-config')
+  getEgresoRemitoConfig(@Query('tenantId') tenantId?: string) {
+    return this.service.getEgresoRemitoConfig(tenantId);
+  }
+
+  @ApiOperation({ summary: 'Actualizar formato número de remito egresos (superadmin)' })
+  @Patch('stock/egresos/remito-config')
+  patchEgresoRemitoConfig(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateStockEgresoRemitoConfigDto,
+  ) {
+    return this.service.upsertEgresoRemitoConfig(tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Registrar egreso (superadmin)' })
+  @Post('stock/egresos')
+  createEgreso(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateEgresoDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.createEgreso(tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar egresos (superadmin)' })
+  @Get('stock/egresos')
+  listEgresos(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    return this.service.listEgresos(tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Listar movimientos de stock (superadmin)' })
+  @Get('stock/movimientos')
+  listMovimientosStock(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('productoId') productoId?: string,
+    @Query('clienteId') clienteId?: string,
+    @Query('soloIngresoEgreso') soloIngresoEgresoRaw?: string,
+  ) {
+    const soloIngresoEgreso =
+      soloIngresoEgresoRaw === '1' ||
+      soloIngresoEgresoRaw === 'true' ||
+      soloIngresoEgresoRaw === 'yes';
+    return this.service.listMovimientosStock(tenantId, productoId, clienteId, soloIngresoEgreso);
+  }
+
+  @ApiOperation({ summary: 'Obtener movimiento de stock por ID (superadmin)' })
+  @Get('stock/movimientos/:id')
+  getMovimientoStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getMovimientoStock(tenantId, id);
   }
 }

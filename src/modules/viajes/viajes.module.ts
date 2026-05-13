@@ -8,6 +8,6 @@ import { PautService } from './paut.service';
 @Module({
   controllers: [ViajesController],
   providers: [ViajesService, ViajesAutoEstadoService, MicCrtService, PautService],
-  exports: [ViajesService],
+  exports: [ViajesService, MicCrtService, PautService],
 })
 export class ViajesModule {}

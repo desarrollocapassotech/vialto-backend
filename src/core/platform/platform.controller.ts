@@ -558,4 +558,62 @@ export class PlatformController {
   getMovimientoStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.getMovimientoStock(tenantId, id);
   }
+
+  // ── ARCA (superadmin) ─────────────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Obtener config ARCA del tenant (superadmin)' })
+  @Get('arca/config')
+  getArcaConfig(@Query('tenantId') tenantId?: string) {
+    return this.service.getArcaConfig(tenantId);
+  }
+
+  @ApiOperation({ summary: 'Crear / actualizar config ARCA del tenant (superadmin)' })
+  @Post('arca/config')
+  upsertArcaConfig(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: import('../../modules/liquidaciones-arca/dto/upsert-arca-config.dto').UpsertArcaConfigDto,
+  ) {
+    return this.service.upsertArcaConfig(tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Listar liquidaciones CVLP de un tenant (superadmin)' })
+  @Get('arca/liquidaciones')
+  listLiquidaciones(
+    @Query('tenantId') tenantId?: string,
+    @Query('estado') estado?: string,
+  ) {
+    return this.service.listLiquidaciones(tenantId, estado);
+  }
+
+  @ApiOperation({ summary: 'Obtener liquidación por ID (superadmin)' })
+  @Get('arca/liquidaciones/:id')
+  getLiquidacion(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getLiquidacion(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Emitir liquidación a ARCA (superadmin)' })
+  @Post('arca/liquidaciones/:id/emitir')
+  emitirLiquidacion(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.emitirLiquidacion(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Emitir factura a ARCA (superadmin)' })
+  @Post('arca/facturas/:facturaId/emitir')
+  emitirFacturaArca(
+    @Param('facturaId') facturaId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: import('../../modules/liquidaciones-arca/dto/emitir-factura-arca.dto').EmitirFacturaArcaDto,
+  ) {
+    return this.service.emitirFacturaArca(tenantId, facturaId, dto);
+  }
+
+  @ApiOperation({ summary: 'Logs de auditoría de AFIP SDK (superadmin)' })
+  @Get('arca/logs')
+  getArcaLogs(
+    @Query('tenantId') tenantId?: string,
+    @Query('liquidacionId') liquidacionId?: string,
+    @Query('facturaId') facturaId?: string,
+  ) {
+    return this.service.getArcaLogs(tenantId, liquidacionId, facturaId);
+  }
 }

@@ -43,6 +43,9 @@ model Tenant {
   importSessions          ImportSession[]
   stockRemitoSecuencias   StockRemitoSecuencia[]
   stockEgresoRemitoConfig StockEgresoRemitoConfig?
+  arcaConfig              ArcaConfig?
+  liquidaciones           Liquidacion[]
+  arcaLogs                ArcaLog[]
 
   @@map("tenants")
 }
@@ -52,16 +55,17 @@ model Tenant {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Cliente {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre    String
-  idFiscal  String?
-  email     String?
-  telefono  String?
-  direccion String?
-  pais      String?
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre       String
+  idFiscal     String?
+  email        String?
+  telefono     String?
+  direccion    String?
+  pais         String?
+  condicionIva Int?     // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
+  createdAt    DateTime @default(now())
 
   viajes           Viaje[]
   facturas         Factura[]
@@ -88,12 +92,15 @@ model Transportista {
   fechaVencimientoPermiso  DateTime? // vencimiento del permiso internacional
   domicilio                String?   // domicilio legal del transportista
   bandera                  String?   // país/bandera (ej: ARGENTINA)
+  condicionIva             Int?      // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
+  comisionPct              Float?    // % comisión NyM (si null usa el default de ArcaConfig)
   createdAt                DateTime  @default(now())
 
-  choferes  Chofer[]
-  vehiculos Vehiculo[]
-  viajes    Viaje[]
-  facturas  Factura[]
+  choferes      Chofer[]
+  vehiculos     Vehiculo[]
+  viajes        Viaje[]
+  facturas      Factura[]
+  liquidaciones Liquidacion[]
 
   @@index([tenantId])
   @@map("transportistas")
@@ -220,6 +227,7 @@ model Viaje {
   factura    Factura? @relation(fields: [facturaId], references: [id], onDelete: SetNull)
   nroFactura String?
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
+  liquidacionesViaje         LiquidacionViaje[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])
@@ -255,6 +263,14 @@ model Factura {
   fechaVencimiento DateTime?
   estado           String    @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
+  // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
+  cbteTipo         Int?      // 1=Factura A, 6=Factura B
+  cbteNro          Int?
+  ptoVenta         Int?
+  cae              String?
+  caeFechaVto      DateTime?
+  arcaEstado       String?   // pendiente_cae | autorizado | error
+  arcaError        String?
   createdAt        DateTime  @default(now())
   pagos            Pago[]
 
@@ -579,4 +595,127 @@ model ImportLog {
   @@index([tenantId])
   @@index([tenantId, modulo])
   @@map("import_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: liquidaciones-arca (NyM Logística — CVLP tipo 60 + Facturas A/B vía AFIP SDK)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Configuración AFIP SDK por tenant. La API key viene de AFIP_SDK_API_KEY (env var). */
+model ArcaConfig {
+  tenantId              String   @id
+  tenant                Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  cuitEmisor            String   // CUIT del emisor (NyM)
+  ptoVentaCvlp          Int      // punto de venta para CVLP tipo 60
+  ptoVentaFactura       Int      // punto de venta para Facturas A/B
+  ambiente              String   @default("homologacion") // homologacion | produccion
+  comisionPctDefault    Float    @default(8)  // % comisión por defecto
+  comisionPctAlt        Float    @default(7)  // % comisión alternativa
+  gastosAdminPorViaje   Float    @default(0)  // monto fijo por viaje (sin IVA)
+  ivaGastosAdmin        Float    @default(21) // % IVA sobre gastos administrativos
+  updatedAt             DateTime @updatedAt
+
+  @@map("arca_configs")
+}
+
+/** Liquidación CVLP tipo 60 — emitida al transportista (fletero). */
+model Liquidacion {
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  transportistaId String
+  transportista   Transportista @relation(fields: [transportistaId], references: [id], onDelete: Restrict)
+
+  // Período de la liquidación
+  periodoDesde    DateTime
+  periodoHasta    DateTime
+
+  // Montos calculados (snapshot al momento de crear la liquidación)
+  cantViajes           Int    // cantidad de viajes incluidos
+  bruto                Float  // sum(tnDestino * tarifaTransportista) por todos los viajes
+  comisionPct          Float  // % de comisión aplicado
+  comision             Float  // bruto * comisionPct / 100
+  gastosAdmin          Float  // cantViajes * gastosAdminPorViaje (sin IVA)
+  gastosAdminIva       Float  // IVA sobre gastosAdmin
+  liquido              Float  // bruto - comision - gastosAdmin - gastosAdminIva (neto al transportista)
+
+  // Campos del comprobante AFIP (cbteTipo siempre 60 para CVLP)
+  cbteTipo        Int           @default(60)
+  cbteNro         Int?
+  ptoVenta        Int?
+  cae             String?
+  caeFechaVto     DateTime?
+
+  // Estado de la integración ARCA
+  estado          String        @default("borrador")
+  // borrador | pendiente_cae | autorizado | error | anulado
+  arcaError       String?
+  reintentos      Int           @default(0)
+
+  // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
+  payloadHash     String?
+
+  createdAt       DateTime      @default(now())
+  createdBy       String
+  updatedAt       DateTime      @updatedAt
+
+  viajes          LiquidacionViaje[]
+  arcaLogs        ArcaLog[]
+
+  @@index([tenantId])
+  @@index([tenantId, transportistaId])
+  @@index([tenantId, estado])
+  @@index([tenantId, periodoDesde, periodoHasta])
+  @@map("liquidaciones")
+}
+
+/** Viajes incluidos en una liquidación (snapshot de montos al liquidar). */
+model LiquidacionViaje {
+  id              String      @id @default(cuid())
+  tenantId        String
+  liquidacionId   String
+  liquidacion     Liquidacion @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
+  viajeId         String
+  viaje           Viaje       @relation(fields: [viajeId], references: [id], onDelete: Restrict)
+
+  // Snapshot de los valores al momento de liquidar
+  tnOrigen             Float?
+  tnDestino            Float?
+  tarifaTransportista  Float?  // tarifa por tn aplicada al transportista
+  subtotal             Float?  // tnDestino * tarifaTransportista
+
+  @@unique([liquidacionId, viajeId])
+  @@index([tenantId])
+  @@index([liquidacionId])
+  @@index([viajeId])
+  @@map("liquidacion_viajes")
+}
+
+/** Log de auditoría de cada request/response a AFIP SDK. */
+model ArcaLog {
+  id            String       @id @default(cuid())
+  tenantId      String
+  tenant        Tenant       @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  liquidacionId String?
+  liquidacion   Liquidacion? @relation(fields: [liquidacionId], references: [id], onDelete: SetNull)
+  // facturaId referencial (sin FK — la Factura puede no tener relación formal con ArcaLog)
+  facturaId     String?
+
+  method        String       // afip/auth | FECompUltimoAutorizado | FECAESolicitar
+  ambiente      String       // homologacion | produccion
+  cuit          String
+  requestBody   Json         // payload enviado (sin la API key)
+  responseBody  Json?        // respuesta recibida
+  httpStatus    Int?
+  durationMs    Int?
+  exitoso       Boolean      @default(false)
+  error         String?
+
+  createdAt     DateTime     @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, liquidacionId])
+  @@index([tenantId, facturaId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("arca_logs")
 }

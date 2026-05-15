@@ -503,6 +503,7 @@ export class PlatformService {
       limit: 1,
     });
     let userId = users.data[0]?.id;
+    const userAlreadyExisted = !!userId;
 
     if (!userId) {
       const created = await clerk.users.createUser({
@@ -516,41 +517,52 @@ export class PlatformService {
       userId = created.id;
     }
 
-    await clerk.users.updateUser(userId, {
-      firstName,
-      lastName,
-      password,
-      skipPasswordChecks: true,
-    });
-    await clerk.users.updateUserMetadata(userId, {
-      publicMetadata: {
-        vialtoRole: toVialtoRole(role),
-        tenantId: organizationId,
-      },
-    });
+    try {
+      await clerk.users.updateUser(userId, {
+        firstName,
+        lastName,
+        password,
+        skipPasswordChecks: true,
+      });
+      await clerk.users.updateUserMetadata(userId, {
+        publicMetadata: {
+          vialtoRole: toVialtoRole(role),
+          tenantId: organizationId,
+        },
+      });
 
-    const memberships = await clerk.organizations.getOrganizationMembershipList({
-      organizationId,
-    });
-    const alreadyMember = memberships.data.some(
-      (m) => m.publicUserData?.userId === userId,
-    );
+      const memberships = await clerk.organizations.getOrganizationMembershipList({
+        organizationId,
+      });
+      const alreadyMember = memberships.data.some(
+        (m) => m.publicUserData?.userId === userId,
+      );
 
-    if (alreadyMember) {
-      await clerk.organizations.updateOrganizationMembership({
+      if (alreadyMember) {
+        await clerk.organizations.updateOrganizationMembership({
+          organizationId,
+          userId,
+          role: toClerkOrganizationRole(role),
+        });
+        return { userId, organizationId, action: 'role-updated' };
+      }
+
+      await clerk.organizations.createOrganizationMembership({
         organizationId,
         userId,
         role: toClerkOrganizationRole(role),
       });
-      return { userId, organizationId, action: 'role-updated' };
-    }
+      return { userId, organizationId, action: 'created-and-added' };
 
-    await clerk.organizations.createOrganizationMembership({
-      organizationId,
-      userId,
-      role: toClerkOrganizationRole(role),
-    });
-    return { userId, organizationId, action: 'created-and-added' };
+    } catch (error) {
+      if (!userAlreadyExisted) {
+        await clerk.users.deleteUser(userId);
+      }
+      if (error?.status === 403) {
+        throw new BadRequestException('No se puede agregar el usuario a la organización. Verificá el límite de miembros del plan.');
+      }
+      throw error;
+    }
   }
 
   async updateUserRole(tenantId: string | undefined, userId: string, role: string) {

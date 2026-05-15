@@ -34,6 +34,8 @@ import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentaci
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
 import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
 import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
+import { ArcaConfigService } from '../../modules/liquidaciones-arca/arca-config.service';
+import { LiquidacionesService } from '../../modules/liquidaciones-arca/liquidaciones.service';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -86,6 +88,8 @@ export class PlatformService {
     private readonly facturacionService: FacturacionService,
     private readonly micCrt: MicCrtService,
     private readonly paut: PautService,
+    private readonly arcaConfigService: ArcaConfigService,
+    private readonly liquidacionesService: LiquidacionesService,
   ) {}
 
   private requiredTenantId(tenantId?: string) {
@@ -779,5 +783,46 @@ export class PlatformService {
   getMovimientoStock(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.findMovimiento(id, scopedTenantId);
+  }
+
+  // ── ARCA (superadmin) ─────────────────────────────────────────────────────
+
+  getArcaConfig(tenantId: string | undefined) {
+    const id = this.requiredTenantId(tenantId);
+    return this.arcaConfigService.findPublic(id);
+  }
+
+  upsertArcaConfig(tenantId: string | undefined, dto: import('../../modules/liquidaciones-arca/dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
+    const id = this.requiredTenantId(tenantId);
+    return this.arcaConfigService.upsert(id, dto);
+  }
+
+  listLiquidaciones(tenantId: string | undefined, estado?: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.findAll(id, estado);
+  }
+
+  getLiquidacion(tenantId: string | undefined, liquidacionId: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.findById(id, liquidacionId);
+  }
+
+  emitirLiquidacion(tenantId: string | undefined, liquidacionId: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.emitirLiquidacion(id, liquidacionId);
+  }
+
+  emitirFacturaArca(
+    tenantId: string | undefined,
+    facturaId: string,
+    dto: import('../../modules/liquidaciones-arca/dto/emitir-factura-arca.dto').EmitirFacturaArcaDto,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.emitirFacturaArca(id, facturaId, dto);
+  }
+
+  getArcaLogs(tenantId: string | undefined, liquidacionId?: string, facturaId?: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.findLogs(id, liquidacionId, facturaId);
   }
 }

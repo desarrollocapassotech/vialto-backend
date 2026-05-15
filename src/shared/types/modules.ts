@@ -7,6 +7,7 @@ export const VIALTO_MODULES = [
   'combustible',
   'mantenimiento',
   'remitos',
+  'liquidaciones-arca',
   'turnos',
   'reportes',
 ] as const;

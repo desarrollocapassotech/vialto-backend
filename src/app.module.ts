@@ -22,6 +22,7 @@ import { TurnosModule } from './modules/turnos/turnos.module';
 import { ReportesModule } from './modules/reportes/reportes.module';
 import { ImportacionesModule } from './modules/importaciones/importaciones.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { LiquidacionesArcaModule } from './modules/liquidaciones-arca/liquidaciones-arca.module';
 import { HealthController } from './health.controller';
 import { PlatformModule } from './core/platform/platform.module';
 
@@ -50,6 +51,7 @@ import { PlatformModule } from './core/platform/platform.module';
     ReportesModule,
     ImportacionesModule,
     DashboardModule,
+    LiquidacionesArcaModule,
     PlatformModule,
   ],
   controllers: [HealthController],

@@ -2,13 +2,16 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Body,
   Query,
+  Res,
   UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { ModuleGuard } from '../../shared/guards/module.guard';
@@ -16,6 +19,7 @@ import { RequireModule } from '../../shared/decorators/require-module.decorator'
 import { CurrentAuth } from '../../core/auth/current-auth.decorator';
 import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { LiquidacionesService } from './liquidaciones.service';
+import { LiquidacionPdfService } from './liquidacion-pdf.service';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 
@@ -25,7 +29,18 @@ import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 @UseGuards(ClerkAuthGuard, ModuleGuard)
 @RequireModule('liquidaciones-arca')
 export class LiquidacionesController {
-  constructor(private readonly service: LiquidacionesService) {}
+  constructor(
+    private readonly service: LiquidacionesService,
+    private readonly pdfService: LiquidacionPdfService,
+  ) {}
+
+  // ── Config (lectura pública para el tenant) ───────────────────────────────
+
+  @ApiOperation({ summary: 'Obtener configuración ARCA del tenant (solo lectura)' })
+  @Get('config')
+  getConfig(@CurrentAuth() auth: AuthPayload) {
+    return this.service.getConfig(auth.tenantId!);
+  }
 
   // ── Liquidaciones (CVLP Tipo 60) ──────────────────────────────────────────
 
@@ -42,6 +57,31 @@ export class LiquidacionesController {
   @Get('liquidaciones/:id')
   findOne(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
     return this.service.findById(auth.tenantId!, id);
+  }
+
+  @ApiOperation({ summary: 'Descargar PDF de liquidación' })
+  @Get('liquidaciones/:id/pdf')
+  async getPdf(
+    @CurrentAuth() auth: AuthPayload,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const pdf = await this.pdfService.generate(auth.tenantId!, id);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="liquidacion-${id}.pdf"`,
+        'Content-Length': String(pdf.length),
+      });
+      res.end(pdf);
+    } catch (err: unknown) {
+      const e = err as { status?: number; message?: string; response?: unknown };
+      if (e?.status === 404) {
+        res.status(404).json(e.response ?? { message: e.message });
+      } else {
+        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+      }
+    }
   }
 
   @ApiOperation({ summary: 'Crear liquidación (CVLP Tipo 60) — calcula montos automáticamente' })
@@ -72,6 +112,15 @@ export class LiquidacionesController {
   @HttpCode(HttpStatus.OK)
   anularLiquidacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
     return this.service.anularLiquidacion(auth.tenantId!, id);
+  }
+
+  @ApiOperation({
+    summary: 'Eliminar liquidación en borrador o con error',
+  })
+  @Delete('liquidaciones/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteLiquidacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
+    return this.service.deleteLiquidacion(auth.tenantId!, id);
   }
 
   // ── Facturas A/B via ARCA ──────────────────────────────────────────────────

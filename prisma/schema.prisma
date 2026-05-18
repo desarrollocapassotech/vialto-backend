@@ -606,14 +606,21 @@ model ImportLog {
 model ArcaConfig {
   tenantId              String   @id
   tenant                Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  cuitEmisor            String   // CUIT del emisor (NyM)
+  // Datos del emisor para el comprobante PDF
+  cuitEmisor            String
+  razonSocial           String?  // Razón social del emisor (ej: NyM Logística SRL)
+  domicilioEmisor       String?  // Domicilio del emisor
+  condicionIvaEmisor    String?  // Condición IVA del emisor (ej: RESP. INSCRIPTO)
+  ingBrutos             String?  // N° Ing. Brutos (suele coincidir con CUIT)
+  inicActEmisor         String?  // Fecha de inicio de actividades (ej: 01/03/2015)
+  // Puntos de venta y ambiente
   ptoVentaCvlp          Int      // punto de venta para CVLP tipo 60
   ptoVentaFactura       Int      // punto de venta para Facturas A/B
   ambiente              String   @default("homologacion") // homologacion | produccion
-  comisionPctDefault    Float    @default(8)  // % comisión por defecto
-  comisionPctAlt        Float    @default(7)  // % comisión alternativa
-  gastosAdminPorViaje   Float    @default(0)  // monto fijo por viaje (sin IVA)
-  ivaGastosAdmin        Float    @default(21) // % IVA sobre gastos administrativos
+  // Parámetros de liquidación
+  comisionPctDefault    Float    @default(8)
+  comisionPctAlt        Float    @default(7)
+  ivaGastosAdmin        Float    @default(21)
   updatedAt             DateTime @updatedAt
 
   @@map("arca_configs")
@@ -684,6 +691,7 @@ model LiquidacionViaje {
   tnDestino            Float?
   tarifaTransportista  Float?  // tarifa por tn aplicada al transportista
   subtotal             Float?  // tnDestino * tarifaTransportista
+  gastosAdmin          Float?  // gastos admin tomados del metadata del viaje
 
   @@unique([liquidacionId, viajeId])
   @@index([tenantId])

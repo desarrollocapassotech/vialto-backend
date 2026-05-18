@@ -36,6 +36,7 @@ import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
 import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 import { ArcaConfigService } from '../../modules/liquidaciones-arca/arca-config.service';
 import { LiquidacionesService } from '../../modules/liquidaciones-arca/liquidaciones.service';
+import { LiquidacionPdfService } from '../../modules/liquidaciones-arca/liquidacion-pdf.service';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -90,6 +91,7 @@ export class PlatformService {
     private readonly paut: PautService,
     private readonly arcaConfigService: ArcaConfigService,
     private readonly liquidacionesService: LiquidacionesService,
+    private readonly liquidacionPdfService: LiquidacionPdfService,
   ) {}
 
   private requiredTenantId(tenantId?: string) {
@@ -855,5 +857,10 @@ export class PlatformService {
   getArcaLogs(tenantId: string | undefined, liquidacionId?: string, facturaId?: string) {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionesService.findLogs(id, liquidacionId, facturaId);
+  }
+
+  getLiquidacionPdf(tenantId: string | undefined, liquidacionId: string): Promise<Buffer> {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionPdfService.generate(id, liquidacionId);
   }
 }

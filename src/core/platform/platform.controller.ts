@@ -597,6 +597,31 @@ export class PlatformController {
     return this.service.emitirLiquidacion(tenantId, id);
   }
 
+  @ApiOperation({ summary: 'Descargar PDF de liquidación (superadmin)' })
+  @Get('arca/liquidaciones/:id/pdf')
+  async getLiquidacionPdf(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const pdf = await this.service.getLiquidacionPdf(tenantId, id);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="liquidacion-${id}.pdf"`,
+        'Content-Length': String(pdf.length),
+      });
+      res.end(pdf);
+    } catch (err: unknown) {
+      const e = err as { status?: number; message?: string; response?: unknown };
+      if (e?.status === 400 || e?.status === 404) {
+        res.status(e.status).json(e.response ?? { message: e.message });
+      } else {
+        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+      }
+    }
+  }
+
   @ApiOperation({ summary: 'Emitir factura a ARCA (superadmin)' })
   @Post('arca/facturas/:facturaId/emitir')
   emitirFacturaArca(

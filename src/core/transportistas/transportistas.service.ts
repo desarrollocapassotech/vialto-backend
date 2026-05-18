@@ -38,6 +38,7 @@ export class TransportistasService {
         idFiscal: dto.idFiscal ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
+        pais: dto.pais ?? null,
         paut: dto.paut ?? null,
         permisoInternacional: dto.permisoInternacional ?? null,
         fechaVencimientoPermiso: dto.fechaVencimientoPermiso ? new Date(dto.fechaVencimientoPermiso) : null,
@@ -56,6 +57,7 @@ export class TransportistasService {
         idFiscal: dto.idFiscal,
         email: dto.email,
         telefono: dto.telefono,
+        pais: dto.pais,
         paut: dto.paut,
         permisoInternacional: dto.permisoInternacional,
         fechaVencimientoPermiso:

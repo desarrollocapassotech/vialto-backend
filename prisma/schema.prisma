@@ -82,6 +82,8 @@ model Transportista {
   idFiscal                 String?
   email                    String?
   telefono                 String?
+  /** Código de país (ej. AR, UY) para formularios / PAUT. */
+  pais                     String?
   tipo                     String    @default("externo") // siempre externo
   paut                     String?   // número de PAUT
   permisoInternacional     String?   // número de permiso internacional

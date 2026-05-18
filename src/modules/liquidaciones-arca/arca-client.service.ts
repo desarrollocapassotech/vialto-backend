@@ -176,10 +176,12 @@ export class ArcaClientService {
       });
 
       httpStatus = res.status;
-      const body = await res.json() as ArcaTokenResponse & { error?: string };
+      const body = await res.json() as ArcaTokenResponse & { error?: string; message?: string };
 
       if (!res.ok || !body.token) {
-        throw this.mapError(body?.error ?? `HTTP ${res.status}`, res.status);
+        const errDetail = body?.error ?? body?.message ?? `HTTP ${res.status}`;
+        this.logger.error(`AFIP SDK auth HTTP ${res.status}: ${JSON.stringify(body)}`);
+        throw this.mapError(errDetail, res.status);
       }
 
       const expiresAt = new Date(body.expiration);

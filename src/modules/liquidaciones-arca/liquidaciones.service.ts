@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  UnprocessableEntityException,
   Logger,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
@@ -105,6 +106,7 @@ export class LiquidacionesService {
       tnDestino: number | null;
       tarifaTransportista: number | null;
       subtotal: number;
+      gastosAdmin: number;
     }> = [];
 
     for (const v of viajesConMeta) {
@@ -113,22 +115,29 @@ export class LiquidacionesService {
       const tnOrigen = (meta.tnOrigen as number | null) ?? null;
       const tarifaTransportista = (meta.tarifaTransportista as number | null) ?? null;
 
+      const gastos = Array.isArray((v as { otrosGastos?: unknown }).otrosGastos)
+        ? ((v as { otrosGastos: Array<{ monto?: number; moneda?: string }> }).otrosGastos)
+        : [];
+      const gastosAdminViaje = round2(
+        gastos
+          .filter((g) => (g.moneda ?? 'ARS') === 'ARS')
+          .reduce((acc, g) => acc + (g.monto ?? 0), 0),
+      );
+
+      // Granel (NyM): tnDestino × tarifaTransportista. Viaje estándar: precioTransportistaExterno.
       const subtotal = tnDestino != null && tarifaTransportista != null
         ? round2(tnDestino * tarifaTransportista)
-        : 0;
+        : round2((v as { precioTransportistaExterno?: number | null }).precioTransportistaExterno ?? 0);
 
       bruto += subtotal;
-      viajesDetalle.push({ viajeId: v.id, tnOrigen, tnDestino, tarifaTransportista, subtotal });
+      viajesDetalle.push({ viajeId: v.id, tnOrigen, tnDestino, tarifaTransportista, subtotal, gastosAdmin: gastosAdminViaje });
     }
 
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
-    const gastosAdmin = round2(config.gastosAdminPorViaje * dto.viajeIds.length);
-    // IVA 21% aplica solo sobre (bruto - comisión) — ambos al 21%.
-    // Gastos admin son al 0% IVA y NO forman parte de la base imponible.
-    const ivaBase = round2(bruto - comision);
-    const gastosAdminIva = round2(ivaBase * config.ivaGastosAdmin / 100);
-    const liquido = round2(ivaBase - gastosAdmin + gastosAdminIva);
+    const gastosAdmin = round2(viajesDetalle.reduce((acc, d) => acc + d.gastosAdmin, 0));
+    const gastosAdminIva = round2(bruto * config.ivaGastosAdmin / 100);
+    const liquido = round2(bruto - comision - gastosAdmin + gastosAdminIva);
 
     const liquidacion = await this.db.liquidacion.create({
       data: {
@@ -156,6 +165,7 @@ export class LiquidacionesService {
             tnDestino: d.tnDestino,
             tarifaTransportista: d.tarifaTransportista,
             subtotal: d.subtotal,
+            gastosAdmin: d.gastosAdmin,
           })),
         },
       },
@@ -266,17 +276,19 @@ export class LiquidacionesService {
     } catch (err) {
       const isConectividad =
         err instanceof ArcaException && err.code === ARCA_ERROR_CODES.CONECTIVIDAD;
+      const errMsg = err instanceof Error ? err.message : String(err);
 
       await this.db.liquidacion.update({
         where: { id: liquidacionId },
         data: {
           estado: isConectividad ? 'pendiente_cae' : 'error',
-          arcaError: err instanceof Error ? err.message : String(err),
+          arcaError: errMsg,
           updatedAt: new Date(),
         },
       });
 
-      throw err;
+      this.logger.error(`Error al emitir liquidación ${liquidacionId}: ${errMsg}`);
+      throw new UnprocessableEntityException(errMsg);
     }
   }
 
@@ -351,6 +363,27 @@ export class LiquidacionesService {
     return this.findById(tenantId, liquidacionId);
   }
 
+  async getConfig(tenantId: string) {
+    return this.arcaConfig.findPublic(tenantId);
+  }
+
+  async deleteLiquidacion(tenantId: string, id: string) {
+    const liq = await this.db.liquidacion.findUnique({
+      where: { id },
+      select: { tenantId: true, estado: true },
+    });
+    if (!liq || liq.tenantId !== tenantId) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+    if (liq.estado === 'autorizado' || liq.estado === 'anulado') {
+      throw new BadRequestException(
+        'No se puede eliminar una liquidación autorizada o anulada',
+      );
+    }
+    await this.db.liquidacionViaje.deleteMany({ where: { liquidacionId: id } });
+    await this.db.liquidacion.delete({ where: { id } });
+  }
+
   async findAll(tenantId: string, estado?: string) {
     return this.db.liquidacion.findMany({
       where: { tenantId, ...(estado ? { estado } : {}) },
@@ -366,11 +399,21 @@ export class LiquidacionesService {
     const liq = await this.db.liquidacion.findUnique({
       where: { id },
       include: {
-        transportista: { select: { id: true, nombre: true, idFiscal: true, condicionIva: true } },
+        transportista: {
+          select: { id: true, nombre: true, idFiscal: true, condicionIva: true, domicilio: true, pais: true },
+        },
         viajes: {
           include: {
             viaje: {
-              select: { id: true, numero: true, fechaCarga: true, fechaDescarga: true },
+              select: {
+                id: true,
+                numero: true,
+                fechaCarga: true,
+                fechaDescarga: true,
+                origen: true,
+                destino: true,
+                metadata: true,
+              },
             },
           },
         },

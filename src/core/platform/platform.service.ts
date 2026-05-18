@@ -398,9 +398,16 @@ export class PlatformService {
       data: {
         tenantId: scopedTenantId,
         nombre: dto.nombre,
+        pais: dto.pais ?? null,
         idFiscal: dto.idFiscal ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
+        domicilio: dto.domicilio ?? null,
+        condicionIva: dto.condicionIva ?? null,
+        condicionTributaria: dto.condicionTributaria ?? null,
+        paut: dto.paut ?? null,
+        permisoInternacional: dto.permisoInternacional ?? null,
+        fechaVencimientoPermiso: dto.fechaVencimientoPermiso ? new Date(dto.fechaVencimientoPermiso) : null,
       },
     });
   }
@@ -416,9 +423,21 @@ export class PlatformService {
       where: { id },
       data: {
         nombre: dto.nombre,
+        pais: dto.pais,
         idFiscal: dto.idFiscal,
         email: dto.email,
         telefono: dto.telefono,
+        domicilio: dto.domicilio,
+        condicionIva: dto.condicionIva,
+        condicionTributaria: dto.condicionTributaria,
+        paut: dto.paut,
+        permisoInternacional: dto.permisoInternacional,
+        fechaVencimientoPermiso:
+          dto.fechaVencimientoPermiso === undefined
+            ? undefined
+            : dto.fechaVencimientoPermiso
+              ? new Date(dto.fechaVencimientoPermiso)
+              : null,
       },
     });
   }

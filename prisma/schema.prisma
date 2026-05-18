@@ -90,9 +90,10 @@ model Transportista {
   paut                     String?   // número de PAUT
   permisoInternacional     String?   // número de permiso internacional
   fechaVencimientoPermiso  DateTime? // vencimiento del permiso internacional
+  pais                     String?   // código de país (AR, UY, PY, CL, BR)
   domicilio                String?   // domicilio legal del transportista
-  bandera                  String?   // país/bandera (ej: ARGENTINA)
   condicionIva             Int?      // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
+  condicionTributaria      String?   // condición tributaria genérica (para países no AR)
   comisionPct              Float?    // % comisión NyM (si null usa el default de ArcaConfig)
   createdAt                DateTime  @default(now())
 

@@ -28,7 +28,7 @@ type PautViaje = {
     permisoInternacional: string | null;
     fechaVencimientoPermiso: Date | null;
     domicilio: string | null;
-    bandera: string | null;
+    pais: string | null;
   } | null;
   chofer: {
     id: string;
@@ -58,7 +58,7 @@ export class PautService {
             permisoInternacional: true,
             fechaVencimientoPermiso: true,
             domicilio: true,
-            bandera: true,
+            pais: true,
           },
         },
         chofer: { select: { id: true, nombre: true, dni: true, cuit: true } },
@@ -100,7 +100,7 @@ export class PautService {
       if (!viaje.transportista.permisoInternacional?.trim()) t.push('Permiso Internacional');
       if (!viaje.transportista.fechaVencimientoPermiso) t.push('Vencimiento del Permiso Internacional');
       if (!viaje.transportista.domicilio?.trim()) t.push('Domicilio');
-      if (!viaje.transportista.bandera?.trim()) t.push('Bandera (país)');
+      if (!viaje.transportista.pais?.trim()) t.push('País');
       if (t.length > 0) missingGroups['Transportista'] = { fields: t, entityId: viaje.transportista.id };
     }
 
@@ -271,7 +271,7 @@ export class PautService {
       ['DOMICILIO:', t?.domicilio ?? ''],
       ['PERMISO INTERNACIONAL:', t?.permisoInternacional ?? ''],
       ['FECHA VENCIMIENTO:', this.fmtDate(t?.fechaVencimientoPermiso)],
-      ['BANDERA:', t?.bandera ?? ''],
+      ['BANDERA:', t?.pais ?? ''],
     ];
 
     for (const [label, value] of empresaRows) {

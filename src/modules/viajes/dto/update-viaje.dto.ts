@@ -9,23 +9,10 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
-import { OtroGastoDto } from './create-viaje.dto';
+import { OtroGastoDto, PagoTransportistaDto } from './create-viaje.dto';
 import { ViajeProductoItemDto } from './viaje-producto-item.dto';
 
-export class PagoTransportistaDto {
-  @IsNumber()
-  monto!: number;
-
-  @IsIn(['ARS', 'USD'])
-  moneda!: string;
-
-  @IsDateString()
-  fecha!: string;
-
-  @IsOptional()
-  @IsString()
-  observaciones?: string;
-}
+export { PagoTransportistaDto };
 
 export class UpdateViajeDto {
   @IsOptional() @IsString() numero?: string;

@@ -255,8 +255,10 @@ export class ImportacionesService {
         fechaDescarga: toDateStr(p.fechaDescarga),
         detalleCarga: toStr(p.detalleCarga),
         monto,
+        monedaMonto: toStr(p.monedaMonto),
         nroFactura,
         precioTransportistaExterno: precioTransp,
+        monedaPrecioTransportistaExterno: toStr(p.monedaPrecioTransportistaExterno),
         nroFacturaTransporte,
       });
 

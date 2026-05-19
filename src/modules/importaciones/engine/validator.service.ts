@@ -148,6 +148,21 @@ export class ValidatorService {
         return { value: id };
       }
 
+      case 'enum': {
+        const upper = str.toUpperCase();
+        if (!col.allowedValues?.includes(upper)) {
+          return {
+            error: {
+              fila: rowNum,
+              campo: col.excelHeader,
+              error: `Valor inválido. Los valores permitidos son: ${col.allowedValues?.join(', ')}`,
+              valor: raw,
+            },
+          };
+        }
+        return { value: upper };
+      }
+
       default:
         return { value: str };
     }

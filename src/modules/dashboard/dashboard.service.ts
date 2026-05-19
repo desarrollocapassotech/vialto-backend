@@ -37,6 +37,7 @@ export type OwnerDashboardResponse = {
   financiero?: {
     /** Monto sin facturar atribuible al período (finalizados en ventana + pendiente/en curso por fecha de carga o alta). */
     sinFacturarPeriodo: MetricCompare;
+    /** Suma de montos de viajes en estado facturado sin cobrar (pipeline actual, por moneda). */
     facturado: MetricCompare;
     cobrado: MetricCompare;
     aPagarTransportistas: MetricCompare;
@@ -64,7 +65,7 @@ export type OwnerDashboardResponse = {
     completados: MetricCompare;
     /** Suma de montos (snapshot actual, no filtrado por el período del selector). */
     sinFacturarMonto: number;
-    /** Conteos snapshot por estado (pipeline actual). */
+    /** Conteos de pipeline: sin facturar / sin cobrar (snapshot); cobrados (período + cobros registrados). */
     sinFacturar: number;
     sinCobrar: number;
     cobrados: number;
@@ -72,6 +73,12 @@ export type OwnerDashboardResponse = {
 };
 
 type CompareMode = 'higher_better' | 'lower_better';
+
+/** Viajes con factura emitida, pendientes de cobro (incluye alias legados en BD). */
+const ESTADOS_VIAJE_FACTURADO = ['facturado_sin_cobrar', 'finalizado_facturado'] as const;
+
+/** Viajes cobrados (incluye alias legados en BD). */
+const ESTADOS_VIAJE_COBRADO = ['cobrado', 'finalizado_cobrado'] as const;
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
@@ -172,7 +179,7 @@ export class DashboardService {
     const [financieroResult, viajesResult] = await Promise.all([
       hasFacturacion
         ? Promise.all([
-            this.sumFacturadoCliente(tenantId, resolved.start, resolved.end),           // 0
+            this.sumFacturadoClienteSnapshot(tenantId),                                 // 0
             this.sumCobradoCliente(tenantId, resolved.start, resolved.end),             // 1
             this.sumAPagarTransportistas(tenantId, resolved.start, resolved.end),       // 2
             this.sumSinFacturarEnPeriodo(tenantId, sinFacturarRanges.current),          // 3
@@ -185,7 +192,7 @@ export class DashboardService {
             this.sumAPagarPorMoneda(tenantId, resolved.start, resolved.end),            // 10
             this.sumSinFacturarEnPeriodoMoneda(tenantId, sinFacturarRanges.current, 'USD'), // 11
             this.sumSinFacturarEnPeriodoMoneda(tenantId, sinFacturarRanges.current, 'ARS'), // 12
-            this.sumFacturadoPorMoneda(tenantId, resolved.start, resolved.end),         // 13
+            this.sumFacturadoPorMonedaSnapshot(tenantId),                               // 13
             this.sumCobradoPorMoneda(tenantId, resolved.start, resolved.end),           // 14
           ])
         : null,
@@ -197,8 +204,8 @@ export class DashboardService {
             this.countCompletadosEnVentana(tenantId, resolved.prevStart, resolved.prevEnd),
             this.sumMontoSinFacturar(tenantId),
             this.countEstadoEnVentana(tenantId, 'finalizado_sin_facturar', resolved.start, resolved.end),
-            this.countEstadoEnVentana(tenantId, 'facturado_sin_cobrar', resolved.start, resolved.end),
-            this.countEstadoEnVentana(tenantId, 'cobrado', resolved.start, resolved.end),
+            this.countEstadosSnapshot(tenantId, [...ESTADOS_VIAJE_FACTURADO]),
+            this.countCobradosEnPeriodo(tenantId, resolved.start, resolved.end),
           ])
         : null,
     ]);
@@ -282,20 +289,62 @@ export class DashboardService {
     };
   }
 
+  /**
+   * Atribuye un viaje al período del dashboard: fecha de carga, finalización, alta
+   * o emisión de la factura vinculada (misma lógica que métricas de cobro).
+   */
+  private whereViajeAtribuidoAlPeriodo(start: Date, end: Date): Prisma.ViajeWhereInput {
+    return {
+      OR: [
+        { fechaCarga: { gte: start, lt: end } },
+        { fechaCarga: null, fechaFinalizado: { gte: start, lt: end } },
+        {
+          fechaCarga: null,
+          fechaFinalizado: null,
+          createdAt: { gte: start, lt: end },
+        },
+        {
+          facturaId: { not: null },
+          factura: { fechaEmision: { gte: start, lt: end } },
+        },
+      ],
+    };
+  }
+
+  /** Suma de `monto` en viajes facturados sin cobrar (pipeline actual). */
+  private async sumFacturadoClienteSnapshot(tenantId: string): Promise<number> {
+    const mon = await this.sumFacturadoPorMonedaSnapshot(tenantId);
+    return roundMoney(mon.ARS + mon.USD);
+  }
+
+  /** Montos por moneda de viajes facturados sin cobrar (sin filtro de período). */
+  private async sumFacturadoPorMonedaSnapshot(
+    tenantId: string,
+  ): Promise<{ ARS: number; USD: number }> {
+    const groups = await this.prisma.viaje.groupBy({
+      by: ['monedaMonto'],
+      where: {
+        tenantId,
+        estado: { in: [...ESTADOS_VIAJE_FACTURADO] },
+      },
+      _sum: { monto: true },
+    });
+    const byMoneda: Record<string, number> = {};
+    for (const g of groups) {
+      const m = g.monedaMonto === 'USD' ? 'USD' : 'ARS';
+      byMoneda[m] = roundMoney((byMoneda[m] ?? 0) + (g._sum.monto ?? 0));
+    }
+    return { ARS: byMoneda['ARS'] ?? 0, USD: byMoneda['USD'] ?? 0 };
+  }
+
+  /** Suma de `monto` en viajes facturados sin cobrar atribuidos al período (comparación histórica). */
   private async sumFacturadoCliente(
     tenantId: string,
     start: Date,
     end: Date,
   ): Promise<number> {
-    const agg = await this.prisma.factura.aggregate({
-      where: {
-        tenantId,
-        tipo: 'cliente',
-        fechaEmision: { gte: start, lt: end },
-      },
-      _sum: { importe: true },
-    });
-    return agg._sum.importe ?? 0;
+    const mon = await this.sumFacturadoPorMoneda(tenantId, start, end);
+    return roundMoney(mon.ARS + mon.USD);
   }
 
   private async sumFacturadoPorMoneda(
@@ -303,19 +352,19 @@ export class DashboardService {
     start: Date,
     end: Date,
   ): Promise<{ ARS: number; USD: number }> {
-    const groups = await this.prisma.factura.groupBy({
-      by: ['moneda'],
+    const groups = await this.prisma.viaje.groupBy({
+      by: ['monedaMonto'],
       where: {
         tenantId,
-        tipo: 'cliente',
-        fechaEmision: { gte: start, lt: end },
+        estado: { in: [...ESTADOS_VIAJE_FACTURADO] },
+        ...this.whereViajeAtribuidoAlPeriodo(start, end),
       },
-      _sum: { importe: true },
+      _sum: { monto: true },
     });
     const byMoneda: Record<string, number> = {};
     for (const g of groups) {
-      const m = g.moneda === 'USD' ? 'USD' : 'ARS';
-      byMoneda[m] = roundMoney(g._sum.importe ?? 0);
+      const m = g.monedaMonto === 'USD' ? 'USD' : 'ARS';
+      byMoneda[m] = roundMoney((byMoneda[m] ?? 0) + (g._sum.monto ?? 0));
     }
     return { ARS: byMoneda['ARS'] ?? 0, USD: byMoneda['USD'] ?? 0 };
   }
@@ -337,13 +386,10 @@ export class DashboardService {
       this.prisma.viaje.findMany({
         where: {
           tenantId,
-          estado: 'cobrado',
+          estado: { in: [...ESTADOS_VIAJE_COBRADO] },
           facturaId: { not: null },
           factura: { tipo: 'cliente' },
-          OR: [
-            { factura: { fechaEmision: { gte: start, lt: end } } },
-            { fechaFinalizado: { gte: start, lt: end } },
-          ],
+          ...this.whereViajeAtribuidoAlPeriodo(start, end),
         },
         select: {
           monto: true,
@@ -392,13 +438,10 @@ export class DashboardService {
       this.prisma.viaje.findMany({
         where: {
           tenantId,
-          estado: 'cobrado',
+          estado: { in: [...ESTADOS_VIAJE_COBRADO] },
           facturaId: { not: null },
           factura: { tipo: 'cliente' },
-          OR: [
-            { factura: { fechaEmision: { gte: start, lt: end } } },
-            { fechaFinalizado: { gte: start, lt: end } },
-          ],
+          ...this.whereViajeAtribuidoAlPeriodo(start, end),
         },
         select: {
           monto: true,
@@ -618,14 +661,54 @@ export class DashboardService {
     start: Date,
     end: Date,
   ): Promise<number> {
+    return this.countEstadosEnVentana(tenantId, [estado], start, end);
+  }
+
+  /** Conteo por estado(s) con atribución al período alineada al resumen financiero. */
+  private async countEstadosEnVentana(
+    tenantId: string,
+    estados: string[],
+    start: Date,
+    end: Date,
+  ): Promise<number> {
+    if (estados.length === 0) return 0;
     return this.prisma.viaje.count({
       where: {
         tenantId,
-        estado,
+        estado: { in: estados },
+        ...this.whereViajeAtribuidoAlPeriodo(start, end),
+      },
+    });
+  }
+
+  /** Conteo snapshot por estado(s) (pipeline operativo actual). */
+  private countEstadosSnapshot(tenantId: string, estados: string[]): Promise<number> {
+    if (estados.length === 0) return Promise.resolve(0);
+    return this.prisma.viaje.count({
+      where: { tenantId, estado: { in: estados } },
+    });
+  }
+
+  /**
+   * Viajes cobrados en el período: estado `cobrado` con atribución temporal o cobro
+   * registrado en factura de cliente (misma lógica que `sumCobradoCliente`).
+   */
+  private countCobradosEnPeriodo(tenantId: string, start: Date, end: Date): Promise<number> {
+    return this.prisma.viaje.count({
+      where: {
+        tenantId,
+        facturaId: { not: null },
+        factura: { tipo: 'cliente' },
         OR: [
-          { fechaCarga: { gte: start, lt: end } },
-          { fechaCarga: null, fechaFinalizado: { gte: start, lt: end } },
-          { fechaCarga: null, fechaFinalizado: null, createdAt: { gte: start, lt: end } },
+          {
+            estado: { in: [...ESTADOS_VIAJE_COBRADO] },
+            ...this.whereViajeAtribuidoAlPeriodo(start, end),
+          },
+          {
+            factura: {
+              pagos: { some: { fecha: { gte: start, lt: end } } },
+            },
+          },
         ],
       },
     });

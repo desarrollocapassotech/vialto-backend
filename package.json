@@ -10,6 +10,7 @@
     "postinstall": "prisma generate",
     "build": "npx @nestjs/cli build",
     "start": "node dist/main",
+    "dev": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:prod": "prisma migrate deploy && node dist/main",
     "prisma:generate": "prisma generate",

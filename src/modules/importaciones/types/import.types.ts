@@ -4,7 +4,7 @@ export type LookupModel =
   | 'vehiculos'
   | 'transportistas';
 
-export type ColumnType = 'string' | 'number' | 'date' | 'boolean' | 'lookup';
+export type ColumnType = 'string' | 'number' | 'date' | 'boolean' | 'lookup' | 'enum';
 
 export interface ColumnConfig {
   /** Nombre del encabezado en el Excel del cliente */
@@ -21,6 +21,7 @@ export interface ColumnConfig {
   /** Para type='lookup': si no se encuentra, crear el registro automáticamente */
   createIfNotFound?: boolean;
   required?: boolean;
+  allowedValues?: string[];
 }
 
 export interface TemplateConfig {
@@ -67,8 +68,10 @@ export interface PreviewViaje {
   fechaDescarga: string | null;
   detalleCarga: string | null;
   monto: number | null;
+  monedaMonto: string | null;
   nroFactura: string | null;
   precioTransportistaExterno: number | null;
+  monedaPrecioTransportistaExterno: string | null;
   nroFacturaTransporte: string | null;
 }
 

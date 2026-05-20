@@ -283,20 +283,60 @@ export class FacturacionService {
 
   async createPago(tenantId: string, dto: CreatePagoDto) {
     await this.findFactura(dto.facturaId, tenantId);
-    return this.prisma.pago.create({
+    const pago = await this.prisma.pago.create({
       data: {
         tenantId,
         facturaId: dto.facturaId,
         importe: dto.importe,
         fecha: new Date(dto.fecha),
-        formaPago: (dto.formaPago ?? null),
+        formaPago: dto.formaPago ?? null,
       },
     });
+    await this.syncViajesEstadoTrasPago(dto.facturaId, tenantId);
+    return pago;
   }
 
   async removePago(id: string, tenantId: string) {
     const row = await this.prisma.pago.findFirst({ where: { id, tenantId } });
     if (!row) throw new NotFoundException('Pago no encontrado');
-    return this.prisma.pago.delete({ where: { id } });
+    await this.prisma.pago.delete({ where: { id } });
+    await this.syncViajesEstadoTrasPago(row.facturaId, tenantId);
+    return row;
+  }
+
+  /** Alinea estado de viajes vinculados con cobro total o parcial de la factura. */
+  private async syncViajesEstadoTrasPago(facturaId: string, tenantId: string): Promise<void> {
+    const factura = await this.prisma.factura.findFirst({
+      where: { id: facturaId, tenantId },
+      include: {
+        viajes: { select: this.VIAJE_SELECT },
+        pagos: { select: this.PAGO_SELECT },
+      },
+    });
+    if (!factura) return;
+
+    const estadoLectura = computeEstadoFacturaLectura({
+      viajes: factura.viajes,
+      fechaVencimiento: factura.fechaVencimiento,
+      importeGuardado: factura.importe,
+      pagos: factura.pagos,
+    });
+
+    if (estadoLectura === 'cobrada') {
+      await this.prisma.viaje.updateMany({
+        where: {
+          facturaId,
+          tenantId,
+          estado: { in: ['facturado_sin_cobrar', 'finalizado_facturado'] },
+        },
+        data: { estado: 'cobrado' },
+      });
+      return;
+    }
+
+    await this.prisma.viaje.updateMany({
+      where: { facturaId, tenantId, estado: 'cobrado' },
+      data: { estado: 'facturado_sin_cobrar' },
+    });
   }
 }

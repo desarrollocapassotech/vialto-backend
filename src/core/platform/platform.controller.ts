@@ -28,6 +28,7 @@ import { CreateTransportistaDto } from '../transportistas/dto/create-transportis
 import { UpdateTransportistaDto } from '../transportistas/dto/update-transportista.dto';
 import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
 import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
+import { MicCrtExportDto } from '../../modules/viajes/dto/mic-crt-export.dto';
 import { ProductosPaginatedQueryDto } from '../../modules/stock/dto/productos-paginated-query.dto';
 import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
 import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
@@ -89,14 +90,23 @@ export class PlatformController {
     return this.service.listViajes(tenantId);
   }
 
-  @Get('viajes/:id/mic-crt')
+  @Get('viajes/:id/documento-aduanero')
+  viajeDocumentoAduanero(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+  ) {
+    return this.service.micCrtPrefill(tenantId, id);
+  }
+
+  @Post('viajes/:id/mic-crt')
   async viajeMicCrt(
     @Param('id') id: string,
     @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: MicCrtExportDto,
     @Res() res: Response,
   ) {
     try {
-      const pdf = await this.service.micCrtPdf(tenantId, id);
+      const pdf = await this.service.micCrtPdf(tenantId, id, dto);
       res.set({
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="MIC-CRT-${id}.pdf"`,

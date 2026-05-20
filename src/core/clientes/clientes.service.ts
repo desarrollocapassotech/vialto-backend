@@ -3,6 +3,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
 
 @Injectable()
 export class ClientesService {
@@ -50,6 +51,7 @@ export class ClientesService {
   }
 
   create(tenantId: string, dto: CreateClienteDto) {
+    validarIdFiscal(dto.pais, dto.idFiscal);
     return this.prisma.cliente.create({
       data: {
         tenantId,
@@ -59,15 +61,28 @@ export class ClientesService {
         telefono: dto.telefono ?? null,
         direccion: dto.direccion ?? null,
         pais: dto.pais ?? null,
+        condicionIva: dto.pais === 'AR' ? (dto.condicionIva ?? null) : null,
+        condicionTributaria: dto.pais !== 'AR' ? (dto.condicionTributaria ?? null) : null,
       },
     });
   }
 
   async update(id: string, tenantId: string, dto: UpdateClienteDto) {
-    await this.findOne(id, tenantId);
+    const existing = await this.findOne(id, tenantId);
+    const paisEfectivo = dto.pais ?? existing.pais ?? undefined;
+    validarIdFiscal(paisEfectivo, dto.idFiscal);
     return this.prisma.cliente.update({
       where: { id },
-      data: dto,
+      data: {
+        nombre: dto.nombre,
+        idFiscal: dto.idFiscal,
+        email: dto.email,
+        telefono: dto.telefono,
+        direccion: dto.direccion,
+        pais: dto.pais,
+        condicionIva: paisEfectivo === 'AR' ? dto.condicionIva : null,
+        condicionTributaria: paisEfectivo !== 'AR' ? dto.condicionTributaria : null,
+      },
     });
   }
 

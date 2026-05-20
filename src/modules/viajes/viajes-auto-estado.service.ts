@@ -16,41 +16,40 @@ export class ViajesAutoEstadoService {
    * Sin `tenantId`, actualiza todos los tenants (cron nocturno).
    */
   async actualizarEstadosPorFecha(tenantId?: string): Promise<void> {
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const ahora = new Date();
 
     const base = tenantId ? { tenantId } : {};
 
     const [finalizados, facturados, enCurso] = await Promise.all([
-      // pendiente/en_curso + fechaDescarga <= hoy + sin factura → finalizado_sin_facturar
+      // pendiente/en_curso + fechaDescarga <= ahora + sin factura → finalizado_sin_facturar
       this.prisma.viaje.updateMany({
         where: {
           ...base,
           estado: { in: ['pendiente', 'en_curso'] },
-          fechaDescarga: { lte: hoy },
+          fechaDescarga: { lte: ahora },
           facturaId: null,
         },
         data: { estado: 'finalizado_sin_facturar', fechaFinalizado: new Date() },
       }),
 
-      // pendiente/en_curso + fechaDescarga <= hoy + con factura → facturado_sin_cobrar
+      // pendiente/en_curso + fechaDescarga <= ahora + con factura → facturado_sin_cobrar
       this.prisma.viaje.updateMany({
         where: {
           ...base,
           estado: { in: ['pendiente', 'en_curso'] },
-          fechaDescarga: { lte: hoy },
+          fechaDescarga: { lte: ahora },
           facturaId: { not: null },
         },
         data: { estado: 'facturado_sin_cobrar', fechaFinalizado: new Date() },
       }),
 
-      // pendiente + fechaCarga <= hoy + fechaDescarga no pasada → en_curso
+      // pendiente + fechaCarga <= ahora + fechaDescarga no pasada → en_curso
       this.prisma.viaje.updateMany({
         where: {
           ...base,
           estado: 'pendiente',
-          fechaCarga: { lte: hoy },
-          OR: [{ fechaDescarga: null }, { fechaDescarga: { gt: hoy } }],
+          fechaCarga: { lte: ahora },
+          OR: [{ fechaDescarga: null }, { fechaDescarga: { gt: ahora } }],
         },
         data: { estado: 'en_curso' },
       }),

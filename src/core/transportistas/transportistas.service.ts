@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateTransportistaDto } from './dto/create-transportista.dto';
 import { UpdateTransportistaDto } from './dto/update-transportista.dto';
+import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
 
 @Injectable()
 export class TransportistasService {
@@ -17,9 +18,10 @@ export class TransportistasService {
   private async ensureExists(id: string, tenantId: string) {
     const row = await this.prisma.transportista.findFirst({
       where: { id, tenantId },
-      select: { id: true },
+      select: { id: true, pais: true },
     });
     if (!row) throw new NotFoundException('Transportista no encontrado');
+    return row;
   }
 
   async findOne(id: string, tenantId: string) {
@@ -48,6 +50,7 @@ export class TransportistasService {
 
   create(tenantId: string, dto: CreateTransportistaDto) {
     this.assertTransportistaRequiredFields(dto);
+    validarIdFiscal(dto.pais, dto.idFiscal);
     return this.prisma.transportista.create({
       data: {
         tenantId,
@@ -98,6 +101,7 @@ export class TransportistasService {
             : null,
     };
     this.assertTransportistaRequiredFields(next);
+    validarIdFiscal(next.pais, next.idFiscal);
     return this.prisma.transportista.update({
       where: { id },
       data: next,

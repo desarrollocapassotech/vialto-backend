@@ -176,9 +176,18 @@ export class PlatformService {
     return this.viajesService.deletePagoTransportista(viajeId, scoped, userId, index);
   }
 
-  micCrtPdf(tenantId: string | undefined, viajeId: string) {
+  micCrtPrefill(tenantId: string | undefined, viajeId: string) {
     const scoped = this.requiredTenantId(tenantId);
-    return this.micCrt.generate(viajeId, scoped);
+    return this.micCrt.getPrefill(viajeId, scoped);
+  }
+
+  micCrtPdf(
+    tenantId: string | undefined,
+    viajeId: string,
+    dto: import('../../modules/viajes/dto/mic-crt-export.dto').MicCrtExportDto,
+  ) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.micCrt.generate(viajeId, scoped, dto);
   }
 
   pautPdf(tenantId: string | undefined, viajeId: string) {

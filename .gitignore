@@ -1,6 +1,10 @@
 node_modules/
 .env
 .env.*
+env.*
+env.production
+env.qa
+env.local
 serviceAccountKey.json
 *.log
 dist/

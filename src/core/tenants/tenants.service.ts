@@ -7,6 +7,7 @@ import {
 import { createClerkClient } from '@clerk/backend';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 
+import { TenantBootstrapService } from '../../shared/tenant-bootstrap.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { ListTenantsDto } from './dto/list-tenants.dto';
@@ -43,7 +44,10 @@ function isClerkNotFoundError(err: unknown): boolean {
 
 @Injectable()
 export class TenantsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantBootstrap: TenantBootstrapService,
+  ) {}
 
   findAll() {
     return this.prisma.tenant.findMany({ orderBy: { createdAt: 'desc' } });
@@ -93,6 +97,11 @@ export class TenantsService {
     const tenant = await this.prisma.tenant.findUnique({ where: { clerkOrgId } });
     if (!tenant) throw new NotFoundException('Tenant no encontrado');
     return tenant;
+  }
+
+  /** Registra la org de Clerk en Vialto si aún no existe (onboarding automático). */
+  ensureRegistered(clerkOrgId: string) {
+    return this.tenantBootstrap.ensureRegistered(clerkOrgId);
   }
 
   async create(dto: CreateTenantDto, requesterUserId?: string) {

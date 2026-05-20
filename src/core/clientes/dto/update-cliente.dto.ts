@@ -1,5 +1,13 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsEmail,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 const trimString = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -26,4 +34,6 @@ export class UpdateClienteDto {
   @IsOptional() @IsEmail({}, { message: 'Email inválido' }) email?: string;
   @IsOptional() @IsString() telefono?: string;
   @IsOptional() @IsString() direccion?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(99) condicionIva?: number;
+  @IsOptional() @IsString() condicionTributaria?: string;
 }

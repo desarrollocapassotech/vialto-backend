@@ -3,6 +3,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
 
 @Injectable()
 export class ClientesService {
@@ -67,35 +68,53 @@ export class ClientesService {
 
   create(tenantId: string, dto: CreateClienteDto) {
     this.assertClienteRequiredFields(dto);
+    const pais = dto.pais.trim();
+    const idFiscal = dto.idFiscal.trim();
+    validarIdFiscal(pais, idFiscal);
     return this.prisma.cliente.create({
       data: {
         tenantId,
         nombre: dto.nombre.trim(),
-        idFiscal: dto.idFiscal.trim(),
-        pais: dto.pais.trim(),
+        idFiscal,
+        pais,
         email: dto.email?.trim() || null,
         telefono: dto.telefono?.trim() || null,
         direccion: dto.direccion?.trim() || null,
+        condicionIva: pais === 'AR' ? (dto.condicionIva ?? null) : null,
+        condicionTributaria: pais !== 'AR' ? (dto.condicionTributaria ?? null) : null,
       },
     });
   }
 
   async update(id: string, tenantId: string, dto: UpdateClienteDto) {
     const current = await this.findOne(id, tenantId);
+    const paisEfectivo =
+      dto.pais !== undefined ? dto.pais.trim() : (current.pais ?? '');
+    const idFiscalEfectivo =
+      dto.idFiscal !== undefined ? dto.idFiscal.trim() : (current.idFiscal ?? '');
     const next = {
       nombre: dto.nombre !== undefined ? dto.nombre.trim() : current.nombre,
-      idFiscal:
-        dto.idFiscal !== undefined ? dto.idFiscal.trim() : (current.idFiscal ?? ''),
-      pais: dto.pais !== undefined ? dto.pais.trim() : (current.pais ?? ''),
+      idFiscal: idFiscalEfectivo,
+      pais: paisEfectivo,
       email: dto.email !== undefined ? dto.email?.trim() || null : current.email,
       telefono: dto.telefono !== undefined ? dto.telefono?.trim() || null : current.telefono,
       direccion:
         dto.direccion !== undefined ? dto.direccion?.trim() || null : current.direccion,
     };
     this.assertClienteRequiredFields(next);
+    validarIdFiscal(paisEfectivo, idFiscalEfectivo);
     return this.prisma.cliente.update({
       where: { id },
-      data: next,
+      data: {
+        nombre: next.nombre,
+        idFiscal: next.idFiscal,
+        pais: next.pais,
+        email: next.email,
+        telefono: next.telefono,
+        direccion: next.direccion,
+        condicionIva: paisEfectivo === 'AR' ? dto.condicionIva : null,
+        condicionTributaria: paisEfectivo !== 'AR' ? dto.condicionTributaria : null,
+      },
     });
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
@@ -49,25 +49,53 @@ export class ClientesService {
     return row;
   }
 
+  private assertClienteRequiredFields(data: {
+    nombre: string;
+    idFiscal: string | null | undefined;
+    pais: string | null | undefined;
+  }) {
+    if (!data.nombre?.trim()) {
+      throw new BadRequestException('El nombre es obligatorio');
+    }
+    if (!data.idFiscal?.trim()) {
+      throw new BadRequestException('El ID Fiscal es obligatorio');
+    }
+    if (!data.pais?.trim()) {
+      throw new BadRequestException('El país es obligatorio');
+    }
+  }
+
   create(tenantId: string, dto: CreateClienteDto) {
+    this.assertClienteRequiredFields(dto);
     return this.prisma.cliente.create({
       data: {
         tenantId,
-        nombre: dto.nombre,
-        idFiscal: dto.idFiscal ?? null,
-        email: dto.email ?? null,
-        telefono: dto.telefono ?? null,
-        direccion: dto.direccion ?? null,
-        pais: dto.pais ?? null,
+        nombre: dto.nombre.trim(),
+        idFiscal: dto.idFiscal.trim(),
+        pais: dto.pais.trim(),
+        email: dto.email?.trim() || null,
+        telefono: dto.telefono?.trim() || null,
+        direccion: dto.direccion?.trim() || null,
       },
     });
   }
 
   async update(id: string, tenantId: string, dto: UpdateClienteDto) {
-    await this.findOne(id, tenantId);
+    const current = await this.findOne(id, tenantId);
+    const next = {
+      nombre: dto.nombre !== undefined ? dto.nombre.trim() : current.nombre,
+      idFiscal:
+        dto.idFiscal !== undefined ? dto.idFiscal.trim() : (current.idFiscal ?? ''),
+      pais: dto.pais !== undefined ? dto.pais.trim() : (current.pais ?? ''),
+      email: dto.email !== undefined ? dto.email?.trim() || null : current.email,
+      telefono: dto.telefono !== undefined ? dto.telefono?.trim() || null : current.telefono,
+      direccion:
+        dto.direccion !== undefined ? dto.direccion?.trim() || null : current.direccion,
+    };
+    this.assertClienteRequiredFields(next);
     return this.prisma.cliente.update({
       where: { id },
-      data: dto,
+      data: next,
     });
   }
 

@@ -63,9 +63,10 @@ model Cliente {
   email        String?
   telefono     String?
   direccion    String?
-  pais         String?
-  condicionIva Int?     // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
-  createdAt    DateTime @default(now())
+  pais                String?
+  condicionIva        Int?     // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
+  condicionTributaria String?  // condición tributaria genérica (para países no AR)
+  createdAt           DateTime @default(now())
 
   viajes           Viaje[]
   facturas         Factura[]

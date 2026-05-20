@@ -50,6 +50,13 @@ export class TenantsController {
     return this.service.findOne(orgId);
   }
 
+  @ApiOperation({ summary: 'Registrar org de Clerk en Vialto si aún no existe' })
+  @Post(':orgId/ensure')
+  @UseGuards(OwnTenantOrAdminGuard)
+  ensure(@Param('orgId') orgId: string) {
+    return this.service.ensureRegistered(orgId);
+  }
+
   @ApiOperation({ summary: 'Crear nuevo tenant (empresa cliente)' })
   @Post()
   @Roles('superadmin')

@@ -32,6 +32,7 @@ import { RequireModule } from '../../shared/decorators/require-module.decorator'
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { queryParamFromRequest } from '../../shared/util/express-query-string';
 import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
+import { MicCrtExportDto } from './dto/mic-crt-export.dto';
 
 @ApiTags('Módulo: Viajes')
 @ApiBearerAuth('clerk-jwt')
@@ -102,17 +103,48 @@ export class ViajesController {
     return this.service.getViajesSaldoPendienteTransportista(auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Generar PDF MIC/CRT del viaje (para cargas internacionales)' })
+  @ApiOperation({ summary: 'Datos sugeridos para el modal de exportación MIC/CRT' })
+  @Get(':id/mic-crt/prefill')
+  @Roles('admin', 'supervisor', 'superadmin')
+  getMicCrtPrefill(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.micCrt.getPrefill(id, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Alias de mic-crt/prefill (documento aduanero)' })
+  @Get(':id/documento-aduanero')
+  @Roles('admin', 'supervisor', 'superadmin')
+  getDocumentoAduanero(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.micCrt.getPrefill(id, auth.tenantId);
+  }
+
+  @ApiOperation({
+    summary: 'Obsoleto — usar GET mic-crt/prefill + POST mic-crt',
+    deprecated: true,
+  })
   @Get(':id/mic-crt')
+  @Roles('admin', 'supervisor', 'superadmin')
+  micCrtGetDeprecated(@Res() res: Response) {
+    res.status(400).json({
+      message:
+        'La exportación MIC/CRT requiere el formulario aduanero. Usá GET /viajes/:id/mic-crt/prefill y POST /viajes/:id/mic-crt.',
+      code: 'MIC_CRT_REQUIRES_EXPORT_FORM',
+    });
+  }
+
+  @ApiOperation({ summary: 'Generar PDF MIC/CRT con datos comerciales/aduaneros del formulario' })
+  @Post(':id/mic-crt')
   @Roles('admin', 'supervisor', 'superadmin')
   async generateMicCrt(
     @Param('id') id: string,
+    @Body() dto: MicCrtExportDto,
     @CurrentAuth() auth: AuthPayload,
     @Res() res: Response,
   ) {
     assertTenantId(auth.tenantId);
     try {
-      const pdf = await this.micCrt.generate(id, auth.tenantId);
+      const pdf = await this.micCrt.generate(id, auth.tenantId, dto);
       res.set({
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="MIC-CRT-${id}.pdf"`,

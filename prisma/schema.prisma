@@ -220,6 +220,8 @@ model Viaje {
   observaciones    String?
   otrosGastos         Json      @default("[]")
   pagosTransportista  Json      @default("[]")
+  /** Datos comerciales/aduaneros MIC·CRT (independientes del monto operativo del viaje). */
+  documentoAduanero   Json      @default("{}")
   fechaFinalizado  DateTime?
   createdAt        DateTime  @default(now())
   createdBy        String

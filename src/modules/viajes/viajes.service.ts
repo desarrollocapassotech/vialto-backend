@@ -453,6 +453,7 @@ export class ViajesService {
           dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
         observaciones: dto.observaciones ?? null,
         otrosGastos: dto.otrosGastos ? (dto.otrosGastos as unknown as Prisma.InputJsonValue) : [],
+        pagosTransportista: dto.pagosTransportista ? (dto.pagosTransportista as unknown as Prisma.InputJsonValue) : [],
         createdBy: userId,
       };
       const viaje = await tx.viaje.create({ data });

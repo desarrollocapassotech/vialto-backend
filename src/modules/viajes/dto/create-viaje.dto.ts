@@ -20,6 +20,13 @@ export class OtroGastoDto {
   @IsOptional() @IsDateString() fecha?: string;
 }
 
+export class PagoTransportistaDto {
+  @IsNumber() @Min(0) @Type(() => Number) monto: number;
+  @IsIn(['ARS', 'USD']) moneda: string;
+  @IsDateString() fecha: string;
+  @IsOptional() @IsString() observaciones?: string;
+}
+
 export class CreateViajeDto {
   /** Si no se envía, el servidor asigna un correlativo (AAAA-NNNNNN). */
   @IsOptional() @IsString() numero?: string;
@@ -53,4 +60,5 @@ export class CreateViajeDto {
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
   @IsOptional() @IsString() observaciones?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PagoTransportistaDto) pagosTransportista?: PagoTransportistaDto[];
 }

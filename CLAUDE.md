@@ -105,7 +105,7 @@ Ejemplos de uso:
 3. **Todo endpoint de módulo DEBE tener `@UseGuards(ModuleGuard)`** con el nombre del módulo.
 4. **Nuevos módulos van en `src/modules/{nombre}/`** con su propio NestJS module, controller, service y schema Prisma.
 5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí (salvo `reportes`).
-6. **Migraciones Prisma** — siempre `prisma migrate dev` en local y `prisma migrate deploy` en CI/CD.
+6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** de Neon (entorno QA); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
 
 ### Configuración del tenant en PostgreSQL
 

@@ -42,11 +42,14 @@ jobs:
           S3_BUCKET: ${{ secrets.S3_BUCKET }}
         run: |
           set -euo pipefail
+          # Usar el pg_dump más nuevo instalado (cliente PGDG v17), no el 16 preinstalado del runner.
+          PG_DUMP=$(ls -d /usr/lib/postgresql/*/bin/pg_dump 2>/dev/null | sort -V | tail -n1)
+          echo "Usando: $("$PG_DUMP" --version)"
           STAMP=$(date -u +%Y-%m-%d_%H%M%S)
           FILE="vialto_prod_${STAMP}.dump"
 
           echo "→ Generando $FILE (formato custom, comprimido)"
-          pg_dump "$DATABASE_URL_UNPOOLED" -Fc -f "$FILE"
+          "$PG_DUMP" "$DATABASE_URL_UNPOOLED" -Fc -f "$FILE"
 
           echo "→ Subiendo a s3://${S3_BUCKET}/daily/${FILE}"
           aws s3 cp "$FILE" "s3://${S3_BUCKET}/daily/${FILE}" \

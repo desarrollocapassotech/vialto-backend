@@ -2,8 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateClienteDto } from '../clientes/dto/create-cliente.dto';
 import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
+import { ChoferesService } from '../choferes/choferes.service';
 import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
+import { VehiculosService } from '../vehiculos/vehiculos.service';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
 import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
@@ -84,6 +86,8 @@ async function getUserPlatformRole(userId: string | null): Promise<string | null
 export class PlatformService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly choferesService: ChoferesService,
+    private readonly vehiculosService: VehiculosService,
     private readonly viajesService: ViajesService,
     private readonly stockService: StockService,
     private readonly facturacionService: FacturacionService,
@@ -308,43 +312,12 @@ export class PlatformService {
   async createChofer(tenantId: string | undefined, dto: CreateChoferDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
-    await this.assertTransportista(scopedTenantId, dto.transportistaId);
-    return this.prisma.chofer.create({
-      data: {
-        tenantId: scopedTenantId,
-        nombre: dto.nombre,
-        dni: dto.dni ?? null,
-        licencia: dto.licencia ?? null,
-        licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
-        telefono: dto.telefono ?? null,
-        transportistaId: dto.transportistaId ?? null,
-      },
-    });
+    return this.choferesService.create(scopedTenantId, dto);
   }
 
   async updateChofer(tenantId: string | undefined, id: string, dto: UpdateChoferDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    await this.getChoferById(scopedTenantId, id);
-    if (dto.transportistaId !== undefined) {
-      await this.assertTransportista(scopedTenantId, dto.transportistaId ?? undefined);
-    }
-    return this.prisma.chofer.update({
-      where: { id },
-      data: {
-        nombre: dto.nombre,
-        dni: dto.dni,
-        licencia: dto.licencia,
-        telefono: dto.telefono,
-        transportistaId:
-          dto.transportistaId === undefined ? undefined : dto.transportistaId,
-        licenciaVence:
-          dto.licenciaVence === undefined
-            ? undefined
-            : dto.licenciaVence
-              ? new Date(dto.licenciaVence)
-              : null,
-      },
-    });
+    return this.choferesService.update(id, scopedTenantId, dto);
   }
 
   async removeChofer(tenantId: string | undefined, id: string) {
@@ -657,40 +630,12 @@ export class PlatformService {
   async createVehiculo(tenantId: string | undefined, dto: CreateVehiculoDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
-    await this.assertTransportista(scopedTenantId, dto.transportistaId);
-    return this.prisma.vehiculo.create({
-      data: {
-        tenantId: scopedTenantId,
-        patente: dto.patente.toUpperCase(),
-        tipo: dto.tipo,
-        marca: dto.marca ?? null,
-        modelo: dto.modelo ?? null,
-        anio: dto.anio ?? null,
-        kmActual: dto.kmActual ?? 0,
-        transportistaId: dto.transportistaId ?? null,
-      },
-    });
+    return this.vehiculosService.create(scopedTenantId, dto);
   }
 
   async updateVehiculo(tenantId: string | undefined, id: string, dto: UpdateVehiculoDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    await this.getVehiculoById(scopedTenantId, id);
-    if (dto.transportistaId !== undefined) {
-      await this.assertTransportista(scopedTenantId, dto.transportistaId ?? undefined);
-    }
-    return this.prisma.vehiculo.update({
-      where: { id },
-      data: {
-        patente: dto.patente ? dto.patente.toUpperCase() : undefined,
-        tipo: dto.tipo,
-        marca: dto.marca,
-        modelo: dto.modelo,
-        anio: dto.anio,
-        kmActual: dto.kmActual,
-        transportistaId:
-          dto.transportistaId === undefined ? undefined : dto.transportistaId,
-      },
-    });
+    return this.vehiculosService.update(id, scopedTenantId, dto);
   }
 
   async removeVehiculo(tenantId: string | undefined, id: string) {

@@ -123,6 +123,14 @@ export class PlatformController {
     }
   }
 
+  @Get('viajes/:id/exportaciones')
+  viajeExportaciones(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+  ) {
+    return this.service.viajeExportaciones(tenantId, id);
+  }
+
   @Get('viajes/:id/paut')
   async viajePaut(
     @Param('id') id: string,

@@ -28,6 +28,10 @@ import {
   normalizarEstadoViaje,
   type ViajeEstado,
 } from './viaje-estados';
+import {
+  buildViajeExportacionesResponse,
+  enrichViajeConExportaciones,
+} from './viaje-exportaciones.util';
 
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
 
@@ -374,7 +378,7 @@ export class ViajesService {
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
-      items,
+      items: items.map((item) => enrichViajeConExportaciones(item)),
       meta: {
         page,
         pageSize,
@@ -392,7 +396,18 @@ export class ViajesService {
       include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
     });
     if (!row) throw new NotFoundException('Viaje no encontrado');
-    return row as unknown as ViajeConVehiculosViaje;
+    return enrichViajeConExportaciones(
+      row as unknown as ViajeConVehiculosViaje,
+    ) as ViajeConVehiculosViaje;
+  }
+
+  async getExportaciones(id: string, tenantId: string) {
+    const row = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      select: { id: true, numero: true, transportistaId: true },
+    });
+    if (!row) throw new NotFoundException('Viaje no encontrado');
+    return buildViajeExportacionesResponse(row);
   }
 
   async create(tenantId: string, userId: string, dto: CreateViajeDto) {

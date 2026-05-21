@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
@@ -50,36 +50,68 @@ export class ClientesService {
     return row;
   }
 
+  private assertClienteRequiredFields(data: {
+    nombre: string;
+    idFiscal: string | null | undefined;
+    pais: string | null | undefined;
+  }) {
+    if (!data.nombre?.trim()) {
+      throw new BadRequestException('El nombre es obligatorio');
+    }
+    if (!data.idFiscal?.trim()) {
+      throw new BadRequestException('El ID Fiscal es obligatorio');
+    }
+    if (!data.pais?.trim()) {
+      throw new BadRequestException('El país es obligatorio');
+    }
+  }
+
   create(tenantId: string, dto: CreateClienteDto) {
-    validarIdFiscal(dto.pais, dto.idFiscal);
+    this.assertClienteRequiredFields(dto);
+    const pais = dto.pais.trim();
+    const idFiscal = dto.idFiscal.trim();
+    validarIdFiscal(pais, idFiscal);
     return this.prisma.cliente.create({
       data: {
         tenantId,
-        nombre: dto.nombre,
-        idFiscal: dto.idFiscal ?? null,
-        email: dto.email ?? null,
-        telefono: dto.telefono ?? null,
-        direccion: dto.direccion ?? null,
-        pais: dto.pais ?? null,
-        condicionIva: dto.pais === 'AR' ? (dto.condicionIva ?? null) : null,
-        condicionTributaria: dto.pais !== 'AR' ? (dto.condicionTributaria ?? null) : null,
+        nombre: dto.nombre.trim(),
+        idFiscal,
+        pais,
+        email: dto.email?.trim() || null,
+        telefono: dto.telefono?.trim() || null,
+        direccion: dto.direccion?.trim() || null,
+        condicionIva: pais === 'AR' ? (dto.condicionIva ?? null) : null,
+        condicionTributaria: pais !== 'AR' ? (dto.condicionTributaria ?? null) : null,
       },
     });
   }
 
   async update(id: string, tenantId: string, dto: UpdateClienteDto) {
-    const existing = await this.findOne(id, tenantId);
-    const paisEfectivo = dto.pais ?? existing.pais ?? undefined;
-    validarIdFiscal(paisEfectivo, dto.idFiscal);
+    const current = await this.findOne(id, tenantId);
+    const paisEfectivo =
+      dto.pais !== undefined ? dto.pais.trim() : (current.pais ?? '');
+    const idFiscalEfectivo =
+      dto.idFiscal !== undefined ? dto.idFiscal.trim() : (current.idFiscal ?? '');
+    const next = {
+      nombre: dto.nombre !== undefined ? dto.nombre.trim() : current.nombre,
+      idFiscal: idFiscalEfectivo,
+      pais: paisEfectivo,
+      email: dto.email !== undefined ? dto.email?.trim() || null : current.email,
+      telefono: dto.telefono !== undefined ? dto.telefono?.trim() || null : current.telefono,
+      direccion:
+        dto.direccion !== undefined ? dto.direccion?.trim() || null : current.direccion,
+    };
+    this.assertClienteRequiredFields(next);
+    validarIdFiscal(paisEfectivo, idFiscalEfectivo);
     return this.prisma.cliente.update({
       where: { id },
       data: {
-        nombre: dto.nombre,
-        idFiscal: dto.idFiscal,
-        email: dto.email,
-        telefono: dto.telefono,
-        direccion: dto.direccion,
-        pais: dto.pais,
+        nombre: next.nombre,
+        idFiscal: next.idFiscal,
+        pais: next.pais,
+        email: next.email,
+        telefono: next.telefono,
+        direccion: next.direccion,
         condicionIva: paisEfectivo === 'AR' ? dto.condicionIva : null,
         condicionTributaria: paisEfectivo !== 'AR' ? dto.condicionTributaria : null,
       },

@@ -14,20 +14,14 @@
   - Added the required column `updatedAt` to the `productos` table without a default value. This is not possible if the table is not empty.
 
 */
--- DropForeignKey
-ALTER TABLE "cargas" DROP CONSTRAINT "cargas_tenantId_fkey";
+-- DropForeignKey (IF EXISTS — estas tablas pueden no existir en producción)
+ALTER TABLE IF EXISTS "cargas" DROP CONSTRAINT IF EXISTS "cargas_tenantId_fkey";
+ALTER TABLE IF EXISTS "viajes_cargas" DROP CONSTRAINT IF EXISTS "viajes_cargas_cargaId_fkey";
+ALTER TABLE IF EXISTS "viajes_cargas" DROP CONSTRAINT IF EXISTS "viajes_cargas_viajeId_fkey";
 
--- DropForeignKey
-ALTER TABLE "viajes_cargas" DROP CONSTRAINT "viajes_cargas_cargaId_fkey";
-
--- DropForeignKey
-ALTER TABLE "viajes_cargas" DROP CONSTRAINT "viajes_cargas_viajeId_fkey";
-
--- DropIndex
-DROP INDEX "idx_viajes_destino_trgm";
-
--- DropIndex
-DROP INDEX "idx_viajes_origen_trgm";
+-- DropIndex (IF EXISTS — estos índices pueden no existir en producción)
+DROP INDEX IF EXISTS "idx_viajes_destino_trgm";
+DROP INDEX IF EXISTS "idx_viajes_origen_trgm";
 
 -- AlterTable
 ALTER TABLE "choferes" ADD COLUMN     "cuit" TEXT;
@@ -78,11 +72,9 @@ ADD COLUMN     "permisoInternacional" TEXT;
 -- AlterTable
 ALTER TABLE "viajes" ADD COLUMN     "pagosTransportista" JSONB NOT NULL DEFAULT '[]';
 
--- DropTable
-DROP TABLE "cargas";
-
--- DropTable
-DROP TABLE "viajes_cargas";
+-- DropTable (IF EXISTS — pueden no existir en producción)
+DROP TABLE IF EXISTS "cargas";
+DROP TABLE IF EXISTS "viajes_cargas";
 
 -- CreateTable
 CREATE TABLE "viajes_productos" (

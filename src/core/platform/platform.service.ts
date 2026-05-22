@@ -195,6 +195,11 @@ export class PlatformService {
     return this.paut.generate(viajeId, scoped);
   }
 
+  viajeExportaciones(tenantId: string | undefined, viajeId: string) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.getExportaciones(viajeId, scoped);
+  }
+
   async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.viajesService.findOne(id, scopedTenantId);
@@ -314,6 +319,7 @@ export class PlatformService {
         tenantId: scopedTenantId,
         nombre: dto.nombre,
         dni: dto.dni ?? null,
+        cuit: dto.cuit ?? null,
         licencia: dto.licencia ?? null,
         licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
         telefono: dto.telefono ?? null,
@@ -333,6 +339,7 @@ export class PlatformService {
       data: {
         nombre: dto.nombre,
         dni: dto.dni,
+        cuit: dto.cuit,
         licencia: dto.licencia,
         telefono: dto.telefono,
         transportistaId:
@@ -667,6 +674,11 @@ export class PlatformService {
         modelo: dto.modelo ?? null,
         anio: dto.anio ?? null,
         kmActual: dto.kmActual ?? 0,
+        nroChasis: dto.nroChasis?.trim() || null,
+        poliza: dto.poliza?.trim() || null,
+        vencimientoPoliza: dto.vencimientoPoliza ? new Date(dto.vencimientoPoliza) : null,
+        tara: dto.tara ?? null,
+        precinto: dto.precinto?.trim() || null,
         transportistaId: dto.transportistaId ?? null,
       },
     });
@@ -687,6 +699,18 @@ export class PlatformService {
         modelo: dto.modelo,
         anio: dto.anio,
         kmActual: dto.kmActual,
+        nroChasis:
+          dto.nroChasis !== undefined ? (dto.nroChasis?.trim() || null) : undefined,
+        poliza: dto.poliza !== undefined ? (dto.poliza?.trim() || null) : undefined,
+        vencimientoPoliza:
+          dto.vencimientoPoliza !== undefined
+            ? dto.vencimientoPoliza
+              ? new Date(dto.vencimientoPoliza)
+              : null
+            : undefined,
+        tara: dto.tara !== undefined ? dto.tara : undefined,
+        precinto:
+          dto.precinto !== undefined ? (dto.precinto?.trim() || null) : undefined,
         transportistaId:
           dto.transportistaId === undefined ? undefined : dto.transportistaId,
       },

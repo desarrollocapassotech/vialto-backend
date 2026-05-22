@@ -114,6 +114,16 @@ export class ViajesController {
     return this.service.getGananciaBruta(id, auth.tenantId);
   }
 
+  @ApiOperation({
+    summary: 'Documentos exportables del viaje (PAUT solo si hay transportista externo)',
+  })
+  @Get(':id/exportaciones')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  getExportaciones(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.getExportaciones(id, auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Datos sugeridos para el modal de exportación MIC/CRT' })
   @Get(':id/mic-crt/prefill')
   @Roles('admin', 'supervisor', 'superadmin')

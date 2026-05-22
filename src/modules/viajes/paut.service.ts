@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument: new (opts?: PDFKit.PDFDocumentOptions) => PDFKit.PDFDocument = require('pdfkit');
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { viajePuedeExportarPaut } from './viaje-exportaciones.util';
 
 type PautVehiculo = {
   id: string;
@@ -86,6 +87,15 @@ export class PautService {
     })) as unknown as PautViaje | null;
 
     if (!viaje) throw new NotFoundException('Viaje no encontrado');
+
+    if (!viajePuedeExportarPaut({ transportistaId: viaje.transportista?.id ?? null })) {
+      throw new BadRequestException({
+        message:
+          'El PAUT solo aplica a viajes con transportista externo (no a flota propia).',
+        code: 'PAUT_NOT_APPLICABLE',
+        modalidadOperacion: 'flota_propia',
+      });
+    }
 
     const missingGroups: Record<string, MissingGroup> = {};
     const viajeFields: string[] = [];

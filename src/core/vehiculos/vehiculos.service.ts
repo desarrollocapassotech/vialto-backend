@@ -75,11 +75,11 @@ export class VehiculosService {
         modelo: dto.modelo ?? null,
         anio: dto.anio ?? null,
         kmActual: dto.kmActual ?? 0,
-        nroChasis: dto.nroChasis ?? null,
-        poliza: dto.poliza ?? null,
+        nroChasis: dto.nroChasis?.trim() || null,
+        poliza: dto.poliza?.trim() || null,
         vencimientoPoliza: dto.vencimientoPoliza ? new Date(dto.vencimientoPoliza) : null,
         tara: dto.tara ?? null,
-        precinto: dto.precinto ?? null,
+        precinto: dto.precinto?.trim() || null,
         transportistaId: dto.transportistaId ?? null,
       },
     });
@@ -99,13 +99,18 @@ export class VehiculosService {
         modelo: dto.modelo,
         anio: dto.anio,
         kmActual: dto.kmActual,
-        nroChasis: dto.nroChasis,
-        poliza: dto.poliza,
-        vencimientoPoliza: dto.vencimientoPoliza !== undefined
-          ? (dto.vencimientoPoliza ? new Date(dto.vencimientoPoliza) : null)
-          : undefined,
-        tara: dto.tara,
-        precinto: dto.precinto,
+        nroChasis:
+          dto.nroChasis !== undefined ? (dto.nroChasis?.trim() || null) : undefined,
+        poliza: dto.poliza !== undefined ? (dto.poliza?.trim() || null) : undefined,
+        vencimientoPoliza:
+          dto.vencimientoPoliza !== undefined
+            ? dto.vencimientoPoliza
+              ? new Date(dto.vencimientoPoliza)
+              : null
+            : undefined,
+        tara: dto.tara !== undefined ? dto.tara : undefined,
+        precinto:
+          dto.precinto !== undefined ? (dto.precinto?.trim() || null) : undefined,
         transportistaId:
           dto.transportistaId === undefined ? undefined : dto.transportistaId,
       },

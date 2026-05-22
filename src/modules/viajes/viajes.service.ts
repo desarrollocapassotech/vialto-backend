@@ -29,6 +29,10 @@ import {
   type ViajeEstado,
 } from './viaje-estados';
 import {
+  buildViajeExportacionesResponse,
+  enrichViajeConExportaciones,
+} from './viaje-exportaciones.util';
+import {
   GananciaBrutaValidationError,
   buildGananciaBrutaResumen,
   enrichViajeConGananciaBruta,
@@ -417,7 +421,7 @@ export class ViajesService {
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
-      items,
+      items: items.map((item) => enrichViajeConExportaciones(item)),
       meta: {
         page,
         pageSize,
@@ -436,7 +440,7 @@ export class ViajesService {
     });
     if (!row) throw new NotFoundException('Viaje no encontrado');
     return enrichViajeConGananciaBruta(
-      row as unknown as ViajeConVehiculosViaje,
+      enrichViajeConExportaciones(row as unknown as ViajeConVehiculosViaje),
     ) as ViajeConVehiculosViaje;
   }
 
@@ -455,6 +459,15 @@ export class ViajesService {
     });
     if (!row) throw new NotFoundException('Viaje no encontrado');
     return buildGananciaBrutaResumen(row);
+  }
+
+  async getExportaciones(id: string, tenantId: string) {
+    const row = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      select: { id: true, numero: true, transportistaId: true },
+    });
+    if (!row) throw new NotFoundException('Viaje no encontrado');
+    return buildViajeExportacionesResponse(row);
   }
 
   async create(tenantId: string, userId: string, dto: CreateViajeDto) {

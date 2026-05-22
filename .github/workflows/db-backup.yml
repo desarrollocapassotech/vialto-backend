@@ -1,0 +1,58 @@
+name: DB Backup (producción)
+
+# Capa 2 de backups: dump lógico nocturno de la rama production de Neon,
+# subido a Cloudflare R2 (storage externo, S3-compatible).
+# La rotación se maneja con una Lifecycle Rule del bucket (ver BACKUPS.md).
+#
+# Nota: los workflows con schedule solo corren desde la rama default (main).
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # 04:00 UTC = 01:00 Argentina (UTC-3), todas las noches
+  workflow_dispatch: {}    # permite ejecutarlo a mano desde la pestaña Actions
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Instalar pg_dump (PostgreSQL client 17)
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Generar dump y subir a Cloudflare R2
+        env:
+          # Connection string DIRECTA (unpooled) de la rama production
+          DATABASE_URL_UNPOOLED: ${{ secrets.PROD_DATABASE_URL_UNPOOLED }}
+          # Credenciales S3-compatibles (mapeadas a las variables que entiende aws cli)
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 no acepta los headers de checksum nuevos de aws cli v2 → desactivarlos
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        run: |
+          set -euo pipefail
+          # Usar el pg_dump más nuevo instalado (cliente PGDG v17), no el 16 preinstalado del runner.
+          PG_DUMP=$(ls -d /usr/lib/postgresql/*/bin/pg_dump 2>/dev/null | sort -V | tail -n1)
+          echo "Usando: $("$PG_DUMP" --version)"
+          STAMP=$(date -u +%Y-%m-%d_%H%M%S)
+          FILE="vialto_prod_${STAMP}.dump"
+
+          echo "→ Generando $FILE (formato custom, comprimido)"
+          "$PG_DUMP" "$DATABASE_URL_UNPOOLED" -Fc -f "$FILE"
+
+          echo "→ Subiendo a s3://${S3_BUCKET}/daily/${FILE}"
+          aws s3 cp "$FILE" "s3://${S3_BUCKET}/daily/${FILE}" \
+            --endpoint-url "$S3_ENDPOINT"
+
+          echo "✓ Backup completado: ${FILE} ($(du -h "$FILE" | cut -f1))"

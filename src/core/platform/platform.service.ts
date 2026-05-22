@@ -199,6 +199,11 @@ export class PlatformService {
     return this.paut.generate(viajeId, scoped);
   }
 
+  viajeExportaciones(tenantId: string | undefined, viajeId: string) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.getExportaciones(viajeId, scoped);
+  }
+
   async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.viajesService.findOne(id, scopedTenantId);

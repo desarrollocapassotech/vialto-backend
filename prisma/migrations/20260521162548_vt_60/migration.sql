@@ -241,3 +241,9 @@ DO $$ BEGIN
     ALTER INDEX "tenants_cuit_key" RENAME TO "tenants_idFiscal_key";
   END IF;
 END $$;
+
+-- Drop temporary column defaults (solo necesarios para el ADD COLUMN IF NOT EXISTS inicial, no son parte del esquema)
+ALTER TABLE "intervenciones" ALTER COLUMN "createdBy" DROP DEFAULT;
+ALTER TABLE "productos" ALTER COLUMN "nombreNormalizado" DROP DEFAULT;
+ALTER TABLE "productos" ALTER COLUMN "unidadMedida" DROP DEFAULT;
+ALTER TABLE "productos" ALTER COLUMN "updatedAt" DROP DEFAULT;

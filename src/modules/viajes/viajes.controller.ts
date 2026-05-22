@@ -103,6 +103,17 @@ export class ViajesController {
     return this.service.getViajesSaldoPendienteTransportista(auth.tenantId);
   }
 
+  @ApiOperation({
+    summary:
+      'Resumen de ganancia bruta (automática o manual según monedas de facturación y pago transportista)',
+  })
+  @Get(':id/ganancia-bruta')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  getGananciaBruta(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.getGananciaBruta(id, auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Datos sugeridos para el modal de exportación MIC/CRT' })
   @Get(':id/mic-crt/prefill')
   @Roles('admin', 'supervisor', 'superadmin')

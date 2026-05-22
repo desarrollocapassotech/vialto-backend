@@ -218,6 +218,9 @@ model Viaje {
   monedaMonto      String    @default("ARS") // ARS | USD
   precioTransportistaExterno Float?
   monedaPrecioTransportistaExterno String @default("ARS") // ARS | USD
+  /** Solo cuando monedaMonto ≠ monedaPrecioTransportistaExterno (VT-82 / multimoneda). */
+  gananciaBrutaManual        Float?
+  monedaGananciaBrutaManual  String?  // ARS | USD
   observaciones    String?
   otrosGastos         Json      @default("[]")
   pagosTransportista  Json      @default("[]")

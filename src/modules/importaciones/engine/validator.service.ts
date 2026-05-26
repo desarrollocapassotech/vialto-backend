@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import type {
   ColumnConfig,
@@ -26,6 +26,18 @@ export class ValidatorService {
     columns: ColumnConfig[],
     tenantId: string,
   ): Promise<ValidationResult> {
+    if (rows.length > 0) {
+      const excelFields = Object.keys(rows[0]);
+      const missingCols = columns.filter(
+        (col) => col.required && !excelFields.includes(col.field),
+      );
+      if (missingCols.length > 0) {
+        throw new BadRequestException(
+          `Faltan columnas obligatorias en el archivo: ${missingCols.map((c) => c.excelHeader).join(', ')}`,
+        );
+      }
+    }
+
     // Pre-cargar lookups para evitar N queries por fila
     const { caches, created } = await this.buildLookupCaches(rows, columns, tenantId);
 

@@ -56,8 +56,9 @@ export class ParserService {
         const colIndex = headers.findIndex(
           (h) => h.toLowerCase() === col.excelHeader.toLowerCase(),
         );
-        const value = colIndex >= 0 ? (raw[colIndex] ?? null) : null;
-        row[col.field] = value;
+        if (colIndex >= 0) {
+          row[col.field] = raw[colIndex] ?? null;
+        }
       }
 
       // Columnas del Excel que no tienen mapeo → se concatenan en _unmappedText

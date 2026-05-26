@@ -54,7 +54,7 @@ export class ImportacionesService {
       throw new BadRequestException('El archivo no contiene filas de datos');
     }
 
-    const { valid, errors, created } = await this.validator.validate(parsed, config.columns, tenantId);
+    const { valid, errors, created } = await this.validator.validate(parsed, config.columns, tenantId, true);
 
     // Guardar sesión (expira en 30 minutos)
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -108,6 +108,18 @@ export class ImportacionesService {
     }
 
     const filasValidas = session.filasValidas as unknown as ValidatedRow[];
+
+    for (const fila of filasValidas) {
+      for (const key of Object.keys(fila)) {
+        const value = fila[key];
+        if (typeof value === 'string' && value.startsWith('__pending__')) {
+          const [, , model, nombre] = value.split('__');
+          const id = await this.validator.createLookup(model, 'nombre', nombre, tenantId);
+          fila[key] = id;
+        }
+      }
+    }
+
     const detalles: object[] = [];
     let exitosas = 0;
     let errores = 0;

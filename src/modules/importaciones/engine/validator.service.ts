@@ -25,9 +25,10 @@ export class ValidatorService {
     rows: ParsedRow[],
     columns: ColumnConfig[],
     tenantId: string,
+    readOnly = false,
   ): Promise<ValidationResult> {
     // Pre-cargar lookups para evitar N queries por fila
-    const { caches, created } = await this.buildLookupCaches(rows, columns, tenantId);
+    const { caches, created } = await this.buildLookupCaches(rows, columns, tenantId, readOnly);
 
     const valid: ValidatedRow[] = [];
     const errors: RowError[] = [];
@@ -202,6 +203,7 @@ export class ValidatorService {
     rows: ParsedRow[],
     columns: ColumnConfig[],
     tenantId: string,
+    readOnly = false,
   ): Promise<{ caches: LookupCaches; created: Record<string, string[]> }> {
     const caches: LookupCaches = {};
     const created: Record<string, string[]> = {};
@@ -242,10 +244,15 @@ export class ValidatorService {
       if (col.createIfNotFound) {
         for (const [lower, original] of valuesMap) {
           if (!map[lower]) {
-            const id = await this.createLookup(model, field, original, tenantId);
-            if (id) {
-              map[lower] = id;
+            if (readOnly) {
               (created[model] ??= []).push(original);
+              map[lower] = `__pending__${model}__${original}`;
+            } else {
+              const id = await this.createLookup(model, field, original, tenantId);
+              if (id) {
+                map[lower] = id;
+                (created[model] ??= []).push(original);
+              }
             }
           }
         }
@@ -257,7 +264,7 @@ export class ValidatorService {
     return { caches, created };
   }
 
-  private async createLookup(
+  async createLookup(
     model: string,
     field: string,
     value: string,

@@ -105,7 +105,17 @@ export class ViajesController {
 
   @ApiOperation({
     summary:
-      'Documentos exportables del viaje (PAUT solo si hay transportista externo)',
+      'Resumen de ganancia bruta (automática o manual según monedas de facturación y pago transportista)',
+  })
+  @Get(':id/ganancia-bruta')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  getGananciaBruta(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.getGananciaBruta(id, auth.tenantId);
+  }
+
+  @ApiOperation({
+    summary: 'Documentos exportables del viaje (PAUT solo si hay transportista externo)',
   })
   @Get(':id/exportaciones')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')

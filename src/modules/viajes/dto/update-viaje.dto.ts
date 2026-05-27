@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   IsDateString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -42,6 +43,8 @@ export class UpdateViajeDto {
   @IsOptional() @IsIn(['ARS', 'USD']) monedaMonto?: string;
   @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
+  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) gananciaBrutaManual?: number;
+  @IsOptional() @IsIn(['ARS', 'USD']) monedaGananciaBrutaManual?: string;
   @IsOptional() @IsString() observaciones?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PagoTransportistaDto) pagosTransportista?: PagoTransportistaDto[];

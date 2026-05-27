@@ -28,6 +28,16 @@ import {
   normalizarEstadoViaje,
   type ViajeEstado,
 } from './viaje-estados';
+import {
+  buildViajeExportacionesResponse,
+  enrichViajeConExportaciones,
+} from './viaje-exportaciones.util';
+import {
+  GananciaBrutaValidationError,
+  buildGananciaBrutaResumen,
+  enrichViajeConGananciaBruta,
+  resolveGananciaBrutaPersist,
+} from './viaje-ganancia-bruta.util';
 
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
 
@@ -110,6 +120,43 @@ export class ViajesService {
       throw new BadRequestException('Estado de viaje inválido');
     }
     return n as ViajeEstado;
+  }
+
+  private applyGananciaBrutaFields(
+    viaje: {
+      monto?: number | null;
+      monedaMonto?: string | null;
+      monedaPrecioTransportistaExterno?: string | null;
+      otrosGastos?: unknown;
+    },
+    dto: {
+      gananciaBrutaManual?: number | null;
+      monedaGananciaBrutaManual?: string | null;
+      monedaMonto?: string;
+      monedaPrecioTransportistaExterno?: string;
+      otrosGastos?: unknown;
+    },
+  ): { gananciaBrutaManual: number | null; monedaGananciaBrutaManual: string | null } {
+    try {
+      return resolveGananciaBrutaPersist(
+        {
+          monto: viaje.monto,
+          monedaMonto: dto.monedaMonto ?? viaje.monedaMonto,
+          monedaPrecioTransportistaExterno:
+            dto.monedaPrecioTransportistaExterno ?? viaje.monedaPrecioTransportistaExterno,
+          otrosGastos: dto.otrosGastos !== undefined ? dto.otrosGastos : viaje.otrosGastos,
+        },
+        {
+          gananciaBrutaManual: dto.gananciaBrutaManual,
+          monedaGananciaBrutaManual: dto.monedaGananciaBrutaManual,
+        },
+      );
+    } catch (e) {
+      if (e instanceof GananciaBrutaValidationError) {
+        throw new BadRequestException(e.message);
+      }
+      throw e;
+    }
   }
 
   private getMontoFinal(viaje: { monto: number | null; monedaMonto?: string | null; otrosGastos?: unknown }) {
@@ -374,7 +421,7 @@ export class ViajesService {
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
-      items,
+      items: items.map((item) => enrichViajeConExportaciones(item)),
       meta: {
         page,
         pageSize,
@@ -392,7 +439,35 @@ export class ViajesService {
       include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
     });
     if (!row) throw new NotFoundException('Viaje no encontrado');
-    return row as unknown as ViajeConVehiculosViaje;
+    return enrichViajeConGananciaBruta(
+      enrichViajeConExportaciones(row as unknown as ViajeConVehiculosViaje),
+    ) as ViajeConVehiculosViaje;
+  }
+
+  async getGananciaBruta(id: string, tenantId: string) {
+    const row = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      select: {
+        monto: true,
+        monedaMonto: true,
+        precioTransportistaExterno: true,
+        monedaPrecioTransportistaExterno: true,
+        otrosGastos: true,
+        gananciaBrutaManual: true,
+        monedaGananciaBrutaManual: true,
+      },
+    });
+    if (!row) throw new NotFoundException('Viaje no encontrado');
+    return buildGananciaBrutaResumen(row);
+  }
+
+  async getExportaciones(id: string, tenantId: string) {
+    const row = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      select: { id: true, numero: true, transportistaId: true },
+    });
+    if (!row) throw new NotFoundException('Viaje no encontrado');
+    return buildViajeExportacionesResponse(row);
   }
 
   async create(tenantId: string, userId: string, dto: CreateViajeDto) {
@@ -430,6 +505,15 @@ export class ViajesService {
     const precioTransportistaExterno = dto.precioTransportistaExterno;
     const numero =
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, tenantId));
+    const gananciaPersist = this.applyGananciaBrutaFields(
+      {
+        monto: dto.monto,
+        monedaMonto: dto.monedaMonto,
+        monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
+        otrosGastos: dto.otrosGastos,
+      },
+      dto,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const data: Prisma.ViajeUncheckedCreateInput = {
@@ -451,6 +535,8 @@ export class ViajesService {
         precioTransportistaExterno: precioTransportistaExterno ?? null,
         monedaPrecioTransportistaExterno:
           dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
+        gananciaBrutaManual: gananciaPersist.gananciaBrutaManual,
+        monedaGananciaBrutaManual: gananciaPersist.monedaGananciaBrutaManual,
         observaciones: dto.observaciones ?? null,
         otrosGastos: dto.otrosGastos ? (dto.otrosGastos as unknown as Prisma.InputJsonValue) : [],
         pagosTransportista: dto.pagosTransportista ? (dto.pagosTransportista as unknown as Prisma.InputJsonValue) : [],
@@ -463,7 +549,9 @@ export class ViajesService {
         where: { id: viaje.id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       });
-      return out as unknown as ViajeConVehiculosViaje;
+      return enrichViajeConGananciaBruta(
+        out as unknown as ViajeConVehiculosViaje,
+      ) as ViajeConVehiculosViaje;
     });
   }
 
@@ -563,6 +651,27 @@ export class ViajesService {
     (data as any).transportistaId = op.transportistaId;
     (data as any).choferId = op.choferId;
 
+    const gananciaPersist = this.applyGananciaBrutaFields(
+      {
+        monto: (data as { monto?: number }).monto ?? current.monto,
+        monedaMonto: (data as { monedaMonto?: string }).monedaMonto ?? current.monedaMonto,
+        monedaPrecioTransportistaExterno:
+          (data as { monedaPrecioTransportistaExterno?: string })
+            .monedaPrecioTransportistaExterno ?? current.monedaPrecioTransportistaExterno,
+        otrosGastos:
+          dto.otrosGastos !== undefined ? dto.otrosGastos : current.otrosGastos,
+      },
+      {
+        gananciaBrutaManual: dto.gananciaBrutaManual,
+        monedaGananciaBrutaManual: dto.monedaGananciaBrutaManual,
+        monedaMonto: dto.monedaMonto,
+        monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
+        otrosGastos: dto.otrosGastos,
+      },
+    );
+    (data as any).gananciaBrutaManual = gananciaPersist.gananciaBrutaManual;
+    (data as any).monedaGananciaBrutaManual = gananciaPersist.monedaGananciaBrutaManual;
+
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.viaje.update({
         where: { id },
@@ -584,7 +693,7 @@ export class ViajesService {
       if (esEstadoViajeFinal(full.estado)) {
         await this.upsertCargoFinalizacion(tx, full);
       }
-      return full;
+      return enrichViajeConGananciaBruta(full) as ViajeConVehiculosViaje;
     });
   }
 

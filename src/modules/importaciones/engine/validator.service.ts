@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import type {
   ColumnConfig,
@@ -25,9 +25,22 @@ export class ValidatorService {
     rows: ParsedRow[],
     columns: ColumnConfig[],
     tenantId: string,
+    readOnly = false,
   ): Promise<ValidationResult> {
+    if (rows.length > 0) {
+      const excelFields = Object.keys(rows[0]);
+      const missingCols = columns.filter(
+        (col) => col.required && !excelFields.includes(col.field),
+      );
+      if (missingCols.length > 0) {
+        throw new BadRequestException(
+          `Faltan columnas obligatorias en el archivo: ${missingCols.map((c) => c.excelHeader).join(', ')}`,
+        );
+      }
+    }
+
     // Pre-cargar lookups para evitar N queries por fila
-    const { caches, created } = await this.buildLookupCaches(rows, columns, tenantId);
+    const { caches, created } = await this.buildLookupCaches(rows, columns, tenantId, readOnly);
 
     const valid: ValidatedRow[] = [];
     const errors: RowError[] = [];
@@ -202,6 +215,7 @@ export class ValidatorService {
     rows: ParsedRow[],
     columns: ColumnConfig[],
     tenantId: string,
+    readOnly = false,
   ): Promise<{ caches: LookupCaches; created: Record<string, string[]> }> {
     const caches: LookupCaches = {};
     const created: Record<string, string[]> = {};
@@ -242,10 +256,15 @@ export class ValidatorService {
       if (col.createIfNotFound) {
         for (const [lower, original] of valuesMap) {
           if (!map[lower]) {
-            const id = await this.createLookup(model, field, original, tenantId);
-            if (id) {
-              map[lower] = id;
+            if (readOnly) {
               (created[model] ??= []).push(original);
+              map[lower] = `__pending__${model}__${original}`;
+            } else {
+              const id = await this.createLookup(model, field, original, tenantId);
+              if (id) {
+                map[lower] = id;
+                (created[model] ??= []).push(original);
+              }
             }
           }
         }
@@ -257,7 +276,7 @@ export class ValidatorService {
     return { caches, created };
   }
 
-  private async createLookup(
+  async createLookup(
     model: string,
     field: string,
     value: string,

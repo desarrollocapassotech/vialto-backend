@@ -58,6 +58,9 @@ export class CreateViajeDto {
   @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
   /** ARS (default) o USD. */
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
+  /** Solo si monedaMonto ≠ monedaPrecioTransportistaExterno. */
+  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) gananciaBrutaManual?: number;
+  @IsOptional() @IsIn(['ARS', 'USD']) monedaGananciaBrutaManual?: string;
   @IsOptional() @IsString() observaciones?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PagoTransportistaDto) pagosTransportista?: PagoTransportistaDto[];

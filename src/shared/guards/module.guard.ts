@@ -11,12 +11,12 @@ export class ModuleGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requiredModule = this.reflector.getAllAndOverride<string>(MODULE_KEY, [
+    const requiredModules = this.reflector.getAllAndOverride<string[]>(MODULE_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    if (!requiredModule) return true;
+    if (!requiredModules || requiredModules.length === 0) return true;
 
     const auth = context.switchToHttp().getRequest().auth as {
       role?: string | null;
@@ -34,8 +34,9 @@ export class ModuleGuard implements CanActivate {
       select: { modules: true },
     });
 
-    if (!tenant?.modules?.includes(requiredModule)) {
-      throw new ForbiddenException(`El módulo '${requiredModule}' no está habilitado para este tenant`);
+    const tieneAlguno = requiredModules.some((m) => tenant?.modules?.includes(m));
+    if (!tieneAlguno) {
+      throw new ForbiddenException(`Se requiere alguno de los módulos: ${requiredModules.join(', ')}`);
     }
 
     return true;

@@ -32,9 +32,12 @@ export class StockController {
   constructor(private readonly service: StockService) {}
 
   // ───────────────── PRODUCTOS ──────────────────────────────────────────────
+  // Los endpoints de CRUD de productos se habilitan con stock O viajes,
+  // ya que los tenants con viajes también gestionan un catálogo de productos.
 
   @ApiOperation({ summary: 'Listar productos paginado con búsqueda y filtro' })
   @Get('productos/paginated')
+  @RequireModule('stock', 'viajes')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   findProductosPaginated(
     @CurrentAuth() auth: AuthPayload,
@@ -46,6 +49,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Obtener producto por ID (incluye presentaciones)' })
   @Get('productos/:id')
+  @RequireModule('stock', 'viajes')
   @Roles('admin', 'supervisor', 'operador', 'superadmin')
   getProducto(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
@@ -54,6 +58,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Crear producto en el catálogo' })
   @Post('productos')
+  @RequireModule('stock', 'viajes')
   @Roles('admin', 'supervisor', 'superadmin')
   createProducto(@Body() dto: CreateProductoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
@@ -62,6 +67,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Actualizar producto (incluye desactivar: { activo: false })' })
   @Patch('productos/:id')
+  @RequireModule('stock', 'viajes')
   @Roles('admin', 'supervisor', 'superadmin')
   updateProducto(
     @Param('id') id: string,

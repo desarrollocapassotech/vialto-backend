@@ -267,10 +267,10 @@ export class ImportacionesService {
         fechaDescarga: toDateStr(p.fechaDescarga),
         detalleCarga: toStr(p.detalleCarga),
         monto,
-        monedaMonto: toStr(p.monedaMonto),
+        monedaMonto: toStr(validRow.monedaMonto),
         nroFactura,
         precioTransportistaExterno: precioTransp,
-        monedaPrecioTransportistaExterno: toStr(p.monedaPrecioTransportistaExterno),
+        monedaPrecioTransportistaExterno: toStr(validRow.monedaPrecioTransportistaExterno),
         nroFacturaTransporte,
       });
 

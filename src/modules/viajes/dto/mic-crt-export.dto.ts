@@ -63,7 +63,21 @@ export class MicCrtExportDto {
   @IsIn(['origen', 'destino']) condicionPago: 'origen' | 'destino';
 
   @IsString() @IsNotEmpty() aduanaPartida: string;
+  /** País de la aduana de partida (MIC campo 7). */
+  @IsOptional() @IsString() partidaPais?: string;
+  /** Nombre/código de la aduana de partida (MIC campo 7). */
+  @IsOptional() @IsString() aduanaEspecificaPartida?: string;
+  /** Código aduanero / lugar operativo de partida (MIC campos 7 y 24). */
+  @IsOptional() @IsString() codigoLugarOperativoPartida?: string;
   @IsString() @IsNotEmpty() aduanaDestino: string;
+  /** País de destino final (MIC campo 8). */
+  @IsOptional() @IsString() destinoPais?: string;
+  /** Origen comercial de las mercancías (MIC campo 26). */
+  @IsOptional() @IsString() origenComercial?: string;
+  /** País del origen comercial (MIC campo 26; si falta, se usa partidaPais). */
+  @IsOptional() @IsString() origenComercialPais?: string;
+  /** Código aduanero del origen comercial (MIC campo 26; si falta, codigoLugarOperativoPartida). */
+  @IsOptional() @IsString() origenComercialCodigoAduanero?: string;
 
   @IsOptional() @IsString() documentosAnexos?: string;
   @IsOptional() @IsString() precintos?: string;

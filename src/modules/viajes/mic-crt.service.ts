@@ -10,12 +10,24 @@ import {
 import {
   descripcionMercanciasPdf,
   formatMarcaNumeroPdf,
-  formatMicCampo40Pdf,
+  buildMicCampo40ColumnTexts,
   formatMonedaPdf,
   formatMontoPdf,
   formatPartyBlock,
-  formatPorteadorCrtLine,
+  formatPropietarioCamionMicBlock,
+  formatAduanaDestinoMicBlock,
+  formatAduanaPartidaMicBlock,
+  formatConsignatarioMicBlock,
+  formatCrtCampo5EmisionBlock,
+  formatCrtCampo11Block,
+  formatCrtLugarPaisFechaBlock,
+  formatMicCampo24Block,
+  formatMicCampo26Block,
+  formatRemolqueTransporteMicBlock,
   formatPorteadorMicBlock,
+  formatPaisMic,
+  MIC_CAMPO39_DECLARACION,
+  CRT_CAMPO23_DECLARACION,
   montoEnLetras,
   partyFromEntity,
   readStoredMicCrtExport,
@@ -31,6 +43,8 @@ type MicVehiculo = {
   modelo: string | null;
   anio: number | null;
   nroChasis: string | null;
+  poliza: string | null;
+  vencimientoPoliza: Date | null;
   tara: number | null;
   precinto: string | null;
 };
@@ -56,6 +70,8 @@ type MicViajeRow = {
     idFiscal: string | null;
     domicilio: string | null;
     pais: string | null;
+    permisoInternacional: string | null;
+    fechaVencimientoPermiso: Date | null;
   } | null;
   chofer: { id: string; nombre: string; dni: string | null; licencia: string | null } | null;
   vehiculosViaje: Array<{ orden: number; vehiculo: MicVehiculo }>;
@@ -80,7 +96,14 @@ export type MicCrtPrefillResponse = {
 const VIAJE_INCLUDE = {
   cliente: { select: { nombre: true, idFiscal: true, direccion: true, pais: true } },
   transportista: {
-    select: { nombre: true, idFiscal: true, domicilio: true, pais: true },
+    select: {
+      nombre: true,
+      idFiscal: true,
+      domicilio: true,
+      pais: true,
+      permisoInternacional: true,
+      fechaVencimientoPermiso: true,
+    },
   },
   chofer: { select: { id: true, nombre: true, dni: true, licencia: true } },
   vehiculosViaje: {
@@ -94,6 +117,8 @@ const VIAJE_INCLUDE = {
           modelo: true,
           anio: true,
           nroChasis: true,
+          poliza: true,
+          vencimientoPoliza: true,
           tara: true,
           precinto: true,
         },
@@ -206,7 +231,40 @@ export class MicCrtService {
       seguroUsd: typeof legacy.seguroUsd === 'number' ? legacy.seguroUsd : undefined,
       condicionPago: 'destino',
       aduanaPartida: v.origen ?? '',
+      partidaPais: this.paisMicPrefill(
+        this.legacyStr(legacy, 'partidaPais', 'paisPartida') ?? v.cliente?.pais,
+      ),
+      aduanaEspecificaPartida: this.legacyStr(
+        legacy,
+        'aduanaEspecificaPartida',
+        'aduanaEspecifica',
+        'aduanaPartidaEspecifica',
+      ),
+      codigoLugarOperativoPartida: this.legacyStr(
+        legacy,
+        'codigoLugarOperativoPartida',
+        'codigoAduanero',
+        'codigoAduaneroPartida',
+        'codigoLugarOperativo',
+        'lugarOperativoPartida',
+      ),
       aduanaDestino: typeof legacy.aduanaDestino === 'string' ? legacy.aduanaDestino : (v.destino ?? ''),
+      destinoPais: this.paisMicPrefill(
+        this.legacyStr(legacy, 'destinoPais', 'paisDestino') ?? v.cliente?.pais,
+      ),
+      origenComercial:
+        this.legacyStr(legacy, 'origenComercial', 'origen_comercial', 'origenMercancias') ??
+        v.origen ??
+        undefined,
+      origenComercialPais: this.paisMicPrefill(
+        this.legacyStr(legacy, 'origenComercialPais', 'paisOrigenComercial'),
+      ),
+      origenComercialCodigoAduanero: this.legacyStr(
+        legacy,
+        'origenComercialCodigoAduanero',
+        'codigoAduaneroOrigen',
+        'codigoOrigenComercial',
+      ),
       documentosAnexos: '',
       precintos: typeof legacy.precintos === 'string' ? legacy.precintos : (semi?.precinto ?? ''),
       cartaPorte: typeof legacy.crt === 'string' ? legacy.crt : '',
@@ -221,7 +279,7 @@ export class MicCrtService {
           }
         : undefined,
       porteadorDomicilio: v.transportista?.domicilio ?? undefined,
-      porteadorPais: v.transportista?.pais ?? undefined,
+      porteadorPais: this.paisMicPrefill(v.transportista?.pais),
       monedaDocumento: undefined,
     };
   }
@@ -231,7 +289,9 @@ export class MicCrtService {
     dto: MicCrtExportDto | undefined,
   ): { camion: MicVehiculo | null; semi: MicVehiculo | null } {
     const sorted = [...v.vehiculosViaje].sort((a, b) => a.orden - b.orden);
-    const camion = sorted[0]?.vehiculo ?? null;
+    const vehicles = sorted.map((vv) => vv.vehiculo);
+    const camion =
+      vehicles.find((veh) => veh.tipo !== 'semirremolque') ?? vehicles[0] ?? null;
     const semiFromViaje =
       sorted.length > 1
         ? (sorted.slice(1).find((vv) => vv.vehiculo.tipo === 'semirremolque')?.vehiculo ??
@@ -251,6 +311,8 @@ export class MicCrtService {
         modelo: semiFromViaje?.modelo ?? null,
         anio: s?.anio ?? semiFromViaje?.anio ?? null,
         nroChasis: semiFromViaje?.nroChasis ?? null,
+        poliza: semiFromViaje?.poliza ?? null,
+        vencimientoPoliza: semiFromViaje?.vencimientoPoliza ?? null,
         tara:
           s?.capacidadArrastreT != null
             ? s.capacidadArrastreT * 1000
@@ -296,13 +358,42 @@ export class MicCrtService {
     });
   }
 
-  private porteadorBlock(v: MicViajeRow, dto: MicCrtExportDto): string {
+  /** Póliza y vencimiento: camión primero, completa con semirremolque si falta alguno. */
+  private seguroDesdeVehiculos(
+    camion: MicVehiculo | null,
+    semi: MicVehiculo | null,
+  ): { poliza: string | null; vencimientoPoliza: Date | null } {
+    let poliza: string | null = null;
+    let vencimientoPoliza: Date | null = null;
+    for (const v of [camion, semi]) {
+      if (!v) continue;
+      if (!poliza?.trim() && v.poliza?.trim()) poliza = v.poliza;
+      if (!vencimientoPoliza && v.vencimientoPoliza) vencimientoPoliza = v.vencimientoPoliza;
+    }
+    return { poliza, vencimientoPoliza };
+  }
+
+  private porteadorBlock(
+    v: MicViajeRow,
+    dto: MicCrtExportDto,
+    camion: MicVehiculo | null,
+    semi: MicVehiculo | null,
+  ): string {
     if (!v.transportista) return '';
+    const t = v.transportista;
+    const seguro = this.seguroDesdeVehiculos(camion, semi);
     return formatPorteadorMicBlock({
-      nombre: v.transportista.nombre,
-      idFiscal: v.transportista.idFiscal,
-      domicilio: dto.porteadorDomicilio ?? v.transportista.domicilio,
-      pais: dto.porteadorPais ?? v.transportista.pais,
+      nombre: t.nombre,
+      domicilio: dto.porteadorDomicilio ?? t.domicilio,
+      pais: dto.porteadorPais ?? t.pais,
+      permisoInternacional: t.permisoInternacional,
+      vencimientoPermiso: t.fechaVencimientoPermiso
+        ? this.fmt(t.fechaVencimientoPermiso)
+        : undefined,
+      poliza: seguro.poliza,
+      vencimientoPoliza: seguro.vencimientoPoliza
+        ? this.fmt(seguro.vencimientoPoliza)
+        : undefined,
     });
   }
 
@@ -345,19 +436,146 @@ export class MicCrtService {
     doc.font('Helvetica-Bold').fontSize(6.5).text(num, x + 2, y + 2, { lineBreak: false });
     const labelText = label.trim();
     const labelMaxW = w - numW - 4;
+    const labelY = y + 2;
     doc.font('Helvetica').fontSize(6);
     const labelH = doc.heightOfString(labelText, { width: labelMaxW });
-    const valueY = labelH > 9 ? y + 15 : y + 13;
-    doc.text(labelText, x + 2 + numW, y + 2, { width: labelMaxW, lineBreak: labelH > 9 });
+    doc.text(labelText, x + 2 + numW, labelY, { width: labelMaxW, lineBreak: labelH > 9 });
+    const valueY = labelY + labelH + 2;
     const fs = opts.valueFontSize ?? 8;
     const display = value?.trim() ? value : '—';
     doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
       .fontSize(fs)
       .text(display, x + 3, valueY, {
         width: w - 6,
-        height: h - (valueY - y) - 2,
+        height: Math.max(h - (valueY - y) - 2, fs + 2),
         lineBreak: true,
       });
+  }
+
+  private paisMicPrefill(pais?: string | null): string | undefined {
+    const fmt = formatPaisMic(pais);
+    return fmt || undefined;
+  }
+
+  private legacyStr(legacy: Record<string, unknown>, ...keys: string[]): string | undefined {
+    for (const key of keys) {
+      const v = legacy[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return undefined;
+  }
+
+  private aduanaPartidaBlock(dto: MicCrtExportDto): string {
+    return formatAduanaPartidaMicBlock({
+      ciudadLugar: dto.aduanaPartida,
+      pais: dto.partidaPais,
+      aduanaEspecifica: dto.aduanaEspecificaPartida,
+      codigoLugarOperativo: dto.codigoLugarOperativoPartida,
+    });
+  }
+
+  private aduanaDestinoBlock(dto: MicCrtExportDto): string {
+    return formatAduanaDestinoMicBlock({
+      ciudadLugar: dto.aduanaDestino,
+      pais: dto.destinoPais ?? dto.destinatario?.pais,
+    });
+  }
+
+  private propietarioCamionBlock(v: MicViajeRow, dto: MicCrtExportDto): string {
+    const t = v.transportista;
+    if (!t) return '';
+    return formatPropietarioCamionMicBlock({
+      nombre: t.nombre,
+      domicilio: dto.porteadorDomicilio ?? t.domicilio,
+      pais: dto.porteadorPais ?? t.pais,
+    });
+  }
+
+  private remolqueTransporteBlock(semi: MicVehiculo | null, dto: MicCrtExportDto): string {
+    return formatRemolqueTransporteMicBlock({
+      patente: dto.semirremolque?.patente ?? semi?.patente,
+      marca: dto.semirremolque?.marca ?? semi?.marca,
+      modelo: semi?.modelo,
+      nroChasis: semi?.nroChasis,
+    });
+  }
+
+  private micCampo24Block(dto: MicCrtExportDto): string {
+    return formatMicCampo24Block({
+      aduanaEspecifica: dto.aduanaEspecificaPartida,
+      codigoAduanero: dto.codigoLugarOperativoPartida,
+    });
+  }
+
+  private micCampo26Block(dto: MicCrtExportDto): string {
+    return formatMicCampo26Block({
+      origenComercial: dto.origenComercial,
+      pais: dto.origenComercialPais ?? dto.partidaPais,
+      codigoAduanero:
+        dto.origenComercialCodigoAduanero ?? dto.codigoLugarOperativoPartida,
+    });
+  }
+
+  /** Campo 40 — tres columnas (ruta | plazos | conductores); separadores finos. */
+  private drawMicCampo40(
+    doc: PDFKit.PDFDocument,
+    x: number,
+    y: number,
+    w: number,
+    columns: string[],
+  ): number {
+    const title = 'N° DTA, ruta y plazo de transporte';
+    const fsTitle = 6;
+    const fsVal = 7.5;
+    const pad = 4;
+
+    const colWs = [
+      Math.round(w * 0.4),
+      Math.round(w * 0.32),
+      w - Math.round(w * 0.4) - Math.round(w * 0.32),
+    ];
+
+    doc.font('Helvetica').fontSize(fsTitle);
+    const titleH = doc.heightOfString(title, { width: w - 20 });
+    const headerH = titleH + 6;
+
+    doc.font('Helvetica').fontSize(fsVal);
+    let maxContentH = 0;
+    for (let i = 0; i < columns.length; i++) {
+      const innerW = colWs[i] - pad * 2;
+      const text = columns[i]?.trim() || '—';
+      maxContentH = Math.max(maxContentH, doc.heightOfString(text, { width: innerW }));
+    }
+
+    const h = Math.max(48, Math.ceil(headerH + maxContentH + pad + 4));
+
+    doc.rect(x, y, w, h).stroke();
+    doc.font('Helvetica-Bold').fontSize(6.5).text('40', x + 2, y + 2, { lineBreak: false });
+    doc.font('Helvetica')
+      .fontSize(fsTitle)
+      .text(title, x + 16, y + 2, { width: w - 18, lineBreak: true });
+
+    const contentY = y + headerH;
+    let cx = x;
+    for (let i = 0; i < columns.length; i++) {
+      const colW = colWs[i];
+      if (i > 0) {
+        doc.save();
+        doc.lineWidth(0.25).strokeColor('#bbbbbb');
+        doc.moveTo(cx, contentY + 1).lineTo(cx, y + h - 1).stroke();
+        doc.restore();
+      }
+      doc.font('Helvetica')
+        .fontSize(fsVal)
+        .fillColor('#000000')
+        .text(columns[i]?.trim() || '—', cx + pad, contentY + 2, {
+          width: colW - pad * 2,
+          lineBreak: true,
+        });
+      cx += colW;
+    }
+
+    return h;
   }
 
   private fmt(d: Date | string | null | undefined): string {
@@ -410,10 +628,16 @@ export class MicCrtService {
 
     const col1w = Math.round(W * 0.58);
     const col2w = W - col1w;
-    const f1h = 46;
+    const porteadorFs = 7.5;
+    const porteadorText = this.porteadorBlock(v, dto, camion, semi);
+    doc.font('Helvetica').fontSize(porteadorFs);
+    const porteadorValueH = doc.heightOfString(porteadorText.trim() ? porteadorText : '—', {
+      width: col1w - 6,
+    });
+    const f1h = Math.max(62, Math.ceil(18 + porteadorValueH + 6));
 
-    this.cell(doc, x0, y, col1w, f1h, '1', 'Nombre y domicilio del porteador', this.porteadorBlock(v, dto), {
-      valueFontSize: 8,
+    this.cell(doc, x0, y, col1w, f1h, '1', 'Nombre y domicilio del porteador', porteadorText, {
+      valueFontSize: porteadorFs,
     });
 
     const rx = x0 + col1w;
@@ -447,27 +671,82 @@ export class MicCrtService {
     this.cell(doc, x0 + col1w + hojaw, y, col2w - hojaw, f2h, '6', 'Fecha Emisión / Data de emissão', this.fmt(dto.fechaEmision));
     y += f2h;
 
-    const f3h = 22;
-    this.cell(doc, x0, y, W, f3h, '7', 'Aduana, ciudad y país de partida / Alfândega, cidade e país de partida', dto.aduanaPartida, {
-      valueFontSize: 9,
-      bold: true,
+    const partidaFs = 9;
+    const partidaText = this.aduanaPartidaBlock(dto);
+    doc.font('Helvetica-Bold').fontSize(partidaFs);
+    const partidaValueH = doc.heightOfString(partidaText.trim() ? partidaText : '—', {
+      width: W - 6,
     });
-    y += f3h;
-    this.cell(doc, x0, y, W, f3h, '8', 'Ciudad y país de destino final / Cidade e país de destino final', dto.aduanaDestino, {
-      valueFontSize: 9,
-      bold: true,
+    const aduanaPartidaRowH = Math.max(28, Math.ceil(18 + partidaValueH + 4));
+    this.cell(
+      doc,
+      x0,
+      y,
+      W,
+      aduanaPartidaRowH,
+      '7',
+      'Aduana, ciudad y país de partida / Alfândega, cidade e país de partida',
+      partidaText,
+      { valueFontSize: partidaFs, bold: true },
+    );
+    y += aduanaPartidaRowH;
+
+    const destinoFs = 9;
+    const destinoText = this.aduanaDestinoBlock(dto);
+    doc.font('Helvetica-Bold').fontSize(destinoFs);
+    const destinoValueH = doc.heightOfString(destinoText.trim() ? destinoText : '—', {
+      width: W - 6,
     });
-    y += f3h;
+    const aduanaDestinoRowH = Math.max(24, Math.ceil(18 + destinoValueH + 4));
+    this.cell(
+      doc,
+      x0,
+      y,
+      W,
+      aduanaDestinoRowH,
+      '8',
+      'Ciudad y país de destino final / Cidade e país de destino final',
+      destinoText,
+      { valueFontSize: destinoFs, bold: true },
+    );
+    y += aduanaDestinoRowH;
 
-    const f5h = 40;
-    const c9w = Math.round(W * 0.28);
-    const c10w = Math.round(W * 0.14);
-    const c11w = Math.round(W * 0.14);
-    const c12w = Math.round(W * 0.24);
-    const c14w = Math.round(W * 0.1);
-    const c15w = W - c9w - c10w - c11w - c12w - c14w;
+    // 13 = remolque (ancho), 15 = capacidad (angosto, una línea).
+    const c15w = 54;
+    const c14w = Math.round(W * 0.06);
+    const c13w = Math.round(W * 0.19);
+    const c12w = Math.round(W * 0.15);
+    const c11w = Math.round(W * 0.09);
+    const c10w = Math.round(W * 0.09);
+    const c9w = W - c10w - c11w - c12w - c13w - c14w - c15w;
 
-    this.cell(doc, x0, y, c9w, f5h, '9', 'Camión original — Propietario', v.transportista?.nombre ?? '');
+    const rowFs = 7;
+    const remolqueFs = 6.5;
+    const campo15Fs = 7;
+    const propietarioText = this.propietarioCamionBlock(v, dto);
+    const remolqueText = this.remolqueTransporteBlock(semi, dto);
+    const semiExtra =
+      dto.semirremolque?.capacidadArrastreT != null
+        ? `${dto.semirremolque.capacidadArrastreT} t`
+        : '';
+    const remolqueLabel = 'Remolque / Reboque';
+    doc.font('Helvetica').fontSize(6);
+    const remolqueLabelH = doc.heightOfString(remolqueLabel, { width: c13w - 18 });
+    doc.font('Helvetica').fontSize(rowFs);
+    const propietarioValueH = doc.heightOfString(propietarioText.trim() ? propietarioText : '—', {
+      width: c9w - 6,
+    });
+    doc.fontSize(remolqueFs);
+    const remolqueValueH = doc.heightOfString(remolqueText, { width: c13w - 6 });
+    const f5h = Math.max(
+      34,
+      Math.ceil(14 + propietarioValueH + 4),
+      Math.ceil(14 + remolqueLabelH + 2 + remolqueValueH + 4),
+    );
+
+    this.cell(doc, x0, y, c9w, f5h, '9', 'Camión original — Propietario', propietarioText, {
+      valueFontSize: rowFs,
+    });
     this.cell(doc, x0 + c9w, y, c10w, f5h, '10', 'Rol contribuyente', v.transportista?.idFiscal ?? '');
     this.cell(doc, x0 + c9w + c10w, y, c11w, f5h, '11', 'Placa del camión', camion?.patente ?? '');
     const marcaNum = formatMarcaNumeroPdf(camion);
@@ -476,36 +755,79 @@ export class MicCrtService {
       doc,
       x0 + c9w + c10w + c11w + c12w,
       y,
+      c13w,
+      f5h,
+      '13',
+      remolqueLabel,
+      remolqueText,
+      { valueFontSize: remolqueFs },
+    );
+    this.cell(
+      doc,
+      x0 + c9w + c10w + c11w + c12w + c13w,
+      y,
       c14w,
       f5h,
       '14',
       'Año / Ano',
       camion?.anio ? String(camion.anio) : '',
     );
-    const semiInfo = semi
-      ? [
-          dto.semirremolque?.capacidadArrastreT != null
-            ? `Cap: ${dto.semirremolque.capacidadArrastreT} t`
-            : '',
-          `SR ${semi.patente}`,
-          semi.marca ?? '',
-        ]
-          .filter(Boolean)
-          .join(' ')
-      : '';
-    this.cell(doc, x0 + c9w + c10w + c11w + c12w + c14w, y, c15w, f5h, '15', 'Semi/Rem.', semiInfo);
+    this.cell(
+      doc,
+      x0 + c9w + c10w + c11w + c12w + c13w + c14w,
+      y,
+      c15w,
+      f5h,
+      '15',
+      'Capacidad / Capacidade',
+      semiExtra || '—',
+      { valueFontSize: campo15Fs },
+    );
     y += f5h;
 
-    const f6h = 22;
     const c23w = Math.round(W * 0.3);
     const c24w = Math.round(W * 0.28);
     const c25w = Math.round(W * 0.12);
     const c26w = W - c23w - c24w - c25w;
 
+    const campo24Fs = 8;
+    const campo24Text = this.micCampo24Block(dto);
+    const campo26Fs = 8;
+    const campo26Text = this.micCampo26Block(dto);
+    doc.font('Helvetica').fontSize(campo24Fs);
+    const campo24H = doc.heightOfString(campo24Text, { width: c24w - 6 });
+    doc.fontSize(campo26Fs);
+    const campo26H = doc.heightOfString(campo26Text, { width: c26w - 6 });
+    const f6h = Math.max(
+      22,
+      Math.ceil(18 + campo24H + 4),
+      Math.ceil(18 + campo26H + 4),
+    );
+
     this.cell(doc, x0, y, c23w, f6h, '23', 'N° Carta de porte', dto.cartaPorte ?? dto.crtNumero);
-    this.cell(doc, x0 + c23w, y, c24w, f6h, '24', 'Aduana de destino', dto.aduanaDestino);
+    this.cell(
+      doc,
+      x0 + c23w,
+      y,
+      c24w,
+      f6h,
+      '24',
+      'Aduana específica / Código aduanero',
+      campo24Text,
+      { valueFontSize: campo24Fs },
+    );
     this.cell(doc, x0 + c23w + c24w, y, c25w, f6h, '25', 'Moneda', this.monedaDoc(dto));
-    this.cell(doc, x0 + c23w + c24w + c25w, y, c26w, f6h, '26', 'Origen mercancías', v.origen ?? '');
+    this.cell(
+      doc,
+      x0 + c23w + c24w + c25w,
+      y,
+      c26w,
+      f6h,
+      '26',
+      'Origen comercial / País y código aduanero',
+      campo26Text,
+      { valueFontSize: campo26Fs },
+    );
     y += f6h;
 
     const f7h = 22;
@@ -557,11 +879,39 @@ export class MicCrtService {
 
     const f9h = 50;
     const halfW = Math.round(W / 2);
-    this.cell(doc, x0, y, halfW, f9h, '33', 'Remitente / Remetente', formatPartyBlock(dto.remitente));
-    this.cell(doc, x0 + halfW, y, W - halfW, f9h, '34', 'Destinatario', formatPartyBlock(dto.destinatario));
+    this.cell(
+      doc,
+      x0,
+      y,
+      halfW,
+      f9h,
+      '33',
+      'Remitente / Remetente',
+      formatPartyBlock(dto.remitente, { includeIdFiscal: false }),
+    );
+    this.cell(
+      doc,
+      x0 + halfW,
+      y,
+      W - halfW,
+      f9h,
+      '34',
+      'Destinatario',
+      formatPartyBlock(dto.destinatario, { includeIdFiscal: false }),
+    );
     y += f9h;
-    this.cell(doc, x0, y, W, 30, '35', 'Consignatario', formatPartyBlock(dto.consignatario));
-    y += 30;
+    const consignatarioFs = 7;
+    const consignatarioText = formatConsignatarioMicBlock(dto.consignatario);
+    doc.font('Helvetica').fontSize(consignatarioFs);
+    const consignatarioH = doc.heightOfString(
+      consignatarioText.trim() ? consignatarioText : '—',
+      { width: W - 6 },
+    );
+    const f35h = Math.max(30, Math.ceil(18 + consignatarioH + 4));
+    this.cell(doc, x0, y, W, f35h, '35', 'Consignatario', consignatarioText, {
+      valueFontSize: consignatarioFs,
+    });
+    y += f35h;
 
     const f11h = 22;
     this.cell(doc, x0, y, halfW, f11h, '36', 'Documentos Anexos', dto.documentosAnexos ?? '');
@@ -581,26 +931,42 @@ export class MicCrtService {
     );
     y += 55;
 
-    const campo40 = formatMicCampo40Pdf({
-      ruta: dto.ruta,
-      fechaArribo: v.fechaDescarga,
-      chofer: v.chofer,
-      fmt: (d) => this.fmt(d),
-    });
-    this.cell(doc, x0, y, W, 42, '40', 'N° DTA, ruta y plazo de transporte', campo40);
-    y += 42;
+    const campo40Cols = buildMicCampo40ColumnTexts(dto.ruta);
+    const f40h = this.drawMicCampo40(doc, x0, y, W, campo40Cols);
+    y += f40h;
 
     const remainH = Math.max(841 - M - y, 30);
     const fechaData = `Fecha / Data: ${this.fmt(dto.fechaEmision)}`;
+    const campo39Pad = 4;
+    const campo39InnerW = halfW - campo39Pad * 2;
+    const campo39Label =
+      'Firma y sello del porteador / Assinatura e carimbo do transportador';
+    const campo39DeclFs = 5.5;
+    const campo39FechaFs = 7;
+
+    doc.font('Helvetica').fontSize(campo39DeclFs);
+    const campo39DeclH = doc.heightOfString(MIC_CAMPO39_DECLARACION, {
+      width: campo39InnerW,
+    });
+
     doc.rect(x0, y, halfW, remainH).stroke();
     doc.font('Helvetica-Bold').fontSize(6.5).text('39', x0 + 2, y + 2, { lineBreak: false });
     doc.font('Helvetica')
       .fontSize(6)
-      .text(' Firma y sello del porteador / Assinatura e carimbo do transportador', x0 + 10, y + 2, {
+      .text(` ${campo39Label}`, x0 + 10, y + 2, {
         width: halfW - 12,
-        lineBreak: false,
+        lineBreak: true,
       });
-    doc.font('Helvetica').fontSize(7).text(fechaData, x0 + 2, y + 12);
+    doc.font('Helvetica')
+      .fontSize(campo39DeclFs)
+      .text(MIC_CAMPO39_DECLARACION, x0 + campo39Pad, y + 16, {
+        width: campo39InnerW,
+        height: Math.max(remainH - 30, campo39DeclH),
+        lineBreak: true,
+      });
+    doc.font('Helvetica')
+      .fontSize(campo39FechaFs)
+      .text(fechaData, x0 + campo39Pad, y + remainH - 12);
 
     const aduanaX = x0 + halfW;
     const aduanaW = W - halfW;
@@ -652,9 +1018,13 @@ export class MicCrtService {
 
     const halfW = Math.round(W / 2);
     const porteadorCrt = v.transportista
-      ? formatPorteadorCrtLine(v.transportista.nombre, v.transportista.idFiscal)
+      ? formatPropietarioCamionMicBlock({
+          nombre: v.transportista.nombre,
+          domicilio: dto.porteadorDomicilio ?? v.transportista.domicilio,
+          pais: dto.porteadorPais ?? v.transportista.pais,
+        })
       : '';
-    const notificar = formatPartyBlock(dto.notificarA ?? dto.consignatario);
+    const notificar = formatConsignatarioMicBlock(dto.notificarA ?? dto.consignatario);
     const fechaLine = 'Fecha / Data: ____________________';
 
     this.cell(
@@ -673,73 +1043,154 @@ export class MicCrtService {
     });
     y += 38;
 
-    this.cell(doc, x0, y, halfW, 34, '3', 'Nombre y domicilio del porteador', porteadorCrt);
-    this.cell(doc, x0 + halfW, y, W - halfW, 34, '5', 'Lugar y país de emisión', dto.aduanaPartida);
-    y += 34;
+    const row3Fs = 7.5;
+    doc.font('Helvetica').fontSize(row3Fs);
+    const porteadorCrtH = doc.heightOfString(porteadorCrt.trim() ? porteadorCrt : '—', {
+      width: halfW - 6,
+    });
+    const campo5Text = formatCrtCampo5EmisionBlock({
+      lugar: dto.aduanaPartida,
+      pais: dto.partidaPais,
+      codigoAduanero: dto.codigoLugarOperativoPartida,
+    });
+    const campo5H = doc.heightOfString(campo5Text.trim() ? campo5Text : '—', {
+      width: W - halfW - 6,
+    });
+    const row3h = Math.max(34, Math.ceil(18 + Math.max(porteadorCrtH, campo5H) + 4));
 
-    this.cell(doc, x0, y, halfW, 34, '4', 'Nombre y domicilio del destinatario', formatPartyBlock(dto.destinatario));
+    this.cell(doc, x0, y, halfW, row3h, '3', 'Nombre y domicilio del porteador', porteadorCrt, {
+      valueFontSize: row3Fs,
+    });
+    this.cell(doc, x0 + halfW, y, W - halfW, row3h, '5', 'Lugar y país de emisión', campo5Text, {
+      valueFontSize: row3Fs,
+    });
+    y += row3h;
+
+    const campo7Text = formatCrtLugarPaisFechaBlock({
+      lugar: v.origen,
+      pais: dto.partidaPais,
+      fecha: this.fmt(v.fechaCarga ?? dto.fechaEmision),
+    });
+    const destinatarioText = formatPartyBlock(dto.destinatario, { includeIdFiscal: false });
+    doc.font('Helvetica').fontSize(row3Fs);
+    const destinatarioH = doc.heightOfString(destinatarioText.trim() ? destinatarioText : '—', {
+      width: halfW - 6,
+    });
+    const campo7H = doc.heightOfString(campo7Text.trim() ? campo7Text : '—', {
+      width: W - halfW - 6,
+    });
+    const row4h = Math.max(34, Math.ceil(18 + Math.max(destinatarioH, campo7H) + 4));
+
+    this.cell(
+      doc,
+      x0,
+      y,
+      halfW,
+      row4h,
+      '4',
+      'Nombre y domicilio del destinatario',
+      destinatarioText,
+      { valueFontSize: row3Fs },
+    );
     this.cell(
       doc,
       x0 + halfW,
       y,
       W - halfW,
-      34,
+      row4h,
       '7',
       'Lugar, país y fecha en que el porteador se hace cargo de las mercancías',
-      `${v.origen ?? ''}   ${this.fmt(v.fechaCarga ?? dto.fechaEmision)}`,
+      campo7Text,
+      { valueFontSize: row3Fs },
     );
-    y += 34;
+    y += row4h;
 
-    this.cell(doc, x0, y, halfW, 34, '6', 'Nombre y domicilio del consignatario', formatPartyBlock(dto.consignatario));
+    const campo8Text = formatCrtLugarPaisFechaBlock({
+      lugar: v.destino ?? dto.aduanaDestino,
+      pais: dto.destinoPais ?? dto.destinatario?.pais,
+      fecha: this.fmt(v.fechaDescarga),
+    });
+    const consignatarioText = formatPartyBlock(dto.consignatario);
+    const consignatarioH = doc.heightOfString(consignatarioText.trim() ? consignatarioText : '—', {
+      width: halfW - 6,
+    });
+    const campo8H = doc.heightOfString(campo8Text.trim() ? campo8Text : '—', {
+      width: W - halfW - 6,
+    });
+    const row5h = Math.max(34, Math.ceil(18 + Math.max(consignatarioH, campo8H) + 4));
+
+    this.cell(doc, x0, y, halfW, row5h, '6', 'Nombre y domicilio del consignatario', consignatarioText, {
+      valueFontSize: row3Fs,
+    });
     this.cell(
       doc,
       x0 + halfW,
       y,
       W - halfW,
-      34,
+      row5h,
       '8',
       'Lugar, país y plazo de entrega',
-      `${v.destino ?? ''}   ${this.fmt(v.fechaDescarga)}`,
+      campo8Text,
+      { valueFontSize: row3Fs },
     );
-    y += 34;
+    y += row5h;
 
-    this.cell(doc, x0, y, halfW, 28, '9', 'Notificar a', notificar);
-    this.cell(doc, x0 + halfW, y, W - halfW, 28, '10', 'Porteadores sucesivos', '');
-    y += 28;
+    doc.font('Helvetica').fontSize(row3Fs);
+    const notificarH = doc.heightOfString(notificar.trim() ? notificar : '—', {
+      width: halfW - 6,
+    });
+    const row6h = Math.max(28, Math.ceil(18 + notificarH + 4));
+
+    this.cell(doc, x0, y, halfW, row6h, '9', 'Notificar a', notificar, {
+      valueFontSize: row3Fs,
+    });
+    this.cell(doc, x0 + halfW, y, W - halfW, row6h, '10', 'Porteadores sucesivos', '');
+    y += row6h;
 
     const c11w = Math.round(W * 0.55);
     const c12w = Math.round(W * 0.22);
     const c13w = W - c11w - c12w;
-    const mercanciasCrt =
-      descripcionMercanciasPdf(dto) ||
-      [dto.bultos > 0 ? String(dto.bultos) : '', dto.tipoBultos].filter(Boolean).join(' ');
+    const mercanciasCrt = formatCrtCampo11Block(dto);
+    doc.font('Helvetica').fontSize(8);
+    const mercanciasH = doc.heightOfString(mercanciasCrt.trim() ? mercanciasCrt : '—', {
+      width: c11w - 6,
+    });
+    const row7h = Math.max(65, Math.ceil(18 + mercanciasH + 4));
+
     this.cell(
       doc,
       x0,
       y,
       c11w,
-      65,
+      row7h,
       '11',
       'Cantidad y clase de bultos, marcas y números, tipo de mercancías',
       mercanciasCrt,
       { valueFontSize: 8 },
     );
     const pesoCrt = dto.pesoBrutoKg > 0 ? dto.pesoBrutoKg.toLocaleString('es-AR') : '';
-    this.cell(doc, x0 + c11w, y, c12w, 65, '12', 'Peso bruto (kg.)', pesoCrt);
+    this.cell(doc, x0 + c11w, y, c12w, row7h, '12', 'Peso bruto (kg.)', pesoCrt);
     this.cell(
       doc,
       x0 + c11w + c12w,
       y,
       c13w,
-      65,
+      row7h,
       '13',
       'Volumen m³',
       dto.volumenM3 != null ? String(dto.volumenM3) : '',
     );
-    y += 65;
+    y += row7h;
 
     const c14w = Math.round(W * 0.32);
-    this.cell(doc, x0, y, c14w, 35, '14', 'Valor / Valor', formatMontoPdf(dto.valorFot, dto.monedaFot), {
+    const valorLetras = montoEnLetras(dto.valorFot, dto.monedaFot);
+    doc.font('Helvetica').fontSize(8);
+    const valorLetrasH = doc.heightOfString(valorLetras.trim() ? valorLetras : '—', {
+      width: W - c14w - 6,
+    });
+    const row8h = Math.max(35, Math.ceil(18 + valorLetrasH + 4));
+
+    this.cell(doc, x0, y, c14w, row8h, '14', 'Valor / Valor', formatMontoPdf(dto.valorFot, dto.monedaFot), {
       valueFontSize: 10,
       bold: true,
     });
@@ -748,15 +1199,32 @@ export class MicCrtService {
       x0 + c14w,
       y,
       W - c14w,
-      35,
+      row8h,
       '16',
       'Declaración del valor de las mercancías',
-      montoEnLetras(dto.valorFot, dto.monedaFot),
+      valorLetras,
+      { valueFontSize: 8 },
     );
-    y += 35;
+    y += row8h;
 
-    const gastosW = Math.round(W * 0.42);
-    const gastosH = 60;
+    const gastosW = Math.round(W * 0.44);
+    const docAnexosW = W - gastosW;
+    const docAnexosLabel = 'Documentos anexos';
+    const docAnexosFs = 8;
+    const docAnexosNumW = 14;
+    doc.font('Helvetica').fontSize(6);
+    const docAnexosLabelH = doc.heightOfString(docAnexosLabel, {
+      width: docAnexosW - docAnexosNumW - 4,
+    });
+    doc.font('Helvetica').fontSize(docAnexosFs);
+    const docAnexosText = dto.documentosAnexos?.trim() ?? '';
+    const docAnexosValueH = doc.heightOfString(docAnexosText ? docAnexosText : '—', {
+      width: docAnexosW - 6,
+    });
+    const gastosH = Math.max(
+      60,
+      Math.ceil(2 + docAnexosLabelH + 2 + docAnexosValueH + 4),
+    );
     const pagoDestino = dto.condicionPago === 'destino';
     const fleteOrigen = !pagoDestino && dto.flete > 0 ? dto.flete.toFixed(2) : '.00';
     const fleteDestino = pagoDestino && dto.flete > 0 ? dto.flete.toFixed(2) : '.00';
@@ -776,33 +1244,46 @@ export class MicCrtService {
     doc.rect(x0, y, gastosW, gastosH).stroke();
     doc.font('Helvetica-Bold').fontSize(6.5).text('15', x0 + 2, y + 2, { lineBreak: false });
     doc.font('Helvetica').fontSize(6).text(' Gastos a pagar', x0 + 10, y + 2, { lineBreak: false });
+    const gRem = x0 + Math.round(gastosW * 0.36);
+    const gDest = x0 + Math.round(gastosW * 0.58);
+    const gMon = x0 + Math.round(gastosW * 0.80);
     const hdrY = y + 12;
     doc.font('Helvetica-Bold')
       .fontSize(5.5)
       .text('Concepto', x0 + 2, hdrY)
-      .text('Remitente', x0 + 88, hdrY)
-      .text('Destinatario', x0 + 163, hdrY)
-      .text('Moneda', x0 + 238, hdrY);
+      .text('Remitente', gRem, hdrY)
+      .text('Destinatario', gDest, hdrY)
+      .text('Moneda', gMon, hdrY);
     const row1 = y + 22;
     const row2 = y + 34;
     const row3 = y + 46;
     doc.font('Helvetica')
       .fontSize(7)
       .text('Flete / Frete', x0 + 2, row1)
-      .text(fleteOrigen, x0 + 92, row1)
-      .text(fleteDestino, x0 + 167, row1)
-      .text(monFlete, x0 + 242, row1)
+      .text(fleteOrigen, gRem, row1)
+      .text(fleteDestino, gDest, row1)
+      .text(monFlete, gMon, row1)
       .text('Seguro / Seguro', x0 + 2, row2)
-      .text(seguroOrigen, x0 + 92, row2)
-      .text(seguroDestino, x0 + 167, row2)
+      .text(seguroOrigen, gRem, row2)
+      .text(seguroDestino, gDest, row2)
       .font('Helvetica-Bold')
       .text('TOTAL', x0 + 2, row3)
       .font('Helvetica')
-      .text(totalOrigen, x0 + 92, row3)
-      .text(totalDestino, x0 + 167, row3)
-      .text(monFlete, x0 + 242, row3);
+      .text(totalOrigen, gRem, row3)
+      .text(totalDestino, gDest, row3)
+      .text(monFlete, gMon, row3);
 
-    this.cell(doc, x0 + gastosW, y, W - gastosW, gastosH, '17', 'Documentos anexos', dto.documentosAnexos ?? '');
+    this.cell(
+      doc,
+      x0 + gastosW,
+      y,
+      docAnexosW,
+      gastosH,
+      '17',
+      docAnexosLabel,
+      docAnexosText,
+      { valueFontSize: docAnexosFs },
+    );
     y += gastosH;
 
     this.cell(doc, x0, y, W, 22, '18', 'Instrucciones sobre formalidades de aduana', 'N');
@@ -810,7 +1291,6 @@ export class MicCrtService {
 
     const fh = Math.max(841 - M - y, 72);
     const fw = Math.round(W / 3);
-    const transportistaLine = porteadorCrt;
 
     doc.rect(x0, y, fw, fh).stroke();
     doc.font('Helvetica-Bold').fontSize(6.5).text('21', x0 + 2, y + 2, { lineBreak: false });
@@ -822,14 +1302,24 @@ export class MicCrtService {
     doc.font('Helvetica').fontSize(7).text(fechaLine, x0 + 2, y + fh - 14);
 
     const cx = x0 + fw;
+    const campo23Pad = 4;
+    const campo23InnerW = fw - campo23Pad * 2;
+    const campo23Label = ' Nombre, firma y sello del porteador';
+    const campo23Fs = 5.5;
     doc.rect(cx, y, fw, fh).stroke();
     doc.font('Helvetica-Bold').fontSize(6.5).text('23', cx + 2, y + 2, { lineBreak: false });
-    doc.font('Helvetica').fontSize(6).text(' Nombre, firma y sello del porteador', cx + 10, y + 2, {
+    doc.font('Helvetica').fontSize(6).text(campo23Label, cx + 10, y + 2, {
       width: fw - 12,
-      lineBreak: false,
+      lineBreak: true,
     });
-    doc.font('Helvetica').fontSize(6.5).text(transportistaLine, cx + 2, y + 14, { width: fw - 4 });
-    doc.font('Helvetica').fontSize(7).text(fechaLine, cx + 2, y + fh - 14);
+    doc.font('Helvetica').fontSize(6);
+    const campo23LabelH = doc.heightOfString(campo23Label.trim(), { width: fw - 12 });
+    doc.font('Helvetica')
+      .fontSize(campo23Fs)
+      .text(CRT_CAMPO23_DECLARACION, cx + campo23Pad, y + 2 + campo23LabelH + 4, {
+        width: campo23InnerW,
+        lineBreak: true,
+      });
 
     const dx = x0 + fw * 2;
     const dw = W - fw * 2;
@@ -837,9 +1327,7 @@ export class MicCrtService {
     doc.font('Helvetica-Bold').fontSize(6.5).text('24', dx + 2, y + 2, { lineBreak: false });
     doc.font('Helvetica').fontSize(6).text(' Nombre y firma del destinatario o su representante', dx + 10, y + 2, {
       width: dw - 12,
-      lineBreak: false,
+      lineBreak: true,
     });
-    doc.font('Helvetica').fontSize(6.5).text(dto.destinatario.razonSocial, dx + 2, y + 14, { width: dw - 4 });
-    doc.font('Helvetica').fontSize(7).text(fechaLine, dx + 2, y + fh - 14);
   }
 }

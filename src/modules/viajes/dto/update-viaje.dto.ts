@@ -28,6 +28,8 @@ export class UpdateViajeDto {
 
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() transportistaId?: string;
+  /** Transportista que efectivamente realiza el flete (cuando difiere del contratante). */
+  @IsOptional() @IsString() transportistaEfectivoId?: string | null;
   @IsOptional() @IsString() choferId?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsOptional() @IsString() origen?: string;

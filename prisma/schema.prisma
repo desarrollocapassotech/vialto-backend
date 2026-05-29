@@ -98,11 +98,12 @@ model Transportista {
   comisionPct              Float?    // % comisión NyM (si null usa el default de ArcaConfig)
   createdAt                DateTime  @default(now())
 
-  choferes      Chofer[]
-  vehiculos     Vehiculo[]
-  viajes        Viaje[]
-  facturas      Factura[]
-  liquidaciones Liquidacion[]
+  choferes         Chofer[]
+  vehiculos        Vehiculo[]
+  viajes           Viaje[]  @relation("ViajeTransportistaPrincipal")
+  viajesEfectivo   Viaje[]  @relation("ViajeTransportistaEfectivo")
+  facturas         Factura[]
+  liquidaciones    Liquidacion[]
 
   @@index([tenantId])
   @@map("transportistas")
@@ -201,8 +202,11 @@ model Viaje {
   estado           String    @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
   clienteId        String
   cliente          Cliente   @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  transportistaId  String?
-  transportista    Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  transportistaId         String?
+  transportista           Transportista? @relation("ViajeTransportistaPrincipal", fields: [transportistaId], references: [id], onDelete: SetNull)
+  /** Transportista que efectivamente realiza el flete (puede diferir del contratante). */
+  transportistaEfectivoId String?
+  transportistaEfectivo   Transportista? @relation("ViajeTransportistaEfectivo", fields: [transportistaEfectivoId], references: [id], onDelete: SetNull)
   choferId         String?
   chofer           Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
   vehiculosViaje   ViajeVehiculo[]
@@ -241,6 +245,7 @@ model Viaje {
   @@index([tenantId, estado])
   @@index([tenantId, clienteId])
   @@index([tenantId, transportistaId])
+  @@index([tenantId, transportistaEfectivoId])
   @@index([tenantId, fechaCarga])
   @@index([tenantId, fechaDescarga])
   @@index([tenantId, fechaFinalizado])

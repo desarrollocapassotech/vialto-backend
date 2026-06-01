@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -28,6 +29,16 @@ export class UpdateViajeDto {
 
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() transportistaId?: string;
+  /** Si es false, el contratante no realiza el flete y `transportistaEfectivoId` es obligatorio. */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+    if (value === true || value === 'true' || value === 1 || value === '1') return true;
+    if (value === false || value === 'false' || value === 0 || value === '0') return false;
+    return value;
+  })
+  @IsBoolean()
+  contratanteRealizaFlete?: boolean;
   /** Transportista que efectivamente realiza el flete (cuando difiere del contratante). */
   @IsOptional() @IsString() transportistaEfectivoId?: string | null;
   @IsOptional() @IsString() choferId?: string;

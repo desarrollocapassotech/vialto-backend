@@ -9,7 +9,13 @@ import { CreateViajeDto } from './dto/create-viaje.dto';
 import { AddGastoDto } from './dto/add-gasto.dto';
 import { AddPagoTransportistaDto } from './dto/add-pago-transportista.dto';
 import { generateNumeroViaje } from './generate-viaje-numero';
-import { assertViajeOperacionExclusiva, mergeViajeOperacionIds } from './viaje-operacion-exclusiva';
+import {
+  assertViajeOperacionExclusiva,
+  assertTransportistaEfectivoSubcontratacion,
+  mergeViajeOperacionIds,
+  resolveContratanteRealizaFlete,
+  resolveTransportistaEfectivoIdPersist,
+} from './viaje-operacion-exclusiva';
 import {
   assertVehiculosDelViaje,
   idsProductosDelViaje,
@@ -489,9 +495,29 @@ export class ViajesService {
       choferId: dto.choferId,
       vehiculoIds,
     });
-    const transportistaEfectivoId = transportistaExterno
-      ? (dto.transportistaEfectivoId?.trim() || null)
-      : null;
+    const contratanteRealizaFlete =
+      dto.contratanteRealizaFlete === true || dto.contratanteRealizaFlete === false
+        ? dto.contratanteRealizaFlete
+        : resolveContratanteRealizaFlete({
+            flag: dto.contratanteRealizaFlete,
+            transportistaEfectivoIdInDto: dto.transportistaEfectivoId,
+            hasTransportistaExterno: !!transportistaExterno,
+          });
+    const transportistaEfectivoId =
+      dto.contratanteRealizaFlete === false
+        ? (dto.transportistaEfectivoId ?? '').trim() || null
+        : dto.contratanteRealizaFlete === true
+          ? null
+          : resolveTransportistaEfectivoIdPersist({
+              hasTransportistaExterno: !!transportistaExterno,
+              contratanteRealizaFlete,
+              transportistaEfectivoIdInDto: dto.transportistaEfectivoId,
+            });
+    assertTransportistaEfectivoSubcontratacion({
+      transportistaId: transportistaExterno,
+      transportistaEfectivoId,
+      contratanteRealizaFlete,
+    });
     const refs = {
       clienteId: dto.clienteId,
       transportistaId: transportistaExterno || null,
@@ -580,15 +606,39 @@ export class ViajesService {
       },
       dto,
     );
-    const transportistaEfectivoIdUpdate =
-      dto.transportistaEfectivoId !== undefined
-        ? (dto.transportistaEfectivoId?.trim() || null)
-        : (current as any).transportistaEfectivoId ?? null;
+    const currentTeId = (current as { transportistaEfectivoId?: string | null })
+      .transportistaEfectivoId;
+    const contratanteRealizaFlete =
+      dto.contratanteRealizaFlete === true || dto.contratanteRealizaFlete === false
+        ? dto.contratanteRealizaFlete
+        : resolveContratanteRealizaFlete({
+            flag: dto.contratanteRealizaFlete,
+            transportistaEfectivoIdInDto: dto.transportistaEfectivoId,
+            currentTransportistaEfectivoId: currentTeId,
+            hasTransportistaExterno: !!op.transportistaId,
+          });
+    const transportistaEfectivoIdUpdate = !op.transportistaId
+      ? null
+      : dto.contratanteRealizaFlete === false
+        ? (dto.transportistaEfectivoId ?? '').trim() || null
+        : dto.contratanteRealizaFlete === true
+          ? null
+          : resolveTransportistaEfectivoIdPersist({
+              hasTransportistaExterno: true,
+              contratanteRealizaFlete,
+              transportistaEfectivoIdInDto: dto.transportistaEfectivoId,
+              currentTransportistaEfectivoId: currentTeId,
+            });
+    assertTransportistaEfectivoSubcontratacion({
+      transportistaId: op.transportistaId,
+      transportistaEfectivoId: transportistaEfectivoIdUpdate,
+      contratanteRealizaFlete,
+    });
     const merged = {
       clienteId: dto.clienteId ?? current.clienteId,
       transportistaId: op.transportistaId,
       choferId: op.choferId,
-      transportistaEfectivoId: op.transportistaId ? transportistaEfectivoIdUpdate : null,
+      transportistaEfectivoId: transportistaEfectivoIdUpdate,
     };
     await this.assertRefs(tenantId, merged);
     if (dto.fechaCarga !== undefined && !dto.fechaCarga)
@@ -642,6 +692,8 @@ export class ViajesService {
     } as any;
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
     delete (data as { productoItems?: unknown }).productoItems;
+    delete (data as { contratanteRealizaFlete?: unknown }).contratanteRealizaFlete;
+    delete (data as { transportistaEfectivoId?: unknown }).transportistaEfectivoId;
     if (dto.otrosGastos !== undefined) {
       (data as any).otrosGastos = dto.otrosGastos as unknown as Prisma.InputJsonValue;
     }

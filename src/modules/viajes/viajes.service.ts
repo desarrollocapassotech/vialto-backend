@@ -228,8 +228,9 @@ export class ViajesService {
     clienteId: string;
     transportistaId?: string | null;
     choferId?: string | null;
+    transportistaEfectivoId?: string | null;
   }) {
-    const [c, t, ch] = await Promise.all([
+    const [c, t, ch, te] = await Promise.all([
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
       dto.transportistaId
         ? this.prisma.transportista.findFirst({ where: { id: dto.transportistaId, tenantId } })
@@ -237,11 +238,18 @@ export class ViajesService {
       dto.choferId
         ? this.prisma.chofer.findFirst({ where: { id: dto.choferId, tenantId } })
         : null,
+      dto.transportistaEfectivoId
+        ? this.prisma.transportista.findFirst({ where: { id: dto.transportistaEfectivoId, tenantId } })
+        : null,
     ]);
 
     if (!c) throw new BadRequestException('Cliente inválido para este tenant');
     if (dto.transportistaId && !t) throw new BadRequestException('Transportista inválido');
     if (dto.choferId && !ch) throw new BadRequestException('Chofer inválido');
+    if (dto.transportistaEfectivoId && !te)
+      throw new BadRequestException('Transportista efectivo inválido');
+    if (dto.transportistaEfectivoId && dto.transportistaEfectivoId === dto.transportistaId)
+      throw new BadRequestException('El transportista efectivo no puede ser el mismo que el contratante');
   }
 
   async findAll(tenantId: string, estado?: string) {
@@ -250,9 +258,10 @@ export class ViajesService {
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: {
-        cliente:      { select: { id: true, nombre: true } },
-        transportista: { select: { id: true, nombre: true } },
-        factura:      { select: { id: true, numero: true } },
+        cliente:              { select: { id: true, nombre: true } },
+        transportista:        { select: { id: true, nombre: true } },
+        transportistaEfectivo: { select: { id: true, nombre: true } },
+        factura:              { select: { id: true, numero: true } },
       },
     });
   }
@@ -480,10 +489,14 @@ export class ViajesService {
       choferId: dto.choferId,
       vehiculoIds,
     });
+    const transportistaEfectivoId = transportistaExterno
+      ? (dto.transportistaEfectivoId?.trim() || null)
+      : null;
     const refs = {
       clienteId: dto.clienteId,
       transportistaId: transportistaExterno || null,
       choferId: transportistaExterno ? null : dto.choferId?.trim() || null,
+      transportistaEfectivoId,
     };
     await this.assertRefs(tenantId, refs);
     if (!transportistaExterno) {
@@ -522,6 +535,7 @@ export class ViajesService {
         estado,
         clienteId: dto.clienteId,
         transportistaId: refs.transportistaId,
+        transportistaEfectivoId: refs.transportistaEfectivoId,
         choferId: refs.choferId,
         origen: dto.origen ?? null,
         destino: dto.destino ?? null,
@@ -566,10 +580,15 @@ export class ViajesService {
       },
       dto,
     );
+    const transportistaEfectivoIdUpdate =
+      dto.transportistaEfectivoId !== undefined
+        ? (dto.transportistaEfectivoId?.trim() || null)
+        : (current as any).transportistaEfectivoId ?? null;
     const merged = {
       clienteId: dto.clienteId ?? current.clienteId,
       transportistaId: op.transportistaId,
       choferId: op.choferId,
+      transportistaEfectivoId: op.transportistaId ? transportistaEfectivoIdUpdate : null,
     };
     await this.assertRefs(tenantId, merged);
     if (dto.fechaCarga !== undefined && !dto.fechaCarga)
@@ -649,6 +668,7 @@ export class ViajesService {
 
     (data as any).estado = estadoSiguiente;
     (data as any).transportistaId = op.transportistaId;
+    (data as any).transportistaEfectivoId = merged.transportistaEfectivoId;
     (data as any).choferId = op.choferId;
 
     const gananciaPersist = this.applyGananciaBrutaFields(

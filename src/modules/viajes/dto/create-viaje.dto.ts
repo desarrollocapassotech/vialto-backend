@@ -39,6 +39,8 @@ export class CreateViajeDto {
 
   @IsString() @IsNotEmpty() clienteId: string;
   @IsOptional() @IsString() transportistaId?: string;
+  /** Transportista que efectivamente realiza el flete (cuando difiere del contratante). */
+  @IsOptional() @IsString() transportistaEfectivoId?: string | null;
   /** Obligatorio si no hay transportista externo. */
   @IsOptional() @IsString() choferId?: string | null;
   /** IDs de vehículos del maestro (orden = orden del array). Requerido al menos 1 sin transportista externo. */

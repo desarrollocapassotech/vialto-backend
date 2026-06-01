@@ -81,6 +81,17 @@ export class ViajesProcessor implements IImportProcessor {
       select: { id: true },
     });
 
+    if (row.vehiculoId) {
+      await this.prisma.viajeVehiculo.create({
+        data: {
+          tenantId,
+          viajeId: viaje.id,
+          vehiculoId: row.vehiculoId as string,
+          orden: 0,
+        },
+      });
+    }
+
     // Crear factura del transportista externo si hay número de factura
     if (row.nroFacturaTransporte) {
       const fechaEmision = (row.fechaEmisionFacturaTransp as Date | null) ?? fechaCarga ?? new Date();

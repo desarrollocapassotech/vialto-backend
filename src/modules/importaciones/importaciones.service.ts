@@ -261,6 +261,8 @@ export class ImportacionesService {
         fila: validRow._rowNum,
         cliente,
         transporte,
+        chofer: toStr(p.choferId),
+        vehiculo: toStr(p.vehiculoId),
         origen: toStr(p.origen),
         destino: toStr(p.destino),
         fechaCarga: toDateStr(p.fechaCarga),

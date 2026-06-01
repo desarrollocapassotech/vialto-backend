@@ -478,6 +478,24 @@ export function descripcionMercanciasPdf(dto: MicCrtExportDto): string {
   return lines.join('\n');
 }
 
+/** CRT campo 18 — Consolidado / Fraccionado (como formulario impreso). */
+export function formatCrtCampo18Block(instrucciones?: string | null): string {
+  const raw = instrucciones?.trim() || 'N';
+  const pick = (label: string): string => {
+    const m = new RegExp(`${label}\\s*[:\\->]+\\s*(\\S+)`, 'i').exec(raw);
+    if (m?.[1]) {
+      const c = m[1].trim().charAt(0).toUpperCase();
+      return c === 'S' ? 'S' : 'N';
+    }
+    return '';
+  };
+  const simple = /^[NS]$/i.test(raw) ? raw.toUpperCase().charAt(0) : '';
+  const def = simple || 'N';
+  const consolidado = pick('Consolidado') || def;
+  const fraccionado = pick('Fraccionado') || def;
+  return `Consolidado --> ${consolidado}\nFraccionado --> ${fraccionado}`;
+}
+
 /** CRT campo 11 — cantidad/clase de bultos + NCM y descripción de mercancías. */
 export function formatCrtCampo11Block(dto: MicCrtExportDto): string {
   const lines: string[] = [];

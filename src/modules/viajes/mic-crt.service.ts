@@ -20,6 +20,7 @@ import {
   formatConsignatarioMicBlock,
   formatCrtCampo5EmisionBlock,
   formatCrtCampo11Block,
+  formatCrtCampo18Block,
   formatCrtLugarPaisFechaBlock,
   formatMicCampo24Block,
   formatMicCampo26Block,
@@ -59,6 +60,7 @@ type MicViajeRow = {
   documentoAduanero: unknown;
   monedaPrecioTransportistaExterno: string;
   precioTransportistaExterno: number | null;
+  observaciones: string | null;
   cliente: {
     nombre: string;
     idFiscal: string | null;
@@ -265,6 +267,51 @@ export class MicCrtService {
         'codigoAduaneroOrigen',
         'codigoOrigenComercial',
       ),
+      porteadoresSucesivos: this.legacyStr(
+        legacy,
+        'porteadoresSucesivos',
+        'porteadores_sucesivos',
+        'porteadoresSucesivo',
+      ),
+      instruccionesFormalidadesAduana:
+        this.legacyStr(
+          legacy,
+          'instruccionesFormalidadesAduana',
+          'formalidadesAduana',
+          'campo18',
+          'instruccionesFormalidades',
+        ) ?? 'N',
+      montoFleteExterno:
+        typeof legacy.montoFleteExterno === 'number'
+          ? legacy.montoFleteExterno
+          : typeof legacy.fleteExterno === 'number'
+            ? legacy.fleteExterno
+            : (v.precioTransportistaExterno ?? 0),
+      monedaFleteExterno:
+        legacy.monedaFleteExterno === 'USD' || legacy.monedaFleteExterno === 'ARS'
+          ? legacy.monedaFleteExterno
+          : v.monedaPrecioTransportistaExterno === 'USD'
+            ? 'USD'
+            : 'ARS',
+      montoReembolsoContraEntrega:
+        typeof legacy.montoReembolsoContraEntrega === 'number'
+          ? legacy.montoReembolsoContraEntrega
+          : typeof legacy.reembolsoContraEntrega === 'number'
+            ? legacy.reembolsoContraEntrega
+            : undefined,
+      monedaReembolsoContraEntrega:
+        legacy.monedaReembolsoContraEntrega === 'USD' ||
+        legacy.monedaReembolsoContraEntrega === 'ARS'
+          ? legacy.monedaReembolsoContraEntrega
+          : undefined,
+      declaracionesObservaciones:
+        this.legacyStr(
+          legacy,
+          'declaracionesObservaciones',
+          'declaraciones_observaciones',
+          'declaracionesYObservaciones',
+          'campo22',
+        ) ?? (v.observaciones?.trim() ? v.observaciones.trim() : undefined),
       documentosAnexos: '',
       precintos: typeof legacy.precintos === 'string' ? legacy.precintos : (semi?.precinto ?? ''),
       cartaPorte: typeof legacy.crt === 'string' ? legacy.crt : '',
@@ -429,7 +476,7 @@ export class MicCrtService {
     num: string,
     label: string,
     value: string,
-    opts: { bold?: boolean; valueFontSize?: number } = {},
+    opts: { bold?: boolean; valueFontSize?: number; emptyDash?: boolean } = {},
   ) {
     doc.rect(x, y, w, h).stroke();
     const numW = num.length >= 2 ? 14 : 10;
@@ -442,7 +489,8 @@ export class MicCrtService {
     doc.text(labelText, x + 2 + numW, labelY, { width: labelMaxW, lineBreak: labelH > 9 });
     const valueY = labelY + labelH + 2;
     const fs = opts.valueFontSize ?? 8;
-    const display = value?.trim() ? value : '—';
+    const raw = value?.trim() ?? '';
+    const display = raw || (opts.emptyDash === false ? '' : '—');
     doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
       .fontSize(fs)
       .text(display, x + 3, valueY, {
@@ -450,6 +498,148 @@ export class MicCrtService {
         height: Math.max(h - (valueY - y) - 2, fs + 2),
         lineBreak: true,
       });
+  }
+
+  private measureCrtFieldH(
+    doc: PDFKit.PDFDocument,
+    w: number,
+    label: string,
+    value: string,
+    valueFs: number,
+  ): number {
+    const numColW = 14;
+    doc.font('Helvetica').fontSize(6);
+    const labelH = doc.heightOfString(label.trim(), { width: w - numColW - 4, lineBreak: true });
+    const valueY = 2 + labelH + 2;
+    doc.font('Helvetica').fontSize(valueFs);
+    const valueH = doc.heightOfString(value?.trim() ? value : '—', { width: w - 6 });
+    return Math.max(22, Math.ceil(valueY + valueH + 4));
+  }
+
+  /**
+   * Pie CRT (campos 18–24): columna izquierda 19/20/21, derecha 18 arriba y 22 alto, abajo 23/24.
+   */
+  private drawCrtBloqueFirmas(
+    doc: PDFKit.PDFDocument,
+    x0: number,
+    y: number,
+    W: number,
+    pageBottom: number,
+    dto: MicCrtExportDto,
+    fechaLine: string,
+  ): void {
+    const leftW = Math.round(W * 0.52);
+    const rightW = W - leftW;
+    const fsMonto = 9;
+    const fsText = 8;
+
+    const campo19Label = 'Monto del flete externo / Valor do frete externo';
+    const montoFleteExt =
+      dto.montoFleteExterno != null && dto.montoFleteExterno > 0
+        ? dto.montoFleteExterno
+        : dto.flete;
+    const monedaFleteExt = dto.monedaFleteExterno ?? dto.monedaFlete;
+    const campo19Text =
+      montoFleteExt > 0 ? formatMontoPdf(montoFleteExt, monedaFleteExt) : '';
+
+    const campo20Label =
+      'Monto de reembolso contra entrega / Valor de reembolso contra entrega';
+    const montoReembolso = dto.montoReembolsoContraEntrega ?? 0;
+    const monedaReembolso = dto.monedaReembolsoContraEntrega ?? dto.monedaFot;
+    const campo20Text =
+      montoReembolso > 0 ? formatMontoPdf(montoReembolso, monedaReembolso) : '';
+
+    const campo18Label =
+      'Instrucciones sobre formalidades de aduana / Instruções sobre formalidades aduaneiras';
+    const campo18Text = formatCrtCampo18Block(dto.instruccionesFormalidadesAduana);
+
+    const campo22Label =
+      'Declaraciones y observaciones / Declarações e observações';
+    const campo22Text = dto.declaracionesObservaciones?.trim() ?? '';
+
+    const campo21Label =
+      'Nombre y firma del remitente o su representante / Nome e assinatura do remitente ou seu representante';
+
+    const h19 = this.measureCrtFieldH(doc, leftW, campo19Label, campo19Text, fsMonto);
+    const h20 = this.measureCrtFieldH(doc, leftW, campo20Label, campo20Text, fsMonto);
+    const h18 = this.measureCrtFieldH(doc, rightW, campo18Label, campo18Text, fsText);
+    const h21 = Math.max(
+      40,
+      this.measureCrtFieldH(doc, leftW, campo21Label, dto.remitente.razonSocial, 6.5) + 10,
+    );
+    const leftStackH = h19 + h20 + h21;
+    const h22 = Math.max(36, leftStackH - h18);
+
+    this.cell(doc, x0, y, leftW, h19, '19', campo19Label, campo19Text, {
+      valueFontSize: fsMonto,
+      bold: true,
+      emptyDash: false,
+    });
+    this.cell(doc, x0 + leftW, y, rightW, h18, '18', campo18Label, campo18Text, {
+      valueFontSize: fsText,
+    });
+
+    this.cell(doc, x0, y + h19, leftW, h20, '20', campo20Label, campo20Text, {
+      valueFontSize: fsMonto,
+      bold: true,
+      emptyDash: false,
+    });
+    this.cell(doc, x0 + leftW, y + h18, rightW, h22, '22', campo22Label, campo22Text, {
+      valueFontSize: fsText,
+      emptyDash: false,
+    });
+
+    const y21 = y + h19 + h20;
+    this.cell(doc, x0, y21, leftW, h21, '21', campo21Label, '', { emptyDash: false });
+    doc.font('Helvetica')
+      .fontSize(6.5)
+      .text(dto.remitente.razonSocial?.trim() || '', x0 + 3, y21 + 16, {
+        width: leftW - 6,
+        lineBreak: true,
+      });
+    doc.font('Helvetica')
+      .fontSize(7)
+      .text(fechaLine, x0 + 2, y21 + h21 - 14, { lineBreak: false });
+
+    const sigY = y + leftStackH;
+    const fh = Math.max(pageBottom - sigY, 58);
+    const campo23Pad = 4;
+    const campo23InnerW = leftW - campo23Pad * 2;
+    const campo23Label =
+      'Nombre, firma y sello del porteador y su representante / Nome, assinatura e carimbo do transportador o seu representante';
+
+    doc.rect(x0, sigY, leftW, fh).stroke();
+    doc.font('Helvetica-Bold').fontSize(6.5).text('23', x0 + 2, sigY + 2, { lineBreak: false });
+    doc.font('Helvetica').fontSize(6).text(campo23Label, x0 + 14, sigY + 2, {
+      width: leftW - 16,
+      lineBreak: true,
+    });
+    doc.font('Helvetica').fontSize(6);
+    const campo23LabelH = doc.heightOfString(campo23Label, { width: leftW - 16 });
+    doc.font('Helvetica')
+      .fontSize(5.5)
+      .text(CRT_CAMPO23_DECLARACION, x0 + campo23Pad, sigY + 2 + campo23LabelH + 4, {
+        width: campo23InnerW,
+        lineBreak: true,
+      });
+    doc.font('Helvetica')
+      .fontSize(7)
+      .text(fechaLine, x0 + 2, sigY + fh - 14, { lineBreak: false });
+
+    const dx = x0 + leftW;
+    doc.rect(dx, sigY, rightW, fh).stroke();
+    doc.font('Helvetica-Bold').fontSize(6.5).text('24', dx + 2, sigY + 2, { lineBreak: false });
+    doc.font('Helvetica')
+      .fontSize(6)
+      .text(
+        'Nombre y firma del destinatario o su representante / Nome e assinatura do destinatário ou seu representante',
+        dx + 14,
+        sigY + 2,
+        { width: rightW - 16, lineBreak: true },
+      );
+    doc.font('Helvetica')
+      .fontSize(7)
+      .text(fechaLine, dx + 2, sigY + fh - 14, { lineBreak: false });
   }
 
   private paisMicPrefill(pais?: string | null): string | undefined {
@@ -1139,12 +1329,16 @@ export class MicCrtService {
     const notificarH = doc.heightOfString(notificar.trim() ? notificar : '—', {
       width: halfW - 6,
     });
-    const row6h = Math.max(28, Math.ceil(18 + notificarH + 4));
+    const porteadoresSucesivos = dto.porteadoresSucesivos?.trim() ?? '';
+    const porteadoresSucesivosH = doc.heightOfString(porteadoresSucesivos || '—', {
+      width: W - halfW - 6,
+    });
+    const row6h = Math.max(28, Math.ceil(18 + Math.max(notificarH, porteadoresSucesivosH) + 4));
 
     this.cell(doc, x0, y, halfW, row6h, '9', 'Notificar a', notificar, {
       valueFontSize: row3Fs,
     });
-    this.cell(doc, x0 + halfW, y, W - halfW, row6h, '10', 'Porteadores sucesivos', '');
+    this.cell(doc, x0 + halfW, y, W - halfW, row6h, '10', 'Porteadores sucesivos', porteadoresSucesivos);
     y += row6h;
 
     const c11w = Math.round(W * 0.55);
@@ -1286,48 +1480,6 @@ export class MicCrtService {
     );
     y += gastosH;
 
-    this.cell(doc, x0, y, W, 22, '18', 'Instrucciones sobre formalidades de aduana', 'N');
-    y += 22;
-
-    const fh = Math.max(841 - M - y, 72);
-    const fw = Math.round(W / 3);
-
-    doc.rect(x0, y, fw, fh).stroke();
-    doc.font('Helvetica-Bold').fontSize(6.5).text('21', x0 + 2, y + 2, { lineBreak: false });
-    doc.font('Helvetica').fontSize(6).text(' Nombre y firma del remitente o su representante', x0 + 10, y + 2, {
-      width: fw - 12,
-      lineBreak: false,
-    });
-    doc.font('Helvetica').fontSize(6.5).text(dto.remitente.razonSocial, x0 + 2, y + 14, { width: fw - 4 });
-    doc.font('Helvetica').fontSize(7).text(fechaLine, x0 + 2, y + fh - 14);
-
-    const cx = x0 + fw;
-    const campo23Pad = 4;
-    const campo23InnerW = fw - campo23Pad * 2;
-    const campo23Label = ' Nombre, firma y sello del porteador';
-    const campo23Fs = 5.5;
-    doc.rect(cx, y, fw, fh).stroke();
-    doc.font('Helvetica-Bold').fontSize(6.5).text('23', cx + 2, y + 2, { lineBreak: false });
-    doc.font('Helvetica').fontSize(6).text(campo23Label, cx + 10, y + 2, {
-      width: fw - 12,
-      lineBreak: true,
-    });
-    doc.font('Helvetica').fontSize(6);
-    const campo23LabelH = doc.heightOfString(campo23Label.trim(), { width: fw - 12 });
-    doc.font('Helvetica')
-      .fontSize(campo23Fs)
-      .text(CRT_CAMPO23_DECLARACION, cx + campo23Pad, y + 2 + campo23LabelH + 4, {
-        width: campo23InnerW,
-        lineBreak: true,
-      });
-
-    const dx = x0 + fw * 2;
-    const dw = W - fw * 2;
-    doc.rect(dx, y, dw, fh).stroke();
-    doc.font('Helvetica-Bold').fontSize(6.5).text('24', dx + 2, y + 2, { lineBreak: false });
-    doc.font('Helvetica').fontSize(6).text(' Nombre y firma del destinatario o su representante', dx + 10, y + 2, {
-      width: dw - 12,
-      lineBreak: true,
-    });
+    this.drawCrtBloqueFirmas(doc, x0, y, W, 841 - M, dto, fechaLine);
   }
 }

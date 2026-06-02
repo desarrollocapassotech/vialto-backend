@@ -1,6 +1,40 @@
 import { BadRequestException } from '@nestjs/common';
 import { normalizarVehiculoIds } from './viaje-vehiculos.helper';
 
+/**
+ * ¿El transportista contratante realiza el flete?
+ * Si hay transportista efectivo en el PATCH o en BD → false (subcontratación).
+ */
+export function resolveContratanteRealizaFlete(args: {
+  flag?: boolean;
+  transportistaEfectivoIdInDto?: string | null;
+  currentTransportistaEfectivoId?: string | null;
+  hasTransportistaExterno: boolean;
+}): boolean {
+  if (!args.hasTransportistaExterno) return true;
+  if (args.flag === true || args.flag === false) return args.flag;
+  if (args.transportistaEfectivoIdInDto !== undefined) {
+    return !(args.transportistaEfectivoIdInDto ?? '').trim();
+  }
+  const tieneEfectivo = !!((args.currentTransportistaEfectivoId ?? '').trim());
+  return !tieneEfectivo;
+}
+
+export function resolveTransportistaEfectivoIdPersist(args: {
+  hasTransportistaExterno: boolean;
+  contratanteRealizaFlete: boolean;
+  transportistaEfectivoIdInDto?: string | null;
+  currentTransportistaEfectivoId?: string | null;
+}): string | null {
+  if (!args.hasTransportistaExterno) return null;
+  if (args.contratanteRealizaFlete) return null;
+  if (args.transportistaEfectivoIdInDto !== undefined) {
+    const te = (args.transportistaEfectivoIdInDto ?? '').trim();
+    return te || null;
+  }
+  return (args.currentTransportistaEfectivoId ?? '').trim() || null;
+}
+
 /** Con transportista externo, chofer y vehículo son opcionales. Sin transportista externo, ambos son obligatorios. */
 export function assertViajeOperacionExclusiva(refs: {
   transportistaId?: string | null;
@@ -17,6 +51,35 @@ export function assertViajeOperacionExclusiva(refs: {
   if (!ch || vids.length === 0) {
     throw new BadRequestException(
       'Sin transportista externo, debés indicar chofer y al menos un vehículo.',
+    );
+  }
+}
+
+/**
+ * Subcontratación del flete: si el contratante no realiza el flete (`contratanteRealizaFlete === false`),
+ * el transportista efectivo es obligatorio y debe ser distinto del contratante.
+ */
+export function assertTransportistaEfectivoSubcontratacion(args: {
+  transportistaId?: string | null;
+  transportistaEfectivoId?: string | null;
+  /** Por defecto true (el contratante realiza el flete) si se omite. */
+  contratanteRealizaFlete?: boolean;
+}): void {
+  const contratante = args.transportistaId?.trim() ?? '';
+  if (!contratante) return;
+
+  const contratanteRealiza = args.contratanteRealizaFlete !== false;
+  if (contratanteRealiza) return;
+
+  const efectivo = args.transportistaEfectivoId?.trim() ?? '';
+  if (!efectivo) {
+    throw new BadRequestException(
+      'Campo obligatorio: seleccioná el transportista que realiza el flete.',
+    );
+  }
+  if (efectivo === contratante) {
+    throw new BadRequestException(
+      'El transportista que realiza el flete debe ser distinto del contratante.',
     );
   }
 }

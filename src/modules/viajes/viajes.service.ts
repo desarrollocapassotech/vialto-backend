@@ -136,6 +136,10 @@ export class ViajesService {
       monedaPrecioTransportistaExterno?: string;
       otrosGastos?: unknown;
     },
+    existing?: {
+      gananciaBrutaManual?: number | null;
+      monedaGananciaBrutaManual?: string | null;
+    },
   ): { gananciaBrutaManual: number | null; monedaGananciaBrutaManual: string | null } {
     try {
       return resolveGananciaBrutaPersist(
@@ -150,6 +154,7 @@ export class ViajesService {
           gananciaBrutaManual: dto.gananciaBrutaManual,
           monedaGananciaBrutaManual: dto.monedaGananciaBrutaManual,
         },
+        existing,
       );
     } catch (e) {
       if (e instanceof GananciaBrutaValidationError) {
@@ -688,7 +693,13 @@ export class ViajesService {
         monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
         otrosGastos: dto.otrosGastos,
       },
+      {
+        gananciaBrutaManual: current.gananciaBrutaManual,
+        monedaGananciaBrutaManual: current.monedaGananciaBrutaManual,
+      },
     );
+    delete (data as { gananciaBrutaManual?: unknown }).gananciaBrutaManual;
+    delete (data as { monedaGananciaBrutaManual?: unknown }).monedaGananciaBrutaManual;
     (data as any).gananciaBrutaManual = gananciaPersist.gananciaBrutaManual;
     (data as any).monedaGananciaBrutaManual = gananciaPersist.monedaGananciaBrutaManual;
 

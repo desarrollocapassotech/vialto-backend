@@ -57,6 +57,14 @@ function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Normaliza montos persistidos (number, string numérica, etc.). */
+function coerceMoneyField(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Ganancia automática cuando facturación y pago al transportista comparten moneda. */
 export function calcularGananciaAutomatica(viaje: {
   monto?: number | null;
@@ -198,6 +206,11 @@ export function resolveGananciaBrutaPersist(
     gananciaBrutaManual?: number | null;
     monedaGananciaBrutaManual?: string | null;
   },
+  /** Valores ya guardados (p. ej. PATCH parcial que no incluye ganancia bruta). */
+  existing?: {
+    gananciaBrutaManual?: number | null;
+    monedaGananciaBrutaManual?: string | null;
+  },
 ): GananciaBrutaPersist {
   if (!monedasFacturacionYPagoDistintas(viaje)) {
     if (
@@ -212,7 +225,22 @@ export function resolveGananciaBrutaPersist(
   }
 
   const manual = input.gananciaBrutaManual;
-  if (manual === undefined || manual === null) {
+  if (manual === null) {
+    return { gananciaBrutaManual: null, monedaGananciaBrutaManual: null };
+  }
+  if (manual === undefined) {
+    const prev = coerceMoneyField(existing?.gananciaBrutaManual);
+    if (prev != null && prev >= 0) {
+      const moneda = input.monedaGananciaBrutaManual
+        ? normalizarMonedaViaje(input.monedaGananciaBrutaManual)
+        : existing?.monedaGananciaBrutaManual
+          ? normalizarMonedaViaje(existing.monedaGananciaBrutaManual)
+          : normalizarMonedaViaje(viaje.monedaMonto);
+      return {
+        gananciaBrutaManual: roundMoney(prev),
+        monedaGananciaBrutaManual: moneda,
+      };
+    }
     return { gananciaBrutaManual: null, monedaGananciaBrutaManual: null };
   }
   if (typeof manual !== 'number' || Number.isNaN(manual) || manual < 0) {

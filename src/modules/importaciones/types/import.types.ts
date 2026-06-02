@@ -64,6 +64,8 @@ export interface PreviewViaje {
   transporte: string | null;
   origen: string | null;
   destino: string | null;
+  chofer: string | null;
+  vehiculo: string | null;  
   fechaCarga: string | null;
   fechaDescarga: string | null;
   detalleCarga: string | null;

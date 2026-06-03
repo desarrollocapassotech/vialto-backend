@@ -40,6 +40,7 @@ const productoSelect = {
   id: true,
   tenantId: true,
   nombre: true,
+  codigo: true,
   descripcion: true,
   unidadMedida: true,
   activo: true,
@@ -88,6 +89,11 @@ export class StockService {
       where.nombre = { contains: q, mode: 'insensitive' };
     }
 
+    const codigoQ = query.codigo?.trim();
+    if (codigoQ) {
+      where.codigo = { contains: codigoQ, mode: 'insensitive' };
+    }
+
     const fa = query.filtroActivo ?? 'todos';
     if (fa === 'activos') where.activo = true;
     else if (fa === 'inactivos') where.activo = false;
@@ -131,22 +137,42 @@ export class StockService {
     return row;
   }
 
+  private async nextProductoCodigoTx(tx: Prisma.TransactionClient, tenantId: string): Promise<string> {
+    const id = randomUUID().replace(/-/g, '').slice(0, 25);
+    const rows = await tx.$queryRaw<{ lastValue: number }[]>(
+      Prisma.sql`
+        INSERT INTO "producto_secuencias" ("id", "tenantId", "lastValue")
+        VALUES (${id}, ${tenantId}, 1)
+        ON CONFLICT ("tenantId")
+        DO UPDATE SET "lastValue" = "producto_secuencias"."lastValue" + 1
+        RETURNING "lastValue"
+      `,
+    );
+    const n = rows[0]?.lastValue;
+    if (n === undefined || n === null) throw new BadRequestException('No se pudo generar el código de producto.');
+    return `P-${String(n).padStart(3, '0')}`;
+  }
+
   async createProducto(tenantId: string, dto: CreateProductoDto) {
     const nombre = displayNombre(dto.nombre);
     if (!nombre) throw new ConflictException('El nombre no puede quedar vacío.');
     const nombreNormalizado = normalizarNombre(nombre);
 
     try {
-      return await this.prisma.producto.create({
-        data: {
-          tenantId,
-          nombre,
-          nombreNormalizado,
-          descripcion: dto.descripcion?.trim() || null,
-          unidadMedida: dto.unidadMedida?.trim() || '',
-          activo: dto.activo ?? true,
-        },
-        select: productoSelect,
+      return await this.prisma.$transaction(async (tx) => {
+        const codigo = await this.nextProductoCodigoTx(tx, tenantId);
+        return tx.producto.create({
+          data: {
+            tenantId,
+            nombre,
+            nombreNormalizado,
+            codigo,
+            descripcion: dto.descripcion?.trim() || null,
+            unidadMedida: dto.unidadMedida?.trim() || '',
+            activo: dto.activo ?? true,
+          },
+          select: productoSelect,
+        });
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {

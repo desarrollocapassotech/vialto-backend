@@ -352,6 +352,7 @@ model Producto {
   nombre            String
   /** lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive). */
   nombreNormalizado String
+  codigo            String?  // generado por el sistema: P-001, P-002… único por tenant cuando presente
   descripcion       String?
   unidadMedida      String   // kg | tn | unidades | rollos | pallets | m3 | litros | otro
   activo            Boolean  @default(true)
@@ -364,9 +365,18 @@ model Producto {
   stockItems     StockItem[]
 
   @@unique([tenantId, nombreNormalizado])
+  @@unique([tenantId, codigo])
   @@index([tenantId])
   @@index([tenantId, activo])
   @@map("productos")
+}
+
+model ProductoSecuencia {
+  id        String @id @default(cuid())
+  tenantId  String @unique
+  lastValue Int    @default(0)
+
+  @@map("producto_secuencias")
 }
 
 model Presentacion {

@@ -19,6 +19,10 @@ export class ProductosPaginatedQueryDto extends PaginationQueryDto {
   @IsString()
   q?: string;
 
+  @IsOptional()
+  @IsString()
+  codigo?: string;
+
   /** todos (default) | activos | inactivos */
   @IsOptional()
   @IsIn(['todos', 'activos', 'inactivos'])

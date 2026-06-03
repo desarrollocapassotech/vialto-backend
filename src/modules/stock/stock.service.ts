@@ -15,6 +15,8 @@ import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { CreateIngresoDto } from './dto/create-ingreso.dto';
 import { CreateEgresoDto } from './dto/create-egreso.dto';
 import { UpdateStockEgresoRemitoConfigDto } from './dto/update-stock-egreso-remito-config.dto';
+import { CreatePresentacionDto } from './dto/create-presentacion.dto';
+import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
 
@@ -196,6 +198,50 @@ export class StockService {
       }
       throw e;
     }
+  }
+
+  // ───────────────── PRESENTACIONES ────────────────────────────────────────
+
+  async listPresentaciones(productoId: string, tenantId: string) {
+    const p = await this.prisma.producto.findFirst({ where: { id: productoId, tenantId } });
+    if (!p) throw new NotFoundException('Producto no encontrado');
+    return this.prisma.presentacion.findMany({
+      where: { productoId, tenantId },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
+  async createPresentacion(productoId: string, tenantId: string, dto: CreatePresentacionDto) {
+    const p = await this.prisma.producto.findFirst({ where: { id: productoId, tenantId } });
+    if (!p) throw new NotFoundException('Producto no encontrado');
+    return this.prisma.presentacion.create({
+      data: {
+        tenantId,
+        productoId,
+        nombre: dto.nombre.trim(),
+        cantidadEquivalente: dto.cantidadEquivalente,
+        unidadEquivalente: dto.unidadEquivalente.trim(),
+      },
+    });
+  }
+
+  async updatePresentacion(productoId: string, id: string, tenantId: string, dto: UpdatePresentacionDto) {
+    const row = await this.prisma.presentacion.findFirst({ where: { id, productoId, tenantId } });
+    if (!row) throw new NotFoundException('Presentación no encontrada');
+    return this.prisma.presentacion.update({
+      where: { id },
+      data: {
+        ...(dto.nombre !== undefined ? { nombre: dto.nombre.trim() } : {}),
+        ...(dto.cantidadEquivalente !== undefined ? { cantidadEquivalente: dto.cantidadEquivalente } : {}),
+        ...(dto.unidadEquivalente !== undefined ? { unidadEquivalente: dto.unidadEquivalente.trim() } : {}),
+      },
+    });
+  }
+
+  async removePresentacion(productoId: string, id: string, tenantId: string) {
+    const row = await this.prisma.presentacion.findFirst({ where: { id, productoId, tenantId } });
+    if (!row) throw new NotFoundException('Presentación no encontrada');
+    return this.prisma.presentacion.delete({ where: { id } });
   }
 
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────

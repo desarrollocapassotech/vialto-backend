@@ -360,6 +360,7 @@ model Producto {
   updatedAt         DateTime @updatedAt
 
   movimientos    MovimientoStock[]
+  presentaciones Presentacion[]
   viajesProducto ViajeProducto[]
   stockItems     StockItem[]
 
@@ -368,6 +369,22 @@ model Producto {
   @@index([tenantId])
   @@index([tenantId, activo])
   @@map("productos")
+}
+
+model Presentacion {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  productoId          String
+  producto            Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  nombre              String
+  cantidadEquivalente Float
+  unidadEquivalente   String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([productoId])
+  @@map("presentaciones")
 }
 
 model ProductoSecuencia {

@@ -360,7 +360,6 @@ model Producto {
   updatedAt         DateTime @updatedAt
 
   movimientos    MovimientoStock[]
-  presentaciones Presentacion[]
   viajesProducto ViajeProducto[]
   stockItems     StockItem[]
 
@@ -379,51 +378,30 @@ model ProductoSecuencia {
   @@map("producto_secuencias")
 }
 
-model Presentacion {
-  id                  String   @id @default(cuid())
-  tenantId            String
-  productoId          String
-  producto            Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  nombre              String   // ej. "Palet de 8 rollos"
-  cantidadEquivalente Float
-  unidadEquivalente   String   // unidad de la cantidad equivalente
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-
-  movimientos MovimientoStock[]
-  stockItems  StockItem[]
-
-  @@index([tenantId])
-  @@index([productoId])
-  @@map("presentaciones")
-}
-
 model MovimientoStock {
-  id              String        @id @default(cuid())
+  id              String   @id @default(cuid())
   tenantId        String
-  tenant          Tenant        @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant          Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   productoId      String
-  producto        Producto      @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  presentacionId  String?
-  presentacion    Presentacion? @relation(fields: [presentacionId], references: [id], onDelete: SetNull)
+  producto        Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
   clienteId       String
-  cliente         Cliente       @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  tipo            String        // ingreso | egreso | division
-  cantidad        Float
+  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  tipo            String   // ingreso | egreso | division
+  cantidadPallets Float    @default(0)
+  cantidadSuelto  Float    @default(0)
   /** Número de remito interno generado al egresar (ej. R-2026-00001). Distinto del módulo Remito. */
   numeroRemito    String?
   remitoId        String?
-  remito          Remito?       @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  remito          Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   /** URL del remito escaneado (p. ej. Cloudinary) — preparado para carga futura. */
   remitoUrl       String?
   observaciones   String?
-  createdBy       String        @default("")
+  createdBy       String   @default("")
   fecha           DateTime
-  createdAt       DateTime      @default(now())
+  createdAt       DateTime @default(now())
 
   @@index([tenantId])
   @@index([tenantId, productoId])
-  @@index([tenantId, presentacionId])
   @@index([tenantId, clienteId])
   @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
@@ -456,19 +434,18 @@ model StockEgresoRemitoConfig {
 }
 
 model StockItem {
-  id             String       @id @default(cuid())
-  tenantId       String
-  tenant         Tenant       @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  productoId     String
-  producto       Producto     @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  presentacionId String
-  presentacion   Presentacion @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
-  clienteId      String
-  cliente        Cliente      @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  cantidad       Float        @default(0)
-  updatedAt      DateTime     @updatedAt
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  productoId      String
+  producto        Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  clienteId       String
+  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  cantidadPallets Float    @default(0)
+  cantidadSuelto  Float    @default(0)
+  updatedAt       DateTime @updatedAt
 
-  @@unique([productoId, presentacionId, clienteId])
+  @@unique([productoId, clienteId])
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@index([tenantId, productoId])

@@ -3,8 +3,8 @@ import {
   IsNotEmpty,
   IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
+  Min,
 } from 'class-validator';
 
 export class CreateIngresoDto {
@@ -14,16 +14,19 @@ export class CreateIngresoDto {
 
   @IsString()
   @IsNotEmpty()
-  presentacionId: string;
-
-  @IsString()
-  @IsNotEmpty()
   clienteId: string;
 
+  @IsOptional()
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   @Type(() => Number)
-  cantidad: number;
+  cantidadPallets?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  cantidadSuelto?: number;
 
   @IsString()
   @IsNotEmpty()

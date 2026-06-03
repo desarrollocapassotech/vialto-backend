@@ -10,8 +10,6 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { ProductosPaginatedQueryDto } from './dto/productos-paginated-query.dto';
-import { CreatePresentacionDto } from './dto/create-presentacion.dto';
-import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { CreateIngresoDto } from './dto/create-ingreso.dto';
@@ -48,25 +46,8 @@ const productoSelect = {
   updatedAt: true,
 } as const;
 
-const productoWithPresentacionesSelect = {
-  ...productoSelect,
-  presentaciones: {
-    select: {
-      id: true,
-      productoId: true,
-      nombre: true,
-      cantidadEquivalente: true,
-      unidadEquivalente: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-    orderBy: { nombre: 'asc' as const },
-  },
-} as const;
-
 const movimientoStockRelations = {
   producto: { select: { id: true, nombre: true, unidadMedida: true } },
-  presentacion: { select: { id: true, nombre: true } },
   cliente: { select: { id: true, nombre: true } },
 } as const;
 
@@ -131,7 +112,7 @@ export class StockService {
   async findProducto(id: string, tenantId: string) {
     const row = await this.prisma.producto.findFirst({
       where: { id, tenantId },
-      select: productoWithPresentacionesSelect,
+      select: productoSelect,
     });
     if (!row) throw new NotFoundException('Producto no encontrado');
     return row;
@@ -217,64 +198,6 @@ export class StockService {
     }
   }
 
-  // ───────────────── PRESENTACIONES ─────────────────────────────────────────
-
-  async listPresentaciones(productoId: string, tenantId: string) {
-    await this.findProducto(productoId, tenantId);
-    return this.prisma.presentacion.findMany({
-      where: { productoId },
-      orderBy: { nombre: 'asc' },
-    });
-  }
-
-  async createPresentacion(productoId: string, tenantId: string, dto: CreatePresentacionDto) {
-    await this.findProducto(productoId, tenantId);
-    return this.prisma.presentacion.create({
-      data: {
-        tenantId,
-        productoId,
-        nombre: dto.nombre.trim(),
-        cantidadEquivalente: dto.cantidadEquivalente,
-        unidadEquivalente: dto.unidadEquivalente.trim(),
-      },
-    });
-  }
-
-  async updatePresentacion(
-    productoId: string,
-    presentacionId: string,
-    tenantId: string,
-    dto: UpdatePresentacionDto,
-  ) {
-    await this.findProducto(productoId, tenantId);
-    const p = await this.prisma.presentacion.findFirst({
-      where: { id: presentacionId, productoId },
-    });
-    if (!p) throw new NotFoundException('Presentación no encontrada');
-
-    return this.prisma.presentacion.update({
-      where: { id: presentacionId },
-      data: {
-        ...(dto.nombre !== undefined ? { nombre: dto.nombre.trim() } : {}),
-        ...(dto.cantidadEquivalente !== undefined
-          ? { cantidadEquivalente: dto.cantidadEquivalente }
-          : {}),
-        ...(dto.unidadEquivalente !== undefined
-          ? { unidadEquivalente: dto.unidadEquivalente.trim() }
-          : {}),
-      },
-    });
-  }
-
-  async removePresentacion(productoId: string, presentacionId: string, tenantId: string) {
-    await this.findProducto(productoId, tenantId);
-    const p = await this.prisma.presentacion.findFirst({
-      where: { id: presentacionId, productoId },
-    });
-    if (!p) throw new NotFoundException('Presentación no encontrada');
-    return this.prisma.presentacion.delete({ where: { id: presentacionId } });
-  }
-
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
   private async assertProductoCliente(tenantId: string, productoId: string, clienteId: string) {
@@ -329,13 +252,21 @@ export class StockService {
     await this.assertRemito(tenantId, dto.remitoId);
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
     if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
+
+    const cantidadPallets = dto.cantidadPallets ?? 0;
+    const cantidadSuelto = dto.cantidadSuelto ?? 0;
+    if (cantidadPallets <= 0 && cantidadSuelto <= 0) {
+      throw new BadRequestException('Al menos uno de cantidadPallets o cantidadSuelto debe ser mayor a 0.');
+    }
+
     return this.prisma.movimientoStock.create({
       data: {
         tenantId,
         productoId: dto.productoId,
         clienteId: dto.clienteId,
         tipo: dto.tipo,
-        cantidad: dto.cantidad,
+        cantidadPallets,
+        cantidadSuelto,
         remitoId: dto.remitoId ?? null,
         fecha: fechaMov,
       },
@@ -371,13 +302,17 @@ export class StockService {
   // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────
 
   async createIngreso(tenantId: string, dto: CreateIngresoDto, createdBy: string) {
-    const [producto, presentacion, cliente] = await Promise.all([
+    const cantidadPallets = dto.cantidadPallets ?? 0;
+    const cantidadSuelto = dto.cantidadSuelto ?? 0;
+    if (cantidadPallets <= 0 && cantidadSuelto <= 0) {
+      throw new BadRequestException('Al menos uno de cantidadPallets o cantidadSuelto debe ser mayor a 0.');
+    }
+
+    const [producto, cliente] = await Promise.all([
       this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
-      this.prisma.presentacion.findFirst({ where: { id: dto.presentacionId, productoId: dto.productoId } }),
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
     ]);
     if (!producto) throw new BadRequestException('Producto inválido');
-    if (!presentacion) throw new BadRequestException('Presentación inválida');
     if (!cliente) throw new BadRequestException('Cliente inválido');
 
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
@@ -388,37 +323,38 @@ export class StockService {
         data: {
           tenantId,
           productoId: dto.productoId,
-          presentacionId: dto.presentacionId,
           clienteId: dto.clienteId,
           tipo: 'ingreso',
-          cantidad: dto.cantidad,
-
+          cantidadPallets,
+          cantidadSuelto,
           observaciones: dto.observaciones?.trim() || null,
           createdBy,
           fecha: fechaMov,
         },
         include: {
           producto: { select: { id: true, nombre: true, unidadMedida: true } },
-          presentacion: { select: { id: true, nombre: true } },
           cliente: { select: { id: true, nombre: true } },
         },
       });
 
       await tx.stockItem.upsert({
         where: {
-          productoId_presentacionId_clienteId: {
+          productoId_clienteId: {
             productoId: dto.productoId,
-            presentacionId: dto.presentacionId,
             clienteId: dto.clienteId,
           },
         },
-        update: { cantidad: { increment: dto.cantidad }, tenantId },
+        update: {
+          cantidadPallets: { increment: cantidadPallets },
+          cantidadSuelto: { increment: cantidadSuelto },
+          tenantId,
+        },
         create: {
           tenantId,
           productoId: dto.productoId,
-          presentacionId: dto.presentacionId,
           clienteId: dto.clienteId,
-          cantidad: dto.cantidad,
+          cantidadPallets,
+          cantidadSuelto,
         },
       });
 
@@ -438,7 +374,6 @@ export class StockService {
       take: 200,
       include: {
         producto: { select: { id: true, nombre: true, unidadMedida: true } },
-        presentacion: { select: { id: true, nombre: true } },
         cliente: { select: { id: true, nombre: true } },
       },
     });
@@ -454,7 +389,6 @@ export class StockService {
       orderBy: [{ clienteId: 'asc' }, { productoId: 'asc' }],
       include: {
         producto: { select: { id: true, nombre: true, unidadMedida: true } },
-        presentacion: { select: { id: true, nombre: true } },
         cliente: { select: { id: true, nombre: true } },
       },
     });
@@ -491,7 +425,7 @@ export class StockService {
     return `${p}-${year}-${String(seq).padStart(d, '0')}`;
   }
 
-  /** Atomático dentro de la transacción: incrementa contador anual y devuelve el nuevo valor. */
+  /** Atómico dentro de la transacción: incrementa contador anual y devuelve el nuevo valor. */
   private async nextSecuenciaRemitoTx(tx: Prisma.TransactionClient, tenantId: string, year: number) {
     const id = randomUUID().replace(/-/g, '').slice(0, 25);
     const rows = await tx.$queryRaw<{ lastValue: number }[]>(
@@ -513,13 +447,17 @@ export class StockService {
   // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
 
   async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
-    const [producto, presentacion, cliente] = await Promise.all([
+    const cantidadPallets = dto.cantidadPallets ?? 0;
+    const cantidadSuelto = dto.cantidadSuelto ?? 0;
+    if (cantidadPallets <= 0 && cantidadSuelto <= 0) {
+      throw new BadRequestException('Al menos uno de cantidadPallets o cantidadSuelto debe ser mayor a 0.');
+    }
+
+    const [producto, cliente] = await Promise.all([
       this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
-      this.prisma.presentacion.findFirst({ where: { id: dto.presentacionId, productoId: dto.productoId } }),
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
     ]);
     if (!producto) throw new BadRequestException('Producto inválido');
-    if (!presentacion) throw new BadRequestException('Presentación inválida');
     if (!cliente) throw new BadRequestException('Cliente inválido');
 
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
@@ -537,33 +475,44 @@ export class StockService {
 
       const item = await tx.stockItem.findUnique({
         where: {
-          productoId_presentacionId_clienteId: {
+          productoId_clienteId: {
             productoId: dto.productoId,
-            presentacionId: dto.presentacionId,
             clienteId: dto.clienteId,
           },
         },
       });
-      const disponible = item?.cantidad ?? 0;
-      if (disponible < dto.cantidad) {
+
+      const dispPallets = item?.cantidadPallets ?? 0;
+      const dispSuelto = item?.cantidadSuelto ?? 0;
+
+      if (cantidadPallets > 0 && dispPallets < cantidadPallets) {
         throw new BadRequestException(
-          `Stock insuficiente para esta empresa, producto y presentación. Disponible: ${disponible}.`,
+          `Stock de pallets insuficiente para esta empresa y producto. Disponible: ${dispPallets}.`,
+        );
+      }
+      if (cantidadSuelto > 0 && dispSuelto < cantidadSuelto) {
+        throw new BadRequestException(
+          `Stock suelto insuficiente para esta empresa y producto. Disponible: ${dispSuelto}.`,
         );
       }
 
+      // Validación atómica con optimistic locking vía condición en updateMany
       const dec = await tx.stockItem.updateMany({
         where: {
           tenantId,
           productoId: dto.productoId,
-          presentacionId: dto.presentacionId,
           clienteId: dto.clienteId,
-          cantidad: { gte: dto.cantidad },
+          cantidadPallets: { gte: cantidadPallets },
+          cantidadSuelto: { gte: cantidadSuelto },
         },
-        data: { cantidad: { decrement: dto.cantidad } },
+        data: {
+          cantidadPallets: { decrement: cantidadPallets },
+          cantidadSuelto: { decrement: cantidadSuelto },
+        },
       });
       if (dec.count === 0) {
         throw new BadRequestException(
-          `Stock insuficiente para esta empresa, producto y presentación. Disponible: ${disponible}.`,
+          `Stock insuficiente para esta empresa y producto. Pallets disponibles: ${dispPallets}, suelto disponible: ${dispSuelto}.`,
         );
       }
 
@@ -577,10 +526,10 @@ export class StockService {
           data: {
             tenantId,
             productoId: dto.productoId,
-            presentacionId: dto.presentacionId,
             clienteId: dto.clienteId,
             tipo: 'egreso',
-            cantidad: dto.cantidad,
+            cantidadPallets,
+            cantidadSuelto,
             numeroRemito: numero,
             observaciones: dto.observaciones?.trim() || null,
             remitoUrl,

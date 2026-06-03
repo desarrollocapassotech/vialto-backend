@@ -358,32 +358,47 @@ model MovimientoCuentaCorriente {
 
 ### `stock` — Gestión de stock (Riedel)
 
+El stock se expresa siempre como dos contadores simultáneos por producto/cliente: **pallets** y **suelto** (unidades no paletizadas). No existe el concepto de "presentación".
+
 ```prisma
 model Producto {
   id        String   @id @default(cuid())
   tenantId  String
   nombre    String
-  unidad    String   // kg | unidad | palet | rollo | otro
+  unidad    String   // kg | unidad | pallet | rollo | otro
   createdAt DateTime @default(now())
 
   @@index([tenantId])
 }
 
 model MovimientoStock {
-  id         String   @id @default(cuid())
-  tenantId   String
-  productoId String
-  clienteId  String
-  tipo       String   // ingreso | egreso | division
-  cantidad   Float
-  pesoKg     Float?
-  remito     String?
-  fecha      DateTime
-  createdAt  DateTime @default(now())
+  id              String   @id @default(cuid())
+  tenantId        String
+  productoId      String
+  clienteId       String
+  tipo            String   // ingreso | egreso | division
+  cantidadPallets Float    @default(0)
+  cantidadSuelto  Float    @default(0)
+  numeroRemito    String?  // solo en egresos (R-YYYY-NNNNN)
+  fecha           DateTime
+  createdAt       DateTime @default(now())
 
   @@index([tenantId])
   @@index([tenantId, productoId])
   @@index([tenantId, clienteId])
+}
+
+model StockItem {
+  id              String   @id @default(cuid())
+  tenantId        String
+  productoId      String
+  clienteId       String
+  cantidadPallets Float    @default(0)
+  cantidadSuelto  Float    @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@unique([productoId, clienteId])
+  @@index([tenantId])
 }
 ```
 

@@ -10,6 +10,7 @@ import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { CreateIngresoDto } from './dto/create-ingreso.dto';
 import { CreateEgresoDto } from './dto/create-egreso.dto';
+import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateStockEgresoRemitoConfigDto } from './dto/update-stock-egreso-remito-config.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -194,6 +195,28 @@ export class StockController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listIngresos(auth.tenantId, clienteId, productoId);
+  }
+
+  // ───────────────── DIVISIONES ─────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Registrar división de bultos (convierte pallets ↔ suelto, actualiza stock)' })
+  @Post('divisiones')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  createDivision(@Body() dto: CreateDivisionDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.createDivision(auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar divisiones de bultos' })
+  @Get('divisiones')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listDivisiones(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listDivisiones(auth.tenantId, clienteId, productoId);
   }
 
   @ApiOperation({ summary: 'Stock disponible por producto/cliente' })

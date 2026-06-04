@@ -412,7 +412,9 @@ model MovimientoStock {
   remito          Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   /** URL del remito escaneado (p. ej. Cloudinary) — preparado para carga futura. */
   remitoUrl       String?
-  observaciones   String?
+  observaciones           String?
+  /** ID del movimiento par en una división (el origen apunta al destino y viceversa). */
+  movimientoVinculadoId   String?
   createdBy       String   @default("")
   fecha           DateTime
   createdAt       DateTime @default(now())

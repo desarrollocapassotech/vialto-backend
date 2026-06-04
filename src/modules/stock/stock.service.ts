@@ -17,6 +17,7 @@ import { CreateEgresoDto } from './dto/create-egreso.dto';
 import { UpdateStockEgresoRemitoConfigDto } from './dto/update-stock-egreso-remito-config.dto';
 import { CreatePresentacionDto } from './dto/create-presentacion.dto';
 import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
+import { CreateDivisionDto } from './dto/create-division.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
 
@@ -603,6 +604,114 @@ export class StockService {
       where: {
         tenantId,
         tipo: 'egreso',
+        ...(clienteId ? { clienteId } : {}),
+        ...(productoId ? { productoId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: movimientoStockRelations,
+    });
+  }
+
+  // ───────────────── DIVISIONES ─────────────────────────────────────────────
+
+  async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {
+    const palletsOrigen = dto.palletsOrigen ?? 0;
+    const sueltoOrigen = dto.sueltoOrigen ?? 0;
+    const palletsDestino = dto.palletsDestino ?? 0;
+    const sueltoDestino = dto.sueltoDestino ?? 0;
+
+    if (palletsOrigen <= 0 && sueltoOrigen <= 0) {
+      throw new BadRequestException('Al menos uno de palletsOrigen o sueltoOrigen debe ser mayor a 0.');
+    }
+    if (palletsDestino <= 0 && sueltoDestino <= 0) {
+      throw new BadRequestException('Al menos uno de palletsDestino o sueltoDestino debe ser mayor a 0.');
+    }
+
+    const [producto, cliente] = await Promise.all([
+      this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
+      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
+    ]);
+    if (!producto) throw new BadRequestException('Producto inválido');
+    if (!cliente) throw new BadRequestException('Cliente inválido');
+
+    const fechaMov = parseFechaMovimientoStock(dto.fecha);
+    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
+
+    return this.prisma.$transaction(async (tx) => {
+      const item = await tx.stockItem.findUnique({
+        where: { productoId_clienteId: { productoId: dto.productoId, clienteId: dto.clienteId } },
+      });
+
+      const dispPallets = item?.cantidadPallets ?? 0;
+      const dispSuelto = item?.cantidadSuelto ?? 0;
+
+      if (palletsOrigen > 0 && dispPallets < palletsOrigen) {
+        throw new BadRequestException(
+          `Stock de pallets insuficiente. Disponible: ${dispPallets}.`,
+        );
+      }
+      if (sueltoOrigen > 0 && dispSuelto < sueltoOrigen) {
+        throw new BadRequestException(
+          `Stock suelto insuficiente. Disponible: ${dispSuelto}.`,
+        );
+      }
+
+      const dec = await tx.stockItem.updateMany({
+        where: {
+          tenantId,
+          productoId: dto.productoId,
+          clienteId: dto.clienteId,
+          cantidadPallets: { gte: palletsOrigen },
+          cantidadSuelto: { gte: sueltoOrigen },
+        },
+        data: {
+          cantidadPallets: { decrement: palletsOrigen, increment: palletsDestino },
+          cantidadSuelto: { decrement: sueltoOrigen, increment: sueltoDestino },
+        },
+      });
+
+      if (dec.count === 0) {
+        throw new BadRequestException(
+          `Stock insuficiente. Pallets disponibles: ${dispPallets}, suelto disponible: ${dispSuelto}.`,
+        );
+      }
+
+      const observaciones = dto.observaciones?.trim() || null;
+      const baseData = {
+        tenantId,
+        productoId: dto.productoId,
+        clienteId: dto.clienteId,
+        tipo: 'division' as const,
+        observaciones,
+        createdBy,
+        fecha: fechaMov,
+      };
+
+      const movOrigen = await tx.movimientoStock.create({
+        data: { ...baseData, cantidadPallets: -palletsOrigen, cantidadSuelto: -sueltoOrigen },
+        include: movimientoStockRelations,
+      });
+
+      const movDestino = await tx.movimientoStock.create({
+        data: { ...baseData, cantidadPallets: palletsDestino, cantidadSuelto: sueltoDestino, movimientoVinculadoId: movOrigen.id },
+        include: movimientoStockRelations,
+      });
+
+      await tx.movimientoStock.update({
+        where: { id: movOrigen.id },
+        data: { movimientoVinculadoId: movDestino.id },
+      });
+
+      return { origen: { ...movOrigen, movimientoVinculadoId: movDestino.id }, destino: movDestino };
+    });
+  }
+
+  listDivisiones(tenantId: string, clienteId?: string, productoId?: string) {
+    return this.prisma.movimientoStock.findMany({
+      where: {
+        tenantId,
+        tipo: 'division',
         ...(clienteId ? { clienteId } : {}),
         ...(productoId ? { productoId } : {}),
       },

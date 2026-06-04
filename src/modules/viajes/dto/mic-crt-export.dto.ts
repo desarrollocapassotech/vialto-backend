@@ -24,7 +24,8 @@ export class MicCrtActorDto {
   @IsString() @IsNotEmpty() razonSocial: string;
   @IsString() @IsNotEmpty() idFiscal: string;
   @IsString() @IsNotEmpty() calle: string;
-  @IsString() @IsNotEmpty() numero: string;
+  /** Número de domicilio (opcional). */
+  @IsOptional() @IsString() numero?: string;
   @IsString() @IsNotEmpty() ciudad: string;
   @IsString() @IsNotEmpty() pais: string;
 }
@@ -49,7 +50,7 @@ export class MicCrtExportDto {
   @ValidateNested() @Type(() => MicCrtActorDto) consignatario: MicCrtActorDto;
   @IsOptional() @ValidateNested() @Type(() => MicCrtActorDto) notificarA?: MicCrtActorDto;
 
-  @IsString() @IsNotEmpty() ncm: string;
+  @IsOptional() @IsString() ncm?: string;
   @IsNumber() @Min(0) @Type(() => Number) bultos: number;
   @IsString() @IsNotEmpty() @IsIn([...MIC_CRT_TIPOS_BULTOS]) tipoBultos: string;
   @IsNumber() @Min(0) @Type(() => Number) pesoBrutoKg: number;

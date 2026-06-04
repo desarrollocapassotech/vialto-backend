@@ -70,6 +70,12 @@ export type OwnerDashboardResponse = {
     sinCobrar: number;
     cobrados: number;
   };
+  stock?: {
+    totalProductos: number;
+    totalClientes: number;
+    ingresosHoy: number;
+    egresosHoy: number;
+  };
 };
 
 type CompareMode = 'higher_better' | 'lower_better';
@@ -163,6 +169,7 @@ export class DashboardService {
     const mod = new Set(modules.map((m) => m.toLowerCase()));
     const hasViajes = mod.has('viajes');
     const hasFacturacion = mod.has('facturacion') || hasViajes;
+    const hasStock = mod.has('stock');
 
     const resolved = resolveDashboardPeriod(periodKind, from, to);
     const meta = this.periodMeta(resolved);
@@ -176,7 +183,7 @@ export class DashboardService {
 
     const out: OwnerDashboardResponse = { period: meta };
 
-    const [financieroResult, viajesResult] = await Promise.all([
+    const [financieroResult, viajesResult, stockResult] = await Promise.all([
       hasFacturacion
         ? Promise.all([
             this.sumFacturadoClienteSnapshot(tenantId),                                 // 0
@@ -208,6 +215,7 @@ export class DashboardService {
             this.countCobradosEnPeriodo(tenantId, resolved.start, resolved.end),
           ])
         : null,
+      hasStock ? this.getStockResumen(tenantId, resolved.start, resolved.end) : null,
     ]);
 
     if (financieroResult) {
@@ -274,6 +282,10 @@ export class DashboardService {
         sinCobrar,
         cobrados,
       };
+    }
+
+    if (stockResult) {
+      out.stock = stockResult;
     }
 
     return out;
@@ -798,5 +810,25 @@ export class DashboardService {
       _sum: { monto: true },
     });
     return agg._sum.monto ?? 0;
+  }
+
+  /** Snapshot de stock para el dashboard: productos/clientes activos + ingresos/egresos del período. */
+  private async getStockResumen(
+    tenantId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ totalProductos: number; totalClientes: number; ingresosHoy: number; egresosHoy: number }> {
+    const [totalProductos, totalClientes, ingresosHoy, egresosHoy] = await Promise.all([
+      this.prisma.producto.count({ where: { tenantId, activo: true } }),
+      this.prisma.cliente.count({ where: { tenantId } }),
+      this.prisma.movimientoStock.count({
+        where: { tenantId, tipo: 'ingreso', fecha: { gte: start, lt: end } },
+      }),
+      this.prisma.movimientoStock.count({
+        where: { tenantId, tipo: 'egreso', fecha: { gte: start, lt: end } },
+      }),
+    ]);
+
+    return { totalProductos, totalClientes, ingresosHoy, egresosHoy };
   }
 }

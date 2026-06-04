@@ -16,6 +16,10 @@ export class CreateDivisionDto {
   @IsNotEmpty()
   clienteId: string;
 
+  @IsString()
+  @IsNotEmpty()
+  depositoId: string;
+
   /** Pallets que se restan (origen). */
   @IsOptional()
   @IsNumber()

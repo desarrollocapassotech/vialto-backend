@@ -4,6 +4,7 @@ import { Type } from 'class-transformer';
 export class UpdateMovimientoStockDto {
   @IsOptional() @IsString() productoId?: string;
   @IsOptional() @IsString() clienteId?: string;
+  @IsOptional() @IsString() depositoId?: string;
   @IsOptional() @IsIn(['ingreso', 'egreso', 'division']) tipo?: string;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidadPallets?: number;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidadSuelto?: number;

@@ -17,6 +17,10 @@ export class CreateEgresoDto {
   @IsNotEmpty()
   clienteId: string;
 
+  @IsString()
+  @IsNotEmpty()
+  depositoId: string;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

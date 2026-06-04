@@ -6,6 +6,8 @@ import { StockService } from './stock.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { ProductosPaginatedQueryDto } from './dto/productos-paginated-query.dto';
+import { CreateDepositoDto } from './dto/create-deposito.dto';
+import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { CreateIngresoDto } from './dto/create-ingreso.dto';
@@ -75,6 +77,37 @@ export class StockController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.updateProducto(id, auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Listar depósitos' })
+  @Get('depositos')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listDepositos(@CurrentAuth() auth: AuthPayload, @Query('activo') activo?: string) {
+    assertTenantId(auth.tenantId);
+    return this.service.listDepositos(
+      auth.tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
+  }
+
+  @ApiOperation({ summary: 'Crear depósito' })
+  @Post('depositos')
+  @Roles('admin', 'supervisor', 'superadmin')
+  createDeposito(@Body() dto: CreateDepositoDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.createDeposito(auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Actualizar depósito' })
+  @Patch('depositos/:id')
+  @Roles('admin', 'supervisor', 'superadmin')
+  updateDeposito(
+    @Param('id') id: string,
+    @Body() dto: UpdateDepositoDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.updateDeposito(id, auth.tenantId, dto);
   }
 
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────

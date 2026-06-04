@@ -4,8 +4,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")           // pooled (PgBouncer) — para runtime
-  directUrl = env("DATABASE_URL_UNPOOLED")  // directa (sin pooler) — solo para migraciones
+  url       = env("DATABASE_URL") // pooled (PgBouncer) — para runtime
+  directUrl = env("DATABASE_URL_UNPOOLED") // directa (sin pooler) — solo para migraciones
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -13,16 +13,16 @@ datasource db {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Tenant {
-  id               String   @id @default(cuid())
-  clerkOrgId       String   @unique
+  id               String    @id @default(cuid())
+  clerkOrgId       String    @unique
   name             String
-  idFiscal         String?  @unique
-  modules          String[] @default([])
-  maxUsers         Int      @default(10)
-  billingStatus    String   @default("trial") // trial | active | suspended | expired
+  idFiscal         String?   @unique
+  modules          String[]  @default([])
+  maxUsers         Int       @default(10)
+  billingStatus    String    @default("trial") // trial | active | suspended | expired
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime  @default(now())
 
   clientes                Cliente[]
   transportistas          Transportista[]
@@ -35,6 +35,7 @@ model Tenant {
   productos               Producto[]
   movimientosStock        MovimientoStock[]
   stockItems              StockItem[]
+  depositos               Deposito[]
   cargasCombustible       CargaCombustible[]
   intervenciones          Intervencion[]
   remitos                 Remito[]
@@ -55,17 +56,17 @@ model Tenant {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Cliente {
-  id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre       String
-  idFiscal     String?
-  email        String?
-  telefono     String?
-  direccion    String?
+  id                  String   @id @default(cuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre              String
+  idFiscal            String?
+  email               String?
+  telefono            String?
+  direccion           String?
   pais                String?
-  condicionIva        Int?     // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
-  condicionTributaria String?  // condición tributaria genérica (para países no AR)
+  condicionIva        Int? // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
+  condicionTributaria String? // condición tributaria genérica (para países no AR)
   createdAt           DateTime @default(now())
 
   viajes           Viaje[]
@@ -80,75 +81,75 @@ model Cliente {
 }
 
 model Transportista {
-  id                       String    @id @default(cuid())
-  tenantId                 String
-  tenant                   Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre                   String
-  idFiscal                 String?
-  email                    String?
-  telefono                 String?
-  tipo                     String    @default("externo") // siempre externo
-  paut                     String?   // número de PAUT
-  permisoInternacional     String?   // número de permiso internacional
-  fechaVencimientoPermiso  DateTime? // vencimiento del permiso internacional
-  pais                     String?   // código de país (AR, UY, PY, CL, BR)
-  domicilio                String?   // domicilio legal del transportista
-  condicionIva             Int?      // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
-  condicionTributaria      String?   // condición tributaria genérica (para países no AR)
-  comisionPct              Float?    // % comisión NyM (si null usa el default de ArcaConfig)
-  createdAt                DateTime  @default(now())
+  id                      String    @id @default(cuid())
+  tenantId                String
+  tenant                  Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre                  String
+  idFiscal                String?
+  email                   String?
+  telefono                String?
+  tipo                    String    @default("externo") // siempre externo
+  paut                    String? // número de PAUT
+  permisoInternacional    String? // número de permiso internacional
+  fechaVencimientoPermiso DateTime? // vencimiento del permiso internacional
+  pais                    String? // código de país (AR, UY, PY, CL, BR)
+  domicilio               String? // domicilio legal del transportista
+  condicionIva            Int? // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
+  condicionTributaria     String? // condición tributaria genérica (para países no AR)
+  comisionPct             Float? // % comisión NyM (si null usa el default de ArcaConfig)
+  createdAt               DateTime  @default(now())
 
-  choferes         Chofer[]
-  vehiculos        Vehiculo[]
-  viajes           Viaje[]  @relation("ViajeTransportistaPrincipal")
-  viajesEfectivo   Viaje[]  @relation("ViajeTransportistaEfectivo")
-  facturas         Factura[]
-  liquidaciones    Liquidacion[]
+  choferes       Chofer[]
+  vehiculos      Vehiculo[]
+  viajes         Viaje[]       @relation("ViajeTransportistaPrincipal")
+  viajesEfectivo Viaje[]       @relation("ViajeTransportistaEfectivo")
+  facturas       Factura[]
+  liquidaciones  Liquidacion[]
 
   @@index([tenantId])
   @@map("transportistas")
 }
 
 model Chofer {
-  id              String    @id @default(cuid())
+  id              String         @id @default(cuid())
   tenantId        String
-  tenant          Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant          Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre          String
   dni             String?
-  cuit            String?   // CUIT del chofer (requerido para PAUT)
+  cuit            String? // CUIT del chofer (requerido para PAUT)
   licencia        String?
   licenciaVence   DateTime?
   telefono        String?
   transportistaId String?
   transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
-  createdAt       DateTime  @default(now())
+  createdAt       DateTime       @default(now())
 
-  viajes              Viaje[]
-  cargasCombustible   CargaCombustible[]
-  remitos             Remito[]
+  viajes            Viaje[]
+  cargasCombustible CargaCombustible[]
+  remitos           Remito[]
 
   @@index([tenantId])
   @@map("choferes")
 }
 
 model Vehiculo {
-  id                 String    @id @default(cuid())
-  tenantId           String
-  tenant             Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  patente            String
-  tipo               String    // tractor | semirremolque | camion | utilitario | otro
-  marca              String?
-  modelo             String?
-  anio               Int?
-  kmActual           Int       @default(0)
-  nroChasis          String?
-  poliza             String?
-  vencimientoPoliza  DateTime?
-  tara               Float?
-  precinto           String?
-  transportistaId    String?
-  transportista      Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
-  createdAt          DateTime  @default(now())
+  id                String         @id @default(cuid())
+  tenantId          String
+  tenant            Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  patente           String
+  tipo              String // tractor | semirremolque | camion | utilitario | otro
+  marca             String?
+  modelo            String?
+  anio              Int?
+  kmActual          Int            @default(0)
+  nroChasis         String?
+  poliza            String?
+  vencimientoPoliza DateTime?
+  tara              Float?
+  precinto          String?
+  transportistaId   String?
+  transportista     Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  createdAt         DateTime       @default(now())
 
   vehiculosViaje    ViajeVehiculo[]
   cargasCombustible CargaCombustible[]
@@ -195,48 +196,54 @@ model ViajeProducto {
 }
 
 model Viaje {
-  id               String    @id @default(cuid())
-  tenantId         String
-  tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero           String
-  estado           String    @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
-  clienteId        String
-  cliente          Cliente   @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  transportistaId         String?
-  transportista           Transportista? @relation("ViajeTransportistaPrincipal", fields: [transportistaId], references: [id], onDelete: SetNull)
-  /** Transportista que efectivamente realiza el flete (puede diferir del contratante). */
-  transportistaEfectivoId String?
-  transportistaEfectivo   Transportista? @relation("ViajeTransportistaEfectivo", fields: [transportistaEfectivoId], references: [id], onDelete: SetNull)
-  choferId         String?
-  chofer           Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  vehiculosViaje   ViajeVehiculo[]
-  origen           String?
-  destino          String?
-  fechaCarga       DateTime?
-  fechaDescarga    DateTime?
-  productosViaje   ViajeProducto[]
-  detalleCarga     String?
-  kmRecorridos     Int?
-  litrosConsumidos Float?
-  monto            Float?
-  monedaMonto      String    @default("ARS") // ARS | USD
-  precioTransportistaExterno Float?
-  monedaPrecioTransportistaExterno String @default("ARS") // ARS | USD
-  /** Solo cuando monedaMonto ≠ monedaPrecioTransportistaExterno (VT-82 / multimoneda). */
-  gananciaBrutaManual        Float?
-  monedaGananciaBrutaManual  String?  // ARS | USD
-  observaciones    String?
-  otrosGastos         Json      @default("[]")
-  pagosTransportista  Json      @default("[]")
-  /** Datos comerciales/aduaneros MIC·CRT (independientes del monto operativo del viaje). */
-  documentoAduanero   Json      @default("{}")
-  fechaFinalizado  DateTime?
-  createdAt        DateTime  @default(now())
-  createdBy        String
+  id                               String          @id @default(cuid())
+  tenantId                         String
+  tenant                           Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero                           String
+  estado                           String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
+  clienteId                        String
+  cliente                          Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  transportistaId                  String?
+  transportista                    Transportista?  @relation("ViajeTransportistaPrincipal", fields: [transportistaId], references: [id], onDelete: SetNull)
+  /**
+   * Transportista que efectivamente realiza el flete (puede diferir del contratante).
+   */
+  transportistaEfectivoId          String?
+  transportistaEfectivo            Transportista?  @relation("ViajeTransportistaEfectivo", fields: [transportistaEfectivoId], references: [id], onDelete: SetNull)
+  choferId                         String?
+  chofer                           Chofer?         @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  vehiculosViaje                   ViajeVehiculo[]
+  origen                           String?
+  destino                          String?
+  fechaCarga                       DateTime?
+  fechaDescarga                    DateTime?
+  productosViaje                   ViajeProducto[]
+  detalleCarga                     String?
+  kmRecorridos                     Int?
+  litrosConsumidos                 Float?
+  monto                            Float?
+  monedaMonto                      String          @default("ARS") // ARS | USD
+  precioTransportistaExterno       Float?
+  monedaPrecioTransportistaExterno String          @default("ARS") // ARS | USD
+  /**
+   * Solo cuando monedaMonto ≠ monedaPrecioTransportistaExterno (VT-82 / multimoneda).
+   */
+  gananciaBrutaManual              Float?
+  monedaGananciaBrutaManual        String? // ARS | USD
+  observaciones                    String?
+  otrosGastos                      Json            @default("[]")
+  pagosTransportista               Json            @default("[]")
+  /**
+   * Datos comerciales/aduaneros MIC·CRT (independientes del monto operativo del viaje).
+   */
+  documentoAduanero                Json            @default("{}")
+  fechaFinalizado                  DateTime?
+  createdAt                        DateTime        @default(now())
+  createdBy                        String
 
-  facturaId  String?
-  factura    Factura? @relation(fields: [facturaId], references: [id], onDelete: SetNull)
-  nroFactura String?
+  facturaId                  String?
+  factura                    Factura?                    @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  nroFactura                 String?
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
   liquidacionesViaje         LiquidacionViaje[]
 
@@ -259,31 +266,31 @@ model Viaje {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Factura {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   tenantId         String
-  tenant           Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant           Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero           String
-  tipo             String    // cliente | transportista_externo
+  tipo             String // cliente | transportista_externo
   clienteId        String?
   cliente          Cliente?       @relation(fields: [clienteId], references: [id], onDelete: SetNull)
   transportistaId  String?
   transportista    Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   viajes           Viaje[]
   importe          Float
-  moneda           String    @default("ARS") // ARS | USD
+  moneda           String         @default("ARS") // ARS | USD
   fechaEmision     DateTime
   fechaVencimiento DateTime?
-  estado           String    @default("pendiente") // pendiente | cobrada | vencida
+  estado           String         @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
   // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
-  cbteTipo         Int?      // 1=Factura A, 6=Factura B
+  cbteTipo         Int? // 1=Factura A, 6=Factura B
   cbteNro          Int?
   ptoVenta         Int?
   cae              String?
   caeFechaVto      DateTime?
-  arcaEstado       String?   // pendiente_cae | autorizado | error
+  arcaEstado       String? // pendiente_cae | autorizado | error
   arcaError        String?
-  createdAt        DateTime  @default(now())
+  createdAt        DateTime       @default(now())
   pagos            Pago[]
 
   @@unique([tenantId, numero])
@@ -303,7 +310,7 @@ model Pago {
   factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
   importe   Float
   fecha     DateTime
-  formaPago String?  // transferencia | cheque | efectivo
+  formaPago String? // transferencia | cheque | efectivo
   createdAt DateTime @default(now())
 
   @@index([tenantId])
@@ -322,8 +329,8 @@ model MovimientoCuentaCorriente {
   clienteId  String
   cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   viajeId    String?
-  viaje      Viaje?  @relation(fields: [viajeId], references: [id], onDelete: SetNull)
-  tipo       String   // cargo | pago
+  viaje      Viaje?   @relation(fields: [viajeId], references: [id], onDelete: SetNull)
+  tipo       String // cargo | pago
   origen     String   @default("manual") // manual | viaje
   concepto   String
   importe    Float
@@ -331,13 +338,13 @@ model MovimientoCuentaCorriente {
   referencia String?
   createdAt  DateTime @default(now())
 
+  @@unique([tenantId, viajeId])
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@index([tenantId, clienteId, tipo])
   @@index([tenantId, fecha])
   @@index([tenantId, origen])
   @@index([tenantId, viajeId])
-  @@unique([tenantId, viajeId])
   @@map("movimientos_cuenta_corriente")
 }
 
@@ -350,11 +357,13 @@ model Producto {
   tenantId          String
   tenant            Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre            String
-  /** lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive). */
+  /**
+   * lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive).
+   */
   nombreNormalizado String
-  codigo            String?  // generado por el sistema: P-001, P-002… único por tenant cuando presente
+  codigo            String? // generado por el sistema: P-001, P-002… único por tenant cuando presente
   descripcion       String?
-  unidadMedida      String   // kg | tn | unidades | rollos | pallets | m3 | litros | otro
+  unidadMedida      String // kg | tn | unidades | rollos | pallets | m3 | litros | otro
   activo            Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -396,40 +405,52 @@ model ProductoSecuencia {
 }
 
 model MovimientoStock {
-  id              String   @id @default(cuid())
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  productoId      String
-  producto        Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  clienteId       String
-  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  tipo            String   // ingreso | egreso | division
-  cantidadPallets Float    @default(0)
-  cantidadSuelto  Float    @default(0)
-  /** Número de remito interno generado al egresar (ej. R-2026-00001). Distinto del módulo Remito. */
-  numeroRemito    String?
-  remitoId        String?
-  remito          Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
-  /** URL del remito escaneado (p. ej. Cloudinary) — preparado para carga futura. */
-  remitoUrl       String?
-  observaciones           String?
-  /** ID del movimiento par en una división (el origen apunta al destino y viceversa). */
-  movimientoVinculadoId   String?
-  createdBy       String   @default("")
-  fecha           DateTime
-  createdAt       DateTime @default(now())
+  id                    String   @id @default(cuid())
+  tenantId              String
+  tenant                Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  productoId            String
+  producto              Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  clienteId             String
+  cliente               Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  tipo                  String // ingreso | egreso | division
+  cantidadPallets       Float    @default(0)
+  cantidadSuelto        Float    @default(0)
+  /**
+   * Número de remito interno generado al egresar (ej. R-2026-00001). Distinto del módulo Remito.
+   */
+  numeroRemito          String?
+  remitoId              String?
+  remito                Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  /**
+   * URL del remito escaneado (p. ej. Cloudinary) — preparado para carga futura.
+   */
+  remitoUrl             String?
+  observaciones         String?
+  /**
+   * ID del movimiento par en una división (el origen apunta al destino y viceversa).
+   */
+  movimientoVinculadoId String?
+  createdBy             String   @default("")
+  fecha                 DateTime
+  createdAt             DateTime @default(now())
 
+  depositoId String
+  deposito   Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, numeroRemito])
   @@index([tenantId])
   @@index([tenantId, productoId])
   @@index([tenantId, clienteId])
+  @@index([tenantId, depositoId])
   @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
   @@index([tenantId, createdAt(sort: Desc)])
-  @@unique([tenantId, numeroRemito])
   @@map("movimientos_stock")
 }
 
-/** Contador por año para numeración de remitos de egreso (transaccional). */
+/**
+ * Contador por año para numeración de remitos de egreso (transaccional).
+ */
 model StockRemitoSecuencia {
   id        String @id @default(cuid())
   tenantId  String
@@ -441,7 +462,27 @@ model StockRemitoSecuencia {
   @@map("stock_remito_secuencias")
 }
 
-/** Formato del número de remito de egreso por tenant (prefijo y ancho numérico). */
+model Deposito {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre      String
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  movimientosStock MovimientoStock[]
+  stockItems       StockItem[]
+
+  @@index([tenantId])
+  @@index([tenantId, activo])
+  @@map("depositos")
+}
+
+/**
+ * Formato del número de remito de egreso por tenant (prefijo y ancho numérico).
+ */
 model StockEgresoRemitoConfig {
   tenantId      String   @id
   tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
@@ -460,14 +501,17 @@ model StockItem {
   producto        Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
   clienteId       String
   cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  depositoId      String
+  deposito        Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
   cantidadPallets Float    @default(0)
   cantidadSuelto  Float    @default(0)
   updatedAt       DateTime @updatedAt
 
-  @@unique([productoId, clienteId])
+  @@unique([productoId, clienteId, depositoId])
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@index([tenantId, productoId])
+  @@index([tenantId, depositoId])
   @@map("stock_items")
 }
 
@@ -487,7 +531,7 @@ model CargaCombustible {
   litros     Float
   importe    Float
   km         Int
-  formaPago  String?  // transferencia | cheque | efectivo
+  formaPago  String? // transferencia | cheque | efectivo
   fecha      DateTime
   createdAt  DateTime @default(now())
   createdBy  String
@@ -510,7 +554,7 @@ model Intervencion {
   tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   vehiculoId  String
   vehiculo    Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
-  tipo        String   // service | aceite | filtro | cubiertas | otro
+  tipo        String // service | aceite | filtro | cubiertas | otro
   descripcion String?
   km          Int?
   proximoKm   Int?
@@ -529,21 +573,21 @@ model Intervencion {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Remito {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero      String
-  clienteId   String
-  cliente     Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  choferId    String?
-  chofer      Chofer?  @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  vehiculoId  String?
-  vehiculo    Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
-  descripcion String
-  fecha       DateTime
-  firmaUrl    String?
-  estado      String   @default("emitido") // emitido | firmado | facturado
-  createdAt   DateTime @default(now())
+  id               String            @id @default(cuid())
+  tenantId         String
+  tenant           Tenant            @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero           String
+  clienteId        String
+  cliente          Cliente           @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  choferId         String?
+  chofer           Chofer?           @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  vehiculoId       String?
+  vehiculo         Vehiculo?         @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  descripcion      String
+  fecha            DateTime
+  firmaUrl         String?
+  estado           String            @default("emitido") // emitido | firmado | facturado
+  createdAt        DateTime          @default(now())
   movimientosStock MovimientoStock[]
 
   @@unique([tenantId, numero])
@@ -562,9 +606,9 @@ model ImportTemplate {
   id        String   @id @default(cuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  modulo    String   // viajes | clientes | choferes | vehiculos | stock | etc.
+  modulo    String // viajes | clientes | choferes | vehiculos | stock | etc.
   nombre    String
-  config    Json     // TemplateConfig: sheet, headerRow, columns[]
+  config    Json // TemplateConfig: sheet, headerRow, columns[]
   activo    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -584,8 +628,8 @@ model ImportSession {
   templateId    String
   template      ImportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
   nombreArchivo String
-  filasValidas  Json           // ValidatedRow[] — listas para insertar
-  errores       Json           // RowError[]
+  filasValidas  Json // ValidatedRow[] — listas para insertar
+  errores       Json // RowError[]
   totalFilas    Int
   expiresAt     DateTime
   createdAt     DateTime       @default(now())
@@ -606,7 +650,7 @@ model ImportLog {
   totalFilas    Int
   exitosas      Int             @default(0)
   errores       Int             @default(0)
-  detalles      Json            // [{ fila: 2, estado: "ok", id: "..." }, { fila: 3, estado: "error", mensaje: "..." }]
+  detalles      Json // [{ fila: 2, estado: "ok", id: "..." }, { fila: 3, estado: "error", mensaje: "..." }]
   createdAt     DateTime        @default(now())
   createdBy     String
 
@@ -619,31 +663,35 @@ model ImportLog {
 // Módulo: liquidaciones-arca (NyM Logística — CVLP tipo 60 + Facturas A/B vía AFIP SDK)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Configuración AFIP SDK por tenant. La API key viene de AFIP_SDK_API_KEY (env var). */
+/**
+ * Configuración AFIP SDK por tenant. La API key viene de AFIP_SDK_API_KEY (env var).
+ */
 model ArcaConfig {
-  tenantId              String   @id
-  tenant                Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenantId           String   @id
+  tenant             Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   // Datos del emisor para el comprobante PDF
-  cuitEmisor            String
-  razonSocial           String?  // Razón social del emisor (ej: NyM Logística SRL)
-  domicilioEmisor       String?  // Domicilio del emisor
-  condicionIvaEmisor    String?  // Condición IVA del emisor (ej: RESP. INSCRIPTO)
-  ingBrutos             String?  // N° Ing. Brutos (suele coincidir con CUIT)
-  inicActEmisor         String?  // Fecha de inicio de actividades (ej: 01/03/2015)
+  cuitEmisor         String
+  razonSocial        String? // Razón social del emisor (ej: NyM Logística SRL)
+  domicilioEmisor    String? // Domicilio del emisor
+  condicionIvaEmisor String? // Condición IVA del emisor (ej: RESP. INSCRIPTO)
+  ingBrutos          String? // N° Ing. Brutos (suele coincidir con CUIT)
+  inicActEmisor      String? // Fecha de inicio de actividades (ej: 01/03/2015)
   // Puntos de venta y ambiente
-  ptoVentaCvlp          Int      // punto de venta para CVLP tipo 60
-  ptoVentaFactura       Int      // punto de venta para Facturas A/B
-  ambiente              String   @default("homologacion") // homologacion | produccion
+  ptoVentaCvlp       Int // punto de venta para CVLP tipo 60
+  ptoVentaFactura    Int // punto de venta para Facturas A/B
+  ambiente           String   @default("homologacion") // homologacion | produccion
   // Parámetros de liquidación
-  comisionPctDefault    Float    @default(8)
-  comisionPctAlt        Float    @default(7)
-  ivaGastosAdmin        Float    @default(21)
-  updatedAt             DateTime @updatedAt
+  comisionPctDefault Float    @default(8)
+  comisionPctAlt     Float    @default(7)
+  ivaGastosAdmin     Float    @default(21)
+  updatedAt          DateTime @updatedAt
 
   @@map("arca_configs")
 }
 
-/** Liquidación CVLP tipo 60 — emitida al transportista (fletero). */
+/**
+ * Liquidación CVLP tipo 60 — emitida al transportista (fletero).
+ */
 model Liquidacion {
   id              String        @id @default(cuid())
   tenantId        String
@@ -652,40 +700,40 @@ model Liquidacion {
   transportista   Transportista @relation(fields: [transportistaId], references: [id], onDelete: Restrict)
 
   // Período de la liquidación
-  periodoDesde    DateTime
-  periodoHasta    DateTime
+  periodoDesde DateTime
+  periodoHasta DateTime
 
   // Montos calculados (snapshot al momento de crear la liquidación)
-  cantViajes           Int    // cantidad de viajes incluidos
-  bruto                Float  // sum(tnDestino * tarifaTransportista) por todos los viajes
-  comisionPct          Float  // % de comisión aplicado
-  comision             Float  // bruto * comisionPct / 100
-  gastosAdmin          Float  // cantViajes * gastosAdminPorViaje (sin IVA)
-  gastosAdminIva       Float  // IVA sobre gastosAdmin
-  liquido              Float  // bruto - comision - gastosAdmin - gastosAdminIva (neto al transportista)
+  cantViajes     Int // cantidad de viajes incluidos
+  bruto          Float // sum(tnDestino * tarifaTransportista) por todos los viajes
+  comisionPct    Float // % de comisión aplicado
+  comision       Float // bruto * comisionPct / 100
+  gastosAdmin    Float // cantViajes * gastosAdminPorViaje (sin IVA)
+  gastosAdminIva Float // IVA sobre gastosAdmin
+  liquido        Float // bruto - comision - gastosAdmin - gastosAdminIva (neto al transportista)
 
   // Campos del comprobante AFIP (cbteTipo siempre 60 para CVLP)
-  cbteTipo        Int           @default(60)
-  cbteNro         Int?
-  ptoVenta        Int?
-  cae             String?
-  caeFechaVto     DateTime?
+  cbteTipo    Int       @default(60)
+  cbteNro     Int?
+  ptoVenta    Int?
+  cae         String?
+  caeFechaVto DateTime?
 
   // Estado de la integración ARCA
-  estado          String        @default("borrador")
+  estado     String  @default("borrador")
   // borrador | pendiente_cae | autorizado | error | anulado
-  arcaError       String?
-  reintentos      Int           @default(0)
+  arcaError  String?
+  reintentos Int     @default(0)
 
   // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
-  payloadHash     String?
+  payloadHash String?
 
-  createdAt       DateTime      @default(now())
-  createdBy       String
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  createdBy String
+  updatedAt DateTime @updatedAt
 
-  viajes          LiquidacionViaje[]
-  arcaLogs        ArcaLog[]
+  viajes   LiquidacionViaje[]
+  arcaLogs ArcaLog[]
 
   @@index([tenantId])
   @@index([tenantId, transportistaId])
@@ -694,21 +742,23 @@ model Liquidacion {
   @@map("liquidaciones")
 }
 
-/** Viajes incluidos en una liquidación (snapshot de montos al liquidar). */
+/**
+ * Viajes incluidos en una liquidación (snapshot de montos al liquidar).
+ */
 model LiquidacionViaje {
-  id              String      @id @default(cuid())
-  tenantId        String
-  liquidacionId   String
-  liquidacion     Liquidacion @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
-  viajeId         String
-  viaje           Viaje       @relation(fields: [viajeId], references: [id], onDelete: Restrict)
+  id            String      @id @default(cuid())
+  tenantId      String
+  liquidacionId String
+  liquidacion   Liquidacion @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
+  viajeId       String
+  viaje         Viaje       @relation(fields: [viajeId], references: [id], onDelete: Restrict)
 
   // Snapshot de los valores al momento de liquidar
-  tnOrigen             Float?
-  tnDestino            Float?
-  tarifaTransportista  Float?  // tarifa por tn aplicada al transportista
-  subtotal             Float?  // tnDestino * tarifaTransportista
-  gastosAdmin          Float?  // gastos admin tomados del metadata del viaje
+  tnOrigen            Float?
+  tnDestino           Float?
+  tarifaTransportista Float? // tarifa por tn aplicada al transportista
+  subtotal            Float? // tnDestino * tarifaTransportista
+  gastosAdmin         Float? // gastos admin tomados del metadata del viaje
 
   @@unique([liquidacionId, viajeId])
   @@index([tenantId])
@@ -717,7 +767,9 @@ model LiquidacionViaje {
   @@map("liquidacion_viajes")
 }
 
-/** Log de auditoría de cada request/response a AFIP SDK. */
+/**
+ * Log de auditoría de cada request/response a AFIP SDK.
+ */
 model ArcaLog {
   id            String       @id @default(cuid())
   tenantId      String
@@ -727,17 +779,17 @@ model ArcaLog {
   // facturaId referencial (sin FK — la Factura puede no tener relación formal con ArcaLog)
   facturaId     String?
 
-  method        String       // afip/auth | FECompUltimoAutorizado | FECAESolicitar
-  ambiente      String       // homologacion | produccion
-  cuit          String
-  requestBody   Json         // payload enviado (sin la API key)
-  responseBody  Json?        // respuesta recibida
-  httpStatus    Int?
-  durationMs    Int?
-  exitoso       Boolean      @default(false)
-  error         String?
+  method       String // afip/auth | FECompUltimoAutorizado | FECAESolicitar
+  ambiente     String // homologacion | produccion
+  cuit         String
+  requestBody  Json // payload enviado (sin la API key)
+  responseBody Json? // respuesta recibida
+  httpStatus   Int?
+  durationMs   Int?
+  exitoso      Boolean @default(false)
+  error        String?
 
-  createdAt     DateTime     @default(now())
+  createdAt DateTime @default(now())
 
   @@index([tenantId])
   @@index([tenantId, liquidacionId])

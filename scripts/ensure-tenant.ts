@@ -7,6 +7,12 @@
  */
 import { PrismaClient } from '@prisma/client';
 
+const DEFAULT_PRESENTACIONES = ['Pallet', 'Unidad'] as const;
+
+function normalizarNombrePresentacion(nombre: string): string {
+  return String(nombre ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 const VIALTO_MODULES = [
   'viajes',
   'facturacion',
@@ -43,6 +49,15 @@ async function main() {
         maxUsers: 10,
         billingStatus: 'trial',
       },
+    });
+    await prisma.presentacion.createMany({
+      data: DEFAULT_PRESENTACIONES.map((nombre) => ({
+        tenantId: tenant.clerkOrgId,
+        nombre,
+        nombreNormalizado: normalizarNombrePresentacion(nombre),
+        activo: true,
+      })),
+      skipDuplicates: true,
     });
     console.log('Tenant creado:', tenant);
   } finally {

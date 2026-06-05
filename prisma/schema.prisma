@@ -36,6 +36,7 @@ model Tenant {
   movimientosStock        MovimientoStock[]
   stockItems              StockItem[]
   depositos               Deposito[]
+  presentaciones          Presentacion[]
   cargasCombustible       CargaCombustible[]
   intervenciones          Intervencion[]
   remitos                 Remito[]
@@ -363,14 +364,19 @@ model Producto {
   nombreNormalizado String
   codigo            String? // generado por el sistema: P-001, P-002… único por tenant cuando presente
   descripcion       String?
+  presentacion1Id   String?
+  presentacion1     Presentacion? @relation("ProductoPresentacion1", fields: [presentacion1Id], references: [id], onDelete: Restrict)
+  presentacion2Id   String?
+  presentacion2     Presentacion? @relation("ProductoPresentacion2", fields: [presentacion2Id], references: [id], onDelete: Restrict)
+  /** Denormalizado desde presentacion1.nombre (lectura en stock). */
   unidad1Nombre     String   @default("Pallets")
+  /** Denormalizado desde presentacion2.nombre; null si no hay segunda cantidad. */
   unidad2Nombre     String?  @default("Unidad")
   activo            Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   movimientos    MovimientoStock[]
-  presentaciones Presentacion[]
   viajesProducto ViajeProducto[]
   stockItems     StockItem[]
 
@@ -382,18 +388,22 @@ model Producto {
 }
 
 model Presentacion {
-  id                  String   @id @default(cuid())
-  tenantId            String
-  productoId          String
-  producto            Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  nombre              String
-  cantidadEquivalente Float
-  unidadEquivalente   String
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String   @id @default(cuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre            String
+  /** lower(trim(collapsed spaces)) — unicidad por tenant. */
+  nombreNormalizado String
+  activo            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
+  productosCantidad1 Producto[] @relation("ProductoPresentacion1")
+  productosCantidad2 Producto[] @relation("ProductoPresentacion2")
+
+  @@unique([tenantId, nombreNormalizado])
   @@index([tenantId])
-  @@index([productoId])
+  @@index([tenantId, activo])
   @@map("presentaciones")
 }
 

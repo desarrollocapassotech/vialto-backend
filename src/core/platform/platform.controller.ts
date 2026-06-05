@@ -452,44 +452,44 @@ export class PlatformController {
     return this.service.updateProducto(tenantId, id, dto);
   }
 
-  @ApiOperation({ summary: 'Listar presentaciones de producto (superadmin)' })
-  @Get('stock/productos/:productoId/presentaciones')
+  @ApiOperation({ summary: 'Listar presentaciones del catálogo (superadmin)' })
+  @Get('stock/presentaciones')
   listPresentaciones(
-    @Param('productoId') productoId: string,
     @Query('tenantId') tenantId?: string,
+    @Query('activo') activo?: string,
   ) {
-    return this.service.listPresentaciones(tenantId, productoId);
+    return this.service.listPresentaciones(
+      tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
   }
 
-  @ApiOperation({ summary: 'Agregar presentación a producto (superadmin)' })
-  @Post('stock/productos/:productoId/presentaciones')
+  @ApiOperation({ summary: 'Crear presentación en el catálogo (superadmin)' })
+  @Post('stock/presentaciones')
   createPresentacion(
-    @Param('productoId') productoId: string,
     @Query('tenantId') tenantId: string | undefined,
     @Body() dto: CreatePresentacionDto,
   ) {
-    return this.service.createPresentacion(tenantId, productoId, dto);
+    return this.service.createPresentacion(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar presentación (superadmin)' })
-  @Patch('stock/productos/:productoId/presentaciones/:id')
+  @ApiOperation({ summary: 'Actualizar presentación del catálogo (superadmin)' })
+  @Patch('stock/presentaciones/:id')
   updatePresentacion(
-    @Param('productoId') productoId: string,
     @Param('id') id: string,
     @Query('tenantId') tenantId: string | undefined,
     @Body() dto: UpdatePresentacionDto,
   ) {
-    return this.service.updatePresentacion(tenantId, productoId, id, dto);
+    return this.service.updatePresentacion(tenantId, id, dto);
   }
 
-  @ApiOperation({ summary: 'Eliminar presentación (superadmin)' })
-  @Delete('stock/productos/:productoId/presentaciones/:id')
+  @ApiOperation({ summary: 'Eliminar presentación del catálogo (superadmin)' })
+  @Delete('stock/presentaciones/:id')
   removePresentacion(
-    @Param('productoId') productoId: string,
     @Param('id') id: string,
     @Query('tenantId') tenantId?: string,
   ) {
-    return this.service.removePresentacion(tenantId, productoId, id);
+    return this.service.removePresentacion(tenantId, id);
   }
 
   @ApiOperation({ summary: 'Listar depósitos (superadmin)' })

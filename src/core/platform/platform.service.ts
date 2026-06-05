@@ -706,24 +706,24 @@ export class PlatformService {
     return this.stockService.updateProducto(id, scopedTenantId, dto);
   }
 
-  listPresentaciones(tenantId: string | undefined, productoId: string) {
+  listPresentaciones(tenantId: string | undefined, activo?: boolean) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listPresentaciones(productoId, scopedTenantId);
+    return this.stockService.listPresentaciones(scopedTenantId, activo);
   }
 
-  createPresentacion(tenantId: string | undefined, productoId: string, dto: CreatePresentacionDto) {
+  createPresentacion(tenantId: string | undefined, dto: CreatePresentacionDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.createPresentacion(productoId, scopedTenantId, dto);
+    return this.stockService.createPresentacion(scopedTenantId, dto);
   }
 
-  updatePresentacion(tenantId: string | undefined, productoId: string, id: string, dto: UpdatePresentacionDto) {
+  updatePresentacion(tenantId: string | undefined, id: string, dto: UpdatePresentacionDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.updatePresentacion(productoId, id, scopedTenantId, dto);
+    return this.stockService.updatePresentacion(id, scopedTenantId, dto);
   }
 
-  removePresentacion(tenantId: string | undefined, productoId: string, id: string) {
+  removePresentacion(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.removePresentacion(productoId, id, scopedTenantId);
+    return this.stockService.removePresentacion(id, scopedTenantId);
   }
 
   listDepositos(tenantId: string | undefined, activo?: boolean) {

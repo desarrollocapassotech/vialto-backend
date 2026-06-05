@@ -1,18 +1,12 @@
-import { IsNotEmpty, IsNumber, IsPositive, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreatePresentacionDto {
   @IsString()
   @IsNotEmpty()
-  @MaxLength(200)
+  @MaxLength(100)
   nombre!: string;
 
-  @IsNumber()
-  @IsPositive()
-  cantidadEquivalente!: number;
-
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(50)
-  unidadEquivalente!: string;
-
+  @IsOptional()
+  @IsBoolean()
+  activo?: boolean;
 }

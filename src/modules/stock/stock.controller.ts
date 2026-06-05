@@ -14,6 +14,8 @@ import { CreateIngresoDto } from './dto/create-ingreso.dto';
 import { CreateEgresoDto } from './dto/create-egreso.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateStockEgresoRemitoConfigDto } from './dto/update-stock-egreso-remito-config.dto';
+import { CreatePresentacionDto } from './dto/create-presentacion.dto';
+import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -77,6 +79,48 @@ export class StockController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.updateProducto(id, auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Listar presentaciones del catálogo' })
+  @Get('presentaciones')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  listPresentaciones(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('activo') activo?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listPresentaciones(
+      auth.tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
+  }
+
+  @ApiOperation({ summary: 'Crear presentación en el catálogo' })
+  @Post('presentaciones')
+  @Roles('admin', 'supervisor', 'superadmin')
+  createPresentacion(@Body() dto: CreatePresentacionDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.createPresentacion(auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Actualizar presentación del catálogo' })
+  @Patch('presentaciones/:id')
+  @Roles('admin', 'supervisor', 'superadmin')
+  updatePresentacion(
+    @Param('id') id: string,
+    @Body() dto: UpdatePresentacionDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.updatePresentacion(id, auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Eliminar presentación del catálogo' })
+  @Delete('presentaciones/:id')
+  @Roles('admin', 'supervisor', 'superadmin')
+  removePresentacion(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.removePresentacion(id, auth.tenantId);
   }
 
   @ApiOperation({ summary: 'Listar depósitos' })

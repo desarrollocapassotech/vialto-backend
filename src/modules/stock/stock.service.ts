@@ -45,8 +45,19 @@ const productoSelect = {
   nombre: true,
   codigo: true,
   descripcion: true,
+  presentacion1Id: true,
+  presentacion2Id: true,
   unidad1Nombre: true,
   unidad2Nombre: true,
+  activo: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+const presentacionSelect = {
+  id: true,
+  tenantId: true,
+  nombre: true,
   activo: true,
   createdAt: true,
   updatedAt: true,
@@ -149,10 +160,42 @@ export class StockService {
     return `P-${String(n).padStart(3, '0')}`;
   }
 
+  private async resolvePresentacionesProducto(
+    tenantId: string,
+    presentacion1Id: string,
+    presentacion2Id?: string | null,
+  ) {
+    const p1 = await this.prisma.presentacion.findFirst({
+      where: { id: presentacion1Id, tenantId, activo: true },
+    });
+    if (!p1) throw new BadRequestException('Presentación de cantidad 1 inválida o inactiva.');
+
+    if (!presentacion2Id) {
+      return { presentacion1Id: p1.id, presentacion2Id: null, unidad1Nombre: p1.nombre, unidad2Nombre: null };
+    }
+
+    const p2 = await this.prisma.presentacion.findFirst({
+      where: { id: presentacion2Id, tenantId, activo: true },
+    });
+    if (!p2) throw new BadRequestException('Presentación de cantidad 2 inválida o inactiva.');
+
+    return {
+      presentacion1Id: p1.id,
+      presentacion2Id: p2.id,
+      unidad1Nombre: p1.nombre,
+      unidad2Nombre: p2.nombre,
+    };
+  }
+
   async createProducto(tenantId: string, dto: CreateProductoDto) {
     const nombre = displayNombre(dto.nombre);
     if (!nombre) throw new ConflictException('El nombre no puede quedar vacío.');
     const nombreNormalizado = normalizarNombre(nombre);
+    const pres = await this.resolvePresentacionesProducto(
+      tenantId,
+      dto.presentacion1Id,
+      dto.presentacion2Id ?? null,
+    );
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -164,10 +207,10 @@ export class StockService {
             nombreNormalizado,
             codigo,
             descripcion: dto.descripcion?.trim() || null,
-            ...(dto.unidad1Nombre !== undefined ? { unidad1Nombre: dto.unidad1Nombre.trim() || 'Pallets' } : {}),
-            ...(dto.unidad2Nombre !== undefined
-              ? { unidad2Nombre: dto.unidad2Nombre === null ? null : dto.unidad2Nombre.trim() || null }
-              : {}),
+            presentacion1Id: pres.presentacion1Id,
+            presentacion2Id: pres.presentacion2Id,
+            unidad1Nombre: pres.unidad1Nombre,
+            unidad2Nombre: pres.unidad2Nombre,
             activo: dto.activo ?? true,
           },
           select: productoSelect,
@@ -193,6 +236,22 @@ export class StockService {
     const nombreNormalizado =
       dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
 
+    let presentacionPatch: {
+      presentacion1Id?: string;
+      presentacion2Id?: string | null;
+      unidad1Nombre?: string;
+      unidad2Nombre?: string | null;
+    } = {};
+
+    if (dto.presentacion1Id !== undefined || dto.presentacion2Id !== undefined) {
+      const p1Id = dto.presentacion1Id ?? current.presentacion1Id;
+      if (!p1Id) throw new BadRequestException('La presentación de cantidad 1 es obligatoria.');
+      const p2Id =
+        dto.presentacion2Id !== undefined ? dto.presentacion2Id : current.presentacion2Id;
+      const pres = await this.resolvePresentacionesProducto(tenantId, p1Id, p2Id);
+      presentacionPatch = pres;
+    }
+
     try {
       return await this.prisma.producto.update({
         where: { id },
@@ -201,12 +260,7 @@ export class StockService {
           ...(dto.descripcion !== undefined
             ? { descripcion: dto.descripcion?.trim() || null }
             : {}),
-          ...(dto.unidad1Nombre !== undefined
-            ? { unidad1Nombre: dto.unidad1Nombre.trim() || 'Pallets' }
-            : {}),
-          ...(dto.unidad2Nombre !== undefined
-            ? { unidad2Nombre: dto.unidad2Nombre === null ? null : dto.unidad2Nombre.trim() || null }
-            : {}),
+          ...presentacionPatch,
           ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
         },
         select: productoSelect,
@@ -261,47 +315,106 @@ export class StockService {
     return row;
   }
 
-  // ───────────────── PRESENTACIONES ────────────────────────────────────────
+  // ───────────────── PRESENTACIONES (catálogo por tenant) ────────────────────
 
-  async listPresentaciones(productoId: string, tenantId: string) {
-    const p = await this.prisma.producto.findFirst({ where: { id: productoId, tenantId } });
-    if (!p) throw new NotFoundException('Producto no encontrado');
+  async listPresentaciones(tenantId: string, activo?: boolean) {
     return this.prisma.presentacion.findMany({
-      where: { productoId, tenantId },
-      orderBy: { nombre: 'asc' },
-    });
-  }
-
-  async createPresentacion(productoId: string, tenantId: string, dto: CreatePresentacionDto) {
-    const p = await this.prisma.producto.findFirst({ where: { id: productoId, tenantId } });
-    if (!p) throw new NotFoundException('Producto no encontrado');
-    return this.prisma.presentacion.create({
-      data: {
+      where: {
         tenantId,
-        productoId,
-        nombre: dto.nombre.trim(),
-        cantidadEquivalente: dto.cantidadEquivalente,
-        unidadEquivalente: dto.unidadEquivalente.trim(),
+        ...(activo !== undefined ? { activo } : {}),
       },
+      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+      select: presentacionSelect,
     });
   }
 
-  async updatePresentacion(productoId: string, id: string, tenantId: string, dto: UpdatePresentacionDto) {
-    const row = await this.prisma.presentacion.findFirst({ where: { id, productoId, tenantId } });
-    if (!row) throw new NotFoundException('Presentación no encontrada');
-    return this.prisma.presentacion.update({
-      where: { id },
-      data: {
-        ...(dto.nombre !== undefined ? { nombre: dto.nombre.trim() } : {}),
-        ...(dto.cantidadEquivalente !== undefined ? { cantidadEquivalente: dto.cantidadEquivalente } : {}),
-        ...(dto.unidadEquivalente !== undefined ? { unidadEquivalente: dto.unidadEquivalente.trim() } : {}),
-      },
+  async findPresentacion(id: string, tenantId: string) {
+    const row = await this.prisma.presentacion.findFirst({
+      where: { id, tenantId },
+      select: presentacionSelect,
     });
+    if (!row) throw new NotFoundException('Presentación no encontrada');
+    return row;
   }
 
-  async removePresentacion(productoId: string, id: string, tenantId: string) {
-    const row = await this.prisma.presentacion.findFirst({ where: { id, productoId, tenantId } });
+  async createPresentacion(tenantId: string, dto: CreatePresentacionDto) {
+    const nombre = displayNombre(dto.nombre);
+    if (!nombre) throw new ConflictException('El nombre no puede quedar vacío.');
+    const nombreNormalizado = normalizarNombre(nombre);
+    try {
+      return await this.prisma.presentacion.create({
+        data: {
+          tenantId,
+          nombre,
+          nombreNormalizado,
+          activo: dto.activo ?? true,
+        },
+        select: presentacionSelect,
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe una presentación con ese nombre (sin distinguir mayúsculas).');
+      }
+      throw e;
+    }
+  }
+
+  async updatePresentacion(id: string, tenantId: string, dto: UpdatePresentacionDto) {
+    const current = await this.prisma.presentacion.findFirst({ where: { id, tenantId } });
+    if (!current) throw new NotFoundException('Presentación no encontrada');
+
+    const nombre =
+      dto.nombre !== undefined ? displayNombre(dto.nombre) : current.nombre;
+    if (dto.nombre !== undefined && !nombre) {
+      throw new ConflictException('El nombre no puede quedar vacío.');
+    }
+    const nombreNormalizado =
+      dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
+
+    try {
+      const updated = await this.prisma.presentacion.update({
+        where: { id },
+        data: {
+          ...(dto.nombre !== undefined ? { nombre, nombreNormalizado } : {}),
+          ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
+        },
+        select: presentacionSelect,
+      });
+
+      if (dto.nombre !== undefined && nombre !== current.nombre) {
+        await this.prisma.producto.updateMany({
+          where: { tenantId, presentacion1Id: id },
+          data: { unidad1Nombre: nombre },
+        });
+        await this.prisma.producto.updateMany({
+          where: { tenantId, presentacion2Id: id },
+          data: { unidad2Nombre: nombre },
+        });
+      }
+
+      return updated;
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe una presentación con ese nombre (sin distinguir mayúsculas).');
+      }
+      throw e;
+    }
+  }
+
+  async removePresentacion(id: string, tenantId: string) {
+    const row = await this.prisma.presentacion.findFirst({ where: { id, tenantId } });
     if (!row) throw new NotFoundException('Presentación no encontrada');
+
+    const [enCant1, enCant2] = await Promise.all([
+      this.prisma.producto.count({ where: { tenantId, presentacion1Id: id } }),
+      this.prisma.producto.count({ where: { tenantId, presentacion2Id: id } }),
+    ]);
+    if (enCant1 + enCant2 > 0) {
+      throw new ConflictException(
+        'No se puede eliminar: hay productos que usan esta presentación como cantidad 1 o 2.',
+      );
+    }
+
     return this.prisma.presentacion.delete({ where: { id } });
   }
 

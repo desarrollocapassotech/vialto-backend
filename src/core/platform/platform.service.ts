@@ -35,6 +35,7 @@ import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentaci
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
 import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
+import { CreateDivisionDto } from '../../modules/stock/dto/create-division.dto';
 import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 import { ArcaConfigService } from '../../modules/liquidaciones-arca/arca-config.service';
 import { LiquidacionesService } from '../../modules/liquidaciones-arca/liquidaciones.service';
@@ -725,19 +726,24 @@ export class PlatformService {
     return this.stockService.removePresentacion(productoId, id, scopedTenantId);
   }
 
+  listDepositos(tenantId: string | undefined, activo?: boolean) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listDepositos(scopedTenantId, activo);
+  }
+
   createIngreso(tenantId: string | undefined, dto: CreateIngresoDto, createdBy: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
   }
 
-  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string) {
+  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId);
+    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId, depositoId);
   }
 
-  listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string) {
+  listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId);
+    return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId, depositoId);
   }
 
   getEgresoRemitoConfig(tenantId: string | undefined) {
@@ -755,9 +761,19 @@ export class PlatformService {
     return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
   }
 
-  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string) {
+  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId);
+    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId);
+  }
+
+  createDivision(tenantId: string | undefined, dto: CreateDivisionDto, createdBy: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.createDivision(scopedTenantId, dto, createdBy);
+  }
+
+  listDivisiones(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listDivisiones(scopedTenantId, clienteId, productoId, depositoId);
   }
 
   listMovimientosStock(

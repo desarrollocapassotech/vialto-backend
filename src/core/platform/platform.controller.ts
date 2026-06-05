@@ -36,6 +36,7 @@ import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentaci
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
 import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
+import { CreateDivisionDto } from '../../modules/stock/dto/create-division.dto';
 import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 import { ViajesPaginatedQueryDto } from '../../modules/viajes/dto/viajes-paginated-query.dto';
 import { AddGastoDto } from '../../modules/viajes/dto/add-gasto.dto';
@@ -491,6 +492,18 @@ export class PlatformController {
     return this.service.removePresentacion(tenantId, productoId, id);
   }
 
+  @ApiOperation({ summary: 'Listar depósitos (superadmin)' })
+  @Get('stock/depositos')
+  listDepositos(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('activo') activo?: string,
+  ) {
+    return this.service.listDepositos(
+      tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
+  }
+
   @ApiOperation({ summary: 'Registrar ingreso al depósito (superadmin)' })
   @Post('stock/ingresos')
   createIngreso(
@@ -552,8 +565,30 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
   ) {
-    return this.service.listEgresos(tenantId, clienteId, productoId);
+    return this.service.listEgresos(tenantId, clienteId, productoId, depositoId);
+  }
+
+  @ApiOperation({ summary: 'Registrar división de bultos (superadmin)' })
+  @Post('stock/divisiones')
+  createDivision(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateDivisionDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.createDivision(tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar divisiones (superadmin)' })
+  @Get('stock/divisiones')
+  listDivisiones(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
+  ) {
+    return this.service.listDivisiones(tenantId, clienteId, productoId, depositoId);
   }
 
   @ApiOperation({ summary: 'Listar movimientos de stock (superadmin)' })

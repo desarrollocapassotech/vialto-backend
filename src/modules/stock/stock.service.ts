@@ -1,9 +1,14 @@
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -21,6 +26,7 @@ import { CreateDivisionDto } from './dto/create-division.dto';
 import { CreateDepositoDto } from './dto/create-deposito.dto';
 import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
+import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +93,7 @@ export class StockService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clerkUsers: ClerkVialtoRoleService,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   // ───────────────── PRODUCTOS ──────────────────────────────────────────────
@@ -526,6 +533,74 @@ export class StockService {
     return this.prisma.movimientoStock.delete({ where: { id } });
   }
 
+  // ───────────────── REMITO ESCANEADO (PDF) ───────────────────────────────────
+
+  async uploadRemitoPdf(tenantId: string, file: Express.Multer.File) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Se requiere un archivo de remito.');
+    }
+    const name = file.originalname.toLowerCase();
+    const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
+    const isImage =
+      file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
+    if (!isPdf && !isImage) {
+      throw new BadRequestException('El remito debe ser un PDF o una imagen.');
+    }
+    if (file.buffer.length > 10 * 1024 * 1024) {
+      throw new BadRequestException('El archivo no puede superar 10 MB.');
+    }
+
+    const url = await this.cloudinary.uploadRemitoArchivo(
+      tenantId,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    return { url };
+  }
+
+  async streamRemitoAdjunto(id: string, tenantId: string, res: Response) {
+    const row = await this.prisma.movimientoStock.findFirst({
+      where: { id, tenantId },
+      select: { remitoUrl: true },
+    });
+    if (!row?.remitoUrl?.trim()) {
+      throw new NotFoundException('Este movimiento no tiene remito escaneado.');
+    }
+
+    const storedUrl = row.remitoUrl.trim();
+    this.cloudinary.assertRemitoUrlForTenant(storedUrl, tenantId);
+
+    const candidates = [storedUrl, this.cloudinary.resolveDeliveryUrl(storedUrl)];
+    let upstream: globalThis.Response | null = null;
+    let lastStatus = 0;
+
+    for (const url of [...new Set(candidates)]) {
+      const attempt = await fetch(url);
+      lastStatus = attempt.status;
+      if (attempt.ok && attempt.body) {
+        upstream = attempt;
+        break;
+      }
+    }
+
+    if (!upstream?.body) {
+      if (lastStatus === 401) {
+        throw new ServiceUnavailableException(
+          'Cloudinary bloquea la entrega de PDF. En el panel de Cloudinary → Settings → Security, activá “Allow delivery of PDF and ZIP files”.',
+        );
+      }
+      throw new BadGatewayException('No se pudo obtener el remito escaneado.');
+    }
+
+    const contentType = upstream.headers.get('content-type') ?? 'application/pdf';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+
+    await pipeline(Readable.fromWeb(upstream.body as import('stream/web').ReadableStream), res);
+  }
+
   // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────
 
   async createIngreso(tenantId: string, dto: CreateIngresoDto, createdBy: string) {
@@ -547,6 +622,11 @@ export class StockService {
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
     if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
 
+    const remitoUrl = dto.remitoEscaneadoUrl?.trim();
+    if (!remitoUrl) {
+      throw new BadRequestException('El remito es obligatorio.');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const movimiento = await tx.movimientoStock.create({
         data: {
@@ -558,6 +638,7 @@ export class StockService {
           cantidad1,
           cantidad2,
           observaciones: dto.observaciones?.trim() || null,
+          remitoUrl,
           createdBy,
           fecha: fechaMov,
         },
@@ -693,6 +774,11 @@ export class StockService {
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
     if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
 
+    const remitoUrl = dto.remitoEscaneadoUrl?.trim();
+    if (!remitoUrl) {
+      throw new BadRequestException('El remito es obligatorio.');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const cfg = await tx.stockEgresoRemitoConfig.findUnique({
         where: { tenantId },
@@ -747,8 +833,6 @@ export class StockService {
           `Stock insuficiente para esta empresa y producto. Pallets disponibles: ${disp1}, suelto disponible: ${disp2}.`,
         );
       }
-
-      const remitoUrl = dto.remitoEscaneadoUrl?.trim() || null;
 
       const seq = await this.nextSecuenciaRemitoTx(tx, tenantId, year);
       let numeroRemito = this.formatoNumeroRemito(prefix, year, seq, digitos);

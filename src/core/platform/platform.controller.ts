@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,10 +11,14 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -504,6 +509,24 @@ export class PlatformController {
     );
   }
 
+  @ApiOperation({ summary: 'Subir remito escaneado PDF (superadmin)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('stock/upload-remito')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadRemitoStock(
+    @Query('tenantId') tenantId: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
+    return this.service.uploadRemitoPdf(tenantId, file);
+  }
+
   @ApiOperation({ summary: 'Registrar ingreso al depósito (superadmin)' })
   @Post('stock/ingresos')
   createIngreso(
@@ -610,6 +633,16 @@ export class PlatformController {
   @Get('stock/movimientos/:id')
   getMovimientoStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.getMovimientoStock(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado (superadmin)' })
+  @Get('stock/movimientos/:id/remito-adjunto')
+  async getRemitoAdjuntoStock(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Res() res: Response,
+  ) {
+    await this.service.streamRemitoAdjunto(tenantId, id, res);
   }
 
   // ── ARCA (superadmin) ─────────────────────────────────────────────────────

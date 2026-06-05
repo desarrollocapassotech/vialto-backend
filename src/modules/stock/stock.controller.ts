@@ -1,7 +1,22 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { StockService } from './stock.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
@@ -183,6 +198,18 @@ export class StockController {
     return this.service.findMovimiento(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado del movimiento' })
+  @Get('movimientos/:id/remito-adjunto')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  async getRemitoAdjunto(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    await this.service.streamRemitoAdjunto(id, auth.tenantId, res);
+  }
+
   @ApiOperation({ summary: 'Registrar movimiento de stock (ingreso, egreso, división)' })
   @Post('movimientos')
   @Roles('admin', 'supervisor', 'superadmin')
@@ -209,6 +236,23 @@ export class StockController {
   removeMovimiento(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.removeMovimiento(id, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Subir remito escaneado (PDF) a almacenamiento' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('upload-remito')
+  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadRemito(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
+    return this.service.uploadRemitoPdf(auth.tenantId, file);
   }
 
   // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────

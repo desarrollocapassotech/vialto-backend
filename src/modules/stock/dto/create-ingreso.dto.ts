@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
 } from 'class-validator';
 
@@ -40,4 +41,10 @@ export class CreateIngresoDto {
   @IsOptional()
   @IsString()
   observaciones?: string;
+
+  /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en ingresos. */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2048)
+  remitoEscaneadoUrl: string;
 }

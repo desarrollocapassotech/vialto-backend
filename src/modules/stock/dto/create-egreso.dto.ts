@@ -42,9 +42,9 @@ export class CreateEgresoDto {
   @IsString()
   observaciones?: string;
 
-  /** URL del remito escaneado (p. ej. tras subida a Cloudinary). Opcional. */
-  @IsOptional()
+  /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en egresos. */
   @IsString()
+  @IsNotEmpty()
   @MaxLength(2048)
-  remitoEscaneadoUrl?: string;
+  remitoEscaneadoUrl: string;
 }

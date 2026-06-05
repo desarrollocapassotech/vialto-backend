@@ -731,6 +731,11 @@ export class PlatformService {
     return this.stockService.listDepositos(scopedTenantId, activo);
   }
 
+  uploadRemitoPdf(tenantId: string | undefined, file: Express.Multer.File) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.uploadRemitoPdf(scopedTenantId, file);
+  }
+
   createIngreso(tenantId: string | undefined, dto: CreateIngresoDto, createdBy: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
@@ -791,6 +796,11 @@ export class PlatformService {
   getMovimientoStock(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.findMovimiento(id, scopedTenantId);
+  }
+
+  streamRemitoAdjunto(tenantId: string | undefined, id: string, res: import('express').Response) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.streamRemitoAdjunto(id, scopedTenantId, res);
   }
 
   // ── ARCA (superadmin) ─────────────────────────────────────────────────────

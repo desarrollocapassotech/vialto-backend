@@ -13,11 +13,6 @@ export class CreateProductoDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(50)
-  unidadMedida?: string;
-
-  @IsOptional()
-  @IsString()
   @MaxLength(100)
   unidad1Nombre?: string;
 

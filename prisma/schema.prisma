@@ -363,7 +363,6 @@ model Producto {
   nombreNormalizado String
   codigo            String? // generado por el sistema: P-001, P-002… único por tenant cuando presente
   descripcion       String?
-  unidadMedida      String // kg | tn | unidades | rollos | pallets | m3 | litros | otro
   unidad1Nombre     String   @default("Pallets")
   unidad2Nombre     String?  @default("Unidad")
   activo            Boolean  @default(true)

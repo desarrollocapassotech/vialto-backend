@@ -97,7 +97,7 @@ export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultAr
       orderBy: { orden: 'asc' },
       include: {
         producto: {
-          select: { id: true, nombre: true, activo: true, unidadMedida: true },
+          select: { id: true, nombre: true, activo: true },
         },
       },
     },

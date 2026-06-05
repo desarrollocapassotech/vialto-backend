@@ -45,7 +45,6 @@ const productoSelect = {
   nombre: true,
   codigo: true,
   descripcion: true,
-  unidadMedida: true,
   unidad1Nombre: true,
   unidad2Nombre: true,
   activo: true,
@@ -56,7 +55,6 @@ const productoSelect = {
 const productoMiniSelect = {
   id: true,
   nombre: true,
-  unidadMedida: true,
   unidad1Nombre: true,
   unidad2Nombre: true,
 } as const;
@@ -100,11 +98,6 @@ export class StockService {
     const fa = query.filtroActivo ?? 'todos';
     if (fa === 'activos') where.activo = true;
     else if (fa === 'inactivos') where.activo = false;
-
-    const um = query.unidadMedida?.trim();
-    if (um) {
-      where.unidadMedida = um;
-    }
 
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.producto.count({ where }),
@@ -171,7 +164,6 @@ export class StockService {
             nombreNormalizado,
             codigo,
             descripcion: dto.descripcion?.trim() || null,
-            unidadMedida: dto.unidadMedida?.trim() || '',
             ...(dto.unidad1Nombre !== undefined ? { unidad1Nombre: dto.unidad1Nombre.trim() || 'Pallets' } : {}),
             ...(dto.unidad2Nombre !== undefined
               ? { unidad2Nombre: dto.unidad2Nombre === null ? null : dto.unidad2Nombre.trim() || null }
@@ -208,9 +200,6 @@ export class StockService {
           ...(dto.nombre !== undefined ? { nombre, nombreNormalizado } : {}),
           ...(dto.descripcion !== undefined
             ? { descripcion: dto.descripcion?.trim() || null }
-            : {}),
-          ...(dto.unidadMedida !== undefined
-            ? { unidadMedida: dto.unidadMedida?.trim() || '' }
             : {}),
           ...(dto.unidad1Nombre !== undefined
             ? { unidad1Nombre: dto.unidad1Nombre.trim() || 'Pallets' }

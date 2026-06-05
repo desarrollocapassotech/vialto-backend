@@ -46,19 +46,29 @@ const productoSelect = {
   codigo: true,
   descripcion: true,
   unidadMedida: true,
+  unidad1Nombre: true,
+  unidad2Nombre: true,
   activo: true,
   createdAt: true,
   updatedAt: true,
 } as const;
 
+const productoMiniSelect = {
+  id: true,
+  nombre: true,
+  unidadMedida: true,
+  unidad1Nombre: true,
+  unidad2Nombre: true,
+} as const;
+
 const movimientoStockRelations = {
-  producto: { select: { id: true, nombre: true, unidadMedida: true } },
+  producto: { select: productoMiniSelect },
   cliente: { select: { id: true, nombre: true } },
   deposito: { select: { id: true, nombre: true } },
 } as const;
 
 const stockItemRelations = {
-  producto: { select: { id: true, nombre: true, unidadMedida: true } },
+  producto: { select: productoMiniSelect },
   cliente: { select: { id: true, nombre: true } },
   deposito: { select: { id: true, nombre: true } },
 } as const;
@@ -162,6 +172,10 @@ export class StockService {
             codigo,
             descripcion: dto.descripcion?.trim() || null,
             unidadMedida: dto.unidadMedida?.trim() || '',
+            ...(dto.unidad1Nombre !== undefined ? { unidad1Nombre: dto.unidad1Nombre.trim() || 'Pallets' } : {}),
+            ...(dto.unidad2Nombre !== undefined
+              ? { unidad2Nombre: dto.unidad2Nombre === null ? null : dto.unidad2Nombre.trim() || null }
+              : {}),
             activo: dto.activo ?? true,
           },
           select: productoSelect,
@@ -197,6 +211,12 @@ export class StockService {
             : {}),
           ...(dto.unidadMedida !== undefined
             ? { unidadMedida: dto.unidadMedida?.trim() || '' }
+            : {}),
+          ...(dto.unidad1Nombre !== undefined
+            ? { unidad1Nombre: dto.unidad1Nombre.trim() || 'Pallets' }
+            : {}),
+          ...(dto.unidad2Nombre !== undefined
+            ? { unidad2Nombre: dto.unidad2Nombre === null ? null : dto.unidad2Nombre.trim() || null }
             : {}),
           ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
         },
@@ -353,10 +373,10 @@ export class StockService {
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
     if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
 
-    const cantidadPallets = dto.cantidadPallets ?? 0;
-    const cantidadSuelto = dto.cantidadSuelto ?? 0;
-    if (cantidadPallets <= 0 && cantidadSuelto <= 0) {
-      throw new BadRequestException('Al menos uno de cantidadPallets o cantidadSuelto debe ser mayor a 0.');
+    const cantidad1 = dto.cantidad1 ?? 0;
+    const cantidad2 = dto.cantidad2 ?? 0;
+    if (cantidad1 <= 0 && cantidad2 <= 0) {
+      throw new BadRequestException('Al menos uno de cantidad1 o cantidad2 debe ser mayor a 0.');
     }
 
     return this.prisma.movimientoStock.create({
@@ -366,8 +386,8 @@ export class StockService {
         clienteId: dto.clienteId,
         depositoId: dto.depositoId,
         tipo: dto.tipo,
-        cantidadPallets,
-        cantidadSuelto,
+        cantidad1,
+        cantidad2,
         remitoId: dto.remitoId ?? null,
         fecha: fechaMov,
       },
@@ -407,10 +427,10 @@ export class StockService {
   // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────
 
   async createIngreso(tenantId: string, dto: CreateIngresoDto, createdBy: string) {
-    const cantidadPallets = dto.cantidadPallets ?? 0;
-    const cantidadSuelto = dto.cantidadSuelto ?? 0;
-    if (cantidadPallets <= 0 && cantidadSuelto <= 0) {
-      throw new BadRequestException('Al menos uno de cantidadPallets o cantidadSuelto debe ser mayor a 0.');
+    const cantidad1 = dto.cantidad1 ?? 0;
+    const cantidad2 = dto.cantidad2 ?? 0;
+    if (cantidad1 <= 0 && cantidad2 <= 0) {
+      throw new BadRequestException('Al menos uno de cantidad1 o cantidad2 debe ser mayor a 0.');
     }
 
     await this.assertDeposito(tenantId, dto.depositoId, true);
@@ -433,14 +453,14 @@ export class StockService {
           clienteId: dto.clienteId,
           depositoId: dto.depositoId,
           tipo: 'ingreso',
-          cantidadPallets,
-          cantidadSuelto,
+          cantidad1,
+          cantidad2,
           observaciones: dto.observaciones?.trim() || null,
           createdBy,
           fecha: fechaMov,
         },
         include: {
-          producto: { select: { id: true, nombre: true, unidadMedida: true } },
+          producto: { select: productoMiniSelect },
           cliente: { select: { id: true, nombre: true } },
           deposito: { select: { id: true, nombre: true } },
         },
@@ -455,16 +475,16 @@ export class StockService {
           },
         },
         update: {
-          cantidadPallets: { increment: cantidadPallets },
-          cantidadSuelto: { increment: cantidadSuelto },
+          cantidad1: { increment: cantidad1 },
+          cantidad2: { increment: cantidad2 },
         },
         create: {
           tenantId,
           productoId: dto.productoId,
           clienteId: dto.clienteId,
           depositoId: dto.depositoId,
-          cantidadPallets,
-          cantidadSuelto,
+          cantidad1,
+          cantidad2,
         },
       });
 
@@ -553,10 +573,10 @@ export class StockService {
   // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
 
   async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
-    const cantidadPallets = dto.cantidadPallets ?? 0;
-    const cantidadSuelto = dto.cantidadSuelto ?? 0;
-    if (cantidadPallets <= 0 && cantidadSuelto <= 0) {
-      throw new BadRequestException('Al menos uno de cantidadPallets o cantidadSuelto debe ser mayor a 0.');
+    const cantidad1 = dto.cantidad1 ?? 0;
+    const cantidad2 = dto.cantidad2 ?? 0;
+    if (cantidad1 <= 0 && cantidad2 <= 0) {
+      throw new BadRequestException('Al menos uno de cantidad1 o cantidad2 debe ser mayor a 0.');
     }
 
     await this.assertDeposito(tenantId, dto.depositoId, true);
@@ -591,17 +611,17 @@ export class StockService {
         },
       });
 
-      const dispPallets = item?.cantidadPallets ?? 0;
-      const dispSuelto = item?.cantidadSuelto ?? 0;
+      const disp1 = item?.cantidad1 ?? 0;
+      const disp2 = item?.cantidad2 ?? 0;
 
-      if (cantidadPallets > 0 && dispPallets < cantidadPallets) {
+      if (cantidad1 > 0 && disp1 < cantidad1) {
         throw new BadRequestException(
-          `Stock de pallets insuficiente para esta empresa y producto. Disponible: ${dispPallets}.`,
+          `Stock de pallets insuficiente para esta empresa y producto. Disponible: ${disp1}.`,
         );
       }
-      if (cantidadSuelto > 0 && dispSuelto < cantidadSuelto) {
+      if (cantidad2 > 0 && disp2 < cantidad2) {
         throw new BadRequestException(
-          `Stock suelto insuficiente para esta empresa y producto. Disponible: ${dispSuelto}.`,
+          `Stock suelto insuficiente para esta empresa y producto. Disponible: ${disp2}.`,
         );
       }
 
@@ -612,17 +632,17 @@ export class StockService {
           productoId: dto.productoId,
           clienteId: dto.clienteId,
           depositoId: dto.depositoId,
-          cantidadPallets: { gte: cantidadPallets },
-          cantidadSuelto: { gte: cantidadSuelto },
+          cantidad1: { gte: cantidad1 },
+          cantidad2: { gte: cantidad2 },
         },
         data: {
-          cantidadPallets: { decrement: cantidadPallets },
-          cantidadSuelto: { decrement: cantidadSuelto },
+          cantidad1: { decrement: cantidad1 },
+          cantidad2: { decrement: cantidad2 },
         },
       });
       if (dec.count === 0) {
         throw new BadRequestException(
-          `Stock insuficiente para esta empresa y producto. Pallets disponibles: ${dispPallets}, suelto disponible: ${dispSuelto}.`,
+          `Stock insuficiente para esta empresa y producto. Pallets disponibles: ${disp1}, suelto disponible: ${disp2}.`,
         );
       }
 
@@ -639,8 +659,8 @@ export class StockService {
             clienteId: dto.clienteId,
             depositoId: dto.depositoId,
             tipo: 'egreso',
-            cantidadPallets,
-            cantidadSuelto,
+            cantidad1,
+            cantidad2,
             numeroRemito: numero,
             observaciones: dto.observaciones?.trim() || null,
             remitoUrl,
@@ -681,16 +701,16 @@ export class StockService {
   // ───────────────── DIVISIONES ─────────────────────────────────────────────
 
   async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {
-    const palletsOrigen = dto.palletsOrigen ?? 0;
-    const sueltoOrigen = dto.sueltoOrigen ?? 0;
-    const palletsDestino = dto.palletsDestino ?? 0;
-    const sueltoDestino = dto.sueltoDestino ?? 0;
+    const cantidad1Origen = dto.cantidad1Origen ?? 0;
+    const cantidad2Origen = dto.cantidad2Origen ?? 0;
+    const cantidad1Destino = dto.cantidad1Destino ?? 0;
+    const cantidad2Destino = dto.cantidad2Destino ?? 0;
 
-    if (palletsOrigen <= 0 && sueltoOrigen <= 0) {
-      throw new BadRequestException('Al menos uno de palletsOrigen o sueltoOrigen debe ser mayor a 0.');
+    if (cantidad1Origen <= 0 && cantidad2Origen <= 0) {
+      throw new BadRequestException('Al menos uno de cantidad1Origen o cantidad2Origen debe ser mayor a 0.');
     }
-    if (palletsDestino <= 0 && sueltoDestino <= 0) {
-      throw new BadRequestException('Al menos uno de palletsDestino o sueltoDestino debe ser mayor a 0.');
+    if (cantidad1Destino <= 0 && cantidad2Destino <= 0) {
+      throw new BadRequestException('Al menos uno de cantidad1Destino o cantidad2Destino debe ser mayor a 0.');
     }
 
     const [producto, cliente] = await Promise.all([
@@ -710,17 +730,17 @@ export class StockService {
         where: { productoId_clienteId_depositoId: { productoId: dto.productoId, clienteId: dto.clienteId, depositoId: dto.depositoId } },
       });
 
-      const dispPallets = item?.cantidadPallets ?? 0;
-      const dispSuelto = item?.cantidadSuelto ?? 0;
+      const disp1 = item?.cantidad1 ?? 0;
+      const disp2 = item?.cantidad2 ?? 0;
 
-      if (palletsOrigen > 0 && dispPallets < palletsOrigen) {
+      if (cantidad1Origen > 0 && disp1 < cantidad1Origen) {
         throw new BadRequestException(
-          `Stock de pallets insuficiente. Disponible: ${dispPallets}.`,
+          `Stock de pallets insuficiente. Disponible: ${disp1}.`,
         );
       }
-      if (sueltoOrigen > 0 && dispSuelto < sueltoOrigen) {
+      if (cantidad2Origen > 0 && disp2 < cantidad2Origen) {
         throw new BadRequestException(
-          `Stock suelto insuficiente. Disponible: ${dispSuelto}.`,
+          `Stock suelto insuficiente. Disponible: ${disp2}.`,
         );
       }
 
@@ -730,18 +750,18 @@ export class StockService {
           productoId: dto.productoId,
           clienteId: dto.clienteId,
           depositoId: dto.depositoId,
-          cantidadPallets: { gte: palletsOrigen },
-          cantidadSuelto: { gte: sueltoOrigen },
+          cantidad1: { gte: cantidad1Origen },
+          cantidad2: { gte: cantidad2Origen },
         },
         data: {
-          cantidadPallets: { decrement: palletsOrigen, increment: palletsDestino },
-          cantidadSuelto: { decrement: sueltoOrigen, increment: sueltoDestino },
+          cantidad1: { decrement: cantidad1Origen, increment: cantidad1Destino },
+          cantidad2: { decrement: cantidad2Origen, increment: cantidad2Destino },
         },
       });
 
       if (dec.count === 0) {
         throw new BadRequestException(
-          `Stock insuficiente. Pallets disponibles: ${dispPallets}, suelto disponible: ${dispSuelto}.`,
+          `Stock insuficiente. Pallets disponibles: ${disp1}, suelto disponible: ${disp2}.`,
         );
       }
 
@@ -758,12 +778,12 @@ export class StockService {
       };
 
       const movOrigen = await tx.movimientoStock.create({
-        data: { ...baseData, cantidadPallets: -palletsOrigen, cantidadSuelto: -sueltoOrigen },
+        data: { ...baseData, cantidad1: -cantidad1Origen, cantidad2: -cantidad2Origen },
         include: movimientoStockRelations,
       });
 
       const movDestino = await tx.movimientoStock.create({
-        data: { ...baseData, cantidadPallets: palletsDestino, cantidadSuelto: sueltoDestino, movimientoVinculadoId: movOrigen.id },
+        data: { ...baseData, cantidad1: cantidad1Destino, cantidad2: cantidad2Destino, movimientoVinculadoId: movOrigen.id },
         include: movimientoStockRelations,
       });
 

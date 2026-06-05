@@ -6,8 +6,8 @@ export class UpdateMovimientoStockDto {
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() depositoId?: string;
   @IsOptional() @IsIn(['ingreso', 'egreso', 'division']) tipo?: string;
-  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidadPallets?: number;
-  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidadSuelto?: number;
+  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidad1?: number;
+  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidad2?: number;
   @IsOptional() @IsString() remitoId?: string;
   @IsOptional() @IsString() fecha?: string;
 }

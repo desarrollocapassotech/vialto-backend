@@ -17,6 +17,16 @@ export class UpdateProductoDto {
   unidadMedida?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  unidad1Nombre?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  unidad2Nombre?: string | null;
+
+  @IsOptional()
   @IsBoolean()
   activo?: boolean;
 }

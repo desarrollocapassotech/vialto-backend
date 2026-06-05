@@ -25,28 +25,28 @@ export class CreateDivisionDto {
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  palletsOrigen?: number;
+  cantidad1Origen?: number;
 
   /** Suelto que se resta (origen). */
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  sueltoOrigen?: number;
+  cantidad2Origen?: number;
 
   /** Pallets que se suman (destino). */
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  palletsDestino?: number;
+  cantidad1Destino?: number;
 
   /** Suelto que se suma (destino). */
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  sueltoDestino?: number;
+  cantidad2Destino?: number;
 
   @IsString()
   @IsNotEmpty()

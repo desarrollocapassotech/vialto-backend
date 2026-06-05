@@ -364,6 +364,8 @@ model Producto {
   codigo            String? // generado por el sistema: P-001, P-002… único por tenant cuando presente
   descripcion       String?
   unidadMedida      String // kg | tn | unidades | rollos | pallets | m3 | litros | otro
+  unidad1Nombre     String   @default("Pallets")
+  unidad2Nombre     String?  @default("Unidad")
   activo            Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -413,8 +415,8 @@ model MovimientoStock {
   clienteId             String
   cliente               Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   tipo                  String // ingreso | egreso | division
-  cantidadPallets       Float    @default(0)
-  cantidadSuelto        Float    @default(0)
+  cantidad1             Float    @default(0)
+  cantidad2             Float    @default(0)
   /**
    * Número de remito interno generado al egresar (ej. R-2026-00001). Distinto del módulo Remito.
    */
@@ -503,8 +505,8 @@ model StockItem {
   cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   depositoId      String
   deposito        Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
-  cantidadPallets Float    @default(0)
-  cantidadSuelto  Float    @default(0)
+  cantidad1 Float    @default(0)
+  cantidad2 Float    @default(0)
   updatedAt       DateTime @updatedAt
 
   @@unique([productoId, clienteId, depositoId])

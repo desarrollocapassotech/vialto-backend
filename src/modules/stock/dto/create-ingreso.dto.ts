@@ -24,13 +24,13 @@ export class CreateIngresoDto {
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  cantidadPallets?: number;
+  cantidad1?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  cantidadSuelto?: number;
+  cantidad2?: number;
 
   @IsString()
   @IsNotEmpty()

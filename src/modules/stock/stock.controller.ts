@@ -173,7 +173,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente). Con soloIngresoEgreso=1 ordena por fecha de movimiento descendente e incluye solo ingreso y egreso.' })
   @Get('movimientos')
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
     @Query('productoId') productoId?: string,
@@ -192,7 +192,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID' })
   @Get('movimientos/:id')
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'superadmin')
   getMovimiento(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findMovimiento(id, auth.tenantId);
@@ -322,7 +322,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Registrar división de bultos (convierte pallets ↔ suelto, actualiza stock)' })
   @Post('divisiones')
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'superadmin')
   createDivision(@Body() dto: CreateDivisionDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createDivision(auth.tenantId, dto, auth.userId);
@@ -330,7 +330,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar divisiones de bultos' })
   @Get('divisiones')
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'superadmin')
   listDivisiones(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -342,7 +342,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Stock disponible por producto/cliente' })
   @Get('disponible')
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'superadmin')
   listStockDisponible(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,

@@ -413,7 +413,7 @@ export class PautService {
       .fillColor(PAUT.white)
       .font('Helvetica-Bold')
       .fontSize(PAUT.title)
-      .text('PERMISO DE ACTUACIÓN DEL TRANSPORTE (NOMINA)', x0, y + 11, {
+      .text('NOMINA', x0, y + 11, {
         width: W,
         align: 'center',
       });

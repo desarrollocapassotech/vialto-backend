@@ -8,10 +8,21 @@ function toClerkOrganizationRole(appRole: string): string {
   return 'org:member';
 }
 
+async function getPlatformRole(userId: string | null | undefined): Promise<string | null> {
+  if (!userId) return null;
+  try {
+    const user = await clerk.users.getUser(userId);
+    const raw = user.publicMetadata?.vialtoRole;
+    return typeof raw === 'string' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class UsersService {
   /**
-   * Lista los miembros de una organización de Clerk.
+   * Lista los miembros de la organización, excluyendo superadmins de plataforma.
    * Clerk es la fuente de verdad para usuarios — no se duplican en Postgres.
    */
   async listByTenant(tenantId: string) {
@@ -19,14 +30,23 @@ export class UsersService {
       organizationId: tenantId,
     });
 
-    return memberships.data.map((m) => ({
-      userId: m.publicUserData?.userId,
-      firstName: m.publicUserData?.firstName,
-      lastName: m.publicUserData?.lastName,
-      email: m.publicUserData?.identifier,
-      role: m.role,
-      createdAt: m.createdAt,
-    }));
+    const results = await Promise.all(
+      memberships.data.map(async (m) => {
+        const userId = m.publicUserData?.userId ?? null;
+        const platformRole = await getPlatformRole(userId);
+        return {
+          userId,
+          firstName: m.publicUserData?.firstName ?? null,
+          lastName: m.publicUserData?.lastName ?? null,
+          email: m.publicUserData?.identifier ?? null,
+          role: m.role,
+          createdAt: m.createdAt,
+          platformRole,
+        };
+      }),
+    );
+
+    return results.filter((u) => u.platformRole !== 'superadmin');
   }
 
   async inviteToOrg(tenantId: string, emailAddress: string, role: string) {

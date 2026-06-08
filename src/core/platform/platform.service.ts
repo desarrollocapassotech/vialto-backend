@@ -51,7 +51,7 @@ function toClerkOrganizationRole(appRole: string): string {
 
 function toVialtoRole(appRole: string): string {
   if (appRole === 'admin') return 'admin';
-  return 'operador';
+  return 'member';
 }
 
 function splitFullName(fullName: string) {

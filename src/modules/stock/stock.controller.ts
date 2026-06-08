@@ -56,7 +56,7 @@ export class StockController {
   @ApiOperation({ summary: 'Listar productos paginado con búsqueda y filtro' })
   @Get('productos/paginated')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findProductosPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ProductosPaginatedQueryDto,
@@ -68,7 +68,7 @@ export class StockController {
   @ApiOperation({ summary: 'Obtener producto por ID' })
   @Get('productos/:id')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getProducto(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findProducto(id, auth.tenantId);
@@ -77,7 +77,7 @@ export class StockController {
   @ApiOperation({ summary: 'Crear producto en el catálogo' })
   @Post('productos')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createProducto(@Body() dto: CreateProductoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createProducto(auth.tenantId, dto);
@@ -86,7 +86,7 @@ export class StockController {
   @ApiOperation({ summary: 'Actualizar producto (incluye desactivar: { activo: false })' })
   @Patch('productos/:id')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   updateProducto(
     @Param('id') id: string,
     @Body() dto: UpdateProductoDto,
@@ -98,7 +98,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar presentaciones del catálogo' })
   @Get('presentaciones')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listPresentaciones(
     @CurrentAuth() auth: AuthPayload,
     @Query('activo') activo?: string,
@@ -112,7 +112,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Crear presentación en el catálogo' })
   @Post('presentaciones')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createPresentacion(@Body() dto: CreatePresentacionDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createPresentacion(auth.tenantId, dto);
@@ -120,7 +120,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Actualizar presentación del catálogo' })
   @Patch('presentaciones/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   updatePresentacion(
     @Param('id') id: string,
     @Body() dto: UpdatePresentacionDto,
@@ -132,7 +132,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Eliminar presentación del catálogo' })
   @Delete('presentaciones/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   removePresentacion(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.removePresentacion(id, auth.tenantId);
@@ -140,7 +140,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar depósitos' })
   @Get('depositos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listDepositos(@CurrentAuth() auth: AuthPayload, @Query('activo') activo?: string) {
     assertTenantId(auth.tenantId);
     return this.service.listDepositos(
@@ -151,7 +151,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Crear depósito' })
   @Post('depositos')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createDeposito(@Body() dto: CreateDepositoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createDeposito(auth.tenantId, dto);
@@ -159,7 +159,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Actualizar depósito' })
   @Patch('depositos/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   updateDeposito(
     @Param('id') id: string,
     @Body() dto: UpdateDepositoDto,
@@ -173,7 +173,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente). Con soloIngresoEgreso=1 ordena por fecha de movimiento descendente e incluye solo ingreso y egreso.' })
   @Get('movimientos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
     @Query('productoId') productoId?: string,
@@ -192,7 +192,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID' })
   @Get('movimientos/:id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getMovimiento(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findMovimiento(id, auth.tenantId);
@@ -200,7 +200,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado del movimiento' })
   @Get('movimientos/:id/remito-adjunto')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   async getRemitoAdjunto(
     @Param('id') id: string,
     @CurrentAuth() auth: AuthPayload,
@@ -212,7 +212,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Registrar movimiento de stock (ingreso, egreso, división)' })
   @Post('movimientos')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createMovimiento(@Body() dto: CreateMovimientoStockDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createMovimiento(auth.tenantId, dto);
@@ -220,7 +220,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Actualizar movimiento de stock' })
   @Patch('movimientos/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   updateMovimiento(
     @Param('id') id: string,
     @Body() dto: UpdateMovimientoStockDto,
@@ -242,7 +242,7 @@ export class StockController {
   @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
   @Post('upload-remito')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -259,7 +259,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Formato del número de remito en egresos (prefijo y dígitos)' })
   @Get('egresos/remito-config')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getEgresoRemitoConfig(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getEgresoRemitoConfig(auth.tenantId);
@@ -267,7 +267,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Actualizar formato del número de remito en egresos' })
   @Patch('egresos/remito-config')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   patchEgresoRemitoConfig(
     @Body() dto: UpdateStockEgresoRemitoConfigDto,
     @CurrentAuth() auth: AuthPayload,
@@ -278,7 +278,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Registrar egreso / despacho (descuenta stock y asigna número de remito)' })
   @Post('egresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   createEgreso(@Body() dto: CreateEgresoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createEgreso(auth.tenantId, dto, auth.userId);
@@ -286,7 +286,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar egresos recientes' })
   @Get('egresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listEgresos(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -300,7 +300,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Registrar ingreso de mercadería al depósito (actualiza stock)' })
   @Post('ingresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   createIngreso(@Body() dto: CreateIngresoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createIngreso(auth.tenantId, dto, auth.userId);
@@ -308,7 +308,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar ingresos al depósito' })
   @Get('ingresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listIngresos(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -322,7 +322,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Registrar división de bultos (convierte pallets ↔ suelto, actualiza stock)' })
   @Post('divisiones')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   createDivision(@Body() dto: CreateDivisionDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createDivision(auth.tenantId, dto, auth.userId);
@@ -330,7 +330,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar divisiones de bultos' })
   @Get('divisiones')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listDivisiones(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -342,7 +342,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Stock disponible por producto/cliente' })
   @Get('disponible')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listStockDisponible(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,

@@ -45,7 +45,7 @@ export class CombustibleService {
   ) {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
 
-    if (auth.role === 'operador') {
+    if (auth.role === 'member') {
       where['createdBy'] = auth.userId;
     }
 
@@ -74,7 +74,7 @@ export class CombustibleService {
       where: { id, tenantId: auth.tenantId },
     });
     if (!carga) throw new NotFoundException('Carga no encontrada');
-    if (auth.role === 'operador' && carga.createdBy !== auth.userId) {
+    if (auth.role === 'member' && carga.createdBy !== auth.userId) {
       throw new ForbiddenException('No tenés acceso a esta carga');
     }
     return carga;
@@ -105,7 +105,7 @@ export class CombustibleService {
       dto.choferId === undefined ? carga.choferId : dto.choferId;
     await this.assertVehiculoChofer(auth.tenantId, nextVehiculo, nextChofer);
 
-    if (auth.role === 'operador' && carga.createdBy !== auth.userId) {
+    if (auth.role === 'member' && carga.createdBy !== auth.userId) {
       throw new ForbiddenException('No podés editar esta carga');
     }
 

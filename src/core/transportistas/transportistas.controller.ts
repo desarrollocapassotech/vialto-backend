@@ -29,7 +29,7 @@ export class TransportistasController {
 
   @ApiOperation({ summary: 'Listar todos los transportistas' })
   @Get()
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId);
@@ -37,7 +37,7 @@ export class TransportistasController {
 
   @ApiOperation({ summary: 'Obtener transportista por ID' })
   @Get(':id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);
@@ -45,7 +45,7 @@ export class TransportistasController {
 
   @ApiOperation({ summary: 'Crear transportista' })
   @Post()
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateTransportistaDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto);
@@ -53,7 +53,7 @@ export class TransportistasController {
 
   @ApiOperation({ summary: 'Actualizar datos del transportista' })
   @Patch(':id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateTransportistaDto,

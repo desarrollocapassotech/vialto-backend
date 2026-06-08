@@ -48,7 +48,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Listar viajes (opcionalmente filtrar por estado)' })
   @Get()
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   list(@CurrentAuth() auth: AuthPayload, @Query('estado') estado?: string) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId, estado);
@@ -56,7 +56,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Estadísticas de viajes del tenant (conteo por estado, totales)' })
   @Get('stats')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   stats(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getStats(auth.tenantId);
@@ -64,7 +64,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Listar viajes paginado con filtros avanzados' })
   @Get('paginated')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ViajesPaginatedQueryDto,
@@ -97,7 +97,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Viajes con saldo pendiente de pago al transportista' })
   @Get('saldo-pendiente-transportista')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   saldoPendienteTransportista(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getViajesSaldoPendienteTransportista(auth.tenantId);
@@ -108,7 +108,7 @@ export class ViajesController {
       'Resumen de ganancia bruta (automática o manual según monedas de facturación y pago transportista)',
   })
   @Get(':id/ganancia-bruta')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getGananciaBruta(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getGananciaBruta(id, auth.tenantId);
@@ -118,7 +118,7 @@ export class ViajesController {
     summary: 'Documentos exportables del viaje (PAUT solo si hay transportista externo)',
   })
   @Get(':id/exportaciones')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getExportaciones(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getExportaciones(id, auth.tenantId);
@@ -126,7 +126,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Datos sugeridos para el modal de exportación MIC/CRT' })
   @Get(':id/mic-crt/prefill')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   getMicCrtPrefill(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.micCrt.getPrefill(id, auth.tenantId);
@@ -134,7 +134,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Alias de mic-crt/prefill (documento aduanero)' })
   @Get(':id/documento-aduanero')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   getDocumentoAduanero(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.micCrt.getPrefill(id, auth.tenantId);
@@ -145,7 +145,7 @@ export class ViajesController {
     deprecated: true,
   })
   @Get(':id/mic-crt')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   micCrtGetDeprecated(@Res() res: Response) {
     res.status(400).json({
       message:
@@ -156,7 +156,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Generar PDF MIC/CRT con datos comerciales/aduaneros del formulario' })
   @Post(':id/mic-crt')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   async generateMicCrt(
     @Param('id') id: string,
     @Body() dto: MicCrtExportDto,
@@ -186,7 +186,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Generar PDF PAUT del viaje' })
   @Get(':id/paut')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   async generatePaut(
     @Param('id') id: string,
     @CurrentAuth() auth: AuthPayload,
@@ -214,7 +214,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Obtener viaje por ID' })
   @Get(':id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);
@@ -222,7 +222,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Crear viaje' })
   @Post()
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateViajeDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, auth.userId, dto);
@@ -230,7 +230,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Actualizar viaje' })
   @Patch(':id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateViajeDto,
@@ -242,7 +242,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Registrar pago al transportista en un viaje' })
   @Post(':id/pagos-transportista')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   addPagoTransportista(
     @Param('id') id: string,
     @Body() dto: AddPagoTransportistaDto,
@@ -254,7 +254,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Eliminar pago al transportista por índice' })
   @Delete(':id/pagos-transportista/:index')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   deletePagoTransportista(
     @Param('id') id: string,
     @Param('index', ParseIntPipe) index: number,
@@ -266,7 +266,7 @@ export class ViajesController {
 
   @ApiOperation({ summary: 'Registrar gasto adicional en un viaje' })
   @Post(':id/gastos')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   addGasto(
     @Param('id') id: string,
     @Body() dto: AddGastoDto,

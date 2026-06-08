@@ -76,7 +76,7 @@ export class ImportacionesController {
   /** Historial de importaciones del tenant */
   @ApiOperation({ summary: 'Historial de importaciones del tenant' })
   @Get('logs')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   getLogs(@CurrentAuth() auth: AuthPayload, @Query('modulo') modulo?: string) {
     assertTenantId(auth.tenantId);
     return this.service.getLogs(auth.tenantId, modulo);
@@ -85,7 +85,7 @@ export class ImportacionesController {
   /** Detalle de un log específico (incluye resultado por fila) */
   @ApiOperation({ summary: 'Detalle de un log de importación (resultado por fila)' })
   @Get('logs/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   getLog(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getLog(auth.tenantId, id);

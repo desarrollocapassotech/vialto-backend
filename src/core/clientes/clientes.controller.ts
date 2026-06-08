@@ -23,7 +23,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Listar todos los clientes' })
   @Get()
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId);
@@ -31,7 +31,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Listar clientes paginado con búsqueda' })
   @Get('paginated')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findAllPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
@@ -42,7 +42,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Obtener cliente por ID' })
   @Get(':id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);
@@ -50,7 +50,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Crear cliente' })
   @Post()
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateClienteDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto);
@@ -58,7 +58,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Actualizar datos del cliente' })
   @Patch(':id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateClienteDto,

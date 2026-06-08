@@ -21,7 +21,7 @@ export class ReportesController {
 
   @ApiOperation({ summary: 'Resumen cross-módulo · Fase 8 — aún no implementado' })
   @Get('resumen')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   resumen(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.resumen(auth.tenantId);
@@ -29,7 +29,7 @@ export class ReportesController {
 
   @ApiOperation({ summary: 'Tablero general cross-módulo · Fase 8 — aún no implementado' })
   @Get('tablero-general')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   tableroGeneral(
     @CurrentAuth() auth: AuthPayload,
     @Query('horasEnCurso', new ParseIntPipe({ optional: true })) horasEnCurso?: number,

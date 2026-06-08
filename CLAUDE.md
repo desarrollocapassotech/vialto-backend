@@ -129,7 +129,6 @@ model Tenant {
 | Rol Clerk | Equivalente | Permisos |
 |---|---|---|
 | `org:admin` | Admin | Gestión completa de su empresa |
-| `org:supervisor` | Supervisor | Ve todo, no puede eliminar |
 | `org:member` | Operador / Chofer | Solo registra y ve sus propias operaciones |
 
 ---

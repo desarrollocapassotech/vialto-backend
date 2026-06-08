@@ -26,7 +26,7 @@ export class FacturacionController {
 
   @ApiOperation({ summary: 'Listar facturas (opcionalmente filtrar por cliente)' })
   @Get('facturas')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listFacturas(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -37,7 +37,7 @@ export class FacturacionController {
 
   @ApiOperation({ summary: 'Obtener factura por ID' })
   @Get('facturas/:id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getFactura(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findFactura(id, auth.tenantId);
@@ -45,7 +45,7 @@ export class FacturacionController {
 
   @ApiOperation({ summary: 'Crear factura' })
   @Post('facturas')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createFactura(@Body() dto: CreateFacturaDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createFactura(auth.tenantId, dto);
@@ -53,7 +53,7 @@ export class FacturacionController {
 
   @ApiOperation({ summary: 'Actualizar factura (estado, vencimiento)' })
   @Patch('facturas/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   updateFactura(
     @Param('id') id: string,
     @Body() dto: UpdateFacturaDto,
@@ -73,7 +73,7 @@ export class FacturacionController {
 
   @ApiOperation({ summary: 'Listar pagos (opcionalmente filtrar por factura)' })
   @Get('pagos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listPagos(
     @CurrentAuth() auth: AuthPayload,
     @Query('facturaId') facturaId?: string,
@@ -84,7 +84,7 @@ export class FacturacionController {
 
   @ApiOperation({ summary: 'Registrar pago sobre una factura' })
   @Post('pagos')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createPago(@Body() dto: CreatePagoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createPago(auth.tenantId, dto);

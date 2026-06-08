@@ -371,7 +371,7 @@ model Producto {
   /** Denormalizado desde presentacion1.nombre (lectura en stock). */
   unidad1Nombre     String   @default("Pallets")
   /** Denormalizado desde presentacion2.nombre; null si no hay segunda cantidad. */
-  unidad2Nombre     String?  @default("Unidad")
+  unidad2Nombre     String?  @default("Suelto")
   activo            Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -436,6 +436,7 @@ model MovimientoStock {
    * URL del remito escaneado (p. ej. Cloudinary) — preparado para carga futura.
    */
   remitoUrl             String?
+  lote                  String?
   observaciones         String?
   /**
    * ID del movimiento par en una división (el origen apunta al destino y viceversa).

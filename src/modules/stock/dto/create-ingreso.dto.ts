@@ -40,6 +40,11 @@ export class CreateIngresoDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
+  lote?: string;
+
+  @IsOptional()
+  @IsString()
   observaciones?: string;
 
   /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en ingresos. */

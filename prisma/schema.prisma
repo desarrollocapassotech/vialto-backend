@@ -438,6 +438,9 @@ model MovimientoStock {
   remitoUrl             String?
   lote                  String?
   observaciones         String?
+  entregadoPor          String?  // quien realizó la entrega física (ej. "Cacho", "Gustavo")
+  destinatario          String?  // cliente final del despacho (ej. "Luvi SRL")
+  destinoFinal          String?  // dirección o ruta (ej. "Express Brio", "Pampa 1087 San Fernando")
   /**
    * ID del movimiento par en una división (el origen apunta al destino y viceversa).
    */

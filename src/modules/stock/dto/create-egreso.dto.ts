@@ -47,6 +47,21 @@ export class CreateEgresoDto {
   @IsString()
   observaciones?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  entregadoPor?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  destinatario?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  destinoFinal?: string;
+
   /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en egresos. */
   @IsString()
   @IsNotEmpty()

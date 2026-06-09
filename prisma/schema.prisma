@@ -283,6 +283,8 @@ model Factura {
   fechaVencimiento DateTime?
   estado           String         @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
+  ivaPct           Float?         @default(21)
+  comprobanteUrl   String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
   // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
   cbteTipo         Int? // 1=Factura A, 6=Factura B
   cbteNro          Int?
@@ -742,6 +744,8 @@ model Liquidacion {
   // borrador | pendiente_cae | autorizado | error | anulado
   arcaError  String?
   reintentos Int     @default(0)
+
+  comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
 
   // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
   payloadHash String?

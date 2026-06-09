@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
@@ -31,6 +32,7 @@ export class LiquidacionesService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
     private readonly arcaClient: ArcaClientService,
     private readonly arcaConfig: ArcaConfigService,
   ) {}
@@ -40,12 +42,26 @@ export class LiquidacionesService {
     return this.prisma as PrismaAny;
   }
 
+  async uploadComprobante(tenantId: string, file: Express.Multer.File): Promise<{ url: string }> {
+    const name = file.originalname.toLowerCase();
+    const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
+    const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
+    if (!isPdf && !isImage) {
+      throw new BadRequestException('El comprobante debe ser un PDF o una imagen.');
+    }
+    const url = await this.cloudinary.uploadComprobanteArchivo(
+      tenantId,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    return { url };
+  }
+
   // ── Liquidaciones (CVLP Tipo 60) ──────────────────────────────────────────
 
   async createLiquidacion(tenantId: string, userId: string, dto: CreateLiquidacionDto) {
-    await this.arcaConfig.validateConfigExists(tenantId);
-
-    const config = await this.arcaConfig.findWithApiKey(tenantId);
+    const config = await this.arcaConfig.findPublic(tenantId);
 
     // Obtener el transportista y su comisionPct
     const transportistaRaw = await this.prisma.transportista.findUnique({
@@ -60,8 +76,8 @@ export class LiquidacionesService {
       comisionPct: number | null;
     };
 
-    // Determinar el % de comisión: dto > transportista > config default
-    const comisionPct = dto.comisionPct ?? transportista.comisionPct ?? config.comisionPctDefault;
+    // Determinar el % de comisión: dto > transportista > config default > 0
+    const comisionPct = dto.comisionPct ?? transportista.comisionPct ?? config?.comisionPctDefault ?? 0;
 
     // Obtener los viajes y validar que pertenezcan al tenant y al transportista
     const viajes = await this.prisma.viaje.findMany({
@@ -136,9 +152,11 @@ export class LiquidacionesService {
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
     const gastosAdmin = round2(viajesDetalle.reduce((acc, d) => acc + d.gastosAdmin, 0));
-    // IVA base = bruto - comision (los gastos admin van al 0% IVA, no reducen la base gravada)
-    const gastosAdminIva = round2((bruto - comision) * config.ivaGastosAdmin / 100);
-    const liquido = round2(bruto - comision - gastosAdmin + gastosAdminIva);
+    // netoGravado = bruto - comision - gastos; IVA se aplica sobre el neto gravado
+    const netoGravado = round2(bruto - comision - gastosAdmin);
+    const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
+    const gastosAdminIva = round2(netoGravado * ivaPct / 100);
+    const liquido = round2(netoGravado + gastosAdminIva);
 
     const liquidacion = await this.db.liquidacion.create({
       data: {
@@ -155,7 +173,8 @@ export class LiquidacionesService {
         liquido,
         estado: 'borrador',
         cbteTipo: 60,
-        ptoVenta: config.ptoVentaCvlp,
+        ptoVenta: config?.ptoVentaCvlp ?? 0,
+        comprobanteUrl: dto.comprobanteUrl ?? null,
         createdBy: userId,
         updatedAt: new Date(),
         viajes: {

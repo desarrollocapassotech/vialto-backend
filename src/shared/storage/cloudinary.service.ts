@@ -114,6 +114,63 @@ export class CloudinaryService {
     return this.uploadRemitoArchivo(tenantId, buffer, originalName, 'application/pdf');
   }
 
+  async uploadComprobanteArchivo(
+    tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ): Promise<string> {
+    if (!this.configured) {
+      throw new ServiceUnavailableException(
+        'El almacenamiento de comprobantes no está configurado. Contactá al administrador.',
+      );
+    }
+    if (buffer.length > MAX_REMITO_PDF_BYTES) {
+      throw new ServiceUnavailableException('El archivo no puede superar 10 MB.');
+    }
+
+    const isPdf = this.isPdfUpload(mimeType, originalName);
+    const baseName = String(originalName ?? 'comprobante')
+      .replace(/\.[^.]+$/i, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'comprobante';
+
+    const publicId = `${Date.now()}-${baseName}`;
+
+    try {
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `vialto/comprobantes/${tenantId}`,
+            resource_type: isPdf ? 'raw' : 'image',
+            public_id: publicId,
+            access_mode: 'public',
+            type: 'upload',
+          },
+          (error, uploadResult) => {
+            if (error || !uploadResult) {
+              reject(error ?? new Error('Cloudinary no devolvió resultado'));
+              return;
+            }
+            resolve(uploadResult);
+          },
+        );
+        stream.end(buffer);
+      });
+
+      return result.secure_url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al subir el archivo';
+      this.logger.error(`Cloudinary comprobante upload failed: ${message}`);
+      throw new BadGatewayException(
+        message.includes('Invalid cloud_name')
+          ? 'Cloudinary mal configurado (cloud name inválido). Revisá las variables de entorno.'
+          : 'No se pudo subir el comprobante. Intentá de nuevo más tarde.',
+      );
+    }
+  }
+
   /** URL de entrega firmada (1 h) para recursos en nuestro Cloudinary. */
   resolveDeliveryUrl(storedUrl: string): string {
     const parsed = this.parseCloudinaryStoredUrl(storedUrl);

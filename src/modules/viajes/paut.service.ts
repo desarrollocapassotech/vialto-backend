@@ -168,7 +168,7 @@ export class PautService {
 
     if (Object.keys(missingGroups).length > 0) {
       throw new BadRequestException({
-        message: 'Faltan datos para generar el PAUT',
+        message: 'Faltan datos para generar la nómina',
         missingGroups,
       });
     }

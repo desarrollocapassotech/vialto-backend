@@ -136,7 +136,8 @@ export class LiquidacionesService {
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
     const gastosAdmin = round2(viajesDetalle.reduce((acc, d) => acc + d.gastosAdmin, 0));
-    const gastosAdminIva = round2(bruto * config.ivaGastosAdmin / 100);
+    // IVA base = bruto - comision (los gastos admin van al 0% IVA, no reducen la base gravada)
+    const gastosAdminIva = round2((bruto - comision) * config.ivaGastosAdmin / 100);
     const liquido = round2(bruto - comision - gastosAdmin + gastosAdminIva);
 
     const liquidacion = await this.db.liquidacion.create({
@@ -222,6 +223,9 @@ export class LiquidacionesService {
         60,
         tenantId,
         liquidacionId,
+        undefined,
+        config.certPem,
+        config.keyPem,
       );
       const cbteNro = ultimoCbte + 1;
 
@@ -230,12 +234,12 @@ export class LiquidacionesService {
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
       const condicionIvaReceptorId = transportista?.condicionIva ?? 1;
 
-      // ImpNeto AFIP = suma de todos los subtotales (incluyendo gastos al 0% IVA)
-      // ImpIVA       = IVA calculado solo sobre (bruto - comisión) al 21%
-      // AlicIva.BaseImp = base gravada al 21% (bruto - comisión), ≠ ImpNeto
-      const impIva = round2(liquidacion.gastosAdminIva);
-      const ivaBase = round2(liquidacion.bruto - liquidacion.comision);  // base gravada 21%
+      // impNeto  = todos los ítems sin IVA (bruto - comision - gastosAdmin)
+      // ivaBase  = base gravada al 21% = bruto - comision (gastosAdmin va al 0%)
+      // ImpTotal = impNeto + impIva = liquido
       const impNeto = round2(liquidacion.bruto - liquidacion.comision - liquidacion.gastosAdmin);
+      const impIva = round2(liquidacion.gastosAdminIva);
+      const ivaBase = round2(liquidacion.bruto - liquidacion.comision);
       const response = await this.arcaClient.autorizarComprobante(
         config.apiKey,
         {
@@ -258,6 +262,9 @@ export class LiquidacionesService {
         },
         tenantId,
         liquidacionId,
+        undefined,
+        config.certPem,
+        config.keyPem,
       );
 
       await this.db.liquidacion.update({
@@ -321,6 +328,9 @@ export class LiquidacionesService {
       60,
       tenantId,
       liquidacionId,
+      undefined,
+      config.certPem,
+      config.keyPem,
     );
     const cbteNro = ultimoCbte + 1;
 
@@ -353,6 +363,9 @@ export class LiquidacionesService {
       },
       tenantId,
       liquidacionId,
+      undefined,
+      config.certPem,
+      config.keyPem,
     );
 
     await this.db.liquidacion.update({
@@ -365,6 +378,10 @@ export class LiquidacionesService {
 
   async getConfig(tenantId: string) {
     return this.arcaConfig.findPublic(tenantId);
+  }
+
+  async upsertConfig(tenantId: string, dto: import('./dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
+    return this.arcaConfig.upsert(tenantId, dto);
   }
 
   async deleteLiquidacion(tenantId: string, id: string) {
@@ -480,6 +497,8 @@ export class LiquidacionesService {
         tenantId,
         undefined,
         facturaId,
+        config.certPem,
+        config.keyPem,
       );
       const cbteNro = ultimoCbte + 1;
 
@@ -518,6 +537,8 @@ export class LiquidacionesService {
         tenantId,
         undefined,
         facturaId,
+        config.certPem,
+        config.keyPem,
       );
 
       await (this.prisma as PrismaAny).factura.update({

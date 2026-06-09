@@ -699,6 +699,9 @@ model ArcaConfig {
   comisionPctDefault Float    @default(8)
   comisionPctAlt     Float    @default(7)
   ivaGastosAdmin     Float    @default(21)
+  // Certificado digital AFIP (PEM) — nunca se expone en la API pública
+  certPem            String?
+  keyPem             String?
   updatedAt          DateTime @updatedAt
 
   @@map("arca_configs")

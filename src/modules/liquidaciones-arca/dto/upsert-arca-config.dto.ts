@@ -24,4 +24,7 @@ export class UpsertArcaConfigDto {
   @IsNumber() @Min(0) @Max(100) comisionPctDefault: number;
   @IsNumber() @Min(0) @Max(100) comisionPctAlt: number;
   @IsNumber() @Min(0) @Max(100) ivaGastosAdmin: number;
+
+  @IsOptional() @IsString() certPem?: string;
+  @IsOptional() @IsString() keyPem?: string;
 }

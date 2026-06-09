@@ -22,6 +22,7 @@ import { LiquidacionesService } from './liquidaciones.service';
 import { LiquidacionPdfService } from './liquidacion-pdf.service';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
+import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
 
 @ApiTags('Liquidaciones ARCA')
 @ApiBearerAuth('clerk-jwt')
@@ -36,10 +37,16 @@ export class LiquidacionesController {
 
   // ── Config (lectura pública para el tenant) ───────────────────────────────
 
-  @ApiOperation({ summary: 'Obtener configuración ARCA del tenant (solo lectura)' })
+  @ApiOperation({ summary: 'Obtener configuración ARCA del tenant' })
   @Get('config')
   getConfig(@CurrentAuth() auth: AuthPayload) {
     return this.service.getConfig(auth.tenantId!);
+  }
+
+  @ApiOperation({ summary: 'Crear / actualizar configuración ARCA del tenant' })
+  @Post('config')
+  upsertConfig(@CurrentAuth() auth: AuthPayload, @Body() dto: UpsertArcaConfigDto) {
+    return this.service.upsertConfig(auth.tenantId!, dto);
   }
 
   // ── Liquidaciones (CVLP Tipo 60) ──────────────────────────────────────────

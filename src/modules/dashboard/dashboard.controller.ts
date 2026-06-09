@@ -19,7 +19,7 @@ export class DashboardController {
 
   @ApiOperation({ summary: 'Resumen del dashboard del tenant (KPIs, últimos viajes, alertas)' })
   @Get('resumen')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getResumen(@CurrentAuth() auth: AuthPayload, @Query() query: DashboardQueryDto) {
     assertTenantId(auth.tenantId);
     return this.dashboardService.getOwnerDashboard(

@@ -1,18 +1,36 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { StockService } from './stock.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { ProductosPaginatedQueryDto } from './dto/productos-paginated-query.dto';
-import { CreatePresentacionDto } from './dto/create-presentacion.dto';
-import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
+import { CreateDepositoDto } from './dto/create-deposito.dto';
+import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { CreateMovimientoStockDto } from './dto/create-movimiento-stock.dto';
 import { UpdateMovimientoStockDto } from './dto/update-movimiento-stock.dto';
 import { CreateIngresoDto } from './dto/create-ingreso.dto';
 import { CreateEgresoDto } from './dto/create-egreso.dto';
+import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateStockEgresoRemitoConfigDto } from './dto/update-stock-egreso-remito-config.dto';
+import { CreatePresentacionDto } from './dto/create-presentacion.dto';
+import { UpdatePresentacionDto } from './dto/update-presentacion.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -38,7 +56,7 @@ export class StockController {
   @ApiOperation({ summary: 'Listar productos paginado con búsqueda y filtro' })
   @Get('productos/paginated')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findProductosPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ProductosPaginatedQueryDto,
@@ -47,10 +65,10 @@ export class StockController {
     return this.service.findAllProductosPaginated(auth.tenantId, query);
   }
 
-  @ApiOperation({ summary: 'Obtener producto por ID (incluye presentaciones)' })
+  @ApiOperation({ summary: 'Obtener producto por ID' })
   @Get('productos/:id')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getProducto(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findProducto(id, auth.tenantId);
@@ -59,7 +77,7 @@ export class StockController {
   @ApiOperation({ summary: 'Crear producto en el catálogo' })
   @Post('productos')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createProducto(@Body() dto: CreateProductoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createProducto(auth.tenantId, dto);
@@ -68,7 +86,7 @@ export class StockController {
   @ApiOperation({ summary: 'Actualizar producto (incluye desactivar: { activo: false })' })
   @Patch('productos/:id')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   updateProducto(
     @Param('id') id: string,
     @Body() dto: UpdateProductoDto,
@@ -78,61 +96,84 @@ export class StockController {
     return this.service.updateProducto(id, auth.tenantId, dto);
   }
 
-  // ───────────────── PRESENTACIONES ─────────────────────────────────────────
-
-  @ApiOperation({ summary: 'Listar presentaciones de un producto' })
-  @Get('productos/:productoId/presentaciones')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @ApiOperation({ summary: 'Listar presentaciones del catálogo' })
+  @Get('presentaciones')
+  @Roles('admin', 'member', 'superadmin')
   listPresentaciones(
-    @Param('productoId') productoId: string,
     @CurrentAuth() auth: AuthPayload,
+    @Query('activo') activo?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listPresentaciones(productoId, auth.tenantId);
+    return this.service.listPresentaciones(
+      auth.tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
   }
 
-  @ApiOperation({ summary: 'Agregar presentación a un producto' })
-  @Post('productos/:productoId/presentaciones')
-  @Roles('admin', 'supervisor', 'superadmin')
-  createPresentacion(
-    @Param('productoId') productoId: string,
-    @Body() dto: CreatePresentacionDto,
-    @CurrentAuth() auth: AuthPayload,
-  ) {
+  @ApiOperation({ summary: 'Crear presentación en el catálogo' })
+  @Post('presentaciones')
+  @Roles('admin', 'superadmin')
+  createPresentacion(@Body() dto: CreatePresentacionDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    return this.service.createPresentacion(productoId, auth.tenantId, dto);
+    return this.service.createPresentacion(auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar presentación' })
-  @Patch('productos/:productoId/presentaciones/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @ApiOperation({ summary: 'Actualizar presentación del catálogo' })
+  @Patch('presentaciones/:id')
+  @Roles('admin', 'superadmin')
   updatePresentacion(
-    @Param('productoId') productoId: string,
     @Param('id') id: string,
     @Body() dto: UpdatePresentacionDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.updatePresentacion(productoId, id, auth.tenantId, dto);
+    return this.service.updatePresentacion(id, auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Eliminar presentación' })
-  @Delete('productos/:productoId/presentaciones/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
-  removePresentacion(
-    @Param('productoId') productoId: string,
+  @ApiOperation({ summary: 'Eliminar presentación del catálogo' })
+  @Delete('presentaciones/:id')
+  @Roles('admin', 'superadmin')
+  removePresentacion(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.removePresentacion(id, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Listar depósitos' })
+  @Get('depositos')
+  @Roles('admin', 'member', 'superadmin')
+  listDepositos(@CurrentAuth() auth: AuthPayload, @Query('activo') activo?: string) {
+    assertTenantId(auth.tenantId);
+    return this.service.listDepositos(
+      auth.tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
+  }
+
+  @ApiOperation({ summary: 'Crear depósito' })
+  @Post('depositos')
+  @Roles('admin', 'superadmin')
+  createDeposito(@Body() dto: CreateDepositoDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.createDeposito(auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Actualizar depósito' })
+  @Patch('depositos/:id')
+  @Roles('admin', 'superadmin')
+  updateDeposito(
     @Param('id') id: string,
+    @Body() dto: UpdateDepositoDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.removePresentacion(productoId, id, auth.tenantId);
+    return this.service.updateDeposito(id, auth.tenantId, dto);
   }
 
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
   @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente). Con soloIngresoEgreso=1 ordena por fecha de movimiento descendente e incluye solo ingreso y egreso.' })
   @Get('movimientos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
     @Query('productoId') productoId?: string,
@@ -151,15 +192,27 @@ export class StockController {
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID' })
   @Get('movimientos/:id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'superadmin')
   getMovimiento(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findMovimiento(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado del movimiento' })
+  @Get('movimientos/:id/remito-adjunto')
+  @Roles('admin', 'member', 'superadmin')
+  async getRemitoAdjunto(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    await this.service.streamRemitoAdjunto(id, auth.tenantId, res);
+  }
+
   @ApiOperation({ summary: 'Registrar movimiento de stock (ingreso, egreso, división)' })
   @Post('movimientos')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   createMovimiento(@Body() dto: CreateMovimientoStockDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createMovimiento(auth.tenantId, dto);
@@ -167,7 +220,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Actualizar movimiento de stock' })
   @Patch('movimientos/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   updateMovimiento(
     @Param('id') id: string,
     @Body() dto: UpdateMovimientoStockDto,
@@ -185,11 +238,28 @@ export class StockController {
     return this.service.removeMovimiento(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Subir remito escaneado (PDF) a almacenamiento' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('upload-remito')
+  @Roles('admin', 'member', 'superadmin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadRemito(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
+    return this.service.uploadRemitoPdf(auth.tenantId, file);
+  }
+
   // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
 
   @ApiOperation({ summary: 'Formato del número de remito en egresos (prefijo y dígitos)' })
   @Get('egresos/remito-config')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   getEgresoRemitoConfig(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getEgresoRemitoConfig(auth.tenantId);
@@ -197,7 +267,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Actualizar formato del número de remito en egresos' })
   @Patch('egresos/remito-config')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   patchEgresoRemitoConfig(
     @Body() dto: UpdateStockEgresoRemitoConfigDto,
     @CurrentAuth() auth: AuthPayload,
@@ -208,7 +278,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Registrar egreso / despacho (descuenta stock y asigna número de remito)' })
   @Post('egresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   createEgreso(@Body() dto: CreateEgresoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createEgreso(auth.tenantId, dto, auth.userId);
@@ -216,7 +286,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar egresos recientes' })
   @Get('egresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listEgresos(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -230,7 +300,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Registrar ingreso de mercadería al depósito (actualiza stock)' })
   @Post('ingresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   createIngreso(@Body() dto: CreateIngresoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createIngreso(auth.tenantId, dto, auth.userId);
@@ -238,7 +308,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar ingresos al depósito' })
   @Get('ingresos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   listIngresos(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -248,9 +318,31 @@ export class StockController {
     return this.service.listIngresos(auth.tenantId, clienteId, productoId);
   }
 
-  @ApiOperation({ summary: 'Stock disponible por producto/presentación/cliente' })
+  // ───────────────── DIVISIONES ─────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Registrar división de bultos (convierte pallets ↔ suelto, actualiza stock)' })
+  @Post('divisiones')
+  @Roles('admin', 'superadmin')
+  createDivision(@Body() dto: CreateDivisionDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.createDivision(auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar divisiones de bultos' })
+  @Get('divisiones')
+  @Roles('admin', 'superadmin')
+  listDivisiones(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listDivisiones(auth.tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Stock disponible por producto/cliente' })
   @Get('disponible')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'superadmin')
   listStockDisponible(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,

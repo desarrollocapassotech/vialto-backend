@@ -129,7 +129,6 @@ model Tenant {
 | Rol Clerk | Equivalente | Permisos |
 |---|---|---|
 | `org:admin` | Admin | Gestión completa de su empresa |
-| `org:supervisor` | Supervisor | Ve todo, no puede eliminar |
 | `org:member` | Operador / Chofer | Solo registra y ve sus propias operaciones |
 
 ---
@@ -222,7 +221,7 @@ src/
     viajes/                 ← ✅ Fase 1 — Fernández
     facturacion/            ← ✅ Fase 5 — González (extiende viajes)
     cuenta-corriente/       ← ✅ Fase 2 — Riedel, Melisa
-    stock/                  ← 🔲 Fase 2 — Riedel
+    stock/                  ← ✅ Fase 2 — Riedel (implementado: inventario, ingresos, egresos, divisiones, depósitos, presentaciones; pendiente: lote, datos de entrega, exportación)
     combustible/            ← 🔲 Fase 4 — Wichi Toledo, Altamirano
     mantenimiento/          ← 🔲 Fase 4 — Wichi Toledo
     remitos/                ← 🔲 Fase 3 — Melisa
@@ -356,34 +355,131 @@ model MovimientoCuentaCorriente {
 
 ---
 
-### `stock` — Gestión de stock (Riedel)
+### `stock` — Gestión de stock
+
+El módulo de stock es genérico y sirve para cualquier tipo de empresa. El stock se expresa como **dos contadores configurables por producto** (`cantidad1` y `cantidad2`), cuyos nombres son definidos por el tenant al configurar el producto (ej. "Pallets" / "Suelto", "Kg" / "Bolsas", etc.). Si un producto solo necesita una unidad, `cantidad2` siempre es 0 y `unidad2Nombre` es null.
+
+Las unidades de medida se gestionan a través de un **catálogo global de Presentaciones** por tenant. Cada producto vincula `presentacion1Id` y opcionalmente `presentacion2Id` desde ese catálogo. Los nombres se desnormalizan en `unidad1Nombre` y `unidad2Nombre` en `Producto` para lectura eficiente.
+
+El stock también está segmentado por **depósito físico** (`Deposito`). Un tenant puede tener múltiples depósitos.
+
+Los tipos de movimiento son: `ingreso`, `egreso` y `division` (convierte cantidad entre unidad1 y unidad2 dentro del mismo depósito).
+
+Los egresos generan un número de remito interno automático con formato configurable (`remitoPrefix-YYYY-NNNNN`), controlado por `StockEgresoRemitoConfig` y secuenciado anualmente por `StockRemitoSecuencia`.
+
+**Pendiente de implementar:** campos `lote`, `entregadoPor`, `destinatario` y `destinoFinal` en `MovimientoStock`.
 
 ```prisma
-model Producto {
-  id        String   @id @default(cuid())
-  tenantId  String
-  nombre    String
-  unidad    String   // kg | unidad | palet | rollo | otro
-  createdAt DateTime @default(now())
+// Catálogo global de unidades de medida por tenant
+model Presentacion {
+  id                String   @id @default(cuid())
+  tenantId          String
+  nombre            String                           // ej. "Pallets", "Suelto", "Kg"
+  nombreNormalizado String                           // lower/trim para unicidad
+  activo            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  @@index([tenantId])
+  @@unique([tenantId, nombreNormalizado])
+  @@map("presentaciones")
+}
+
+model Producto {
+  id                String        @id @default(cuid())
+  tenantId          String
+  nombre            String
+  nombreNormalizado String                           // lower/trim para unicidad
+  codigo            String?                          // P-001, P-002… generado por el sistema
+  descripcion       String?
+  presentacion1Id   String?                          // unidad principal (obligatoria al operar)
+  presentacion2Id   String?                          // unidad secundaria (opcional)
+  unidad1Nombre     String        @default("Pallets") // denormalizado de presentacion1.nombre
+  unidad2Nombre     String?       @default("Unidad")  // denormalizado de presentacion2.nombre; null = una sola unidad
+  activo            Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([tenantId, nombreNormalizado])
+  @@unique([tenantId, codigo])
+  @@map("productos")
+}
+
+model Deposito {
+  id          String   @id @default(cuid())
+  tenantId    String
+  nombre      String
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, activo])
+  @@map("depositos")
 }
 
 model MovimientoStock {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  productoId            String
+  clienteId             String
+  depositoId            String
+  tipo                  String   // ingreso | egreso | division
+  cantidad1             Float    @default(0)
+  cantidad2             Float    @default(0)
+  numeroRemito          String?  // solo en egresos (ej. R-2026-00001)
+  remitoUrl             String?  // URL del remito escaneado (Cloudinary)
+  movimientoVinculadoId String?  // en divisiones: apunta al movimiento par (origen ↔ destino)
+  observaciones         String?
+  createdBy             String   @default("")
+  fecha                 DateTime
+  createdAt             DateTime @default(now())
+
+  // Pendiente: lote String?, entregadoPor String?, destinatario String?, destinoFinal String?
+
+  @@unique([tenantId, numeroRemito])
+  @@index([tenantId])
+  @@index([tenantId, productoId])
+  @@index([tenantId, clienteId])
+  @@index([tenantId, depositoId])
+  @@index([tenantId, fecha])
+  @@map("movimientos_stock")
+}
+
+// Snapshot de stock disponible — se actualiza atómicamente con cada movimiento
+model StockItem {
   id         String   @id @default(cuid())
   tenantId   String
   productoId String
   clienteId  String
-  tipo       String   // ingreso | egreso | division
-  cantidad   Float
-  pesoKg     Float?
-  remito     String?
-  fecha      DateTime
-  createdAt  DateTime @default(now())
+  depositoId String
+  cantidad1  Float    @default(0)
+  cantidad2  Float    @default(0)
+  updatedAt  DateTime @updatedAt
 
+  @@unique([productoId, clienteId, depositoId])
   @@index([tenantId])
-  @@index([tenantId, productoId])
-  @@index([tenantId, clienteId])
+  @@map("stock_items")
+}
+
+// Configuración del formato de número de remito por tenant
+model StockEgresoRemitoConfig {
+  tenantId      String   @id
+  remitoPrefix  String   @default("R")
+  remitoDigitos Int      @default(5)
+  updatedAt     DateTime @updatedAt
+
+  @@map("stock_egreso_remito_configs")
+}
+
+// Contador anual de secuencia de remitos (reinicia cada año)
+model StockRemitoSecuencia {
+  id        String @id @default(cuid())
+  tenantId  String
+  year      Int
+  lastValue Int    @default(0)
+
+  @@unique([tenantId, year])
+  @@map("stock_remito_secuencias")
 }
 ```
 
@@ -474,7 +570,7 @@ model Remito {
 |---|---|---|---|
 | Bressan | ✅ Activo (stack viejo) | combustible | Migrar a Vialto en el futuro |
 | Sebastián Fernández | ✅ Cerrado | viajes | 1 — construir ya |
-| Matías Riedel | ⏳ Cierra mañana | stock, cuenta-corriente | 2 |
+| Matías Riedel | ✅ Activo | stock, cuenta-corriente | 2 |
 | Melisa (Desagotes) | ⏳ Muy probable | remitos, cuenta-corriente | 3 |
 | Marcos Venturini (NyM Logística) | ⏳ Presupuesto enviado | liquidaciones-arca, viajes | 4 |
 | Wichi Toledo SRL | ⏳ Muy probable | mantenimiento, combustible | 5 |
@@ -517,7 +613,7 @@ FASE 1 — Fernández (primer cliente confirmado)
   → Cálculo de ganancia bruta por operación
 
 FASE 2 — Riedel
-  → módulo: stock (ingresos, egresos, remitos, división de bultos)
+  → módulo: stock ✅ (inventario por depósito, ingresos, egresos con remito automático, divisiones, presentaciones configurables)
   → módulo: cuenta-corriente (saldo por cliente, pagos, historial)
 
 FASE 3 — Melisa
@@ -617,5 +713,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: abril 2026*
+*Última actualización: junio 2026*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

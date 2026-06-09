@@ -27,7 +27,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({ summary: 'Listar movimientos de cuenta corriente (opcionalmente por cliente)' })
   @Get('movimientos')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   list(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -38,7 +38,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({ summary: 'Exportar movimientos a Excel' })
   @Get('movimientos/exportar')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   exportar(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ExportarMovimientosQueryDto,
@@ -49,7 +49,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({ summary: 'Obtener movimiento por ID' })
   @Get('movimientos/:id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);
@@ -57,7 +57,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({ summary: 'Registrar movimiento de cuenta corriente' })
   @Post('movimientos')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateMovimientoCcDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto);
@@ -65,7 +65,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({ summary: 'Registrar pago de cliente (genera movimiento automáticamente)' })
   @Post('pagos')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   registrarPago(@Body() dto: RegistrarPagoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.registrarPago(auth.tenantId, dto);
@@ -73,7 +73,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({ summary: 'Saldo actual de un cliente en cuenta corriente' })
   @Get('saldo/:clienteId')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   saldoCliente(
     @Param('clienteId') clienteId: string,
     @CurrentAuth() auth: AuthPayload,
@@ -84,7 +84,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({ summary: 'Actualizar movimiento de cuenta corriente' })
   @Patch('movimientos/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateMovimientoCcDto,

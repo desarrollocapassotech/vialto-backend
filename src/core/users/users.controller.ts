@@ -18,22 +18,24 @@ export class UsersController {
 
   @ApiOperation({ summary: 'Listar usuarios de la organización' })
   @Get()
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   list(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.listByTenant(auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Invitar usuario a la organización' })
-  @Post('invite')
+  @ApiOperation({ summary: 'Crear usuario en la organización' })
+  @Post()
   @Roles('admin', 'superadmin')
-  invite(
+  create(
     @CurrentAuth() auth: AuthPayload,
+    @Body('name') name: string,
     @Body('email') email: string,
+    @Body('password') password: string,
     @Body('role') role: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.inviteToOrg(auth.tenantId, email, role);
+    return this.service.create(auth.tenantId, name, email, password, role);
   }
 
   @ApiOperation({ summary: 'Cambiar rol de un usuario' })

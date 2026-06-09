@@ -3,9 +3,9 @@ import {
   IsNotEmpty,
   IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   MaxLength,
+  Min,
 } from 'class-validator';
 
 export class CreateEgresoDto {
@@ -15,16 +15,23 @@ export class CreateEgresoDto {
 
   @IsString()
   @IsNotEmpty()
-  presentacionId: string;
+  clienteId: string;
 
   @IsString()
   @IsNotEmpty()
-  clienteId: string;
+  depositoId: string;
 
+  @IsOptional()
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   @Type(() => Number)
-  cantidad: number;
+  cantidad1?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  cantidad2?: number;
 
   @IsString()
   @IsNotEmpty()
@@ -33,11 +40,31 @@ export class CreateEgresoDto {
 
   @IsOptional()
   @IsString()
-  observaciones?: string;
+  @MaxLength(200)
+  lote?: string;
 
-  /** URL del remito escaneado (p. ej. tras subida a Cloudinary). Opcional. */
   @IsOptional()
   @IsString()
+  observaciones?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  entregadoPor?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  destinatario?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  destinoFinal?: string;
+
+  /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en egresos. */
+  @IsString()
+  @IsNotEmpty()
   @MaxLength(2048)
-  remitoEscaneadoUrl?: string;
+  remitoEscaneadoUrl: string;
 }

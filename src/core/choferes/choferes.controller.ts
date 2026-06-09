@@ -23,7 +23,7 @@ export class ChoferesController {
 
   @ApiOperation({ summary: 'Listar todos los choferes' })
   @Get()
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId);
@@ -31,7 +31,7 @@ export class ChoferesController {
 
   @ApiOperation({ summary: 'Listar choferes paginado con búsqueda' })
   @Get('paginated')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findAllPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
@@ -42,7 +42,7 @@ export class ChoferesController {
 
   @ApiOperation({ summary: 'Obtener chofer por ID' })
   @Get(':id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);
@@ -50,7 +50,7 @@ export class ChoferesController {
 
   @ApiOperation({ summary: 'Crear chofer' })
   @Post()
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateChoferDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto);
@@ -58,7 +58,7 @@ export class ChoferesController {
 
   @ApiOperation({ summary: 'Actualizar datos del chofer' })
   @Patch(':id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateChoferDto,

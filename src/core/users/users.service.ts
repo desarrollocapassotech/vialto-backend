@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createClerkClient } from '@clerk/backend';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -8,10 +8,21 @@ function toClerkOrganizationRole(appRole: string): string {
   return 'org:member';
 }
 
+async function getPlatformRole(userId: string | null | undefined): Promise<string | null> {
+  if (!userId) return null;
+  try {
+    const user = await clerk.users.getUser(userId);
+    const raw = user.publicMetadata?.vialtoRole;
+    return typeof raw === 'string' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class UsersService {
   /**
-   * Lista los miembros de una organización de Clerk.
+   * Lista los miembros de la organización, excluyendo superadmins de plataforma.
    * Clerk es la fuente de verdad para usuarios — no se duplican en Postgres.
    */
   async listByTenant(tenantId: string) {
@@ -19,23 +30,78 @@ export class UsersService {
       organizationId: tenantId,
     });
 
-    return memberships.data.map((m) => ({
-      userId: m.publicUserData?.userId,
-      firstName: m.publicUserData?.firstName,
-      lastName: m.publicUserData?.lastName,
-      email: m.publicUserData?.identifier,
-      role: m.role,
-      createdAt: m.createdAt,
-    }));
+    const results = await Promise.all(
+      memberships.data.map(async (m) => {
+        const userId = m.publicUserData?.userId ?? null;
+        const platformRole = await getPlatformRole(userId);
+        return {
+          userId,
+          firstName: m.publicUserData?.firstName ?? null,
+          lastName: m.publicUserData?.lastName ?? null,
+          email: m.publicUserData?.identifier ?? null,
+          role: m.role,
+          createdAt: m.createdAt,
+          platformRole,
+        };
+      }),
+    );
+
+    return results.filter((u) => u.platformRole !== 'superadmin');
   }
 
-  async inviteToOrg(tenantId: string, emailAddress: string, role: string) {
-    return clerk.organizations.createOrganizationInvitation({
-      organizationId: tenantId,
-      emailAddress,
-      role: toClerkOrganizationRole(role),
-      redirectUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
-    });
+  async create(tenantId: string, name: string, email: string, password: string, role: string) {
+    const normalized = name.trim().replace(/\s+/g, ' ');
+    const [firstName = '', ...rest] = normalized.split(' ');
+    const lastName = rest.join(' ') || undefined;
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalized) throw new BadRequestException('El nombre es requerido');
+    if (!normalizedEmail) throw new BadRequestException('El email es requerido');
+    if (!password || password.length < 8)
+      throw new BadRequestException('La contraseña debe tener al menos 8 caracteres');
+
+    const existing = await clerk.users.getUserList({ emailAddress: [normalizedEmail], limit: 1 });
+    let userId = existing.data[0]?.id;
+    const alreadyExisted = !!userId;
+
+    if (!userId) {
+      const created = await clerk.users.createUser({
+        emailAddress: [normalizedEmail],
+        firstName,
+        lastName,
+        password,
+        skipPasswordChecks: true,
+      });
+      userId = created.id;
+    }
+
+    try {
+      const memberships = await clerk.organizations.getOrganizationMembershipList({
+        organizationId: tenantId,
+      });
+      const alreadyMember = memberships.data.some((m) => m.publicUserData?.userId === userId);
+
+      if (alreadyMember) {
+        await clerk.organizations.updateOrganizationMembership({
+          organizationId: tenantId,
+          userId,
+          role: toClerkOrganizationRole(role),
+        });
+      } else {
+        await clerk.organizations.createOrganizationMembership({
+          organizationId: tenantId,
+          userId,
+          role: toClerkOrganizationRole(role),
+        });
+      }
+    } catch (err) {
+      if (!alreadyExisted) {
+        await clerk.users.deleteUser(userId).catch(() => null);
+      }
+      throw err;
+    }
+
+    return { userId, action: alreadyExisted ? 'added-to-org' : 'created-and-added' };
   }
 
   async updateRole(tenantId: string, userId: string, role: string) {

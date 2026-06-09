@@ -22,7 +22,7 @@ import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 export class TurnosController {
   @ApiOperation({ summary: 'Estado del módulo · Fase 7 (PWA) — aún no implementado' })
   @Get('estado')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   estadoModulo(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return {

@@ -131,7 +131,7 @@ export class TenantsService {
     }
 
     try {
-      return await this.prisma.tenant.create({
+      const tenant = await this.prisma.tenant.create({
         data: {
           clerkOrgId,
           name: dto.name,
@@ -140,6 +140,8 @@ export class TenantsService {
           maxUsers: 10,
         },
       });
+      await this.tenantBootstrap.seedDefaultPresentaciones(tenant.clerkOrgId);
+      return tenant;
     } catch (error) {
       if (createdOrgId) {
         try {

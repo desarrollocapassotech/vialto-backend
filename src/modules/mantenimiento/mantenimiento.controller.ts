@@ -25,7 +25,7 @@ export class MantenimientoController {
 
   @ApiOperation({ summary: 'Listar intervenciones de mantenimiento · Fase 4 — aún no activo' })
   @Get('intervenciones')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   list(
     @CurrentAuth() auth: AuthPayload,
     @Query('vehiculoId') vehiculoId?: string,
@@ -36,7 +36,7 @@ export class MantenimientoController {
 
   @ApiOperation({ summary: 'Obtener intervención por ID · Fase 4 — aún no activo' })
   @Get('intervenciones/:id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);
@@ -44,7 +44,7 @@ export class MantenimientoController {
 
   @ApiOperation({ summary: 'Registrar intervención de mantenimiento · Fase 4 — aún no activo' })
   @Post('intervenciones')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateIntervencionDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, auth.userId, dto);
@@ -52,7 +52,7 @@ export class MantenimientoController {
 
   @ApiOperation({ summary: 'Actualizar intervención · Fase 4 — aún no activo' })
   @Patch('intervenciones/:id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateIntervencionDto,

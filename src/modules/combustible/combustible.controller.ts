@@ -25,7 +25,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Estadísticas de consumo de combustible · Fase 4 — aún no activo' })
   @Get('stats')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   getStats(@CurrentAuth() auth: AuthPayload, @Query('month') month?: string) {
     assertTenantId(auth.tenantId);
     return this.service.getStats(auth, month);

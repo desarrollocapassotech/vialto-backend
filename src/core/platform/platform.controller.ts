@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,10 +11,14 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -36,6 +41,7 @@ import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentaci
 import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
 import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
 import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
+import { CreateDivisionDto } from '../../modules/stock/dto/create-division.dto';
 import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 import { ViajesPaginatedQueryDto } from '../../modules/viajes/dto/viajes-paginated-query.dto';
 import { AddGastoDto } from '../../modules/viajes/dto/add-gasto.dto';
@@ -451,44 +457,74 @@ export class PlatformController {
     return this.service.updateProducto(tenantId, id, dto);
   }
 
-  @ApiOperation({ summary: 'Listar presentaciones de producto (superadmin)' })
-  @Get('stock/productos/:productoId/presentaciones')
+  @ApiOperation({ summary: 'Listar presentaciones del catálogo (superadmin)' })
+  @Get('stock/presentaciones')
   listPresentaciones(
-    @Param('productoId') productoId: string,
     @Query('tenantId') tenantId?: string,
+    @Query('activo') activo?: string,
   ) {
-    return this.service.listPresentaciones(tenantId, productoId);
+    return this.service.listPresentaciones(
+      tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
   }
 
-  @ApiOperation({ summary: 'Agregar presentación a producto (superadmin)' })
-  @Post('stock/productos/:productoId/presentaciones')
+  @ApiOperation({ summary: 'Crear presentación en el catálogo (superadmin)' })
+  @Post('stock/presentaciones')
   createPresentacion(
-    @Param('productoId') productoId: string,
     @Query('tenantId') tenantId: string | undefined,
     @Body() dto: CreatePresentacionDto,
   ) {
-    return this.service.createPresentacion(tenantId, productoId, dto);
+    return this.service.createPresentacion(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar presentación (superadmin)' })
-  @Patch('stock/productos/:productoId/presentaciones/:id')
+  @ApiOperation({ summary: 'Actualizar presentación del catálogo (superadmin)' })
+  @Patch('stock/presentaciones/:id')
   updatePresentacion(
-    @Param('productoId') productoId: string,
     @Param('id') id: string,
     @Query('tenantId') tenantId: string | undefined,
     @Body() dto: UpdatePresentacionDto,
   ) {
-    return this.service.updatePresentacion(tenantId, productoId, id, dto);
+    return this.service.updatePresentacion(tenantId, id, dto);
   }
 
-  @ApiOperation({ summary: 'Eliminar presentación (superadmin)' })
-  @Delete('stock/productos/:productoId/presentaciones/:id')
+  @ApiOperation({ summary: 'Eliminar presentación del catálogo (superadmin)' })
+  @Delete('stock/presentaciones/:id')
   removePresentacion(
-    @Param('productoId') productoId: string,
     @Param('id') id: string,
     @Query('tenantId') tenantId?: string,
   ) {
-    return this.service.removePresentacion(tenantId, productoId, id);
+    return this.service.removePresentacion(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Listar depósitos (superadmin)' })
+  @Get('stock/depositos')
+  listDepositos(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('activo') activo?: string,
+  ) {
+    return this.service.listDepositos(
+      tenantId,
+      activo === '0' ? false : activo === '1' ? true : undefined,
+    );
+  }
+
+  @ApiOperation({ summary: 'Subir remito escaneado PDF (superadmin)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('stock/upload-remito')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadRemitoStock(
+    @Query('tenantId') tenantId: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
+    return this.service.uploadRemitoPdf(tenantId, file);
   }
 
   @ApiOperation({ summary: 'Registrar ingreso al depósito (superadmin)' })
@@ -552,8 +588,30 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
   ) {
-    return this.service.listEgresos(tenantId, clienteId, productoId);
+    return this.service.listEgresos(tenantId, clienteId, productoId, depositoId);
+  }
+
+  @ApiOperation({ summary: 'Registrar división de bultos (superadmin)' })
+  @Post('stock/divisiones')
+  createDivision(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateDivisionDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.createDivision(tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Listar divisiones (superadmin)' })
+  @Get('stock/divisiones')
+  listDivisiones(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('clienteId') clienteId?: string,
+    @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
+  ) {
+    return this.service.listDivisiones(tenantId, clienteId, productoId, depositoId);
   }
 
   @ApiOperation({ summary: 'Listar movimientos de stock (superadmin)' })
@@ -575,6 +633,16 @@ export class PlatformController {
   @Get('stock/movimientos/:id')
   getMovimientoStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.getMovimientoStock(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado (superadmin)' })
+  @Get('stock/movimientos/:id/remito-adjunto')
+  async getRemitoAdjuntoStock(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Res() res: Response,
+  ) {
+    await this.service.streamRemitoAdjunto(tenantId, id, res);
   }
 
   // ── ARCA (superadmin) ─────────────────────────────────────────────────────

@@ -16,8 +16,7 @@ export interface AuthPayload {
 function normalizeRole(orgRole: string | undefined): string | null {
   if (!orgRole) return null;
   if (orgRole === 'org:admin') return 'admin';
-  if (orgRole === 'org:supervisor') return 'supervisor';
-  if (orgRole === 'org:member') return 'operador';
+  if (orgRole === 'org:member') return 'member';
   return orgRole.replace(/^org:/, '');
 }
 

@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
 
 export class UpdateProductoDto {
   @IsOptional()
@@ -13,8 +13,12 @@ export class UpdateProductoDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(50)
-  unidadMedida?: string;
+  presentacion1Id?: string;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  presentacion2Id?: string | null;
 
   @IsOptional()
   @IsBoolean()

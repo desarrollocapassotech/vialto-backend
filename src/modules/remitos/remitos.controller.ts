@@ -25,7 +25,7 @@ export class RemitosController {
 
   @ApiOperation({ summary: 'Listar remitos · Fase 3 — aún no activo' })
   @Get()
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   list(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
@@ -36,7 +36,7 @@ export class RemitosController {
 
   @ApiOperation({ summary: 'Obtener remito por ID · Fase 3 — aún no activo' })
   @Get(':id')
-  @Roles('admin', 'supervisor', 'operador', 'superadmin')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);
@@ -44,7 +44,7 @@ export class RemitosController {
 
   @ApiOperation({ summary: 'Crear remito · Fase 3 — aún no activo' })
   @Post()
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateRemitoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto);
@@ -52,7 +52,7 @@ export class RemitosController {
 
   @ApiOperation({ summary: 'Actualizar remito · Fase 3 — aún no activo' })
   @Patch(':id')
-  @Roles('admin', 'supervisor', 'superadmin')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateRemitoDto,

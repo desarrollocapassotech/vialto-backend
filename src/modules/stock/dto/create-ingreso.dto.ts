@@ -3,8 +3,9 @@ import {
   IsNotEmpty,
   IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
+  MaxLength,
+  Min,
 } from 'class-validator';
 
 export class CreateIngresoDto {
@@ -14,16 +15,23 @@ export class CreateIngresoDto {
 
   @IsString()
   @IsNotEmpty()
-  presentacionId: string;
+  clienteId: string;
 
   @IsString()
   @IsNotEmpty()
-  clienteId: string;
+  depositoId: string;
 
+  @IsOptional()
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   @Type(() => Number)
-  cantidad: number;
+  cantidad1?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  cantidad2?: number;
 
   @IsString()
   @IsNotEmpty()
@@ -32,5 +40,16 @@ export class CreateIngresoDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
+  lote?: string;
+
+  @IsOptional()
+  @IsString()
   observaciones?: string;
+
+  /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en ingresos. */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2048)
+  remitoEscaneadoUrl: string;
 }

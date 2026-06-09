@@ -134,6 +134,8 @@ export class FacturacionService {
           fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
           estado: 'pendiente',
           diferencia: dto.diferencia ?? null,
+          ivaPorcentaje: dto.ivaPorcentaje ?? null,
+          ivaTotalConIva: dto.ivaTotalConIva ?? null,
         },
       });
       if (viajeIds.length > 0) {
@@ -194,6 +196,8 @@ export class FacturacionService {
           ...(dto.fechaVencimiento !== undefined
             ? { fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null }
             : {}),
+          ...(dto.ivaPorcentaje !== undefined ? { ivaPorcentaje: dto.ivaPorcentaje } : {}),
+          ...(dto.ivaTotalConIva !== undefined ? { ivaTotalConIva: dto.ivaTotalConIva } : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });

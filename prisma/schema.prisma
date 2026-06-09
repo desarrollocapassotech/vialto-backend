@@ -293,6 +293,8 @@ model Factura {
   arcaError        String?
   createdAt        DateTime       @default(now())
   pagos            Pago[]
+  ivaPorcentaje  Float?
+  ivaTotalConIva Float?
 
   @@unique([tenantId, numero])
   @@index([tenantId])

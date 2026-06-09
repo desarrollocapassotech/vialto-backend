@@ -17,4 +17,6 @@ export class UpdateFacturaDto {
   @IsOptional() @IsDateString() fechaEmision?: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
+  @IsOptional() @IsNumber() @Type(() => Number) ivaPorcentaje?: number;
+  @IsOptional() @IsNumber() @Type(() => Number) ivaTotalConIva?: number;
 }

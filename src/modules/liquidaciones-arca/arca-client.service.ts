@@ -13,6 +13,16 @@ import {
 
 const AFIP_SDK_BASE = 'https://app.afipsdk.com/api/v1';
 
+/** AFIP SDK usa "dev"/"prod", no "homologacion"/"produccion" */
+function toSdkEnv(ambiente: ArcaAmbiente): 'dev' | 'prod' {
+  return ambiente === 'produccion' ? 'prod' : 'dev';
+}
+
+/** Normaliza CUIT: elimina guiones y espacios → "30-71234567-8" → "30712345678" */
+function normalizeCuit(cuit: string): string {
+  return cuit.replace(/[-\s]/g, '');
+}
+
 interface CachedToken {
   token: string;
   sign: string;
@@ -47,11 +57,14 @@ export class ArcaClientService {
     tenantId: string,
     liquidacionId?: string,
     facturaId?: string,
+    certPem?: string | null,
+    keyPem?: string | null,
   ): Promise<ArcaLastVoucherResponse> {
-    const { token, sign } = await this.getToken(apiKey, cuit, ambiente);
+    const cuitNorm = normalizeCuit(cuit);
+    const { token, sign } = await this.getToken(apiKey, cuitNorm, ambiente, certPem, keyPem);
 
     const params = {
-      Auth: { Token: token, Sign: sign, Cuit: cuit },
+      Auth: { Token: token, Sign: sign, Cuit: cuitNorm },
       PtoVta: ptoVenta,
       CbteTipo: cbteTipo,
     };
@@ -62,7 +75,7 @@ export class ArcaClientService {
       'wsfe',
       'FECompUltimoAutorizado',
       params,
-      cuit,
+      cuitNorm,
       tenantId,
       liquidacionId,
       facturaId,
@@ -77,11 +90,14 @@ export class ArcaClientService {
     tenantId: string,
     liquidacionId?: string,
     facturaId?: string,
+    certPem?: string | null,
+    keyPem?: string | null,
   ): Promise<ArcaAutorizarResponse> {
-    const { token, sign } = await this.getToken(apiKey, req.cuit, req.ambiente);
+    const cuitNorm = normalizeCuit(req.cuit);
+    const { token, sign } = await this.getToken(apiKey, cuitNorm, req.ambiente, certPem, keyPem);
 
     const params = {
-      Auth: { Token: token, Sign: sign, Cuit: req.cuit },
+      Auth: { Token: token, Sign: sign, Cuit: cuitNorm },
       FeCAEReq: {
         FeCabReq: {
           CantReg: 1,
@@ -127,7 +143,7 @@ export class ArcaClientService {
       'wsfe',
       'FECAESolicitar',
       params,
-      req.cuit,
+      cuitNorm,
       tenantId,
       liquidacionId,
       facturaId,
@@ -154,8 +170,11 @@ export class ArcaClientService {
     apiKey: string,
     cuit: string,
     ambiente: ArcaAmbiente,
+    certPem?: string | null,
+    keyPem?: string | null,
   ): Promise<{ token: string; sign: string }> {
-    const cacheKey = `${cuit}_wsfe_${ambiente}`;
+    const cuitNorm = normalizeCuit(cuit);
+    const cacheKey = `${cuitNorm}_wsfe_${ambiente}`;
     const cached = this.tokenCache.get(cacheKey);
 
     if (cached && cached.expiresAt > new Date()) {
@@ -165,6 +184,11 @@ export class ArcaClientService {
     const start = Date.now();
     let httpStatus: number | undefined;
 
+    const sdkEnv = toSdkEnv(ambiente);
+    const certKey: Record<string, string> = {};
+    if (certPem) certKey.cert = certPem;
+    if (keyPem) certKey.key = keyPem;
+
     try {
       const res = await fetch(`${AFIP_SDK_BASE}/afip/auth`, {
         method: 'POST',
@@ -172,15 +196,16 @@ export class ArcaClientService {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ environment: ambiente, tax_id: cuit, wsid: 'wsfe' }),
+        body: JSON.stringify({ environment: sdkEnv, tax_id: cuitNorm, wsid: 'wsfe', ...certKey }),
       });
 
       httpStatus = res.status;
       const body = await res.json() as ArcaTokenResponse & { error?: string; message?: string };
 
       if (!res.ok || !body.token) {
-        const errDetail = body?.error ?? body?.message ?? `HTTP ${res.status}`;
-        this.logger.error(`AFIP SDK auth HTTP ${res.status}: ${JSON.stringify(body)}`);
+        const bodyStr = JSON.stringify(body);
+        this.logger.error(`AFIP SDK auth HTTP ${res.status} | cuit=${cuitNorm} env=${sdkEnv} | body=${bodyStr}`);
+        const errDetail = body?.error ?? body?.message ?? bodyStr;
         throw this.mapError(errDetail, res.status);
       }
 
@@ -210,7 +235,7 @@ export class ArcaClientService {
     liquidacionId?: string,
     facturaId?: string,
   ): Promise<Record<string, unknown>> {
-    const requestBody = { environment: ambiente, method, wsid, params };
+    const requestBody = { environment: toSdkEnv(ambiente), method, wsid, params };
     const start = Date.now();
     let httpStatus: number | undefined;
     let responseBody: unknown;
@@ -247,7 +272,7 @@ export class ArcaClientService {
       throw err;
     } finally {
       // Log de auditoría — nunca se registra la apiKey
-      const safeRequest = { ...requestBody };
+      const safeRequest = { ...requestBody, cuit: normalizeCuit(cuit) };
       if ((safeRequest.params as Record<string, unknown>)?.Auth) {
         (safeRequest.params as Record<string, unknown>).Auth = '***';
       }
@@ -272,27 +297,58 @@ export class ArcaClientService {
   }
 
   private extractErrorMessage(body: Record<string, unknown>, status: number): string {
-    if (typeof body?.message === 'string') return body.message;
-    if (typeof body?.error === 'string') return body.error;
-    return `Error HTTP ${status}`;
+    // AFIP SDK puede devolver data_errors con mensajes por campo
+    if (typeof body?.data_errors === 'object' && body.data_errors !== null) {
+      const msgs = Object.values(body.data_errors as Record<string, unknown>)
+        .filter((v): v is string => typeof v === 'string');
+      if (msgs.length > 0) return msgs.join('. ');
+    }
+    const candidates = [body?.details, body?.description, body?.message, body?.error];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c && !c.match(/^HTTP \d+$/i)) return c;
+    }
+    for (const c of candidates) {
+      if (typeof c === 'string' && c) return c;
+    }
+    return `HTTP ${status}`;
   }
 
   private mapError(raw: string, httpStatus?: number): ArcaException {
     const lower = raw.toLowerCase();
     if (lower.includes('cuit') && lower.includes('inváli')) {
-      return new ArcaException(ARCA_ERROR_CODES.CUIT_INVALIDO, 'El CUIT informado es inválido', httpStatus, raw);
+      return new ArcaException(ARCA_ERROR_CODES.CUIT_INVALIDO, 'El CUIT informado es inválido.', httpStatus, raw);
     }
     if (lower.includes('certificado') && (lower.includes('vencido') || lower.includes('expirado'))) {
       return new ArcaException(ARCA_ERROR_CODES.CERT_VENCIDO, 'El certificado de ARCA está vencido. Renovarlo en el portal de AFIP SDK.', httpStatus, raw);
     }
+    // Certificado o clave privada faltante (error de configuración del servidor)
+    if (
+      (lower.includes('cert') || lower.includes('certificado')) && lower.includes('obligatorio') ||
+      lower.includes('key') && lower.includes('obligatorio')
+    ) {
+      return new ArcaException(
+        ARCA_ERROR_CODES.GENERICO,
+        'Falta el certificado digital o la clave privada para conectar con AFIP. Contactá al administrador del sistema.',
+        httpStatus,
+        raw,
+      );
+    }
     if (lower.includes('fuera de rango') || lower.includes('número inválido')) {
-      return new ArcaException(ARCA_ERROR_CODES.FUERA_DE_RANGO, 'El número de comprobante está fuera de rango', httpStatus, raw);
+      return new ArcaException(ARCA_ERROR_CODES.FUERA_DE_RANGO, 'El número de comprobante está fuera de rango.', httpStatus, raw);
     }
     if (lower.includes('duplicado') || lower.includes('already exists')) {
-      return new ArcaException(ARCA_ERROR_CODES.COMPROBANTE_DUPLICADO, 'El comprobante ya fue autorizado anteriormente', httpStatus, raw);
+      return new ArcaException(ARCA_ERROR_CODES.COMPROBANTE_DUPLICADO, 'El comprobante ya fue autorizado anteriormente.', httpStatus, raw);
     }
     if (httpStatus === 0 || lower.includes('timeout') || lower.includes('econnrefused') || lower.includes('network')) {
       return new ArcaException(ARCA_ERROR_CODES.CONECTIVIDAD, 'AFIP SDK no respondió. El comprobante quedó en estado pendiente_cae para reintentar.', httpStatus, raw);
+    }
+    if (httpStatus === 400 || lower.match(/^http 4\d\d$/)) {
+      return new ArcaException(
+        ARCA_ERROR_CODES.GENERICO,
+        'AFIP / ARCA rechazó la solicitud. Verificá que el CUIT, el punto de venta y el certificado estén correctamente configurados.',
+        httpStatus,
+        raw,
+      );
     }
     return new ArcaException(ARCA_ERROR_CODES.GENERICO, raw, httpStatus, raw);
   }

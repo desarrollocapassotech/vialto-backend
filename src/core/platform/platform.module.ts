@@ -6,7 +6,7 @@ import { VehiculosModule } from '../vehiculos/vehiculos.module';
 import { ViajesModule } from '../../modules/viajes/viajes.module';
 import { StockModule } from '../../modules/stock/stock.module';
 import { FacturacionModule } from '../../modules/facturacion/facturacion.module';
-import { LiquidacionesArcaModule } from '../../modules/liquidaciones-arca/liquidaciones-arca.module';
+import { IntegracionArcaModule } from '../../modules/liquidaciones-arca/liquidaciones-arca.module';
 
 @Module({
   imports: [
@@ -15,7 +15,7 @@ import { LiquidacionesArcaModule } from '../../modules/liquidaciones-arca/liquid
     ViajesModule,
     StockModule,
     FacturacionModule,
-    LiquidacionesArcaModule,
+    IntegracionArcaModule,
   ],
   controllers: [PlatformController],
   providers: [PlatformService],

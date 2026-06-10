@@ -23,6 +23,9 @@ const CONFIG_SELECT = {
   comisionPctAlt: true,
   ivaGastosAdmin: true,
   updatedAt: true,
+  // cert/key se incluyen solo para saber si están configurados; el contenido no se expone
+  certPem: true,
+  keyPem: true,
 };
 
 @Injectable()
@@ -45,7 +48,7 @@ export class ArcaConfigService {
 
   async upsert(tenantId: string, dto: UpsertArcaConfigDto) {
     const now = new Date();
-    const data = {
+    const data: PrismaAny = {
       cuitEmisor: dto.cuitEmisor,
       razonSocial: dto.razonSocial ?? null,
       domicilioEmisor: dto.domicilioEmisor ?? null,
@@ -60,6 +63,10 @@ export class ArcaConfigService {
       ivaGastosAdmin: dto.ivaGastosAdmin,
       updatedAt: now,
     };
+    // Solo sobreescribir cert/key si se envían con contenido
+    if (dto.certPem?.trim()) data.certPem = dto.certPem.trim();
+    if (dto.keyPem?.trim()) data.keyPem = dto.keyPem.trim();
+
     await this.db.arcaConfig.upsert({
       where: { tenantId },
       create: { tenantId, ...data },
@@ -69,10 +76,17 @@ export class ArcaConfigService {
   }
 
   async findPublic(tenantId: string) {
-    return this.db.arcaConfig.findUnique({
+    const config = await this.db.arcaConfig.findUnique({
       where: { tenantId },
       select: CONFIG_SELECT,
     });
+    if (!config) return null;
+    const { certPem, keyPem, ...rest } = config;
+    return {
+      ...rest,
+      certConfigurado: Boolean(certPem),
+      keyConfigurado: Boolean(keyPem),
+    };
   }
 
   async findWithApiKey(tenantId: string) {

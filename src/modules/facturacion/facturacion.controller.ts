@@ -1,6 +1,9 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  BadRequestException,
+  Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FacturacionService } from './facturacion.service';
 import { CreateFacturaDto } from './dto/create-factura.dto';
@@ -96,5 +99,23 @@ export class FacturacionController {
   removePago(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.removePago(id, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Subir comprobante adjunto (PDF o imagen) a Cloudinary' })
+  @Post('upload-comprobante')
+  @Roles('admin', 'member', 'superadmin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadComprobante(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere un archivo.');
+    return this.service.uploadComprobante(auth.tenantId, file);
   }
 }

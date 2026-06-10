@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -17,4 +18,6 @@ export class UpdateFacturaDto {
   @IsOptional() @IsDateString() fechaEmision?: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
+  @IsOptional() @IsNumber() @Type(() => Number) ivaPct?: number;
+  @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
 }

@@ -79,6 +79,43 @@ export async function reemplazarProductosDelViaje(
   });
 }
 
+export function normalizarDestinosDelViaje(
+  raw: Array<{ etiqueta: string }> | undefined | null,
+): Array<{ etiqueta: string }> {
+  if (!raw?.length) return [];
+  const out: Array<{ etiqueta: string }> = [];
+  for (const item of raw) {
+    const etiqueta = String(item?.etiqueta ?? '').trim();
+    if (!etiqueta) continue;
+    out.push({ etiqueta });
+  }
+  return out;
+}
+
+/** Etiqueta del último destino (destino final de la ruta). */
+export function ultimoDestinoEtiqueta(destinos: Array<{ etiqueta: string }>): string | null {
+  return destinos.length > 0 ? destinos[destinos.length - 1].etiqueta : null;
+}
+
+export async function reemplazarDestinosDelViaje(
+  db: Prisma.TransactionClient,
+  viajeId: string,
+  items: Array<{ etiqueta: string }>,
+  tenantId: string,
+): Promise<void> {
+  const tx = db as any;
+  await tx.viajeDestino.deleteMany({ where: { viajeId } });
+  if (items.length === 0) return;
+  await tx.viajeDestino.createMany({
+    data: items.map(({ etiqueta }, orden) => ({
+      tenantId,
+      viajeId,
+      orden,
+      etiqueta,
+    })),
+  });
+}
+
 export function idsProductosDelViaje(v: {
   productosViaje: Array<{ productoId: string; orden: number }>;
 }): string[] {
@@ -110,17 +147,33 @@ export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultAr
   },
 });
 
+/** Include de destinos (hasta que `prisma generate` incorpore la relación en el cliente). */
+export const viajeDestinosViajeInclude = {
+  orderBy: { orden: 'asc' as const },
+  select: { id: true, orden: true, etiqueta: true, createdAt: true },
+};
+
 /**
  * Viaje cargado con `vehiculosViaje` (cada fila incluye `vehiculo`).
  * Usar `Prisma.validator` + `typeof` para que `ViajeGetPayload` infiera bien (evita `vehiculosViaje: never[]` con un objeto literal suelto).
  */
-export type ViajeConVehiculosViaje = Prisma.ViajeGetPayload<typeof viajeConVehiculosViajeArgs>;
+export type ViajeConVehiculosViaje = Prisma.ViajeGetPayload<typeof viajeConVehiculosViajeArgs> & {
+  destinosViaje?: Array<{
+    id: string;
+    orden: number;
+    etiqueta: string;
+    createdAt: Date;
+  }>;
+};
 
 /** Incluido en consultas de viaje que deben exponer `vehiculosViaje`. */
 export const VIAJE_INCLUDE_VEHICULOS = viajeConVehiculosViajeArgs.include!;
 
-/** Para `include:` si el análisis TS del IDE no reconoce aún la relación `vehiculosViaje`. */
-export const VIAJE_INCLUDE_VEHICULOS_INCLUDE = VIAJE_INCLUDE_VEHICULOS as any;
+/** Para `include:` si el análisis TS del IDE no reconoce aún la relación `vehiculosViaje` / `destinosViaje`. */
+export const VIAJE_INCLUDE_VEHICULOS_INCLUDE = {
+  ...VIAJE_INCLUDE_VEHICULOS,
+  destinosViaje: viajeDestinosViajeInclude,
+} as any;
 
 /** IDs de vehículo en orden del viaje (helper para no depender de la expansión de `ViajeGetPayload` en otros archivos). */
 export function idsVehiculosDelViaje(v: ViajeConVehiculosViaje): string[] {

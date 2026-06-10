@@ -593,8 +593,8 @@ export class StockService {
       throw new BadGatewayException('No se pudo obtener el remito escaneado.');
     }
 
-    const contentType = upstream.headers.get('content-type') ?? 'application/pdf';
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="remito.pdf"');
     res.setHeader('Content-Disposition', 'inline');
     res.setHeader('Cache-Control', 'private, max-age=300');
 

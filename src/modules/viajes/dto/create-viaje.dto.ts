@@ -13,6 +13,7 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
 import { ViajeProductoItemDto } from './viaje-producto-item.dto';
+import { ViajeDestinoItemDto } from './viaje-destino-item.dto';
 
 export class OtroGastoDto {
   @IsString() @IsNotEmpty() descripcion: string;
@@ -60,7 +61,14 @@ export class CreateViajeDto {
   /** IDs de vehículos del maestro (orden = orden del array). Requerido al menos 1 sin transportista externo. */
   @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsString() @IsNotEmpty() origen: string;
-  @IsString() @IsNotEmpty() destino: string;
+  /** Legacy: un solo destino. Usar `destinos` para rutas con múltiples paradas. */
+  @IsOptional() @IsString() @IsNotEmpty() destino?: string;
+  /** Destinos ordenados (orden del array = orden de la ruta). Requerido si no se envía `destino`. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ViajeDestinoItemDto)
+  destinos?: ViajeDestinoItemDto[];
   @IsDateString() fechaCarga: string;
   @IsDateString() fechaDescarga: string;
   /** Productos a transportar (orden = orden del array). */

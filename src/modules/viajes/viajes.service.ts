@@ -19,9 +19,13 @@ import {
 import {
   assertVehiculosDelViaje,
   idsProductosDelViaje,
+  normalizarDestinosDelViaje,
   normalizarVehiculoIds,
+  reemplazarDestinosDelViaje,
   reemplazarProductosDelViaje,
   reemplazarVehiculosDelViaje,
+  ultimoDestinoEtiqueta,
+  viajeDestinosViajeInclude,
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
   type ViajeConVehiculosViaje,
 } from './viaje-vehiculos.helper';
@@ -46,6 +50,33 @@ import {
 } from './viaje-ganancia-bruta.util';
 
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
+type DestinoItem = { etiqueta: string };
+
+function resolveDestinosParaCreate(dto: CreateViajeDto): DestinoItem[] {
+  const fromArray = normalizarDestinosDelViaje(dto.destinos);
+  if (fromArray.length > 0) return fromArray;
+  const legacy = dto.destino?.trim();
+  if (legacy) return [{ etiqueta: legacy }];
+  throw new BadRequestException('Ingresá al menos un destino.');
+}
+
+function resolveDestinosParaUpdate(dto: UpdateViajeDto): DestinoItem[] | undefined {
+  if (dto.destinos !== undefined) {
+    const norm = normalizarDestinosDelViaje(dto.destinos);
+    if (norm.length === 0) {
+      throw new BadRequestException('Ingresá al menos un destino.');
+    }
+    return norm;
+  }
+  if (dto.destino !== undefined) {
+    const legacy = dto.destino?.trim();
+    if (!legacy) {
+      throw new BadRequestException('El destino no puede estar vacío.');
+    }
+    return [{ etiqueta: legacy }];
+  }
+  return undefined;
+}
 
 function normalizarProductoItems(raw: ProductoItem[] | undefined | null): ProductoItem[] {
   if (!raw?.length) return [];
@@ -273,7 +304,8 @@ export class ViajesService {
         transportista:        { select: { id: true, nombre: true } },
         transportistaEfectivo: { select: { id: true, nombre: true } },
         factura:              { select: { id: true, numero: true } },
-      },
+        destinosViaje: viajeDestinosViajeInclude,
+      } as any,
     });
   }
 
@@ -558,6 +590,8 @@ export class ViajesService {
       },
       dto,
     );
+    const destinosNorm = resolveDestinosParaCreate(dto);
+    const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
 
     return this.prisma.$transaction(async (tx) => {
       const data: Prisma.ViajeUncheckedCreateInput = {
@@ -569,7 +603,7 @@ export class ViajesService {
         transportistaEfectivoId: refs.transportistaEfectivoId,
         choferId: refs.choferId,
         origen: dto.origen ?? null,
-        destino: dto.destino ?? null,
+        destino: destinoFinal,
         fechaCarga: new Date(dto.fechaCarga),
         fechaDescarga: new Date(dto.fechaDescarga),
         detalleCarga: dto.detalleCarga ?? null,
@@ -590,6 +624,7 @@ export class ViajesService {
       const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
       await reemplazarProductosDelViaje(tx, viaje.id, productoItemsNorm, tenantId);
+      await reemplazarDestinosDelViaje(tx, viaje.id, destinosNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -697,6 +732,7 @@ export class ViajesService {
     } as any;
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
     delete (data as { productoItems?: unknown }).productoItems;
+    delete (data as { destinos?: unknown }).destinos;
     delete (data as { contratanteRealizaFlete?: unknown }).contratanteRealizaFlete;
     delete (data as { transportistaEfectivoId?: unknown }).transportistaEfectivoId;
     if (dto.otrosGastos !== undefined) {
@@ -755,10 +791,15 @@ export class ViajesService {
     (data as any).gananciaBrutaManual = gananciaPersist.gananciaBrutaManual;
     (data as any).monedaGananciaBrutaManual = gananciaPersist.monedaGananciaBrutaManual;
 
+    const destinosUpdate = resolveDestinosParaUpdate(dto);
+    if (destinosUpdate !== undefined) {
+      (data as any).destino = ultimoDestinoEtiqueta(destinosUpdate);
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.viaje.update({
         where: { id },
-        data,
+        data: data as Prisma.ViajeUncheckedUpdateInput,
       });
       await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
       if (dto.productoItems !== undefined) {
@@ -768,6 +809,9 @@ export class ViajesService {
           normalizarProductoItems(dto.productoItems),
           tenantId,
         );
+      }
+      if (destinosUpdate !== undefined) {
+        await reemplazarDestinosDelViaje(tx, id, destinosUpdate, tenantId);
       }
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },

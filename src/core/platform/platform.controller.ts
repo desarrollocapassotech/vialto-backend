@@ -44,6 +44,7 @@ import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
 import { CreateDivisionDto } from '../../modules/stock/dto/create-division.dto';
 import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
 import { ViajesPaginatedQueryDto } from '../../modules/viajes/dto/viajes-paginated-query.dto';
+import { parseViajesSortParams, parseFechaFiltroQuery, parseTipoFechaQuery } from '../../modules/viajes/viajes-paginated-query.util';
 import { AddGastoDto } from '../../modules/viajes/dto/add-gasto.dto';
 import { AddPagoTransportistaDto } from '../../modules/viajes/dto/add-pago-transportista.dto';
 import { CreateFacturaDto } from '../../modules/facturacion/dto/create-factura.dto';
@@ -77,17 +78,32 @@ export class PlatformController {
     const tipoUbicacion =
       tipoUbicacionRaw === 'origen' || tipoUbicacionRaw === 'destino' ? tipoUbicacionRaw : undefined;
     const ubicacion = queryParamFromRequest(req, 'ubicacion') ?? query.ubicacion;
+    const tipoFecha = parseTipoFechaQuery(
+      queryParamFromRequest(req, 'tipoFecha') ?? query.tipoFecha,
+    );
+    const fechaDesde = parseFechaFiltroQuery(
+      queryParamFromRequest(req, 'fechaDesde') ?? query.fechaDesde,
+    );
+    const fechaHasta = parseFechaFiltroQuery(
+      queryParamFromRequest(req, 'fechaHasta') ?? query.fechaHasta,
+    );
+    const sort = parseViajesSortParams(
+      queryParamFromRequest(req, 'sortBy') ?? query.sortBy,
+      queryParamFromRequest(req, 'sortDir') ?? query.sortDir,
+    );
     return this.service.viajesPaginated(tenantId, {
       page: query.page,
       pageSize: query.pageSize,
       estado: query.estado,
       clienteId,
       transportistaId,
-      tipoFecha: query.tipoFecha,
-      fechaDesde: query.fechaDesde,
-      fechaHasta: query.fechaHasta,
+      tipoFecha,
+      fechaDesde,
+      fechaHasta,
       tipoUbicacion,
       ubicacion,
+      sortBy: sort.sortBy,
+      sortDir: sort.sortDir,
     });
   }
 

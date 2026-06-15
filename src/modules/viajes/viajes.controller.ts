@@ -32,6 +32,7 @@ import { RequireModule } from '../../shared/decorators/require-module.decorator'
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { queryParamFromRequest } from '../../shared/util/express-query-string';
 import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
+import { parseViajesSortParams, parseFechaFiltroQuery, parseTipoFechaQuery } from './viajes-paginated-query.util';
 import { MicCrtExportDto } from './dto/mic-crt-export.dto';
 
 @ApiTags('Módulo: Viajes')
@@ -80,18 +81,30 @@ export class ViajesController {
         ? tipoUbicacionRaw
         : undefined;
     const ubicacion = queryParamFromRequest(req, 'ubicacion') ?? query.ubicacion;
+    const tipoFechaRaw = queryParamFromRequest(req, 'tipoFecha') ?? query.tipoFecha;
+    const tipoFecha = parseTipoFechaQuery(tipoFechaRaw);
+    const fechaDesde =
+      parseFechaFiltroQuery(queryParamFromRequest(req, 'fechaDesde') ?? query.fechaDesde);
+    const fechaHasta =
+      parseFechaFiltroQuery(queryParamFromRequest(req, 'fechaHasta') ?? query.fechaHasta);
     /** Objeto plano (sin `...query`): evita rarezas al expandir instancias del DTO y asegura los filtros. */
+    const sort = parseViajesSortParams(
+      queryParamFromRequest(req, 'sortBy') ?? query.sortBy,
+      queryParamFromRequest(req, 'sortDir') ?? query.sortDir,
+    );
     return this.service.findAllPaginated(auth.tenantId, {
       page: query.page,
       pageSize: query.pageSize,
       estado: query.estado,
       clienteId,
       transportistaId,
-      tipoFecha: query.tipoFecha,
-      fechaDesde: query.fechaDesde,
-      fechaHasta: query.fechaHasta,
+      tipoFecha,
+      fechaDesde,
+      fechaHasta,
       tipoUbicacion,
       ubicacion,
+      sortBy: sort.sortBy,
+      sortDir: sort.sortDir,
     });
   }
 

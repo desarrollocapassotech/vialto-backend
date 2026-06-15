@@ -264,6 +264,26 @@ export class GananciaBrutaValidationError extends Error {
   }
 }
 
+/** Valor numérico para ordenar el listado por ganancia bruta (null = sin dato, va al final). */
+export function gananciaBrutaValorOrdenable(viaje: {
+  monto?: number | null;
+  monedaMonto?: string | null;
+  precioTransportistaExterno?: number | null;
+  monedaPrecioTransportistaExterno?: string | null;
+  otrosGastos?: unknown;
+  gananciaBrutaManual?: number | null;
+  monedaGananciaBrutaManual?: string | null;
+}): number | null {
+  const resumen = buildGananciaBrutaResumen(viaje);
+  if (resumen.gananciaCalculada != null) return resumen.gananciaCalculada;
+  if (resumen.gananciaBrutaManual != null) return resumen.gananciaBrutaManual;
+  if (resumen.balance.length === 1) return resumen.balance[0]!.monto;
+  if (resumen.balance.length > 1) {
+    return resumen.balance.reduce((sum, linea) => sum + linea.monto, 0);
+  }
+  return null;
+}
+
 export function enrichViajeConGananciaBruta<T extends object>(viaje: T) {
   return {
     ...viaje,

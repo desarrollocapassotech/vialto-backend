@@ -107,7 +107,7 @@ export class LiquidacionPdfService {
             viaje: {
               select: {
                 id: true, numero: true, fechaCarga: true, fechaDescarga: true,
-                origen: true, destino: true, metadata: true,
+                origen: true, destino: true,
               },
             },
           },
@@ -190,7 +190,7 @@ export class LiquidacionPdfService {
     y += 22;
 
     // ── Sección 1: emisor | tipo | título ────────────────────────────────────
-    const hdrH = 90;
+    const hdrH = 100;
     doc.rect(M, y, CW, hdrH).stroke('#aaa');
 
     // Líneas divisoras verticales
@@ -207,12 +207,13 @@ export class LiquidacionPdfService {
       ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ?? config.condicionIvaEmisor)
       : '';
     doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(config?.domicilioEmisor ?? '', M + 6, y + 22, { width: 148 })
-      .text(condEmisorLabel, M + 6, y + 32, { width: 148 });
+      .text(config?.domicilioEmisor ?? '', M + 6, y + 22, { width: 148 });
+    doc.fontSize(7).font('Helvetica').fillColor('#333')
+      .text(condEmisorLabel, M + 6, y + 42, { width: 148 });
     doc.fontSize(7).font('Helvetica').fillColor('#555')
-      .text(`CUIT: ${config?.cuitEmisor ?? ''}`, M + 6, y + 44, { width: 148 })
-      .text(`Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ''}`, M + 6, y + 54, { width: 148 })
-      .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, M + 6, y + 64, { width: 148 });
+      .text(`CUIT: ${config?.cuitEmisor ?? ''}`, M + 6, y + 54, { width: 148 })
+      .text(`Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ''}`, M + 6, y + 64, { width: 148 })
+      .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, M + 6, y + 74, { width: 148 });
 
     // Col 2: letra + tipo
     const tipoStr = TIPO_CBTE_LABEL[liq.cbteTipo] ?? String(liq.cbteTipo);

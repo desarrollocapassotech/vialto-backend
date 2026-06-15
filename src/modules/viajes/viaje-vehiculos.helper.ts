@@ -103,10 +103,9 @@ export async function reemplazarDestinosDelViaje(
   items: Array<{ etiqueta: string }>,
   tenantId: string,
 ): Promise<void> {
-  const tx = db as any;
-  await tx.viajeDestino.deleteMany({ where: { viajeId } });
+  await db.viajeDestino.deleteMany({ where: { viajeId } });
   if (items.length === 0) return;
-  await tx.viajeDestino.createMany({
+  await db.viajeDestino.createMany({
     data: items.map(({ etiqueta }, orden) => ({
       tenantId,
       viajeId,
@@ -126,6 +125,9 @@ export function idsProductosDelViaje(v: {
 export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultArgs>()({
   include: {
     cliente: { select: { id: true, nombre: true } },
+    chofer: {
+      select: { id: true, nombre: true, dni: true, cuit: true, telefono: true, transportistaId: true },
+    },
     transportista: { select: { id: true, nombre: true } },
     transportistaEfectivo: { select: { id: true, nombre: true } },
     /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */

@@ -11,7 +11,7 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
-import { OtroGastoDto, PagoTransportistaDto } from './create-viaje.dto';
+import { normalizeOptionalId, OtroGastoDto, PagoTransportistaDto } from './create-viaje.dto';
 import { ViajeProductoItemDto } from './viaje-producto-item.dto';
 import { ViajeDestinoItemDto } from './viaje-destino-item.dto';
 
@@ -42,7 +42,10 @@ export class UpdateViajeDto {
   contratanteRealizaFlete?: boolean;
   /** Transportista que efectivamente realiza el flete (cuando difiere del contratante). */
   @IsOptional() @IsString() transportistaEfectivoId?: string | null;
-  @IsOptional() @IsString() choferId?: string;
+  @IsOptional()
+  @Transform(normalizeOptionalId)
+  @IsString()
+  choferId?: string | null;
   @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsOptional() @IsString() origen?: string;
   /** Legacy: un solo destino (reemplaza toda la lista con una parada). */

@@ -9,6 +9,13 @@ function parseYyyyMmDdDia(s: string): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
 }
 
+/** Inicio del día de hoy en Argentina (UTC-3, sin horario de verano). */
+function inicioHoyArgentina(): Date {
+  const argentinaMs = Date.now() - 3 * 60 * 60 * 1000;
+  const hoy = new Date(argentinaMs).toISOString().slice(0, 10);
+  return new Date(`${hoy}T00:00:00.000-03:00`);
+}
+
 /** Inicio del día calendario en Argentina (UTC−3, sin horario de verano). */
 function parseYyyyMmDdInicioAr(s: string): Date | null {
   const t = parseYyyyMmDdDia(s);
@@ -113,7 +120,7 @@ export function resolveViajesSort(
     ? (rawBy as ViajesSortField)
     : 'fecha_carga';
   const rawDir = query.sortDir?.trim();
-  const sortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : 'desc';
+  const sortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : 'asc';
   return { sortBy, sortDir };
 }
 
@@ -151,6 +158,19 @@ export function buildViajesPaginatedWhere(
       } else {
         where.fechaDescarga = range;
       }
+    }
+  }
+
+  const periodo = query.periodo;
+  if (periodo === 'desde_hoy' || periodo === 'anteriores') {
+    const hoy = inicioHoyArgentina();
+    const periodoRange: Prisma.DateTimeNullableFilter =
+      periodo === 'desde_hoy' ? { gte: hoy } : { lt: hoy };
+    const existing = where.fechaCarga;
+    if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+      where.fechaCarga = { ...(existing as Prisma.DateTimeNullableFilter), ...periodoRange };
+    } else {
+      where.fechaCarga = periodoRange;
     }
   }
 
@@ -196,6 +216,6 @@ export function buildViajesPrismaOrderBy(
     case 'monto':
       return [{ monto: { sort: sortDir, nulls } }, { id: sortDir }];
     default:
-      return [{ fechaCarga: { sort: 'desc', nulls } }, { id: 'desc' }];
+      return [{ fechaCarga: { sort: 'asc', nulls } }, { id: 'asc' }];
   }
 }

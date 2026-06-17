@@ -399,10 +399,6 @@ export class ViajesService {
       return this.findAllPaginatedOrdenGananciaBruta(where, page, pageSize, sortDir);
     }
 
-    if (sortBy === 'fecha_carga' || sortBy === 'fecha_descarga') {
-      return this.findAllPaginatedOrdenFecha(where, page, pageSize, sortBy, sortDir);
-    }
-
     const orderBy = buildViajesPrismaOrderBy(sortBy, sortDir);
     const [total, items] = await this.prisma.$transaction([
       this.prisma.viaje.count({ where }),

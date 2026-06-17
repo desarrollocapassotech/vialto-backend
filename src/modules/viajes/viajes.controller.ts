@@ -87,6 +87,11 @@ export class ViajesController {
       parseFechaFiltroQuery(queryParamFromRequest(req, 'fechaDesde') ?? query.fechaDesde);
     const fechaHasta =
       parseFechaFiltroQuery(queryParamFromRequest(req, 'fechaHasta') ?? query.fechaHasta);
+    const periodoRaw = queryParamFromRequest(req, 'periodo') ?? query.periodo;
+    const periodo: 'todos' | 'desde_hoy' | 'anteriores' | undefined =
+      periodoRaw === 'todos' || periodoRaw === 'desde_hoy' || periodoRaw === 'anteriores'
+        ? periodoRaw
+        : undefined;
     /** Objeto plano (sin `...query`): evita rarezas al expandir instancias del DTO y asegura los filtros. */
     const sort = parseViajesSortParams(
       queryParamFromRequest(req, 'sortBy') ?? query.sortBy,
@@ -103,6 +108,7 @@ export class ViajesController {
       fechaHasta,
       tipoUbicacion,
       ubicacion,
+      periodo,
       sortBy: sort.sortBy,
       sortDir: sort.sortDir,
     });

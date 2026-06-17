@@ -72,6 +72,21 @@ export class ViajesPaginatedQueryDto {
   @MaxLength(200)
   ubicacion?: string;
 
+  /**
+   * Filtro global por fecha de carga relativo al día actual (Argentina, UTC-3).
+   * - `todos` (default): muestra todos los viajes.
+   * - `desde_hoy`: solo viajes con fechaCarga >= inicio del día actual.
+   * - `anteriores`: solo viajes con fechaCarga < inicio del día actual.
+   */
+  @IsOptional()
+  @Transform(({ value }) => {
+    const s = firstQueryString(value);
+    if (s === 'todos' || s === 'desde_hoy' || s === 'anteriores') return s;
+    return undefined;
+  })
+  @IsIn(['todos', 'desde_hoy', 'anteriores'])
+  periodo?: 'todos' | 'desde_hoy' | 'anteriores';
+
   /** Campo de ordenamiento del listado paginado. */
   @IsOptional()
   @Transform(({ value }) => {

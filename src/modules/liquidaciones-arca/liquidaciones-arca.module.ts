@@ -12,4 +12,4 @@ import { LiquidacionPdfService } from './liquidacion-pdf.service';
   providers: [ArcaClientService, ArcaConfigService, LiquidacionesService, LiquidacionPdfService],
   exports: [ArcaConfigService, LiquidacionesService, LiquidacionPdfService],
 })
-export class LiquidacionesArcaModule {}
+export class IntegracionArcaModule {}

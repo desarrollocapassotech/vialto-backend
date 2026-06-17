@@ -593,8 +593,8 @@ export class StockService {
       throw new BadGatewayException('No se pudo obtener el remito escaneado.');
     }
 
-    const contentType = upstream.headers.get('content-type') ?? 'application/pdf';
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="remito.pdf"');
     res.setHeader('Content-Disposition', 'inline');
     res.setHeader('Cache-Control', 'private, max-age=300');
 
@@ -924,16 +924,30 @@ export class StockService {
       const disp1 = item?.cantidad1 ?? 0;
       const disp2 = item?.cantidad2 ?? 0;
 
+      const u1 = producto.unidad1Nombre?.trim() || 'Cantidad 1';
+      const u2 = producto.unidad2Nombre?.trim() || 'Cantidad 2';
+
       if (cantidad1Origen > 0 && disp1 < cantidad1Origen) {
-        throw new BadRequestException(
-          `Stock de pallets insuficiente. Disponible: ${disp1}.`,
-        );
+        throw new BadRequestException(`Stock de ${u1} insuficiente. Disponible: ${disp1}.`);
       }
       if (cantidad2Origen > 0 && disp2 < cantidad2Origen) {
+        throw new BadRequestException(`Stock de ${u2} insuficiente. Disponible: ${disp2}.`);
+      }
+
+      if (!item) {
         throw new BadRequestException(
-          `Stock suelto insuficiente. Disponible: ${disp2}.`,
+          `No hay stock registrado para esta empresa y producto en el depósito seleccionado.`,
         );
       }
+
+      // updateMany admite solo increment o decrement por campo (no ambos a la vez).
+      const net1 = cantidad1Destino - cantidad1Origen;
+      const net2 = cantidad2Destino - cantidad2Origen;
+      const stockData: Prisma.StockItemUpdateManyMutationInput = {};
+      if (net1 > 0) stockData.cantidad1 = { increment: net1 };
+      else if (net1 < 0) stockData.cantidad1 = { decrement: -net1 };
+      if (net2 > 0) stockData.cantidad2 = { increment: net2 };
+      else if (net2 < 0) stockData.cantidad2 = { decrement: -net2 };
 
       const dec = await tx.stockItem.updateMany({
         where: {
@@ -944,15 +958,12 @@ export class StockService {
           cantidad1: { gte: cantidad1Origen },
           cantidad2: { gte: cantidad2Origen },
         },
-        data: {
-          cantidad1: { decrement: cantidad1Origen, increment: cantidad1Destino },
-          cantidad2: { decrement: cantidad2Origen, increment: cantidad2Destino },
-        },
+        data: stockData,
       });
 
       if (dec.count === 0) {
         throw new BadRequestException(
-          `Stock insuficiente. Pallets disponibles: ${disp1}, suelto disponible: ${disp2}.`,
+          `Stock insuficiente. ${u1} disponible: ${disp1}, ${u2} disponible: ${disp2}.`,
         );
       }
 

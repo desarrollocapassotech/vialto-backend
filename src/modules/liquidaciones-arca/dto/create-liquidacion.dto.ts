@@ -7,6 +7,7 @@ import {
   ArrayMinSize,
   Min,
   Max,
+  MaxLength,
 } from 'class-validator';
 
 export class CreateLiquidacionDto {
@@ -28,11 +29,26 @@ export class CreateLiquidacionDto {
   /**
    * Porcentaje de comisión a aplicar.
    * Si no se envía, se usa el comisionPct del Transportista;
-   * si tampoco tiene, se usa comisionPctDefault de ArcaConfig.
+   * si tampoco tiene, se usa comisionPctDefault de ArcaConfig o 0.
    */
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
   comisionPct?: number;
+
+  /**
+   * Alícuota de IVA (%) a aplicar sobre el neto gravado.
+   * Si no se envía, se usa ivaGastosAdmin de ArcaConfig o 21% por defecto.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  ivaPct?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  comprobanteUrl?: string;
 }

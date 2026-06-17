@@ -71,4 +71,28 @@ export class ViajesPaginatedQueryDto {
   @IsString()
   @MaxLength(200)
   ubicacion?: string;
+
+  /** Campo de ordenamiento del listado paginado. */
+  @IsOptional()
+  @Transform(({ value }) => {
+    const s = firstQueryString(value);
+    if (
+      s === 'fecha_carga' ||
+      s === 'fecha_descarga' ||
+      s === 'monto' ||
+      s === 'ganancia_bruta'
+    ) {
+      return s;
+    }
+    return undefined;
+  })
+  sortBy?: 'fecha_carga' | 'fecha_descarga' | 'monto' | 'ganancia_bruta';
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    const s = firstQueryString(value);
+    if (s === 'asc' || s === 'desc') return s;
+    return undefined;
+  })
+  sortDir?: 'asc' | 'desc';
 }

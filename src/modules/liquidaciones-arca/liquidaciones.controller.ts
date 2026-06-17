@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -7,10 +8,14 @@ import {
   Body,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
@@ -22,30 +27,39 @@ import { LiquidacionesService } from './liquidaciones.service';
 import { LiquidacionPdfService } from './liquidacion-pdf.service';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
+import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
 
-@ApiTags('Liquidaciones ARCA')
+@ApiTags('Integración ARCA')
 @ApiBearerAuth('clerk-jwt')
-@Controller('liquidaciones-arca')
+@Controller('integracion-arca')
 @UseGuards(ClerkAuthGuard, ModuleGuard)
-@RequireModule('liquidaciones-arca')
 export class LiquidacionesController {
   constructor(
     private readonly service: LiquidacionesService,
     private readonly pdfService: LiquidacionPdfService,
   ) {}
 
-  // ── Config (lectura pública para el tenant) ───────────────────────────────
+  // ── Config (requiere integracion-arca) ────────────────────────────────────
 
-  @ApiOperation({ summary: 'Obtener configuración ARCA del tenant (solo lectura)' })
+  @ApiOperation({ summary: 'Obtener configuración ARCA del tenant' })
   @Get('config')
+  @RequireModule('integracion-arca')
   getConfig(@CurrentAuth() auth: AuthPayload) {
     return this.service.getConfig(auth.tenantId!);
   }
 
-  // ── Liquidaciones (CVLP Tipo 60) ──────────────────────────────────────────
+  @ApiOperation({ summary: 'Crear / actualizar configuración ARCA del tenant' })
+  @Post('config')
+  @RequireModule('integracion-arca')
+  upsertConfig(@CurrentAuth() auth: AuthPayload, @Body() dto: UpsertArcaConfigDto) {
+    return this.service.upsertConfig(auth.tenantId!, dto);
+  }
+
+  // ── Liquidaciones CRUD (facturacion OR integracion-arca) ─────────────────
 
   @ApiOperation({ summary: 'Listar liquidaciones del tenant' })
   @Get('liquidaciones')
+  @RequireModule('facturacion', 'integracion-arca')
   findAll(
     @CurrentAuth() auth: AuthPayload,
     @Query('estado') estado?: string,
@@ -55,12 +69,34 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: 'Obtener liquidación por ID' })
   @Get('liquidaciones/:id')
+  @RequireModule('facturacion', 'integracion-arca')
   findOne(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
     return this.service.findById(auth.tenantId!, id);
   }
 
+  @ApiOperation({ summary: 'Crear liquidación (CVLP Tipo 60) — calcula montos automáticamente' })
+  @Post('liquidaciones')
+  @RequireModule('facturacion', 'integracion-arca')
+  createLiquidacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Body() dto: CreateLiquidacionDto,
+  ) {
+    return this.service.createLiquidacion(auth.tenantId!, auth.userId, dto);
+  }
+
+  @ApiOperation({ summary: 'Eliminar liquidación en borrador o con error' })
+  @Delete('liquidaciones/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireModule('facturacion', 'integracion-arca')
+  deleteLiquidacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
+    return this.service.deleteLiquidacion(auth.tenantId!, id);
+  }
+
+  // ── Liquidaciones ARCA-específico (requiere integracion-arca) ────────────
+
   @ApiOperation({ summary: 'Descargar PDF de liquidación' })
   @Get('liquidaciones/:id/pdf')
+  @RequireModule('integracion-arca')
   async getPdf(
     @CurrentAuth() auth: AuthPayload,
     @Param('id') id: string,
@@ -84,15 +120,6 @@ export class LiquidacionesController {
     }
   }
 
-  @ApiOperation({ summary: 'Crear liquidación (CVLP Tipo 60) — calcula montos automáticamente' })
-  @Post('liquidaciones')
-  createLiquidacion(
-    @CurrentAuth() auth: AuthPayload,
-    @Body() dto: CreateLiquidacionDto,
-  ) {
-    return this.service.createLiquidacion(auth.tenantId!, auth.userId, dto);
-  }
-
   @ApiOperation({
     summary: 'Emitir liquidación a ARCA — obtiene CAE en tiempo real',
     description:
@@ -101,29 +128,20 @@ export class LiquidacionesController {
   })
   @Post('liquidaciones/:id/emitir')
   @HttpCode(HttpStatus.OK)
+  @RequireModule('integracion-arca')
   emitirLiquidacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
     return this.service.emitirLiquidacion(auth.tenantId!, id);
   }
 
-  @ApiOperation({
-    summary: 'Anular liquidación — emite comprobante negativo a ARCA',
-  })
+  @ApiOperation({ summary: 'Anular liquidación — emite comprobante negativo a ARCA' })
   @Post('liquidaciones/:id/anular')
   @HttpCode(HttpStatus.OK)
+  @RequireModule('integracion-arca')
   anularLiquidacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
     return this.service.anularLiquidacion(auth.tenantId!, id);
   }
 
-  @ApiOperation({
-    summary: 'Eliminar liquidación en borrador o con error',
-  })
-  @Delete('liquidaciones/:id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  deleteLiquidacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string) {
-    return this.service.deleteLiquidacion(auth.tenantId!, id);
-  }
-
-  // ── Facturas A/B via ARCA ──────────────────────────────────────────────────
+  // ── Facturas A/B via ARCA (requiere integracion-arca) ────────────────────
 
   @ApiOperation({
     summary: 'Emitir factura existente a ARCA (Tipo A o B)',
@@ -133,6 +151,7 @@ export class LiquidacionesController {
   })
   @Post('facturas/:facturaId/emitir')
   @HttpCode(HttpStatus.OK)
+  @RequireModule('integracion-arca')
   emitirFactura(
     @CurrentAuth() auth: AuthPayload,
     @Param('facturaId') facturaId: string,
@@ -141,10 +160,31 @@ export class LiquidacionesController {
     return this.service.emitirFacturaArca(auth.tenantId!, facturaId, dto);
   }
 
-  // ── Logs de auditoría ─────────────────────────────────────────────────────
+  // ── Comprobante adjunto (facturacion OR integracion-arca) ────────────────
+
+  @ApiOperation({ summary: 'Subir comprobante adjunto (PDF o imagen) a Cloudinary' })
+  @Post('upload-comprobante')
+  @RequireModule('facturacion', 'integracion-arca')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadComprobante(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    if (!auth.tenantId) throw new BadRequestException('tenantId requerido');
+    if (!file) throw new BadRequestException('Se requiere un archivo.');
+    return this.service.uploadComprobante(auth.tenantId, file);
+  }
+
+  // ── Logs de auditoría (requiere integracion-arca) ─────────────────────────
 
   @ApiOperation({ summary: 'Logs de auditoría de requests a AFIP SDK' })
   @Get('logs')
+  @RequireModule('integracion-arca')
   findLogs(
     @CurrentAuth() auth: AuthPayload,
     @Query('liquidacionId') liquidacionId?: string,

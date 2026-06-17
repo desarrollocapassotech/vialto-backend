@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
@@ -17,7 +18,10 @@ type ViajeSnap = { id: string; estado: string; monto: number | null; monedaMonto
 
 @Injectable()
 export class FacturacionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   private computeImporte(viajes: { monto: number | null }[]): number {
     return viajes.reduce((sum, v) => sum + (v.monto ?? 0), 0);
@@ -87,6 +91,22 @@ export class FacturacionService {
   private readonly VIAJE_SELECT = { id: true, estado: true, monto: true, monedaMonto: true } as const;
   private readonly PAGO_SELECT = { importe: true } as const;
 
+  async uploadComprobante(tenantId: string, file: Express.Multer.File): Promise<{ url: string }> {
+    const name = file.originalname.toLowerCase();
+    const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
+    const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
+    if (!isPdf && !isImage) {
+      throw new BadRequestException('El comprobante debe ser un PDF o una imagen.');
+    }
+    const url = await this.cloudinary.uploadComprobanteArchivo(
+      tenantId,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    return { url };
+  }
+
   async listFacturas(tenantId: string, clienteId?: string) {
     const rows = await this.prisma.factura.findMany({
       where: { tenantId, ...(clienteId ? { clienteId } : {}) },
@@ -134,7 +154,10 @@ export class FacturacionService {
           fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
           estado: 'pendiente',
           diferencia: dto.diferencia ?? null,
-        },
+          ivaPct: dto.ivaPct ?? 21,
+          comprobanteUrl: dto.comprobanteUrl ?? null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
       });
       if (viajeIds.length > 0) {
         // Vincular viajes y guardar nro de factura
@@ -194,6 +217,8 @@ export class FacturacionService {
           ...(dto.fechaVencimiento !== undefined
             ? { fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null }
             : {}),
+          ...(dto.ivaPct !== undefined ? { ivaPct: dto.ivaPct } : {}),
+          ...(dto.comprobanteUrl !== undefined ? { comprobanteUrl: dto.comprobanteUrl || null } : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });

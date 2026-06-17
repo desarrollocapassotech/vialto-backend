@@ -42,8 +42,17 @@ import {
   GananciaBrutaValidationError,
   buildGananciaBrutaResumen,
   enrichViajeConGananciaBruta,
+  gananciaBrutaValorOrdenable,
   resolveGananciaBrutaPersist,
 } from './viaje-ganancia-bruta.util';
+import {
+  buildViajesPaginatedWhere,
+  buildViajesPrismaOrderBy,
+  compareViajesFechaAr,
+  compareViajesOrdenNullable,
+  resolveViajesSort,
+  type ViajesSortDir,
+} from './viajes-paginated-query.util';
 
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
 
@@ -96,20 +105,6 @@ function assertFechaDescargaValida(fechaCarga: Date, fechaDescarga: Date): void 
       'La fecha de descarga no puede ser anterior a la fecha de carga.',
     );
   }
-}
-
-function parseYyyyMmDdInicioUtc(s: string): Date | null {
-  const t = s.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
-  const d = new Date(`${t}T00:00:00.000Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function parseYyyyMmDdFinUtc(s: string): Date | null {
-  const t = s.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
-  const d = new Date(`${t}T23:59:59.999Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 @Injectable()
@@ -364,81 +359,128 @@ export class ViajesService {
 
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
-    const where: Prisma.ViajeWhereInput = { tenantId };
+    const where = buildViajesPaginatedWhere(tenantId, query);
+    const { sortBy, sortDir } = resolveViajesSort(query);
 
-    const est = query.estado?.trim();
-    if (est) where.estado = est;
-
-    const cid = query.clienteId?.trim();
-    if (cid) where.clienteId = cid;
-
-    const tid = query.transportistaId?.trim();
-    if (tid) where.transportistaId = tid;
-
-    const tipoFecha = query.tipoFecha?.trim();
-    const fDesde = query.fechaDesde?.trim();
-    const fHasta = query.fechaHasta?.trim();
-    if (tipoFecha === 'carga' || tipoFecha === 'descarga') {
-      const range: Prisma.DateTimeNullableFilter = {};
-      if (fDesde) {
-        const a = parseYyyyMmDdInicioUtc(fDesde);
-        if (a) range.gte = a;
-      }
-      if (fHasta) {
-        const b = parseYyyyMmDdFinUtc(fHasta);
-        if (b) range.lte = b;
-      }
-      if (Object.keys(range).length > 0) {
-        if (tipoFecha === 'carga') {
-          where.fechaCarga = range;
-        } else {
-          where.fechaDescarga = range;
-        }
-      }
+    if (sortBy === 'ganancia_bruta') {
+      return this.findAllPaginatedOrdenGananciaBruta(where, page, pageSize, sortDir);
     }
 
-    const tipoUbicacion = query.tipoUbicacion?.trim();
-    const uq = query.ubicacion?.trim();
-    if ((tipoUbicacion === 'origen' || tipoUbicacion === 'destino') && uq) {
-      /**
-       * El listado solo muestra el nombre de ciudad (antes de la primera coma); en BD puede
-       * guardarse la etiqueta completa ("Ciudad, provincia") o solo la ciudad. El combobox
-       * envía la etiqueta completa: OR entre contiene etiqueta, igual a solo ciudad, o
-       * prefijo "Ciudad," para alinear con lo que el usuario ve y con datos viejos.
-       */
-      const campo = tipoUbicacion === 'origen' ? 'origen' : 'destino';
-      const primeraComa = uq.indexOf(',');
-      const soloCiudad =
-        primeraComa === -1 ? uq : uq.slice(0, primeraComa).trim();
-      const mode = Prisma.QueryMode.insensitive;
-
-      const or: Prisma.ViajeWhereInput[] = [
-        { [campo]: { startsWith: uq, mode } },
-      ];
-      if (soloCiudad.length >= 2 && soloCiudad !== uq) {
-        or.push({ [campo]: { equals: soloCiudad, mode } });
-        or.push({ [campo]: { startsWith: `${soloCiudad},`, mode } });
-      }
-
-      const prevAnd = where.AND;
-      const andArr: Prisma.ViajeWhereInput[] = Array.isArray(prevAnd)
-        ? [...prevAnd]
-        : prevAnd != null
-          ? [prevAnd]
-          : [];
-      where.AND = [...andArr, { OR: or }];
+    if (sortBy === 'fecha_carga' || sortBy === 'fecha_descarga') {
+      return this.findAllPaginatedOrdenFecha(where, page, pageSize, sortBy, sortDir);
     }
 
+    const orderBy = buildViajesPrismaOrderBy(sortBy, sortDir);
     const [total, items] = await this.prisma.$transaction([
       this.prisma.viaje.count({ where }),
       this.prisma.viaje.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       }),
     ]);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return {
+      items: items.map((item) => enrichViajeConExportaciones(item)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
+  }
+
+  private async findAllPaginatedOrdenFecha(
+    where: Prisma.ViajeWhereInput,
+    page: number,
+    pageSize: number,
+    sortBy: 'fecha_carga' | 'fecha_descarga',
+    sortDir: ViajesSortDir,
+  ) {
+    const prismaField = sortBy === 'fecha_carga' ? 'fechaCarga' : 'fechaDescarga';
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.viaje.count({ where }),
+      this.prisma.viaje.findMany({
+        where,
+        select: { id: true, fechaCarga: true, fechaDescarga: true },
+      }),
+    ]);
+
+    const sortedIds = rows
+      .map((row) => ({
+        id: row.id,
+        fecha: row[prismaField],
+      }))
+      .sort((a, b) =>
+        compareViajesFechaAr(a.fecha, b.fecha, sortDir, () =>
+          a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+        ),
+      )
+      .map((row) => row.id);
+
+    return this.findAllPaginatedPageFromSortedIds(where, sortedIds, total, page, pageSize);
+  }
+
+  private async findAllPaginatedOrdenGananciaBruta(
+    where: Prisma.ViajeWhereInput,
+    page: number,
+    pageSize: number,
+    sortDir: ViajesSortDir,
+  ) {
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.viaje.count({ where }),
+      this.prisma.viaje.findMany({
+        where,
+        select: {
+          id: true,
+          monto: true,
+          monedaMonto: true,
+          precioTransportistaExterno: true,
+          monedaPrecioTransportistaExterno: true,
+          otrosGastos: true,
+          gananciaBrutaManual: true,
+          monedaGananciaBrutaManual: true,
+        },
+      }),
+    ]);
+
+    const sortedIds = rows
+      .map((row) => ({ id: row.id, valor: gananciaBrutaValorOrdenable(row) }))
+      .sort((a, b) =>
+        compareViajesOrdenNullable(a.valor, b.valor, sortDir, () =>
+          a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+        ),
+      )
+      .map((row) => row.id);
+
+    return this.findAllPaginatedPageFromSortedIds(where, sortedIds, total, page, pageSize);
+  }
+
+  private async findAllPaginatedPageFromSortedIds(
+    _where: Prisma.ViajeWhereInput,
+    sortedIds: string[],
+    total: number,
+    page: number,
+    pageSize: number,
+  ) {
+    const pageIds = sortedIds.slice((page - 1) * pageSize, page * pageSize);
+    const itemsUnsorted =
+      pageIds.length === 0
+        ? []
+        : await this.prisma.viaje.findMany({
+            where: { id: { in: pageIds } },
+            include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+          });
+    const byId = new Map(itemsUnsorted.map((item) => [item.id, item]));
+    const items = pageIds
+      .map((id) => byId.get(id))
+      .filter((item): item is NonNullable<typeof item> => item != null);
+
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
       items: items.map((item) => enrichViajeConExportaciones(item)),

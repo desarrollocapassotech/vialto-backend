@@ -196,6 +196,21 @@ model ViajeProducto {
   @@map("viajes_productos")
 }
 
+model ViajeDestino {
+  id        String   @id @default(cuid())
+  tenantId  String
+  viajeId   String
+  viaje     Viaje    @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  orden     Int      @default(0)
+  etiqueta  String
+  createdAt DateTime @default(now())
+
+  @@unique([viajeId, orden])
+  @@index([tenantId])
+  @@index([viajeId])
+  @@map("viajes_destinos")
+}
+
 model Viaje {
   id                               String          @id @default(cuid())
   tenantId                         String
@@ -216,6 +231,7 @@ model Viaje {
   vehiculosViaje                   ViajeVehiculo[]
   origen                           String?
   destino                          String?
+  destinosViaje                    ViajeDestino[]
   fechaCarga                       DateTime?
   fechaDescarga                    DateTime?
   productosViaje                   ViajeProducto[]

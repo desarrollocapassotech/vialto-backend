@@ -10,7 +10,6 @@ import { AddGastoDto } from './dto/add-gasto.dto';
 import { AddPagoTransportistaDto } from './dto/add-pago-transportista.dto';
 import { generateNumeroViaje } from './generate-viaje-numero';
 import {
-  assertViajeOperacionExclusiva,
   assertTransportistaEfectivoSubcontratacion,
   mergeViajeOperacionIds,
   resolveContratanteRealizaFlete,
@@ -19,9 +18,12 @@ import {
 import {
   assertVehiculosDelViaje,
   idsProductosDelViaje,
-  normalizarVehiculoIds,
+  normalizarDestinosDelViaje,
+  reemplazarDestinosDelViaje,
   reemplazarProductosDelViaje,
   reemplazarVehiculosDelViaje,
+  ultimoDestinoEtiqueta,
+  viajeDestinosViajeInclude,
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
   type ViajeConVehiculosViaje,
 } from './viaje-vehiculos.helper';
@@ -54,7 +56,37 @@ import {
   type ViajesSortDir,
 } from './viajes-paginated-query.util';
 
+/** Transacciones con varios writes + Neon pueden superar el default de 5s de Prisma. */
+const VIAJE_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
+
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
+type DestinoItem = { etiqueta: string };
+
+function resolveDestinosParaCreate(dto: CreateViajeDto): DestinoItem[] {
+  const fromArray = normalizarDestinosDelViaje(dto.destinos);
+  if (fromArray.length > 0) return fromArray;
+  const legacy = dto.destino?.trim();
+  if (legacy) return [{ etiqueta: legacy }];
+  throw new BadRequestException('Ingresá al menos un destino.');
+}
+
+function resolveDestinosParaUpdate(dto: UpdateViajeDto): DestinoItem[] | undefined {
+  if (dto.destinos !== undefined) {
+    const norm = normalizarDestinosDelViaje(dto.destinos);
+    if (norm.length === 0) {
+      throw new BadRequestException('Ingresá al menos un destino.');
+    }
+    return norm;
+  }
+  if (dto.destino !== undefined) {
+    const legacy = dto.destino?.trim();
+    if (!legacy) {
+      throw new BadRequestException('El destino no puede estar vacío.');
+    }
+    return [{ etiqueta: legacy }];
+  }
+  return undefined;
+}
 
 function normalizarProductoItems(raw: ProductoItem[] | undefined | null): ProductoItem[] {
   if (!raw?.length) return [];
@@ -268,7 +300,8 @@ export class ViajesService {
         transportista:        { select: { id: true, nombre: true } },
         transportistaEfectivo: { select: { id: true, nombre: true } },
         factura:              { select: { id: true, numero: true } },
-      },
+        destinosViaje: viajeDestinosViajeInclude,
+      } as any,
     });
   }
 
@@ -533,15 +566,16 @@ export class ViajesService {
   }
 
   async create(tenantId: string, userId: string, dto: CreateViajeDto) {
-    const transportistaExterno = dto.transportistaId?.trim();
-    const vehiculoIds = transportistaExterno
-      ? []
-      : normalizarVehiculoIds(dto.vehiculoIds);
-    assertViajeOperacionExclusiva({
-      transportistaId: dto.transportistaId,
-      choferId: dto.choferId,
-      vehiculoIds,
-    });
+    const op = mergeViajeOperacionIds(
+      { transportistaId: null, choferId: null, vehiculoIds: [] },
+      {
+        transportistaId: dto.transportistaId,
+        choferId: dto.choferId,
+        vehiculoIds: dto.vehiculoIds,
+      },
+    );
+    const transportistaExterno = op.transportistaId?.trim();
+    const vehiculoIds = op.vehiculoIds;
     const contratanteRealizaFlete =
       dto.contratanteRealizaFlete === true || dto.contratanteRealizaFlete === false
         ? dto.contratanteRealizaFlete
@@ -567,14 +601,18 @@ export class ViajesService {
     });
     const refs = {
       clienteId: dto.clienteId,
-      transportistaId: transportistaExterno || null,
-      choferId: transportistaExterno ? null : dto.choferId?.trim() || null,
+      transportistaId: op.transportistaId,
+      choferId: op.choferId,
       transportistaEfectivoId,
     };
     await this.assertRefs(tenantId, refs);
     if (!transportistaExterno) {
       await assertVehiculosDelViaje(this.prisma, tenantId, vehiculoIds, {
         requiereFlotaPropia: true,
+      });
+    } else if (vehiculoIds.length > 0) {
+      await assertVehiculosDelViaje(this.prisma, tenantId, vehiculoIds, {
+        requiereFlotaPropia: false,
       });
     }
     const productoItemsNorm = normalizarProductoItems(dto.productoItems);
@@ -600,6 +638,8 @@ export class ViajesService {
       },
       dto,
     );
+    const destinosNorm = resolveDestinosParaCreate(dto);
+    const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
 
     return this.prisma.$transaction(async (tx) => {
       const data: Prisma.ViajeUncheckedCreateInput = {
@@ -611,7 +651,7 @@ export class ViajesService {
         transportistaEfectivoId: refs.transportistaEfectivoId,
         choferId: refs.choferId,
         origen: dto.origen ?? null,
-        destino: dto.destino ?? null,
+        destino: destinoFinal,
         fechaCarga: new Date(dto.fechaCarga),
         fechaDescarga: new Date(dto.fechaDescarga),
         detalleCarga: dto.detalleCarga ?? null,
@@ -632,6 +672,7 @@ export class ViajesService {
       const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
       await reemplazarProductosDelViaje(tx, viaje.id, productoItemsNorm, tenantId);
+      await reemplazarDestinosDelViaje(tx, viaje.id, destinosNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -639,7 +680,7 @@ export class ViajesService {
       return enrichViajeConGananciaBruta(
         out as unknown as ViajeConVehiculosViaje,
       ) as ViajeConVehiculosViaje;
-    });
+    }, VIAJE_INTERACTIVE_TX);
   }
 
   async update(id: string, tenantId: string, dto: UpdateViajeDto) {
@@ -739,6 +780,7 @@ export class ViajesService {
     } as any;
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
     delete (data as { productoItems?: unknown }).productoItems;
+    delete (data as { destinos?: unknown }).destinos;
     delete (data as { contratanteRealizaFlete?: unknown }).contratanteRealizaFlete;
     delete (data as { transportistaEfectivoId?: unknown }).transportistaEfectivoId;
     if (dto.otrosGastos !== undefined) {
@@ -797,10 +839,15 @@ export class ViajesService {
     (data as any).gananciaBrutaManual = gananciaPersist.gananciaBrutaManual;
     (data as any).monedaGananciaBrutaManual = gananciaPersist.monedaGananciaBrutaManual;
 
+    const destinosUpdate = resolveDestinosParaUpdate(dto);
+    if (destinosUpdate !== undefined) {
+      (data as any).destino = ultimoDestinoEtiqueta(destinosUpdate);
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.viaje.update({
         where: { id },
-        data,
+        data: data as Prisma.ViajeUncheckedUpdateInput,
       });
       await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
       if (dto.productoItems !== undefined) {
@@ -811,6 +858,9 @@ export class ViajesService {
           tenantId,
         );
       }
+      if (destinosUpdate !== undefined) {
+        await reemplazarDestinosDelViaje(tx, id, destinosUpdate, tenantId);
+      }
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
@@ -819,7 +869,7 @@ export class ViajesService {
         await this.upsertCargoFinalizacion(tx, full);
       }
       return enrichViajeConGananciaBruta(full) as ViajeConVehiculosViaje;
-    });
+    }, VIAJE_INTERACTIVE_TX);
   }
 
   async addGasto(id: string, tenantId: string, userId: string, dto: AddGastoDto) {
@@ -862,7 +912,7 @@ export class ViajesService {
       }
 
       return full;
-    });
+    }, VIAJE_INTERACTIVE_TX);
   }
 
   async addPagoTransportista(id: string, tenantId: string, userId: string, dto: AddPagoTransportistaDto) {
@@ -911,7 +961,7 @@ export class ViajesService {
         where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
-    });
+    }, VIAJE_INTERACTIVE_TX);
   }
 
   async deletePagoTransportista(id: string, tenantId: string, userId: string, index: number) {
@@ -943,7 +993,7 @@ export class ViajesService {
         where: { id, tenantId },
         include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
       })) as unknown as ViajeConVehiculosViaje;
-    });
+    }, VIAJE_INTERACTIVE_TX);
   }
 
   async getViajesSaldoPendienteTransportista(tenantId: string) {

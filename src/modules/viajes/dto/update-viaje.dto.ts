@@ -11,8 +11,9 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
-import { OtroGastoDto, PagoTransportistaDto } from './create-viaje.dto';
+import { normalizeOptionalId, OtroGastoDto, PagoTransportistaDto } from './create-viaje.dto';
 import { ViajeProductoItemDto } from './viaje-producto-item.dto';
+import { ViajeDestinoItemDto } from './viaje-destino-item.dto';
 
 export { PagoTransportistaDto };
 
@@ -41,10 +42,20 @@ export class UpdateViajeDto {
   contratanteRealizaFlete?: boolean;
   /** Transportista que efectivamente realiza el flete (cuando difiere del contratante). */
   @IsOptional() @IsString() transportistaEfectivoId?: string | null;
-  @IsOptional() @IsString() choferId?: string;
+  @IsOptional()
+  @Transform(normalizeOptionalId)
+  @IsString()
+  choferId?: string | null;
   @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsOptional() @IsString() origen?: string;
+  /** Legacy: un solo destino (reemplaza toda la lista con una parada). */
   @IsOptional() @IsString() destino?: string;
+  /** Reemplaza todos los destinos del viaje (orden del array = orden de la ruta). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ViajeDestinoItemDto)
+  destinos?: ViajeDestinoItemDto[];
   @IsOptional() @IsDateString() fechaCarga?: string;
   @IsOptional() @IsDateString() fechaDescarga?: string;
   /** Reemplaza todos los productos del viaje (vacío = sin productos). */

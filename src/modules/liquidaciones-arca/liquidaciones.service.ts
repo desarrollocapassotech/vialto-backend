@@ -448,7 +448,6 @@ export class LiquidacionesService {
                 fechaDescarga: true,
                 origen: true,
                 destino: true,
-                metadata: true,
               },
             },
           },

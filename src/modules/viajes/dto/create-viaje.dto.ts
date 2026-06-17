@@ -13,6 +13,19 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
 import { ViajeProductoItemDto } from './viaje-producto-item.dto';
+import { ViajeDestinoItemDto } from './viaje-destino-item.dto';
+
+/** Normaliza ids opcionales del body: trim y convierte "" en null. */
+export function normalizeOptionalId({
+  value,
+}: {
+  value: unknown;
+}): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const s = String(value).trim();
+  return s === '' ? null : s;
+}
 
 export class OtroGastoDto {
   @IsString() @IsNotEmpty() descripcion: string;
@@ -56,11 +69,21 @@ export class CreateViajeDto {
   /** Transportista que efectivamente realiza el flete (cuando difiere del contratante). */
   @IsOptional() @IsString() transportistaEfectivoId?: string | null;
   /** Obligatorio si no hay transportista externo. */
-  @IsOptional() @IsString() choferId?: string | null;
+  @IsOptional()
+  @Transform(normalizeOptionalId)
+  @IsString()
+  choferId?: string | null;
   /** IDs de vehículos del maestro (orden = orden del array). Requerido al menos 1 sin transportista externo. */
   @IsOptional() @IsArray() @IsString({ each: true }) vehiculoIds?: string[];
   @IsString() @IsNotEmpty() origen: string;
-  @IsString() @IsNotEmpty() destino: string;
+  /** Legacy: un solo destino. Usar `destinos` para rutas con múltiples paradas. */
+  @IsOptional() @IsString() @IsNotEmpty() destino?: string;
+  /** Destinos ordenados (orden del array = orden de la ruta). Requerido si no se envía `destino`. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ViajeDestinoItemDto)
+  destinos?: ViajeDestinoItemDto[];
   @IsDateString() fechaCarga: string;
   @IsDateString() fechaDescarga: string;
   /** Productos a transportar (orden = orden del array). */

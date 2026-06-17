@@ -233,7 +233,12 @@ export class ViajesController {
     return this.service.findOne(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Crear viaje' })
+  @ApiOperation({
+    summary: 'Crear viaje',
+    description:
+      'Acepta `destino` (legacy, un destino) o `destinos[]` con `{ etiqueta }` ordenados. ' +
+      'El campo `destino` del viaje se sincroniza con el último destino de la lista.',
+  })
   @Post()
   @Roles('admin', 'superadmin')
   create(@Body() dto: CreateViajeDto, @CurrentAuth() auth: AuthPayload) {
@@ -241,7 +246,12 @@ export class ViajesController {
     return this.service.create(auth.tenantId, auth.userId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar viaje' })
+  @ApiOperation({
+    summary: 'Actualizar viaje',
+    description:
+      'Acepta `destino` (legacy) o `destinos[]` para reemplazar la ruta completa. ' +
+      'El campo `destino` del viaje se sincroniza con el último destino de la lista.',
+  })
   @Patch(':id')
   @Roles('admin', 'superadmin')
   update(

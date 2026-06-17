@@ -81,7 +81,8 @@ export class ArcaClientService {
       facturaId,
     );
 
-    return { CbteNro: (response?.CbteNro as number | undefined) ?? 0 };
+    const result = (response?.FECompUltimoAutorizadoResult ?? response) as Record<string, unknown>;
+    return { CbteNro: (result?.CbteNro as number | undefined) ?? 0 };
   }
 
   async autorizarComprobante(
@@ -149,18 +150,40 @@ export class ArcaClientService {
       facturaId,
     );
 
-    if (!response?.CAE) {
+    // AFIP SDK devuelve la respuesta anidada bajo FECAESolicitarResult
+    const solResult = (response?.FECAESolicitarResult ?? response) as Record<string, unknown>;
+    const detResp = (solResult?.FeDetResp as Record<string, unknown>);
+    const detArr = detResp?.FECAEDetResponse as Record<string, unknown>[] | undefined;
+    const det = Array.isArray(detArr) ? detArr[0] : (detArr as Record<string, unknown> | undefined);
+
+    // Surfacea errores AFIP (Errors.Err)
+    const errores = (solResult?.Errors as Record<string, unknown>)?.Err;
+    if (errores) {
+      const errArr = Array.isArray(errores) ? errores : [errores];
+      const msgs = (errArr as Record<string, unknown>[])
+        .map((e) => `[${e.Code}] ${e.Msg}`)
+        .join(' | ');
+      this.logger.error(`FECAESolicitar AFIP Errors: ${msgs}`);
+      throw new ArcaException(ARCA_ERROR_CODES.GENERICO, `AFIP rechazó el comprobante: ${msgs}`, undefined, response);
+    }
+
+    const cae = det?.CAE as string | undefined;
+    const caeFchVto = det?.CAEFchVto as string | undefined;
+
+    if (!cae) {
+      const rawStr = JSON.stringify(response);
+      this.logger.error(`FECAESolicitar sin CAE: ${rawStr}`);
       throw new ArcaException(
         ARCA_ERROR_CODES.GENERICO,
-        'AFIP SDK no devolvió CAE en la respuesta',
+        `AFIP SDK no devolvió CAE. Respuesta: ${rawStr}`,
         undefined,
         response,
       );
     }
 
     return {
-      CAE: String(response.CAE),
-      CAEFchVto: String(response.CAEFchVto),
+      CAE: String(cae),
+      CAEFchVto: String(caeFchVto),
     };
   }
 

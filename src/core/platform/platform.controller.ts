@@ -636,13 +636,12 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
-    @Query('soloIngresoEgreso') soloIngresoEgresoRaw?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
   ) {
-    const soloIngresoEgreso =
-      soloIngresoEgresoRaw === '1' ||
-      soloIngresoEgresoRaw === 'true' ||
-      soloIngresoEgresoRaw === 'yes';
-    return this.service.listMovimientosStock(tenantId, productoId, clienteId, soloIngresoEgreso);
+    return this.service.listMovimientosStock(tenantId, productoId, clienteId, tipo, fechaDesde, fechaHasta, createdBy);
   }
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID (superadmin)' })

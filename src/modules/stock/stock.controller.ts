@@ -171,22 +171,24 @@ export class StockController {
 
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
-  @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente). Con soloIngresoEgreso=1 ordena por fecha de movimiento descendente e incluye solo ingreso y egreso.' })
+  @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, tipo, fechas, usuario).' })
   @Get('movimientos')
   @Roles('admin', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
-    @Query('soloIngresoEgreso') soloIngresoEgresoRaw?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
   ) {
     assertTenantId(auth.tenantId);
-    const soloIngresoEgreso =
-      soloIngresoEgresoRaw === '1' ||
-      soloIngresoEgresoRaw === 'true' ||
-      soloIngresoEgresoRaw === 'yes';
     return this.service.listMovimientos(auth.tenantId, productoId, clienteId, {
-      soloIngresoEgreso,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
     });
   }
 

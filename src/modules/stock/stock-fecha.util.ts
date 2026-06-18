@@ -16,6 +16,24 @@ export function parseFechaMovimientoStock(raw: string): Date {
   return new Date(s);
 }
 
+/** Inicio del día calendario en Argentina (UTC−3, sin horario de verano). */
+export function parseYyyyMmDdInicioAr(s: string): Date | null {
+  const t = (s ?? '').trim();
+  if (!FECHA_SOLO_DIA.test(t)) return null;
+
+  const d = new Date(`${t}T00:00:00.000-03:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Fin del día calendario en Argentina (UTC−3). */
+export function parseYyyyMmDdFinAr(s: string): Date | null {
+  const t = (s ?? '').trim();
+  if (!FECHA_SOLO_DIA.test(t)) return null;
+
+  const d = new Date(`${t}T23:59:59.999-03:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Año civil en Buenos Aires (útil para correlativo de remito de egreso). */
 export function yearInBuenosAires(d: Date): number {
   const y = new Intl.DateTimeFormat('en', {

@@ -27,7 +27,7 @@ import { CreateDepositoDto } from './dto/create-deposito.dto';
 import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
-import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
+import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers de normalización (mismo patrón que Carga)
@@ -442,27 +442,46 @@ export class StockService {
     if (!r) throw new BadRequestException('Remito inválido');
   }
 
-  listMovimientos(
+  async listMovimientos(
     tenantId: string,
     productoId?: string,
     clienteId?: string,
-    options?: { soloIngresoEgreso?: boolean; depositoId?: string },
+    options?: {
+      depositoId?: string;
+      tipo?: 'ingreso' | 'egreso' | 'division';
+      fechaDesde?: string;
+      fechaHasta?: string;
+      createdBy?: string;
+    },
   ) {
-    const soloIe = options?.soloIngresoEgreso === true;
-    return this.prisma.movimientoStock.findMany({
+    const movimientos = await this.prisma.movimientoStock.findMany({
       where: {
         tenantId,
-        ...(soloIe ? { tipo: { in: ['ingreso', 'egreso'] } } : {}),
+        ...(options?.tipo ? { tipo: options.tipo } : {}),
         ...(productoId ? { productoId } : {}),
         ...(clienteId ? { clienteId } : {}),
         ...(options?.depositoId ? { depositoId: options.depositoId } : {}),
+        ...(options?.createdBy ? { createdBy: options.createdBy } : {}),
+        ...(options?.fechaDesde || options?.fechaHasta
+          ? {
+              fecha: {
+                ...(options.fechaDesde ? { gte: parseYyyyMmDdInicioAr(options.fechaDesde) } : {}),
+                ...(options.fechaHasta ? { lte: parseYyyyMmDdFinAr(options.fechaHasta) } : {}),
+              },
+            }
+          : {}),
       },
-      orderBy: soloIe
-        ? [{ fecha: 'desc' }, { createdAt: 'desc' }]
-        : [{ createdAt: 'desc' }, { fecha: 'desc' }],
+      orderBy: [{ fecha: 'desc' }, { createdAt: 'desc' }],
       take: 500,
       include: movimientoStockRelations,
     });
+
+    return Promise.all(
+      movimientos.map(async (m) => ({
+        ...m,
+        createdByLabel: await this.clerkUsers.getUserDisplayLabel(m.createdBy),
+      })),
+    );
   }
 
   async findMovimiento(id: string, tenantId: string) {

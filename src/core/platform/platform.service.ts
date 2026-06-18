@@ -785,11 +785,17 @@ export class PlatformService {
     tenantId: string | undefined,
     productoId?: string,
     clienteId?: string,
-    soloIngresoEgreso?: boolean,
+    tipo?: 'ingreso' | 'egreso' | 'division',
+    fechaDesde?: string,
+    fechaHasta?: string,
+    createdBy?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listMovimientos(scopedTenantId, productoId, clienteId, {
-      soloIngresoEgreso: soloIngresoEgreso === true,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
     });
   }
 

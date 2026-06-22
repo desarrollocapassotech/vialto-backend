@@ -751,6 +751,28 @@ export class PlatformService {
     return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId, depositoId);
   }
 
+  getLotesHistorico(
+    tenantId: string | undefined,
+    productoId: string,
+    clienteId: string,
+    depositoId: string,
+    presentacionId?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.getLotesHistorico(scopedTenantId, productoId, clienteId, depositoId, presentacionId);
+  }
+
+  getLotesDisponibles(
+    tenantId: string | undefined,
+    productoId: string,
+    clienteId: string,
+    depositoId: string,
+    presentacionId?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.getLotesDisponibles(scopedTenantId, productoId, clienteId, depositoId, presentacionId);
+  }
+
   getEgresoRemitoConfig(tenantId: string | undefined) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.getEgresoRemitoConfig(scopedTenantId);

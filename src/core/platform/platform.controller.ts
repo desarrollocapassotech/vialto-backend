@@ -563,6 +563,30 @@ export class PlatformController {
     return this.service.listIngresos(tenantId, clienteId, productoId);
   }
 
+  @ApiOperation({ summary: 'Lotes históricos ingresados - autocompletado (superadmin)' })
+  @Get('stock/lotes/historico')
+  getLotesHistorico(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    return this.service.getLotesHistorico(tenantId!, productoId, clienteId, depositoId, presentacionId);
+  }
+
+  @ApiOperation({ summary: 'Lotes disponibles para un producto/cliente/depósito (superadmin)' })
+  @Get('stock/lotes')
+  getLotes(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    return this.service.getLotesDisponibles(tenantId!, productoId, clienteId, depositoId, presentacionId);
+  }
+
   @ApiOperation({ summary: 'Stock disponible (superadmin)' })
   @Get('stock/disponible')
   listStockDisponible(

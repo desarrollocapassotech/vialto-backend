@@ -356,6 +356,34 @@ export class StockController {
     return this.service.listDivisiones(auth.tenantId, clienteId, productoId, depositoId);
   }
 
+  @ApiOperation({ summary: 'Lotes históricos ingresados (para autocompletado)' })
+  @Get('lotes/historico')
+  @Roles('admin', 'superadmin')
+  getLotesHistorico(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getLotesHistorico(auth.tenantId, productoId, clienteId, depositoId, presentacionId);
+  }
+
+  @ApiOperation({ summary: 'Lotes disponibles para un producto/cliente/depósito' })
+  @Get('lotes')
+  @Roles('admin', 'superadmin')
+  getLotes(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getLotesDisponibles(auth.tenantId, productoId, clienteId, depositoId, presentacionId);
+  }
+
   @ApiOperation({ summary: 'Stock disponible por producto/cliente' })
   @Get('disponible')
   @Roles('admin', 'superadmin')

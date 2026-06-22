@@ -519,38 +519,41 @@ export class StockService {
   }
 
   async findMovimiento(id: string, tenantId: string) {
-    const mov = await this.prisma.movimientoStock.findFirst({
-      where: { id, tenantId },
-      include: {
-        producto: { select: { id: true, nombre: true } },
-        presentacion: {
-          select: {
-            id: true,
-            unidadesPorBulto: true,
-            presentacion: { select: { id: true, nombre: true } },
-          },
-        },
-        operacion: {
-          select: {
-            id: true,
-            clienteId: true,
-            cliente: { select: { id: true, nombre: true } },
-            depositoId: true,
-            deposito: { select: { id: true, nombre: true } },
-            tipo: true,
-            observaciones: true,
-            numeroRemito: true,
-            remitoUrl: true,
-            fotosUrls: true,
-            entregadoPor: true,
-            destinatario: true,
-            destinoFinal: true,
-            createdBy: true,
-            createdAt: true,
-          },
+    const INCLUDE = {
+      producto: { select: { id: true, nombre: true } },
+      presentacion: {
+        select: {
+          id: true,
+          unidadesPorBulto: true,
+          presentacion: { select: { id: true, nombre: true } },
         },
       },
-    });
+      operacion: {
+        select: {
+          id: true,
+          clienteId: true,
+          cliente: { select: { id: true, nombre: true } },
+          depositoId: true,
+          deposito: { select: { id: true, nombre: true } },
+          tipo: true,
+          observaciones: true,
+          numeroRemito: true,
+          remitoUrl: true,
+          fotosUrls: true,
+          entregadoPor: true,
+          destinatario: true,
+          destinoFinal: true,
+          createdBy: true,
+          createdAt: true,
+        },
+      },
+    } as const;
+
+    // Acepta tanto movimientoStock.id (modelo viejo) como StockOperacion.id
+    const mov =
+      (await this.prisma.movimientoStock.findFirst({ where: { id, tenantId }, include: INCLUDE })) ??
+      (await this.prisma.movimientoStock.findFirst({ where: { operacionId: id, tenantId }, include: INCLUDE }));
+
     if (!mov) throw new NotFoundException('Movimiento no encontrado.');
 
     const createdByLabel = await this.clerkUsers.getUserDisplayLabel(mov.operacion.createdBy);
@@ -925,6 +928,8 @@ export class StockService {
         },
       });
 
+      const lote = dto.lote?.trim() || null;
+
       // Movimiento A: los bultos que se convierten
       const movA = await tx.movimientoStock.create({
         data: {
@@ -934,6 +939,7 @@ export class StockService {
           presentacionId: dto.presentacionId,
           bultos: dto.bultos,
           unidades: 0,
+          lote,
           fecha: fechaMov,
           createdBy,
         },
@@ -948,6 +954,7 @@ export class StockService {
           presentacionId: dto.presentacionId,
           bultos: 0,
           unidades: unidadesGeneradas,
+          lote,
           movimientoVinculadoId: movA.id,
           fecha: fechaMov,
           createdBy,
@@ -1026,6 +1033,65 @@ export class StockService {
   }
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CONFIG NÚMERO DE REMITO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  async getLotesDisponibles(
+    tenantId: string,
+    productoId: string,
+    clienteId: string,
+    depositoId: string,
+    presentacionId?: string,
+  ): Promise<{ lote: string; cantidad1: number }[]> {
+    const rows = await this.prisma.movimientoStock.findMany({
+      where: {
+        tenantId,
+        productoId,
+        ...(presentacionId ? { presentacionId } : {}),
+        lote: { not: null },
+        operacion: { clienteId, depositoId },
+      },
+      select: {
+        lote: true,
+        bultos: true,
+        operacion: { select: { tipo: true } },
+      },
+    });
+
+    // Calcula balance de bultos por lote: ingresos suman, egresos y divisiones restan
+    const map = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.lote) continue;
+      const prev = map.get(row.lote) ?? 0;
+      const delta = row.operacion.tipo === 'ingreso' ? row.bultos : -row.bultos;
+      map.set(row.lote, prev + delta);
+    }
+
+    return Array.from(map.entries())
+      .filter(([, cantidad1]) => cantidad1 > 0)
+      .map(([lote, cantidad1]) => ({ lote, cantidad1 }))
+      .sort((a, b) => a.lote.localeCompare(b.lote));
+  }
+
+  async getLotesHistorico(
+    tenantId: string,
+    productoId: string,
+    clienteId: string,
+    depositoId: string,
+    presentacionId?: string,
+  ): Promise<string[]> {
+    const rows = await this.prisma.movimientoStock.findMany({
+      where: {
+        tenantId,
+        productoId,
+        ...(presentacionId ? { presentacionId } : {}),
+        lote: { not: null },
+        operacion: { clienteId, depositoId, tipo: 'ingreso' },
+      },
+      select: { lote: true },
+      distinct: ['lote'],
+      orderBy: { fecha: 'desc' },
+    });
+    return rows.map((r) => r.lote!).filter(Boolean);
+  }
 
   async getEgresoRemitoConfig(tenantId: string) {
     const row = await this.prisma.stockEgresoRemitoConfig.findUnique({

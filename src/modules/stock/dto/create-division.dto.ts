@@ -16,5 +16,6 @@ export class CreateDivisionDto {
   /** Cantidad de bultos a convertir en sueltas (mínimo 1). */
   @IsNumber() @Min(1) @Type(() => Number) bultos!: number;
   @IsString() @IsNotEmpty() fecha!: string;
+  @IsOptional() @IsString() lote?: string;
   @IsOptional() @IsString() observaciones?: string;
 }

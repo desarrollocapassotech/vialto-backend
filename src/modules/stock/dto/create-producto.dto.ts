@@ -1,4 +1,32 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class ProductoPresentacionItemDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  presentacionId!: string;
+
+  @IsInt()
+  @Min(1)
+  unidadesPorBulto!: number;
+}
 
 export class CreateProductoDto {
   @IsString()
@@ -11,14 +39,15 @@ export class CreateProductoDto {
   @MaxLength(2000)
   descripcion?: string;
 
-  @IsString()
-  @IsNotEmpty()
-  presentacion1Id!: string;
+  @IsNumber()
+  @IsPositive()
+  pesoUnitarioKg!: number;
 
-  @IsOptional()
-  @ValidateIf((_, v) => v !== null)
-  @IsString()
-  presentacion2Id?: string | null;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ProductoPresentacionItemDto)
+  presentaciones!: ProductoPresentacionItemDto[];
 
   @IsOptional()
   @IsBoolean()

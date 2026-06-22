@@ -8,52 +8,13 @@ import {
 } from 'class-validator';
 
 export class CreateDivisionDto {
-  @IsString()
-  @IsNotEmpty()
-  productoId: string;
-
-  @IsString()
-  @IsNotEmpty()
-  clienteId: string;
-
-  @IsString()
-  @IsNotEmpty()
-  depositoId: string;
-
-  /** Pallets que se restan (origen). */
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad1Origen?: number;
-
-  /** Suelto que se resta (origen). */
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad2Origen?: number;
-
-  /** Pallets que se suman (destino). */
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad1Destino?: number;
-
-  /** Suelto que se suma (destino). */
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad2Destino?: number;
-
-  @IsString()
-  @IsNotEmpty()
-  /** ISO 8601 (recomendado) o solo `YYYY-MM-DD` (medianoche Argentina). */
-  fecha: string;
-
-  @IsOptional()
-  @IsString()
-  observaciones?: string;
+  @IsString() @IsNotEmpty() clienteId!: string;
+  @IsString() @IsNotEmpty() depositoId!: string;
+  @IsString() @IsNotEmpty() productoId!: string;
+  /** ProductoPresentacion.id — determina unidadesPorBulto */
+  @IsString() @IsNotEmpty() presentacionId!: string;
+  /** Cantidad de bultos a convertir en sueltas (mínimo 1). */
+  @IsNumber() @Min(1) @Type(() => Number) bultos!: number;
+  @IsString() @IsNotEmpty() fecha!: string;
+  @IsOptional() @IsString() observaciones?: string;
 }

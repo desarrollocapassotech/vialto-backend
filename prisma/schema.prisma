@@ -34,9 +34,11 @@ model Tenant {
   movimientosCc           MovimientoCuentaCorriente[]
   productos               Producto[]
   movimientosStock        MovimientoStock[]
+  stockOperaciones        StockOperacion[]
   stockItems              StockItem[]
   depositos               Deposito[]
   presentaciones          Presentacion[]
+  productoPresentaciones  ProductoPresentacion[]
   cargasCombustible       CargaCombustible[]
   intervenciones          Intervencion[]
   remitos                 Remito[]
@@ -73,7 +75,7 @@ model Cliente {
   viajes           Viaje[]
   facturas         Factura[]
   movimientosCc    MovimientoCuentaCorriente[]
-  movimientosStock MovimientoStock[]
+  stockOperaciones StockOperacion[]
   stockItems       StockItem[]
   remitos          Remito[]
 
@@ -376,27 +378,19 @@ model Producto {
   tenantId          String
   tenant            Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre            String
-  /**
-   * lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive).
-   */
+  /** lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive). */
   nombreNormalizado String
-  codigo            String? // generado por el sistema: P-001, P-002… único por tenant cuando presente
+  codigo            String?  // generado por el sistema: P-001, P-002… único por tenant cuando presente
   descripcion       String?
-  presentacion1Id   String?
-  presentacion1     Presentacion? @relation("ProductoPresentacion1", fields: [presentacion1Id], references: [id], onDelete: Restrict)
-  presentacion2Id   String?
-  presentacion2     Presentacion? @relation("ProductoPresentacion2", fields: [presentacion2Id], references: [id], onDelete: Restrict)
-  /** Denormalizado desde presentacion1.nombre (lectura en stock). */
-  unidad1Nombre     String   @default("Pallets")
-  /** Denormalizado desde presentacion2.nombre; null si no hay segunda cantidad. */
-  unidad2Nombre     String?  @default("Suelto")
+  pesoUnitarioKg    Float?
   activo            Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  movimientos    MovimientoStock[]
-  viajesProducto ViajeProducto[]
-  stockItems     StockItem[]
+  movimientos            MovimientoStock[]
+  viajesProducto         ViajeProducto[]
+  stockItems             StockItem[]
+  productoPresentaciones ProductoPresentacion[]
 
   @@unique([tenantId, nombreNormalizado])
   @@unique([tenantId, codigo])
@@ -416,8 +410,7 @@ model Presentacion {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  productosCantidad1 Producto[] @relation("ProductoPresentacion1")
-  productosCantidad2 Producto[] @relation("ProductoPresentacion2")
+  productoPresentaciones ProductoPresentacion[]
 
   @@unique([tenantId, nombreNormalizado])
   @@index([tenantId])
@@ -434,47 +427,32 @@ model ProductoSecuencia {
 }
 
 model MovimientoStock {
-  id                    String   @id @default(cuid())
+  id                    String              @id @default(cuid())
   tenantId              String
-  tenant                Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant                Tenant              @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  operacionId           String
+  operacion             StockOperacion      @relation(fields: [operacionId], references: [id], onDelete: Cascade)
   productoId            String
-  producto              Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  clienteId             String
-  cliente               Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  tipo                  String // ingreso | egreso | division
-  cantidad1             Float    @default(0)
-  cantidad2             Float    @default(0)
-  /**
-   * Número de remito interno generado al egresar (ej. R-2026-00001). Distinto del módulo Remito.
-   */
-  numeroRemito          String?
-  remitoId              String?
-  remito                Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
-  /**
-   * URL del remito escaneado (p. ej. Cloudinary) — preparado para carga futura.
-   */
-  remitoUrl             String?
+  producto              Producto            @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  presentacionId        String?
+  presentacion          ProductoPresentacion? @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
+  fechaVencimiento      DateTime?
+  bultos                Float               @default(0)
+  unidades              Float               @default(0)
   lote                  String?
   observaciones         String?
-  entregadoPor          String?  // quien realizó la entrega física (ej. "Cacho", "Gustavo")
-  destinatario          String?  // cliente final del despacho (ej. "Luvi SRL")
-  destinoFinal          String?  // dirección o ruta (ej. "Express Brio", "Pampa 1087 San Fernando")
-  /**
-   * ID del movimiento par en una división (el origen apunta al destino y viceversa).
-   */
+  /** ID del movimiento par en una división (el origen apunta al destino y viceversa). */
   movimientoVinculadoId String?
-  createdBy             String   @default("")
+  remitoId              String?
+  remito                Remito?             @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  createdBy             String              @default("")
   fecha                 DateTime
-  createdAt             DateTime @default(now())
+  createdAt             DateTime            @default(now())
 
-  depositoId String
-  deposito   Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
-
-  @@unique([tenantId, numeroRemito])
   @@index([tenantId])
+  @@index([tenantId, operacionId])
   @@index([tenantId, productoId])
-  @@index([tenantId, clienteId])
-  @@index([tenantId, depositoId])
+  @@index([tenantId, presentacionId])
   @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
   @@index([tenantId, createdAt(sort: Desc)])
@@ -505,7 +483,7 @@ model Deposito {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  movimientosStock MovimientoStock[]
+  stockOperaciones StockOperacion[]
   stockItems       StockItem[]
 
   @@index([tenantId])
@@ -527,25 +505,89 @@ model StockEgresoRemitoConfig {
 }
 
 model StockItem {
-  id              String   @id @default(cuid())
+  id              String               @id @default(cuid())
   tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant          Tenant               @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   productoId      String
-  producto        Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  producto        Producto             @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  presentacionId  String?
+  presentacion    ProductoPresentacion? @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
   clienteId       String
-  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  cliente         Cliente              @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   depositoId      String
-  deposito        Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
-  cantidad1 Float    @default(0)
-  cantidad2 Float    @default(0)
-  updatedAt       DateTime @updatedAt
+  deposito        Deposito             @relation(fields: [depositoId], references: [id], onDelete: Restrict)
+  cantidad1       Float                @default(0)
+  cantidad2       Float                @default(0)
+  updatedAt       DateTime             @updatedAt
 
-  @@unique([productoId, clienteId, depositoId])
+  @@unique([productoId, presentacionId, clienteId, depositoId])
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@index([tenantId, productoId])
+  @@index([tenantId, presentacionId])
   @@index([tenantId, depositoId])
   @@map("stock_items")
+}
+
+/** Encabezado de una operación de stock (ingreso, egreso o división). */
+model StockOperacion {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  clienteId     String
+  cliente       Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  depositoId    String
+  deposito      Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
+  tipo          String   // ingreso | egreso | division
+  fecha         DateTime
+  observaciones String?
+  /** URL del remito escaneado (Cloudinary). Usado en egresos y divisiones. */
+  remitoUrl     String?
+  /** URLs de fotos adjuntas al ingreso (hasta 2, Cloudinary). */
+  fotosUrls     String[]
+  /** Número de remito interno generado al egresar (ej. R-2026-00001). */
+  numeroRemito  String?
+  remitoId      String?
+  remito        Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  entregadoPor  String?
+  destinatario  String?
+  destinoFinal  String?
+  createdBy     String   @default("")
+  createdAt     DateTime @default(now())
+
+  movimientos MovimientoStock[]
+
+  @@unique([tenantId, numeroRemito])
+  @@index([tenantId])
+  @@index([tenantId, clienteId])
+  @@index([tenantId, depositoId])
+  @@index([tenantId, tipo])
+  @@index([tenantId, fecha])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("stock_operaciones")
+}
+
+/** Vincula un producto a una presentación con cantidad de unidades por bulto. */
+model ProductoPresentacion {
+  id               String       @id @default(cuid())
+  tenantId         String
+  tenant           Tenant       @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  productoId       String
+  producto         Producto     @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  presentacionId   String
+  presentacion     Presentacion @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
+  unidadesPorBulto Float
+  activo           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  movimientos MovimientoStock[]
+  stockItems  StockItem[]
+
+  @@unique([productoId, presentacionId])
+  @@index([tenantId])
+  @@index([tenantId, productoId])
+  @@map("producto_presentaciones")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -622,6 +664,7 @@ model Remito {
   estado           String            @default("emitido") // emitido | firmado | facturado
   createdAt        DateTime          @default(now())
   movimientosStock MovimientoStock[]
+  stockOperaciones StockOperacion[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])

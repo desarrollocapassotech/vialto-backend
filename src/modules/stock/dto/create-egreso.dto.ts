@@ -1,51 +1,40 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  IsArray,
   IsNotEmpty,
-  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
-  Min,
+  ValidateNested,
 } from 'class-validator';
+import { CreateEgresoLineaDto } from './create-egreso-linea.dto';
 
 export class CreateEgresoDto {
   @IsString()
   @IsNotEmpty()
-  productoId: string;
+  clienteId!: string;
 
   @IsString()
   @IsNotEmpty()
-  clienteId: string;
+  depositoId!: string;
 
-  @IsString()
-  @IsNotEmpty()
-  depositoId: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad1?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad2?: number;
-
-  @IsString()
-  @IsNotEmpty()
   /** ISO 8601 (recomendado) o solo `YYYY-MM-DD` (medianoche Argentina). */
-  fecha: string;
-
-  @IsOptional()
   @IsString()
-  @MaxLength(200)
-  lote?: string;
+  @IsNotEmpty()
+  fecha!: string;
 
-  @IsOptional()
+  /** URL del remito escaneado (PDF o imagen) tras subida a Cloudinary. */
   @IsString()
-  observaciones?: string;
+  @IsNotEmpty()
+  @MaxLength(2048)
+  remitoEscaneadoUrl!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateEgresoLineaDto)
+  lineas!: CreateEgresoLineaDto[];
 
   @IsOptional()
   @IsString()
@@ -62,9 +51,7 @@ export class CreateEgresoDto {
   @MaxLength(300)
   destinoFinal?: string;
 
-  /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en egresos. */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  @MaxLength(2048)
-  remitoEscaneadoUrl: string;
+  observaciones?: string;
 }

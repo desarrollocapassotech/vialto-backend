@@ -96,6 +96,19 @@ export class StockController {
     return this.service.updateProducto(id, auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Eliminar presentación de un producto (solo si sin movimientos)' })
+  @Delete('productos/:productoId/presentaciones/:ppId')
+  @RequireModule('stock', 'viajes')
+  @Roles('admin', 'superadmin')
+  removeProductoPresentacion(
+    @Param('productoId') productoId: string,
+    @Param('ppId') ppId: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.removeProductoPresentacion(productoId, ppId, auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Listar presentaciones del catálogo' })
   @Get('presentaciones')
   @Roles('admin', 'member', 'superadmin')
@@ -337,9 +350,10 @@ export class StockController {
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listDivisiones(auth.tenantId, clienteId, productoId);
+    return this.service.listDivisiones(auth.tenantId, clienteId, productoId, depositoId);
   }
 
   @ApiOperation({ summary: 'Stock disponible por producto/cliente' })

@@ -1,5 +1,4 @@
-import {
-  BadGatewayException,
+﻿import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -7,8 +6,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -27,11 +24,11 @@ import { CreateDepositoDto } from './dto/create-deposito.dto';
 import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
-import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
+import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers de normalización (mismo patrón que Carga)
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Helpers de normalización
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function normalizarNombre(nombre: string): string {
   return String(nombre ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -41,9 +38,11 @@ function displayNombre(nombre: string): string {
   return String(nombre ?? '').trim().replace(/\s+/g, ' ');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+const STUB_MSG = 'Operación pendiente de rediseño para el nuevo modelo de operaciones de stock.';
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Shapes públicas
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const productoSelect = {
   id: true,
@@ -51,13 +50,20 @@ const productoSelect = {
   nombre: true,
   codigo: true,
   descripcion: true,
-  presentacion1Id: true,
-  presentacion2Id: true,
-  unidad1Nombre: true,
-  unidad2Nombre: true,
+  pesoUnitarioKg: true,
   activo: true,
   createdAt: true,
   updatedAt: true,
+  productoPresentaciones: {
+    where: { activo: true },
+    select: {
+      id: true,
+      presentacionId: true,
+      presentacion: { select: { id: true, nombre: true } },
+      unidadesPorBulto: true,
+      activo: true,
+    },
+  },
 } as const;
 
 const presentacionSelect = {
@@ -72,14 +78,6 @@ const presentacionSelect = {
 const productoMiniSelect = {
   id: true,
   nombre: true,
-  unidad1Nombre: true,
-  unidad2Nombre: true,
-} as const;
-
-const movimientoStockRelations = {
-  producto: { select: productoMiniSelect },
-  cliente: { select: { id: true, nombre: true } },
-  deposito: { select: { id: true, nombre: true } },
 } as const;
 
 const stockItemRelations = {
@@ -96,7 +94,7 @@ export class StockService {
     private readonly cloudinary: CloudinaryService,
   ) {}
 
-  // ───────────────── PRODUCTOS ──────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ PRODUCTOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async findAllProductosPaginated(tenantId: string, query: ProductosPaginatedQueryDto) {
     const page = query.page ?? 1;
@@ -104,14 +102,10 @@ export class StockService {
     const where: Prisma.ProductoWhereInput = { tenantId };
 
     const q = query.q?.trim();
-    if (q) {
-      where.nombre = { contains: q, mode: 'insensitive' };
-    }
+    if (q) where.nombre = { contains: q, mode: 'insensitive' };
 
     const codigoQ = query.codigo?.trim();
-    if (codigoQ) {
-      where.codigo = { contains: codigoQ, mode: 'insensitive' };
-    }
+    if (codigoQ) where.codigo = { contains: codigoQ, mode: 'insensitive' };
 
     const fa = query.filtroActivo ?? 'todos';
     if (fa === 'activos') where.activo = true;
@@ -167,61 +161,49 @@ export class StockService {
     return `P-${String(n).padStart(3, '0')}`;
   }
 
-  private async resolvePresentacionesProducto(
-    tenantId: string,
-    presentacion1Id: string,
-    presentacion2Id?: string | null,
-  ) {
-    const p1 = await this.prisma.presentacion.findFirst({
-      where: { id: presentacion1Id, tenantId, activo: true },
-    });
-    if (!p1) throw new BadRequestException('Presentación de cantidad 1 inválida o inactiva.');
-
-    if (!presentacion2Id) {
-      return { presentacion1Id: p1.id, presentacion2Id: null, unidad1Nombre: p1.nombre, unidad2Nombre: null };
-    }
-
-    const p2 = await this.prisma.presentacion.findFirst({
-      where: { id: presentacion2Id, tenantId, activo: true },
-    });
-    if (!p2) throw new BadRequestException('Presentación de cantidad 2 inválida o inactiva.');
-
-    return {
-      presentacion1Id: p1.id,
-      presentacion2Id: p2.id,
-      unidad1Nombre: p1.nombre,
-      unidad2Nombre: p2.nombre,
-    };
-  }
-
   async createProducto(tenantId: string, dto: CreateProductoDto) {
     const nombre = displayNombre(dto.nombre);
     if (!nombre) throw new ConflictException('El nombre no puede quedar vacío.');
     const nombreNormalizado = normalizarNombre(nombre);
-    const pres = await this.resolvePresentacionesProducto(
-      tenantId,
-      dto.presentacion1Id,
-      dto.presentacion2Id ?? null,
-    );
+
+    // Validar presentaciones: sin duplicados y todas activas
+    const presIds = dto.presentaciones.map((p) => p.presentacionId);
+    if (new Set(presIds).size !== presIds.length) {
+      throw new BadRequestException('No se pueden repetir presentaciones en el mismo producto.');
+    }
+    for (const pp of dto.presentaciones) {
+      const p = await this.prisma.presentacion.findFirst({
+        where: { id: pp.presentacionId, tenantId, activo: true },
+      });
+      if (!p) throw new BadRequestException(`Presentación inválida o inactiva: ${pp.presentacionId}`);
+    }
 
     try {
       return await this.prisma.$transaction(async (tx) => {
         const codigo = await this.nextProductoCodigoTx(tx, tenantId);
-        return tx.producto.create({
+        const { id } = await tx.producto.create({
           data: {
             tenantId,
             nombre,
             nombreNormalizado,
             codigo,
             descripcion: dto.descripcion?.trim() || null,
-            presentacion1Id: pres.presentacion1Id,
-            presentacion2Id: pres.presentacion2Id,
-            unidad1Nombre: pres.unidad1Nombre,
-            unidad2Nombre: pres.unidad2Nombre,
+            pesoUnitarioKg: dto.pesoUnitarioKg,
             activo: dto.activo ?? true,
           },
-          select: productoSelect,
+          select: { id: true },
         });
+
+        await tx.productoPresentacion.createMany({
+          data: dto.presentaciones.map((pp) => ({
+            tenantId,
+            productoId: id,
+            presentacionId: pp.presentacionId,
+            unidadesPorBulto: pp.unidadesPorBulto,
+          })),
+        });
+
+        return tx.producto.findFirstOrThrow({ where: { id }, select: productoSelect });
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -235,42 +217,76 @@ export class StockService {
     const current = await this.prisma.producto.findFirst({ where: { id, tenantId } });
     if (!current) throw new NotFoundException('Producto no encontrado');
 
-    const nombre =
-      dto.nombre !== undefined ? displayNombre(dto.nombre) : current.nombre;
-    if (dto.nombre !== undefined && !nombre) {
-      throw new ConflictException('El nombre no puede quedar vacío.');
-    }
-    const nombreNormalizado =
-      dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
+    const nombre = dto.nombre !== undefined ? displayNombre(dto.nombre) : current.nombre;
+    if (dto.nombre !== undefined && !nombre) throw new ConflictException('El nombre no puede quedar vacío.');
+    const nombreNormalizado = dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
 
-    let presentacionPatch: {
-      presentacion1Id?: string;
-      presentacion2Id?: string | null;
-      unidad1Nombre?: string;
-      unidad2Nombre?: string | null;
-    } = {};
-
-    if (dto.presentacion1Id !== undefined || dto.presentacion2Id !== undefined) {
-      const p1Id = dto.presentacion1Id ?? current.presentacion1Id;
-      if (!p1Id) throw new BadRequestException('La presentación de cantidad 1 es obligatoria.');
-      const p2Id =
-        dto.presentacion2Id !== undefined ? dto.presentacion2Id : current.presentacion2Id;
-      const pres = await this.resolvePresentacionesProducto(tenantId, p1Id, p2Id);
-      presentacionPatch = pres;
+    if (dto.presentaciones !== undefined) {
+      const presIds = dto.presentaciones.map((p) => p.presentacionId);
+      if (new Set(presIds).size !== presIds.length) {
+        throw new BadRequestException('No se pueden repetir presentaciones en el mismo producto.');
+      }
+      for (const pp of dto.presentaciones) {
+        const p = await this.prisma.presentacion.findFirst({
+          where: { id: pp.presentacionId, tenantId, activo: true },
+        });
+        if (!p) throw new BadRequestException(`Presentación inválida o inactiva: ${pp.presentacionId}`);
+      }
     }
 
     try {
-      return await this.prisma.producto.update({
-        where: { id },
-        data: {
-          ...(dto.nombre !== undefined ? { nombre, nombreNormalizado } : {}),
-          ...(dto.descripcion !== undefined
-            ? { descripcion: dto.descripcion?.trim() || null }
-            : {}),
-          ...presentacionPatch,
-          ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
-        },
-        select: productoSelect,
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.producto.update({
+          where: { id },
+          data: {
+            ...(dto.nombre !== undefined ? { nombre, nombreNormalizado } : {}),
+            ...(dto.descripcion !== undefined ? { descripcion: dto.descripcion?.trim() || null } : {}),
+            ...(dto.pesoUnitarioKg !== undefined ? { pesoUnitarioKg: dto.pesoUnitarioKg } : {}),
+            ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
+          },
+        });
+
+        if (dto.presentaciones !== undefined) {
+          const existing = await tx.productoPresentacion.findMany({
+            where: { productoId: id, tenantId },
+            select: { id: true },
+          });
+
+          const incomingIds = new Set(
+            dto.presentaciones.filter((p) => p.id).map((p) => p.id as string),
+          );
+          const toDelete = existing.filter((e) => !incomingIds.has(e.id));
+
+          for (const del of toDelete) {
+            const movCount = await tx.movimientoStock.count({ where: { presentacionId: del.id } });
+            if (movCount > 0) {
+              throw new ConflictException(
+                'No se puede eliminar una presentación que tiene movimientos de stock asociados.',
+              );
+            }
+            await tx.productoPresentacion.delete({ where: { id: del.id } });
+          }
+
+          for (const pp of dto.presentaciones) {
+            if (pp.id) {
+              await tx.productoPresentacion.update({
+                where: { id: pp.id },
+                data: { unidadesPorBulto: pp.unidadesPorBulto },
+              });
+            } else {
+              await tx.productoPresentacion.create({
+                data: {
+                  tenantId,
+                  productoId: id,
+                  presentacionId: pp.presentacionId,
+                  unidadesPorBulto: pp.unidadesPorBulto,
+                },
+              });
+            }
+          }
+        }
+
+        return tx.producto.findFirstOrThrow({ where: { id }, select: productoSelect });
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -280,12 +296,32 @@ export class StockService {
     }
   }
 
+  async removeProductoPresentacion(productoId: string, ppId: string, tenantId: string) {
+    const pp = await this.prisma.productoPresentacion.findFirst({
+      where: { id: ppId, productoId, tenantId },
+    });
+    if (!pp) throw new NotFoundException('Presentación de producto no encontrada.');
+
+    const count = await this.prisma.productoPresentacion.count({ where: { productoId, tenantId } });
+    if (count <= 1) {
+      throw new ConflictException('El producto debe tener al menos una presentación.');
+    }
+
+    const movCount = await this.prisma.movimientoStock.count({ where: { presentacionId: ppId } });
+    if (movCount > 0) {
+      throw new ConflictException(
+        'No se puede eliminar una presentación que tiene movimientos de stock asociados.',
+      );
+    }
+
+    return this.prisma.productoPresentacion.delete({ where: { id: ppId } });
+  }
+
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ DEPÓSITOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
   async listDepositos(tenantId: string, activo?: boolean) {
     return this.prisma.deposito.findMany({
-      where: {
-        tenantId,
-        ...(activo !== undefined ? { activo } : {}),
-      },
+      where: { tenantId, ...(activo !== undefined ? { activo } : {}) },
       orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
     });
   }
@@ -315,21 +351,11 @@ export class StockService {
     });
   }
 
-  private async assertDeposito(tenantId: string, depositoId: string, requireActive = false) {
-    const row = await this.prisma.deposito.findFirst({ where: { id: depositoId, tenantId } });
-    if (!row) throw new BadRequestException('Depósito inválido');
-    if (requireActive && !row.activo) throw new BadRequestException('Depósito inactivo');
-    return row;
-  }
-
-  // ───────────────── PRESENTACIONES (catálogo por tenant) ────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ PRESENTACIONES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async listPresentaciones(tenantId: string, activo?: boolean) {
     return this.prisma.presentacion.findMany({
-      where: {
-        tenantId,
-        ...(activo !== undefined ? { activo } : {}),
-      },
+      where: { tenantId, ...(activo !== undefined ? { activo } : {}) },
       orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
       select: presentacionSelect,
     });
@@ -350,12 +376,7 @@ export class StockService {
     const nombreNormalizado = normalizarNombre(nombre);
     try {
       return await this.prisma.presentacion.create({
-        data: {
-          tenantId,
-          nombre,
-          nombreNormalizado,
-          activo: dto.activo ?? true,
-        },
+        data: { tenantId, nombre, nombreNormalizado, activo: dto.activo ?? true },
         select: presentacionSelect,
       });
     } catch (e) {
@@ -370,16 +391,12 @@ export class StockService {
     const current = await this.prisma.presentacion.findFirst({ where: { id, tenantId } });
     if (!current) throw new NotFoundException('Presentación no encontrada');
 
-    const nombre =
-      dto.nombre !== undefined ? displayNombre(dto.nombre) : current.nombre;
-    if (dto.nombre !== undefined && !nombre) {
-      throw new ConflictException('El nombre no puede quedar vacío.');
-    }
-    const nombreNormalizado =
-      dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
+    const nombre = dto.nombre !== undefined ? displayNombre(dto.nombre) : current.nombre;
+    if (dto.nombre !== undefined && !nombre) throw new ConflictException('El nombre no puede quedar vacío.');
+    const nombreNormalizado = dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
 
     try {
-      const updated = await this.prisma.presentacion.update({
+      return await this.prisma.presentacion.update({
         where: { id },
         data: {
           ...(dto.nombre !== undefined ? { nombre, nombreNormalizado } : {}),
@@ -387,19 +404,6 @@ export class StockService {
         },
         select: presentacionSelect,
       });
-
-      if (dto.nombre !== undefined && nombre !== current.nombre) {
-        await this.prisma.producto.updateMany({
-          where: { tenantId, presentacion1Id: id },
-          data: { unidad1Nombre: nombre },
-        });
-        await this.prisma.producto.updateMany({
-          where: { tenantId, presentacion2Id: id },
-          data: { unidad2Nombre: nombre },
-        });
-      }
-
-      return updated;
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ConflictException('Ya existe una presentación con ese nombre (sin distinguir mayúsculas).');
@@ -412,301 +416,599 @@ export class StockService {
     const row = await this.prisma.presentacion.findFirst({ where: { id, tenantId } });
     if (!row) throw new NotFoundException('Presentación no encontrada');
 
-    const [enCant1, enCant2] = await Promise.all([
-      this.prisma.producto.count({ where: { tenantId, presentacion1Id: id } }),
-      this.prisma.producto.count({ where: { tenantId, presentacion2Id: id } }),
-    ]);
-    if (enCant1 + enCant2 > 0) {
-      throw new ConflictException(
-        'No se puede eliminar: hay productos que usan esta presentación como cantidad 1 o 2.',
-      );
+    const count = await this.prisma.productoPresentacion.count({ where: { presentacionId: id } });
+    if (count > 0) {
+      throw new ConflictException('No se puede eliminar: hay productos que usan esta presentación.');
     }
 
     return this.prisma.presentacion.delete({ where: { id } });
   }
 
-  // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ MOVIMIENTOS / OPERACIONES (pendientes de rediseño) â”€â”€â”€â”€â”€
 
-  private async assertProductoCliente(tenantId: string, productoId: string, clienteId: string) {
-    const [p, c] = await Promise.all([
-      this.prisma.producto.findFirst({ where: { id: productoId, tenantId } }),
-      this.prisma.cliente.findFirst({ where: { id: clienteId, tenantId } }),
-    ]);
-    if (!p) throw new BadRequestException('Producto inválido');
-    if (!c) throw new BadRequestException('Cliente inválido');
-  }
+  async listMovimientos(tenantId: string, productoId?: string, clienteId?: string, options?: {
+    depositoId?: string;
+    tipo?: 'ingreso' | 'egreso' | 'division';
+    fechaDesde?: string;
+    fechaHasta?: string;
+    createdBy?: string;
+  }) {
+    const { depositoId, tipo, fechaDesde, fechaHasta, createdBy } = options ?? {};
 
-  private async assertRemito(tenantId: string, remitoId?: string | null) {
-    if (!remitoId) return;
-    const r = await this.prisma.remito.findFirst({ where: { id: remitoId, tenantId } });
-    if (!r) throw new BadRequestException('Remito inválido');
-  }
-
-  async listMovimientos(
-    tenantId: string,
-    productoId?: string,
-    clienteId?: string,
-    options?: {
-      depositoId?: string;
-      tipo?: 'ingreso' | 'egreso' | 'division';
-      fechaDesde?: string;
-      fechaHasta?: string;
-      createdBy?: string;
-    },
-  ) {
-    const movimientos = await this.prisma.movimientoStock.findMany({
+    const rows = await this.prisma.movimientoStock.findMany({
       where: {
         tenantId,
-        ...(options?.tipo ? { tipo: options.tipo } : {}),
         ...(productoId ? { productoId } : {}),
-        ...(clienteId ? { clienteId } : {}),
-        ...(options?.depositoId ? { depositoId: options.depositoId } : {}),
-        ...(options?.createdBy ? { createdBy: options.createdBy } : {}),
-        ...(options?.fechaDesde || options?.fechaHasta
+        ...(fechaDesde || fechaHasta
           ? {
               fecha: {
-                ...(options.fechaDesde ? { gte: parseYyyyMmDdInicioAr(options.fechaDesde) } : {}),
-                ...(options.fechaHasta ? { lte: parseYyyyMmDdFinAr(options.fechaHasta) } : {}),
+                ...(fechaDesde ? { gte: new Date(fechaDesde) } : {}),
+                ...(fechaHasta ? { lte: new Date(fechaHasta) } : {}),
               },
             }
           : {}),
+        operacion: {
+          ...(clienteId ? { clienteId } : {}),
+          ...(depositoId ? { depositoId } : {}),
+          ...(tipo ? { tipo } : {}),
+          ...(createdBy ? { createdBy } : {}),
+        },
       },
-      orderBy: [{ fecha: 'desc' }, { createdAt: 'desc' }],
+      orderBy: { fecha: 'desc' },
       take: 500,
-      include: movimientoStockRelations,
+      include: {
+        producto: { select: { id: true, nombre: true } },
+        presentacion: {
+          select: {
+            id: true,
+            unidadesPorBulto: true,
+            presentacion: { select: { id: true, nombre: true } },
+          },
+        },
+        operacion: {
+          select: {
+            id: true,
+            clienteId: true,
+            cliente: { select: { id: true, nombre: true } },
+            depositoId: true,
+            deposito: { select: { id: true, nombre: true } },
+            tipo: true,
+            observaciones: true,
+            numeroRemito: true,
+            remitoUrl: true,
+            entregadoPor: true,
+            destinatario: true,
+            destinoFinal: true,
+            createdBy: true,
+            createdAt: true,
+          },
+        },
+      },
     });
 
-    return Promise.all(
-      movimientos.map(async (m) => ({
-        ...m,
-        createdByLabel: await this.clerkUsers.getUserDisplayLabel(m.createdBy),
-      })),
-    );
+    return rows.map((mov) => ({
+      id: mov.id,
+      tenantId: mov.tenantId,
+      operacionId: mov.operacionId,
+      productoId: mov.productoId,
+      producto: mov.producto,
+      presentacionId: mov.presentacionId,
+      presentacion: mov.presentacion,
+      bultos: mov.bultos,
+      unidades: mov.unidades,
+      fechaVencimiento: mov.fechaVencimiento?.toISOString() ?? null,
+      lote: mov.lote,
+      observaciones: mov.observaciones ?? mov.operacion.observaciones ?? null,
+      movimientoVinculadoId: mov.movimientoVinculadoId,
+      createdBy: mov.operacion.createdBy,
+      fecha: mov.fecha.toISOString(),
+      createdAt: mov.operacion.createdAt.toISOString(),
+      tipo: mov.operacion.tipo as 'ingreso' | 'egreso' | 'division',
+      clienteId: mov.operacion.clienteId,
+      cliente: mov.operacion.cliente,
+      depositoId: mov.operacion.depositoId,
+      deposito: mov.operacion.deposito,
+      numeroRemito: mov.operacion.numeroRemito,
+      remitoUrl: mov.operacion.remitoUrl,
+      entregadoPor: mov.operacion.entregadoPor,
+      destinatario: mov.operacion.destinatario,
+      destinoFinal: mov.operacion.destinoFinal,
+      cantidad1: mov.bultos,
+      cantidad2: mov.unidades,
+    }));
   }
 
   async findMovimiento(id: string, tenantId: string) {
-    const row = await this.prisma.movimientoStock.findFirst({
+    const mov = await this.prisma.movimientoStock.findFirst({
       where: { id, tenantId },
-      include: movimientoStockRelations,
-    });
-    if (!row) throw new NotFoundException('Movimiento de stock no encontrado');
-    const createdByLabel = await this.clerkUsers.getUserDisplayLabel(row.createdBy);
-    return { ...row, createdByLabel };
-  }
-
-  async createMovimiento(tenantId: string, dto: CreateMovimientoStockDto) {
-    await this.assertProductoCliente(tenantId, dto.productoId, dto.clienteId);
-    await this.assertDeposito(tenantId, dto.depositoId, true);
-    await this.assertRemito(tenantId, dto.remitoId);
-    const fechaMov = parseFechaMovimientoStock(dto.fecha);
-    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
-
-    const cantidad1 = dto.cantidad1 ?? 0;
-    const cantidad2 = dto.cantidad2 ?? 0;
-    if (cantidad1 <= 0 && cantidad2 <= 0) {
-      throw new BadRequestException('Al menos uno de cantidad1 o cantidad2 debe ser mayor a 0.');
-    }
-
-    return this.prisma.movimientoStock.create({
-      data: {
-        tenantId,
-        productoId: dto.productoId,
-        clienteId: dto.clienteId,
-        depositoId: dto.depositoId,
-        tipo: dto.tipo,
-        cantidad1,
-        cantidad2,
-        remitoId: dto.remitoId ?? null,
-        fecha: fechaMov,
+      include: {
+        producto: { select: { id: true, nombre: true } },
+        presentacion: {
+          select: {
+            id: true,
+            unidadesPorBulto: true,
+            presentacion: { select: { id: true, nombre: true } },
+          },
+        },
+        operacion: {
+          select: {
+            id: true,
+            clienteId: true,
+            cliente: { select: { id: true, nombre: true } },
+            depositoId: true,
+            deposito: { select: { id: true, nombre: true } },
+            tipo: true,
+            observaciones: true,
+            numeroRemito: true,
+            remitoUrl: true,
+            fotosUrls: true,
+            entregadoPor: true,
+            destinatario: true,
+            destinoFinal: true,
+            createdBy: true,
+            createdAt: true,
+          },
+        },
       },
     });
+    if (!mov) throw new NotFoundException('Movimiento no encontrado.');
+
+    const createdByLabel = await this.clerkUsers.getUserDisplayLabel(mov.operacion.createdBy);
+
+    return {
+      id: mov.id,
+      tenantId: mov.tenantId,
+      operacionId: mov.operacionId,
+      productoId: mov.productoId,
+      producto: mov.producto,
+      presentacionId: mov.presentacionId,
+      presentacion: mov.presentacion,
+      bultos: mov.bultos,
+      unidades: mov.unidades,
+      fechaVencimiento: mov.fechaVencimiento?.toISOString() ?? null,
+      lote: mov.lote,
+      observaciones: mov.observaciones ?? mov.operacion.observaciones ?? null,
+      movimientoVinculadoId: mov.movimientoVinculadoId,
+      createdBy: mov.operacion.createdBy,
+      createdByLabel,
+      fecha: mov.fecha.toISOString(),
+      createdAt: mov.operacion.createdAt.toISOString(),
+      tipo: mov.operacion.tipo as 'ingreso' | 'egreso' | 'division',
+      clienteId: mov.operacion.clienteId,
+      cliente: mov.operacion.cliente,
+      depositoId: mov.operacion.depositoId,
+      deposito: mov.operacion.deposito,
+      numeroRemito: mov.operacion.numeroRemito,
+      remitoUrl: mov.operacion.remitoUrl,
+      fotosUrls: mov.operacion.fotosUrls,
+      entregadoPor: mov.operacion.entregadoPor,
+      destinatario: mov.operacion.destinatario,
+      destinoFinal: mov.operacion.destinoFinal,
+      cantidad1: mov.bultos,
+      cantidad2: mov.unidades,
+    };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async createMovimiento(tenantId: string, dto: CreateMovimientoStockDto) {
+    throw new ServiceUnavailableException(STUB_MSG);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async updateMovimiento(id: string, tenantId: string, dto: UpdateMovimientoStockDto) {
-    const cur = await this.findMovimiento(id, tenantId);
-    const pid = dto.productoId ?? cur.productoId;
-    const cid = dto.clienteId ?? cur.clienteId;
-    const did = dto.depositoId ?? cur.depositoId;
-    await this.assertProductoCliente(tenantId, pid, cid);
-    if (did) {
-      await this.assertDeposito(tenantId, did, true);
-    }
-    await this.assertRemito(tenantId, dto.remitoId);
-    let fechaParsed: Date | undefined;
-    if (dto.fecha !== undefined) {
-      fechaParsed = parseFechaMovimientoStock(dto.fecha);
-      if (Number.isNaN(fechaParsed.getTime())) throw new BadRequestException('Fecha inválida');
-    }
-    return this.prisma.movimientoStock.update({
-      where: { id },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data: {
-        ...dto,
-        fecha: fechaParsed,
-      } as any,
-    });
+    throw new ServiceUnavailableException(STUB_MSG);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async removeMovimiento(id: string, tenantId: string) {
-    await this.findMovimiento(id, tenantId);
-    return this.prisma.movimientoStock.delete({ where: { id } });
+    throw new ServiceUnavailableException(STUB_MSG);
   }
 
-  // ───────────────── REMITO ESCANEADO (PDF) ───────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ REMITO ESCANEADO (PDF) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async uploadRemitoPdf(tenantId: string, file: Express.Multer.File) {
-    if (!file?.buffer?.length) {
-      throw new BadRequestException('Se requiere un archivo de remito.');
-    }
+    if (!file?.buffer?.length) throw new BadRequestException('Se requiere un archivo de remito.');
     const name = file.originalname.toLowerCase();
     const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
-    const isImage =
-      file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
-    if (!isPdf && !isImage) {
-      throw new BadRequestException('El remito debe ser un PDF o una imagen.');
-    }
-    if (file.buffer.length > 10 * 1024 * 1024) {
-      throw new BadRequestException('El archivo no puede superar 10 MB.');
-    }
-
-    const url = await this.cloudinary.uploadRemitoArchivo(
-      tenantId,
-      file.buffer,
-      file.originalname,
-      file.mimetype,
-    );
+    const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
+    if (!isPdf && !isImage) throw new BadRequestException('El remito debe ser un PDF o una imagen.');
+    if (file.buffer.length > 10 * 1024 * 1024) throw new BadRequestException('El archivo no puede superar 10 MB.');
+    const url = await this.cloudinary.uploadRemitoArchivo(tenantId, file.buffer, file.originalname, file.mimetype);
     return { url };
   }
 
   async streamRemitoAdjunto(id: string, tenantId: string, res: Response) {
-    const row = await this.prisma.movimientoStock.findFirst({
+    const mov = await this.prisma.movimientoStock.findFirst({
       where: { id, tenantId },
-      select: { remitoUrl: true },
+      select: { operacion: { select: { remitoUrl: true } } },
     });
-    if (!row?.remitoUrl?.trim()) {
-      throw new NotFoundException('Este movimiento no tiene remito escaneado.');
-    }
-
-    const storedUrl = row.remitoUrl.trim();
-    this.cloudinary.assertRemitoUrlForTenant(storedUrl, tenantId);
-
-    const candidates = [storedUrl, this.cloudinary.resolveDeliveryUrl(storedUrl)];
-    let upstream: globalThis.Response | null = null;
-    let lastStatus = 0;
-
-    for (const url of [...new Set(candidates)]) {
-      const attempt = await fetch(url);
-      lastStatus = attempt.status;
-      if (attempt.ok && attempt.body) {
-        upstream = attempt;
-        break;
-      }
-    }
-
-    if (!upstream?.body) {
-      if (lastStatus === 401) {
-        throw new ServiceUnavailableException(
-          'Cloudinary bloquea la entrega de PDF. En el panel de Cloudinary → Settings → Security, activá “Allow delivery of PDF and ZIP files”.',
-        );
-      }
-      throw new BadGatewayException('No se pudo obtener el remito escaneado.');
-    }
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="remito.pdf"');
-    res.setHeader('Content-Disposition', 'inline');
-    res.setHeader('Cache-Control', 'private, max-age=300');
-
-    await pipeline(Readable.fromWeb(upstream.body as import('stream/web').ReadableStream), res);
+    if (!mov) throw new NotFoundException('Movimiento no encontrado.');
+    const url = mov.operacion.remitoUrl;
+    if (!url) throw new NotFoundException('Este movimiento no tiene remito adjunto.');
+    res.redirect(302, url);
   }
 
-  // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ INGRESOS / EGRESOS / DIVISIONES (pendientes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async createIngreso(tenantId: string, dto: CreateIngresoDto, createdBy: string) {
-    const cantidad1 = dto.cantidad1 ?? 0;
-    const cantidad2 = dto.cantidad2 ?? 0;
-    if (cantidad1 <= 0 && cantidad2 <= 0) {
-      throw new BadRequestException('Al menos uno de cantidad1 o cantidad2 debe ser mayor a 0.');
-    }
-
-    await this.assertDeposito(tenantId, dto.depositoId, true);
-
-    const [producto, cliente] = await Promise.all([
-      this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
+    const [cliente, deposito] = await Promise.all([
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
+      this.prisma.deposito.findFirst({ where: { id: dto.depositoId, tenantId, activo: true } }),
     ]);
-    if (!producto) throw new BadRequestException('Producto inválido');
-    if (!cliente) throw new BadRequestException('Cliente inválido');
+    if (!cliente) throw new BadRequestException('Cliente inválido.');
+    if (!deposito) throw new BadRequestException('Depósito inválido o inactivo.');
+
+    for (const linea of dto.lineas) {
+      if (linea.bultos <= 0 && linea.sueltas <= 0) {
+        throw new BadRequestException('Cada línea debe tener bultos o sueltas mayor a 0.');
+      }
+      const pp = await this.prisma.productoPresentacion.findFirst({
+        where: { id: linea.presentacionId, productoId: linea.productoId, tenantId, activo: true },
+      });
+      if (!pp) {
+        throw new BadRequestException('Presentación inválida para uno de los productos seleccionados.');
+      }
+    }
 
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
-    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
-
-    const remitoUrl = dto.remitoEscaneadoUrl?.trim();
-    if (!remitoUrl) {
-      throw new BadRequestException('El remito es obligatorio.');
-    }
+    if (isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida.');
 
     return this.prisma.$transaction(async (tx) => {
-      const movimiento = await tx.movimientoStock.create({
+      const operacion = await tx.stockOperacion.create({
         data: {
           tenantId,
-          productoId: dto.productoId,
           clienteId: dto.clienteId,
           depositoId: dto.depositoId,
           tipo: 'ingreso',
-          cantidad1,
-          cantidad2,
-          lote: dto.lote?.trim() || null,
-          observaciones: dto.observaciones?.trim() || null,
-          remitoUrl,
-          createdBy,
           fecha: fechaMov,
-        },
-        include: {
-          producto: { select: productoMiniSelect },
-          cliente: { select: { id: true, nombre: true } },
-          deposito: { select: { id: true, nombre: true } },
+          fotosUrls: dto.fotosUrls.map((u) => u.trim()),
+          observaciones: dto.observaciones?.trim() || null,
+          createdBy,
         },
       });
 
-      await tx.stockItem.upsert({
-        where: {
-          productoId_clienteId_depositoId: {
-            productoId: dto.productoId,
+      for (const linea of dto.lineas) {
+        const fechaVencimiento = parseFechaMovimientoStock(linea.fechaVencimiento);
+
+        await tx.movimientoStock.create({
+          data: {
+            tenantId,
+            operacionId: operacion.id,
+            productoId: linea.productoId,
+            presentacionId: linea.presentacionId,
+            bultos: linea.bultos,
+            unidades: linea.sueltas,
+            fechaVencimiento,
+            lote: linea.lote.trim(),
+            fecha: fechaMov,
+            createdBy,
+          },
+        });
+
+        await tx.stockItem.upsert({
+          where: {
+            productoId_presentacionId_clienteId_depositoId: {
+              productoId: linea.productoId,
+              presentacionId: linea.presentacionId,
+              clienteId: dto.clienteId,
+              depositoId: dto.depositoId,
+            },
+          },
+          update: {
+            cantidad1: { increment: linea.bultos },
+            cantidad2: { increment: linea.sueltas },
+          },
+          create: {
+            tenantId,
+            productoId: linea.productoId,
+            presentacionId: linea.presentacionId,
             clienteId: dto.clienteId,
             depositoId: dto.depositoId,
+            cantidad1: linea.bultos,
+            cantidad2: linea.sueltas,
           },
-        },
-        update: {
-          cantidad1: { increment: cantidad1 },
-          cantidad2: { increment: cantidad2 },
-        },
-        create: {
-          tenantId,
-          productoId: dto.productoId,
-          clienteId: dto.clienteId,
-          depositoId: dto.depositoId,
-          cantidad1,
-          cantidad2,
-        },
-      });
+        });
+      }
 
-      return movimiento;
+      return { id: operacion.id, movimientosCount: dto.lineas.length };
     });
   }
 
   listIngresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.movimientoStock.findMany({
+    return this.prisma.stockOperacion.findMany({
       where: {
         tenantId,
         tipo: 'ingreso',
         ...(clienteId ? { clienteId } : {}),
-        ...(productoId ? { productoId } : {}),
         ...(depositoId ? { depositoId } : {}),
+        ...(productoId ? { movimientos: { some: { productoId } } } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
-      include: movimientoStockRelations,
+      include: {
+        cliente: { select: { id: true, nombre: true } },
+        deposito: { select: { id: true, nombre: true } },
+        movimientos: {
+          select: {
+            id: true,
+            productoId: true,
+            producto: { select: { id: true, nombre: true } },
+            presentacionId: true,
+            presentacion: {
+              select: {
+                id: true,
+                unidadesPorBulto: true,
+                presentacion: { select: { id: true, nombre: true } },
+              },
+            },
+            bultos: true,
+            unidades: true,
+            lote: true,
+            fechaVencimiento: true,
+          },
+        },
+      },
+    });
+  }
+
+  async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
+    const [cliente, deposito] = await Promise.all([
+      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
+      this.prisma.deposito.findFirst({ where: { id: dto.depositoId, tenantId, activo: true } }),
+    ]);
+    if (!cliente) throw new BadRequestException('Cliente inválido.');
+    if (!deposito) throw new BadRequestException('Depósito inválido o inactivo.');
+
+    for (const linea of dto.lineas) {
+      if (linea.bultos <= 0 && linea.sueltas <= 0) {
+        throw new BadRequestException('Cada línea debe tener bultos o sueltas mayor a 0.');
+      }
+      const pp = await this.prisma.productoPresentacion.findFirst({
+        where: { id: linea.presentacionId, productoId: linea.productoId, tenantId, activo: true },
+      });
+      if (!pp) {
+        throw new BadRequestException('Presentación inválida para uno de los productos seleccionados.');
+      }
+    }
+
+    const fechaMov = parseFechaMovimientoStock(dto.fecha);
+    if (isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida.');
+
+    const config = await this.getEgresoRemitoConfig(tenantId);
+    const year = yearInBuenosAires(fechaMov);
+
+    return this.prisma.$transaction(async (tx) => {
+      const seq = await this.nextSecuenciaRemitoTx(tx, tenantId, year);
+      const numeroRemito = this.formatoNumeroRemito(config.remitoPrefix, year, seq, config.remitoDigitos);
+
+      const operacion = await tx.stockOperacion.create({
+        data: {
+          tenantId,
+          clienteId: dto.clienteId,
+          depositoId: dto.depositoId,
+          tipo: 'egreso',
+          fecha: fechaMov,
+          numeroRemito,
+          remitoUrl: dto.remitoEscaneadoUrl.trim(),
+          entregadoPor: dto.entregadoPor?.trim() || null,
+          destinatario: dto.destinatario?.trim() || null,
+          destinoFinal: dto.destinoFinal?.trim() || null,
+          observaciones: dto.observaciones?.trim() || null,
+          createdBy,
+        },
+      });
+
+      for (const linea of dto.lineas) {
+        await tx.movimientoStock.create({
+          data: {
+            tenantId,
+            operacionId: operacion.id,
+            productoId: linea.productoId,
+            presentacionId: linea.presentacionId,
+            bultos: linea.bultos,
+            unidades: linea.sueltas,
+            lote: linea.lote?.trim() || null,
+            fecha: fechaMov,
+            createdBy,
+          },
+        });
+
+        const updated = await tx.stockItem.update({
+          where: {
+            productoId_presentacionId_clienteId_depositoId: {
+              productoId: linea.productoId,
+              presentacionId: linea.presentacionId,
+              clienteId: dto.clienteId,
+              depositoId: dto.depositoId,
+            },
+          },
+          data: {
+            cantidad1: { decrement: linea.bultos },
+            cantidad2: { decrement: linea.sueltas },
+          },
+        });
+
+        if (updated.cantidad1 < 0) {
+          throw new BadRequestException(`Stock insuficiente de bultos para uno de los productos.`);
+        }
+        if (updated.cantidad2 < 0) {
+          throw new BadRequestException(`Stock insuficiente de sueltas para uno de los productos.`);
+        }
+      }
+
+      return { id: operacion.id, numeroRemito, movimientosCount: dto.lineas.length };
+    });
+  }
+
+  listEgresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
+    return this.prisma.stockOperacion.findMany({
+      where: {
+        tenantId,
+        tipo: 'egreso',
+        ...(clienteId ? { clienteId } : {}),
+        ...(depositoId ? { depositoId } : {}),
+        ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        cliente: { select: { id: true, nombre: true } },
+        deposito: { select: { id: true, nombre: true } },
+        movimientos: {
+          select: {
+            id: true,
+            productoId: true,
+            producto: { select: { id: true, nombre: true } },
+            presentacionId: true,
+            presentacion: {
+              select: {
+                id: true,
+                unidadesPorBulto: true,
+                presentacion: { select: { id: true, nombre: true } },
+              },
+            },
+            bultos: true,
+            unidades: true,
+            lote: true,
+          },
+        },
+      },
+    });
+  }
+
+  async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {
+    const [cliente, deposito] = await Promise.all([
+      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
+      this.prisma.deposito.findFirst({ where: { id: dto.depositoId, tenantId, activo: true } }),
+    ]);
+    if (!cliente) throw new BadRequestException('Cliente no encontrado.');
+    if (!deposito) throw new BadRequestException('Depósito no encontrado o inactivo.');
+
+    const pp = await this.prisma.productoPresentacion.findFirst({
+      where: { id: dto.presentacionId, tenantId, productoId: dto.productoId, activo: true },
+    });
+    if (!pp) throw new BadRequestException('Presentación no encontrada para este producto.');
+    if (!pp.unidadesPorBulto || pp.unidadesPorBulto <= 0) {
+      throw new BadRequestException(
+        'La presentación no tiene unidades por bulto configuradas. No se puede realizar la división.',
+      );
+    }
+
+    const fechaMov = parseFechaMovimientoStock(dto.fecha);
+    const unidadesGeneradas = dto.bultos * pp.unidadesPorBulto;
+    const stockKey = {
+      productoId: dto.productoId,
+      presentacionId: dto.presentacionId,
+      clienteId: dto.clienteId,
+      depositoId: dto.depositoId,
+    };
+
+    return this.prisma.$transaction(async (tx) => {
+      const stockItem = await tx.stockItem.findUnique({
+        where: { productoId_presentacionId_clienteId_depositoId: stockKey },
+      });
+      if (!stockItem || stockItem.cantidad1 < dto.bultos) {
+        throw new BadRequestException(
+          `Stock insuficiente. Disponible: ${stockItem?.cantidad1 ?? 0} bulto(s), solicitado: ${dto.bultos}.`,
+        );
+      }
+
+      const operacion = await tx.stockOperacion.create({
+        data: {
+          tenantId,
+          clienteId: dto.clienteId,
+          depositoId: dto.depositoId,
+          tipo: 'division',
+          fecha: fechaMov,
+          observaciones: dto.observaciones,
+          createdBy,
+        },
+      });
+
+      // Movimiento A: los bultos que se convierten
+      const movA = await tx.movimientoStock.create({
+        data: {
+          tenantId,
+          operacionId: operacion.id,
+          productoId: dto.productoId,
+          presentacionId: dto.presentacionId,
+          bultos: dto.bultos,
+          unidades: 0,
+          fecha: fechaMov,
+          createdBy,
+        },
+      });
+
+      // Movimiento B: las sueltas generadas, vinculado a A
+      const movB = await tx.movimientoStock.create({
+        data: {
+          tenantId,
+          operacionId: operacion.id,
+          productoId: dto.productoId,
+          presentacionId: dto.presentacionId,
+          bultos: 0,
+          unidades: unidadesGeneradas,
+          movimientoVinculadoId: movA.id,
+          fecha: fechaMov,
+          createdBy,
+        },
+      });
+
+      // Enlazar A → B
+      await tx.movimientoStock.update({
+        where: { id: movA.id },
+        data: { movimientoVinculadoId: movB.id },
+      });
+
+      const updated = await tx.stockItem.update({
+        where: { productoId_presentacionId_clienteId_depositoId: stockKey },
+        data: {
+          cantidad1: { decrement: dto.bultos },
+          cantidad2: { increment: unidadesGeneradas },
+        },
+      });
+
+      if (updated.cantidad1 < 0) {
+        throw new BadRequestException('Stock insuficiente de bultos (verificación post-transacción).');
+      }
+
+      return { id: operacion.id, bultosRestados: dto.bultos, unidadesGeneradas };
+    });
+  }
+
+  listDivisiones(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
+    return this.prisma.stockOperacion.findMany({
+      where: {
+        tenantId,
+        tipo: 'division',
+        ...(clienteId ? { clienteId } : {}),
+        ...(depositoId ? { depositoId } : {}),
+        ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        cliente: { select: { id: true, nombre: true } },
+        deposito: { select: { id: true, nombre: true } },
+        movimientos: {
+          select: {
+            id: true,
+            productoId: true,
+            producto: { select: { id: true, nombre: true } },
+            presentacionId: true,
+            presentacion: {
+              select: {
+                id: true,
+                unidadesPorBulto: true,
+                presentacion: { select: { id: true, nombre: true } },
+              },
+            },
+            bultos: true,
+            unidades: true,
+            movimientoVinculadoId: true,
+          },
+        },
+      },
     });
   }
 
@@ -723,7 +1025,7 @@ export class StockService {
     });
   }
 
-  // ───────────────── CONFIG NÚMERO DE REMITO (EGRESOS) ───────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CONFIG NÚMERO DE REMITO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async getEgresoRemitoConfig(tenantId: string) {
     const row = await this.prisma.stockEgresoRemitoConfig.findUnique({
@@ -754,7 +1056,6 @@ export class StockService {
     return `${p}-${year}-${String(seq).padStart(d, '0')}`;
   }
 
-  /** Atómico dentro de la transacción: incrementa contador anual y devuelve el nuevo valor. */
   private async nextSecuenciaRemitoTx(tx: Prisma.TransactionClient, tenantId: string, year: number) {
     const id = randomUUID().replace(/-/g, '').slice(0, 25);
     const rows = await tx.$queryRaw<{ lastValue: number }[]>(
@@ -767,268 +1068,8 @@ export class StockService {
       `,
     );
     const n = rows[0]?.lastValue;
-    if (n === undefined || n === null) {
-      throw new BadRequestException('No se pudo generar el número de remito.');
-    }
+    if (n === undefined || n === null) throw new BadRequestException('No se pudo generar el número de remito.');
     return n;
   }
 
-  // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
-
-  async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
-    const cantidad1 = dto.cantidad1 ?? 0;
-    const cantidad2 = dto.cantidad2 ?? 0;
-    if (cantidad1 <= 0 && cantidad2 <= 0) {
-      throw new BadRequestException('Al menos uno de cantidad1 o cantidad2 debe ser mayor a 0.');
-    }
-
-    await this.assertDeposito(tenantId, dto.depositoId, true);
-
-    const [producto, cliente] = await Promise.all([
-      this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
-      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
-    ]);
-    if (!producto) throw new BadRequestException('Producto inválido');
-    if (!cliente) throw new BadRequestException('Cliente inválido');
-
-    const fechaMov = parseFechaMovimientoStock(dto.fecha);
-    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
-
-    const remitoUrl = dto.remitoEscaneadoUrl?.trim();
-    if (!remitoUrl) {
-      throw new BadRequestException('El remito es obligatorio.');
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      const cfg = await tx.stockEgresoRemitoConfig.findUnique({
-        where: { tenantId },
-        select: { remitoPrefix: true, remitoDigitos: true },
-      });
-      const prefix = cfg?.remitoPrefix?.trim() || 'R';
-      const digitos = cfg?.remitoDigitos ?? 5;
-
-      const year = yearInBuenosAires(fechaMov);
-
-      const item = await tx.stockItem.findUnique({
-        where: {
-          productoId_clienteId_depositoId: {
-            productoId: dto.productoId,
-            clienteId: dto.clienteId,
-            depositoId: dto.depositoId,
-          },
-        },
-      });
-
-      const disp1 = item?.cantidad1 ?? 0;
-      const disp2 = item?.cantidad2 ?? 0;
-
-      if (cantidad1 > 0 && disp1 < cantidad1) {
-        throw new BadRequestException(
-          `Stock de pallets insuficiente para esta empresa y producto. Disponible: ${disp1}.`,
-        );
-      }
-      if (cantidad2 > 0 && disp2 < cantidad2) {
-        throw new BadRequestException(
-          `Stock suelto insuficiente para esta empresa y producto. Disponible: ${disp2}.`,
-        );
-      }
-
-      // Validación atómica con optimistic locking vía condición en updateMany
-      const dec = await tx.stockItem.updateMany({
-        where: {
-          tenantId,
-          productoId: dto.productoId,
-          clienteId: dto.clienteId,
-          depositoId: dto.depositoId,
-          cantidad1: { gte: cantidad1 },
-          cantidad2: { gte: cantidad2 },
-        },
-        data: {
-          cantidad1: { decrement: cantidad1 },
-          cantidad2: { decrement: cantidad2 },
-        },
-      });
-      if (dec.count === 0) {
-        throw new BadRequestException(
-          `Stock insuficiente para esta empresa y producto. Pallets disponibles: ${disp1}, suelto disponible: ${disp2}.`,
-        );
-      }
-
-      const seq = await this.nextSecuenciaRemitoTx(tx, tenantId, year);
-      let numeroRemito = this.formatoNumeroRemito(prefix, year, seq, digitos);
-
-      const tryCreate = async (numero: string) =>
-        tx.movimientoStock.create({
-          data: {
-            tenantId,
-            productoId: dto.productoId,
-            clienteId: dto.clienteId,
-            depositoId: dto.depositoId,
-            tipo: 'egreso',
-            cantidad1,
-            cantidad2,
-            numeroRemito: numero,
-            lote: dto.lote?.trim() || null,
-            observaciones: dto.observaciones?.trim() || null,
-            entregadoPor: dto.entregadoPor?.trim() || null,
-            destinatario: dto.destinatario?.trim() || null,
-            destinoFinal: dto.destinoFinal?.trim() || null,
-            remitoUrl,
-            createdBy,
-            fecha: fechaMov,
-          },
-          include: movimientoStockRelations,
-        });
-
-      try {
-        return await tryCreate(numeroRemito);
-      } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-          const seqRetry = await this.nextSecuenciaRemitoTx(tx, tenantId, year);
-          numeroRemito = this.formatoNumeroRemito(prefix, year, seqRetry, digitos);
-          return await tryCreate(numeroRemito);
-        }
-        throw e;
-      }
-    });
-  }
-
-  listEgresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.movimientoStock.findMany({
-      where: {
-        tenantId,
-        tipo: 'egreso',
-        ...(clienteId ? { clienteId } : {}),
-        ...(productoId ? { productoId } : {}),
-        ...(depositoId ? { depositoId } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: movimientoStockRelations,
-    });
-  }
-
-  // ───────────────── DIVISIONES ─────────────────────────────────────────────
-
-  async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {
-    const cantidad1Origen = dto.cantidad1Origen ?? 0;
-    const cantidad2Origen = dto.cantidad2Origen ?? 0;
-    const cantidad1Destino = dto.cantidad1Destino ?? 0;
-    const cantidad2Destino = dto.cantidad2Destino ?? 0;
-
-    if (cantidad1Origen <= 0 && cantidad2Origen <= 0) {
-      throw new BadRequestException('Al menos uno de cantidad1Origen o cantidad2Origen debe ser mayor a 0.');
-    }
-    if (cantidad1Destino <= 0 && cantidad2Destino <= 0) {
-      throw new BadRequestException('Al menos uno de cantidad1Destino o cantidad2Destino debe ser mayor a 0.');
-    }
-
-    const [producto, cliente] = await Promise.all([
-      this.prisma.producto.findFirst({ where: { id: dto.productoId, tenantId } }),
-      this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
-    ]);
-    if (!producto) throw new BadRequestException('Producto inválido');
-    if (!cliente) throw new BadRequestException('Cliente inválido');
-
-    await this.assertDeposito(tenantId, dto.depositoId, true);
-
-    const fechaMov = parseFechaMovimientoStock(dto.fecha);
-    if (Number.isNaN(fechaMov.getTime())) throw new BadRequestException('Fecha inválida');
-
-    return this.prisma.$transaction(async (tx) => {
-      const item = await tx.stockItem.findUnique({
-        where: { productoId_clienteId_depositoId: { productoId: dto.productoId, clienteId: dto.clienteId, depositoId: dto.depositoId } },
-      });
-
-      const disp1 = item?.cantidad1 ?? 0;
-      const disp2 = item?.cantidad2 ?? 0;
-
-      const u1 = producto.unidad1Nombre?.trim() || 'Cantidad 1';
-      const u2 = producto.unidad2Nombre?.trim() || 'Cantidad 2';
-
-      if (cantidad1Origen > 0 && disp1 < cantidad1Origen) {
-        throw new BadRequestException(`Stock de ${u1} insuficiente. Disponible: ${disp1}.`);
-      }
-      if (cantidad2Origen > 0 && disp2 < cantidad2Origen) {
-        throw new BadRequestException(`Stock de ${u2} insuficiente. Disponible: ${disp2}.`);
-      }
-
-      if (!item) {
-        throw new BadRequestException(
-          `No hay stock registrado para esta empresa y producto en el depósito seleccionado.`,
-        );
-      }
-
-      // updateMany admite solo increment o decrement por campo (no ambos a la vez).
-      const net1 = cantidad1Destino - cantidad1Origen;
-      const net2 = cantidad2Destino - cantidad2Origen;
-      const stockData: Prisma.StockItemUpdateManyMutationInput = {};
-      if (net1 > 0) stockData.cantidad1 = { increment: net1 };
-      else if (net1 < 0) stockData.cantidad1 = { decrement: -net1 };
-      if (net2 > 0) stockData.cantidad2 = { increment: net2 };
-      else if (net2 < 0) stockData.cantidad2 = { decrement: -net2 };
-
-      const dec = await tx.stockItem.updateMany({
-        where: {
-          tenantId,
-          productoId: dto.productoId,
-          clienteId: dto.clienteId,
-          depositoId: dto.depositoId,
-          cantidad1: { gte: cantidad1Origen },
-          cantidad2: { gte: cantidad2Origen },
-        },
-        data: stockData,
-      });
-
-      if (dec.count === 0) {
-        throw new BadRequestException(
-          `Stock insuficiente. ${u1} disponible: ${disp1}, ${u2} disponible: ${disp2}.`,
-        );
-      }
-
-      const observaciones = dto.observaciones?.trim() || null;
-      const baseData = {
-        tenantId,
-        productoId: dto.productoId,
-        clienteId: dto.clienteId,
-        depositoId: dto.depositoId,
-        tipo: 'division' as const,
-        observaciones,
-        createdBy,
-        fecha: fechaMov,
-      };
-
-      const movOrigen = await tx.movimientoStock.create({
-        data: { ...baseData, cantidad1: -cantidad1Origen, cantidad2: -cantidad2Origen },
-        include: movimientoStockRelations,
-      });
-
-      const movDestino = await tx.movimientoStock.create({
-        data: { ...baseData, cantidad1: cantidad1Destino, cantidad2: cantidad2Destino, movimientoVinculadoId: movOrigen.id },
-        include: movimientoStockRelations,
-      });
-
-      await tx.movimientoStock.update({
-        where: { id: movOrigen.id },
-        data: { movimientoVinculadoId: movDestino.id },
-      });
-
-      return { origen: { ...movOrigen, movimientoVinculadoId: movDestino.id }, destino: movDestino };
-    });
-  }
-
-  listDivisiones(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.movimientoStock.findMany({
-      where: {
-        tenantId,
-        tipo: 'division',
-        ...(clienteId ? { clienteId } : {}),
-        ...(productoId ? { productoId } : {}),
-        ...(depositoId ? { depositoId } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: movimientoStockRelations,
-    });
-  }
 }

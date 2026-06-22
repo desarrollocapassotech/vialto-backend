@@ -541,9 +541,9 @@ model StockOperacion {
   tipo          String   // ingreso | egreso | division
   fecha         DateTime
   observaciones String?
-  /** URL del remito escaneado (Cloudinary). Usado en egresos y divisiones. */
+  /** URL del remito interno en PDF (Cloudinary). Solo egresos; generado por el sistema. */
   remitoUrl     String?
-  /** URLs de fotos adjuntas al ingreso (hasta 2, Cloudinary). */
+  /** URLs de fotos del producto en ingresos (hasta 2, Cloudinary). */
   fotosUrls     String[]
   /** Número de remito interno generado al egresar (ej. R-2026-00001). */
   numeroRemito  String?

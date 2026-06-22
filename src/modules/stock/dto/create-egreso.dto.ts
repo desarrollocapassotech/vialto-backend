@@ -24,12 +24,6 @@ export class CreateEgresoDto {
   @IsNotEmpty()
   fecha!: string;
 
-  /** URL del remito escaneado (PDF o imagen) tras subida a Cloudinary. */
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(2048)
-  remitoEscaneadoUrl!: string;
-
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

@@ -731,9 +731,14 @@ export class PlatformService {
     return this.stockService.listDepositos(scopedTenantId, activo);
   }
 
-  uploadRemitoPdf(tenantId: string | undefined, file: Express.Multer.File) {
+  uploadIngresoFoto(tenantId: string | undefined, file: Express.Multer.File) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.uploadRemitoPdf(scopedTenantId, file);
+    return this.stockService.uploadIngresoFoto(scopedTenantId, file);
+  }
+
+  /** @deprecated Usar uploadIngresoFoto */
+  uploadRemitoPdf(tenantId: string | undefined, file: Express.Multer.File) {
+    return this.uploadIngresoFoto(tenantId, file);
   }
 
   createIngreso(tenantId: string | undefined, dto: CreateIngresoDto, createdBy: string) {
@@ -791,6 +796,25 @@ export class PlatformService {
   listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId);
+  }
+
+  findEgreso(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findEgreso(id, scopedTenantId);
+  }
+
+  ensureRemitoInternoPdf(tenantId: string | undefined, egresoId: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.ensureRemitoInternoPdf(egresoId, scopedTenantId);
+  }
+
+  streamRemitoInternoView(
+    tenantId: string | undefined,
+    egresoId: string,
+    res: import('express').Response,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.streamRemitoInternoView(egresoId, scopedTenantId, res);
   }
 
   createDivision(tenantId: string | undefined, dto: CreateDivisionDto, createdBy: string) {

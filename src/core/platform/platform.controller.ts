@@ -525,7 +525,25 @@ export class PlatformController {
     );
   }
 
-  @ApiOperation({ summary: 'Subir remito escaneado PDF (superadmin)' })
+  @ApiOperation({ summary: 'Subir foto del producto para ingreso (superadmin)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('stock/upload-foto-ingreso')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadFotoIngresoStock(
+    @Query('tenantId') tenantId: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(tenantId, file);
+  }
+
+  @ApiOperation({ summary: 'Subir foto del producto (alias legacy, superadmin)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
   @Post('stock/upload-remito')
@@ -539,8 +557,8 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
-    return this.service.uploadRemitoPdf(tenantId, file);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(tenantId, file);
   }
 
   @ApiOperation({ summary: 'Registrar ingreso al depósito (superadmin)' })
@@ -631,6 +649,31 @@ export class PlatformController {
     @Query('depositoId') depositoId?: string,
   ) {
     return this.service.listEgresos(tenantId, clienteId, productoId, depositoId);
+  }
+
+  @ApiOperation({ summary: 'Obtener egreso por ID (superadmin)' })
+  @Get('stock/egresos/:id')
+  getEgreso(@Query('tenantId') tenantId: string | undefined, @Param('id') id: string) {
+    return this.service.findEgreso(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Visualizar remito interno PDF inline (superadmin)' })
+  @Get('stock/egresos/:id/remito-interno/view')
+  async viewRemitoInterno(
+    @Query('tenantId') tenantId: string | undefined,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    await this.service.streamRemitoInternoView(tenantId, id, res);
+  }
+
+  @ApiOperation({ summary: 'Generar (si falta) remito interno PDF (superadmin)' })
+  @Post('stock/egresos/:id/remito-interno')
+  ensureRemitoInterno(
+    @Query('tenantId') tenantId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.service.ensureRemitoInternoPdf(tenantId, id);
   }
 
   @ApiOperation({ summary: 'Registrar división de bultos (superadmin)' })

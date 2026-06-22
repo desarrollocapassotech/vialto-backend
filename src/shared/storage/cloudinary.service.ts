@@ -52,11 +52,74 @@ export class CloudinaryService {
     );
   }
 
+  async uploadIngresoFoto(
+    tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ): Promise<string> {
+    if (!this.configured) {
+      throw new ServiceUnavailableException(
+        'El almacenamiento de fotos no está configurado. Contactá al administrador.',
+      );
+    }
+    if (buffer.length > MAX_REMITO_PDF_BYTES) {
+      throw new ServiceUnavailableException('La imagen no puede superar 10 MB.');
+    }
+
+    const isImage =
+      mimeType.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(originalName ?? '');
+    if (!isImage) {
+      throw new ServiceUnavailableException('Solo se permiten imágenes JPG o PNG.');
+    }
+
+    const baseName = String(originalName ?? 'foto')
+      .replace(/\.[^.]+$/i, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'foto';
+
+    const publicId = `${Date.now()}-${baseName}`;
+
+    try {
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `vialto/stock/ingreso-fotos/${tenantId}`,
+            resource_type: 'image',
+            public_id: publicId,
+            access_mode: 'public',
+            type: 'upload',
+          },
+          (error, uploadResult) => {
+            if (error || !uploadResult) {
+              reject(error ?? new Error('Cloudinary no devolvió resultado'));
+              return;
+            }
+            resolve(uploadResult);
+          },
+        );
+        stream.end(buffer);
+      });
+
+      return result.secure_url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al subir la imagen';
+      this.logger.error(`Cloudinary upload failed: ${message}`);
+      throw new BadGatewayException('No se pudo subir la foto. Intentá de nuevo más tarde.');
+    }
+  }
+
+  async uploadRemitoInternoPdf(tenantId: string, buffer: Buffer, originalName: string): Promise<string> {
+    return this.uploadRemitoArchivo(tenantId, buffer, originalName, 'application/pdf', 'remitos-internos');
+  }
+
   async uploadRemitoArchivo(
     tenantId: string,
     buffer: Buffer,
     originalName: string,
     mimeType: string,
+    folderSuffix: 'remitos' | 'remitos-internos' = 'remitos',
   ): Promise<string> {
     if (!this.configured) {
       throw new ServiceUnavailableException(
@@ -80,7 +143,7 @@ export class CloudinaryService {
       const result = await new Promise<UploadApiResponse>((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           {
-            folder: `vialto/stock/remitos/${tenantId}`,
+            folder: `vialto/stock/${folderSuffix}/${tenantId}`,
             resource_type: isPdf ? 'raw' : 'image',
             public_id: publicId,
             access_mode: 'public',
@@ -222,8 +285,11 @@ export class CloudinaryService {
     const parsed = this.parseCloudinaryStoredUrl(normalized);
     if (!parsed) return;
 
-    const expectedPrefix = `vialto/stock/remitos/${tenantId}/`;
-    if (!parsed.publicId.startsWith(expectedPrefix)) {
+    const allowedPrefixes = [
+      `vialto/stock/remitos/${tenantId}/`,
+      `vialto/stock/remitos-internos/${tenantId}/`,
+    ];
+    if (!allowedPrefixes.some((prefix) => parsed.publicId.startsWith(prefix))) {
       throw new BadGatewayException('URL de remito no válida para esta empresa.');
     }
   }

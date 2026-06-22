@@ -2,6 +2,7 @@
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -25,6 +26,7 @@ import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
+import { RemitoInternoPdfService } from './remito-interno-pdf.service';
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Helpers de normalización
@@ -88,10 +90,13 @@ const stockItemRelations = {
 
 @Injectable()
 export class StockService {
+  private readonly logger = new Logger(StockService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clerkUsers: ClerkVialtoRoleService,
     private readonly cloudinary: CloudinaryService,
+    private readonly remitoInternoPdf: RemitoInternoPdfService,
   ) {}
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ PRODUCTOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -476,6 +481,7 @@ export class StockService {
             observaciones: true,
             numeroRemito: true,
             remitoUrl: true,
+            fotosUrls: true,
             entregadoPor: true,
             destinatario: true,
             destinoFinal: true,
@@ -509,7 +515,8 @@ export class StockService {
       depositoId: mov.operacion.depositoId,
       deposito: mov.operacion.deposito,
       numeroRemito: mov.operacion.numeroRemito,
-      remitoUrl: mov.operacion.remitoUrl,
+      remitoUrl: mov.operacion.tipo === 'egreso' ? mov.operacion.remitoUrl : null,
+      fotosUrls: mov.operacion.tipo === 'ingreso' ? mov.operacion.fotosUrls : [],
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,
@@ -582,8 +589,8 @@ export class StockService {
       depositoId: mov.operacion.depositoId,
       deposito: mov.operacion.deposito,
       numeroRemito: mov.operacion.numeroRemito,
-      remitoUrl: mov.operacion.remitoUrl,
-      fotosUrls: mov.operacion.fotosUrls,
+      remitoUrl: mov.operacion.tipo === 'egreso' ? mov.operacion.remitoUrl : null,
+      fotosUrls: mov.operacion.tipo === 'ingreso' ? mov.operacion.fotosUrls : [],
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,
@@ -607,28 +614,73 @@ export class StockService {
     throw new ServiceUnavailableException(STUB_MSG);
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ REMITO ESCANEADO (PDF) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ───────────────── FOTOS DE INGRESO ─────────────────────────────────────
 
-  async uploadRemitoPdf(tenantId: string, file: Express.Multer.File) {
-    if (!file?.buffer?.length) throw new BadRequestException('Se requiere un archivo de remito.');
+  async uploadIngresoFoto(tenantId: string, file: Express.Multer.File) {
+    if (!file?.buffer?.length) throw new BadRequestException('Se requiere una imagen.');
     const name = file.originalname.toLowerCase();
-    const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
     const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
-    if (!isPdf && !isImage) throw new BadRequestException('El remito debe ser un PDF o una imagen.');
-    if (file.buffer.length > 10 * 1024 * 1024) throw new BadRequestException('El archivo no puede superar 10 MB.');
-    const url = await this.cloudinary.uploadRemitoArchivo(tenantId, file.buffer, file.originalname, file.mimetype);
+    if (!isImage) throw new BadRequestException('Solo se permiten imágenes JPG o PNG.');
+    if (file.buffer.length > 10 * 1024 * 1024) throw new BadRequestException('La imagen no puede superar 10 MB.');
+    const url = await this.cloudinary.uploadIngresoFoto(tenantId, file.buffer, file.originalname, file.mimetype);
     return { url };
+  }
+
+  /** @deprecated Usar uploadIngresoFoto */
+  async uploadRemitoPdf(tenantId: string, file: Express.Multer.File) {
+    return this.uploadIngresoFoto(tenantId, file);
   }
 
   async streamRemitoAdjunto(id: string, tenantId: string, res: Response) {
     const mov = await this.prisma.movimientoStock.findFirst({
       where: { id, tenantId },
-      select: { operacion: { select: { remitoUrl: true } } },
+      select: { operacionId: true, operacion: { select: { tipo: true } } },
     });
     if (!mov) throw new NotFoundException('Movimiento no encontrado.');
-    const url = mov.operacion.remitoUrl;
-    if (!url) throw new NotFoundException('Este movimiento no tiene remito adjunto.');
-    res.redirect(302, url);
+    if (mov.operacion.tipo !== 'egreso') {
+      throw new NotFoundException('Solo los egresos tienen remito PDF.');
+    }
+    return this.streamRemitoInternoView(mov.operacionId, tenantId, res);
+  }
+
+  async streamRemitoInternoView(egresoId: string, tenantId: string, res: Response) {
+    const { buffer, filename } = await this.fetchRemitoInternoPdfBuffer(egresoId, tenantId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Cache-Control': 'private, max-age=300',
+    });
+    res.send(buffer);
+  }
+
+  private async fetchRemitoInternoPdfBuffer(
+    egresoId: string,
+    tenantId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const { url } = await this.ensureRemitoInternoPdf(egresoId, tenantId);
+    const op = await this.prisma.stockOperacion.findFirst({
+      where: { id: egresoId, tenantId, tipo: 'egreso' },
+      select: { numeroRemito: true },
+    });
+    const fetched = await fetch(url);
+    if (!fetched.ok) {
+      throw new ServiceUnavailableException('No se pudo obtener el remito PDF.');
+    }
+    const buffer = Buffer.from(await fetched.arrayBuffer());
+    const filename = `remito-${op?.numeroRemito ?? egresoId}.pdf`.replace(/[^a-zA-Z0-9._-]+/g, '-');
+    return { buffer, filename };
+  }
+
+  private isRemitoInternoPdfUrl(url: string): boolean {
+    return /remito-interno/i.test(url) || /remitos-internos/i.test(url);
+  }
+
+  private mapOperacionForApi<T extends { tipo: string; remitoUrl?: string | null; fotosUrls?: string[] }>(
+    op: T,
+  ): T {
+    if (op.tipo === 'ingreso') return { ...op, remitoUrl: null };
+    if (op.tipo === 'egreso') return { ...op, fotosUrls: [] };
+    return op;
   }
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ INGRESOS / EGRESOS / DIVISIONES (pendientes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -718,40 +770,42 @@ export class StockService {
   }
 
   listIngresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.stockOperacion.findMany({
-      where: {
-        tenantId,
-        tipo: 'ingreso',
-        ...(clienteId ? { clienteId } : {}),
-        ...(depositoId ? { depositoId } : {}),
-        ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: {
-        cliente: { select: { id: true, nombre: true } },
-        deposito: { select: { id: true, nombre: true } },
-        movimientos: {
-          select: {
-            id: true,
-            productoId: true,
-            producto: { select: { id: true, nombre: true } },
-            presentacionId: true,
-            presentacion: {
-              select: {
-                id: true,
-                unidadesPorBulto: true,
-                presentacion: { select: { id: true, nombre: true } },
+    return this.prisma.stockOperacion
+      .findMany({
+        where: {
+          tenantId,
+          tipo: 'ingreso',
+          ...(clienteId ? { clienteId } : {}),
+          ...(depositoId ? { depositoId } : {}),
+          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        include: {
+          cliente: { select: { id: true, nombre: true } },
+          deposito: { select: { id: true, nombre: true } },
+          movimientos: {
+            select: {
+              id: true,
+              productoId: true,
+              producto: { select: { id: true, nombre: true } },
+              presentacionId: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  unidadesPorBulto: true,
+                  presentacion: { select: { id: true, nombre: true } },
+                },
               },
+              bultos: true,
+              unidades: true,
+              lote: true,
+              fechaVencimiento: true,
             },
-            bultos: true,
-            unidades: true,
-            lote: true,
-            fechaVencimiento: true,
           },
         },
-      },
-    });
+      })
+      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
   }
 
   async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
@@ -792,7 +846,6 @@ export class StockService {
           tipo: 'egreso',
           fecha: fechaMov,
           numeroRemito,
-          remitoUrl: dto.remitoEscaneadoUrl.trim(),
           entregadoPor: dto.entregadoPor?.trim() || null,
           destinatario: dto.destinatario?.trim() || null,
           destinoFinal: dto.destinoFinal?.trim() || null,
@@ -840,43 +893,101 @@ export class StockService {
       }
 
       return { id: operacion.id, numeroRemito, movimientosCount: dto.lineas.length };
+    }).then(async (result) => {
+      try {
+        await this.ensureRemitoInternoPdf(result.id, tenantId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`No se pudo generar el remito PDF al crear egreso ${result.id}: ${msg}`);
+      }
+      return result;
     });
   }
 
-  listEgresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.stockOperacion.findMany({
-      where: {
-        tenantId,
-        tipo: 'egreso',
-        ...(clienteId ? { clienteId } : {}),
-        ...(depositoId ? { depositoId } : {}),
-        ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: {
-        cliente: { select: { id: true, nombre: true } },
-        deposito: { select: { id: true, nombre: true } },
-        movimientos: {
-          select: {
-            id: true,
-            productoId: true,
-            producto: { select: { id: true, nombre: true } },
-            presentacionId: true,
-            presentacion: {
-              select: {
-                id: true,
-                unidadesPorBulto: true,
-                presentacion: { select: { id: true, nombre: true } },
-              },
+  private egresoOperacionInclude() {
+    return {
+      cliente: { select: { id: true, nombre: true } },
+      deposito: { select: { id: true, nombre: true } },
+      movimientos: {
+        select: {
+          id: true,
+          productoId: true,
+          producto: { select: { id: true, nombre: true } },
+          presentacionId: true,
+          presentacion: {
+            select: {
+              id: true,
+              unidadesPorBulto: true,
+              presentacion: { select: { id: true, nombre: true } },
             },
-            bultos: true,
-            unidades: true,
-            lote: true,
           },
+          bultos: true,
+          unidades: true,
+          lote: true,
         },
       },
+    } as const;
+  }
+
+  async findEgreso(id: string, tenantId: string) {
+    const op = await this.prisma.stockOperacion.findFirst({
+      where: { id, tenantId, tipo: 'egreso' },
+      include: this.egresoOperacionInclude(),
     });
+    if (!op) throw new NotFoundException('Egreso no encontrado.');
+    return this.mapOperacionForApi(op);
+  }
+
+  async ensureRemitoInternoPdf(egresoId: string, tenantId: string) {
+    const op = await this.prisma.stockOperacion.findFirst({
+      where: { id: egresoId, tenantId, tipo: 'egreso' },
+      select: { id: true, remitoUrl: true, numeroRemito: true },
+    });
+    if (!op) throw new NotFoundException('Egreso no encontrado.');
+
+    const existing = op.remitoUrl?.trim();
+    if (existing && this.isRemitoInternoPdfUrl(existing)) {
+      this.cloudinary.assertRemitoUrlForTenant(existing, tenantId);
+      return {
+        url: this.cloudinary.resolveDeliveryUrl(existing),
+        generated: false,
+      };
+    }
+
+    const buffer = await this.remitoInternoPdf.generate(tenantId, egresoId);
+    const slug = (op.numeroRemito ?? egresoId).replace(/[^a-zA-Z0-9_-]+/g, '-');
+    const storedUrl = await this.cloudinary.uploadRemitoInternoPdf(
+      tenantId,
+      buffer,
+      `remito-interno-${slug}.pdf`,
+    );
+
+    await this.prisma.stockOperacion.update({
+      where: { id: egresoId },
+      data: { remitoUrl: storedUrl },
+    });
+
+    return {
+      url: this.cloudinary.resolveDeliveryUrl(storedUrl),
+      generated: true,
+    };
+  }
+
+  listEgresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
+    return this.prisma.stockOperacion
+      .findMany({
+        where: {
+          tenantId,
+          tipo: 'egreso',
+          ...(clienteId ? { clienteId } : {}),
+          ...(depositoId ? { depositoId } : {}),
+          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        include: this.egresoOperacionInclude(),
+      })
+      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
   }
 
   async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {

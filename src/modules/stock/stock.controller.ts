@@ -213,7 +213,7 @@ export class StockController {
     return this.service.findMovimiento(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado del movimiento' })
+  @ApiOperation({ summary: 'Descargar / previsualizar remito PDF del egreso' })
   @Get('movimientos/:id/remito-adjunto')
   @Roles('admin', 'member', 'superadmin')
   async getRemitoAdjunto(
@@ -253,7 +253,24 @@ export class StockController {
     return this.service.removeMovimiento(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Subir remito escaneado (PDF) a almacenamiento' })
+  @ApiOperation({ summary: 'Subir foto del producto para ingreso' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('upload-foto-ingreso')
+  @Roles('admin', 'member', 'superadmin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadFotoIngreso(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(auth.tenantId, file);
+  }
+
+  @ApiOperation({ summary: 'Subir foto del producto (alias legacy)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
   @Post('upload-remito')
@@ -266,8 +283,8 @@ export class StockController {
   )
   uploadRemito(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
-    return this.service.uploadRemitoPdf(auth.tenantId, file);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(auth.tenantId, file);
   }
 
   // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
@@ -309,6 +326,34 @@ export class StockController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listEgresos(auth.tenantId, clienteId, productoId);
+  }
+
+  @ApiOperation({ summary: 'Obtener egreso por ID (remito interno)' })
+  @Get('egresos/:id')
+  @Roles('admin', 'member', 'superadmin')
+  getEgreso(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.findEgreso(id, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Visualizar remito interno en PDF (inline, sin descarga)' })
+  @Get('egresos/:id/remito-interno/view')
+  @Roles('admin', 'member', 'superadmin')
+  async viewRemitoInterno(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    await this.service.streamRemitoInternoView(id, auth.tenantId, res);
+  }
+
+  @ApiOperation({ summary: 'Generar (si falta) y obtener URL del remito interno en PDF' })
+  @Post('egresos/:id/remito-interno')
+  @Roles('admin', 'member', 'superadmin')
+  ensureRemitoInterno(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.ensureRemitoInternoPdf(id, auth.tenantId);
   }
 
   // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────

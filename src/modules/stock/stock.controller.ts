@@ -373,9 +373,12 @@ export class StockController {
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listIngresos(auth.tenantId, clienteId, productoId);
+    return this.service.listIngresos(auth.tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   // ───────────────── DIVISIONES ─────────────────────────────────────────────

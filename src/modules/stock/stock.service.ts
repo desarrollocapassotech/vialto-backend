@@ -25,7 +25,7 @@ import { CreateDepositoDto } from './dto/create-deposito.dto';
 import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
-import { parseFechaMovimientoStock, yearInBuenosAires } from './stock-fecha.util';
+import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -769,7 +769,17 @@ export class StockService {
     });
   }
 
-  listIngresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
+  listIngresos(
+    tenantId: string,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
+    const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
+    const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
     return this.prisma.stockOperacion
       .findMany({
         where: {
@@ -778,6 +788,14 @@ export class StockService {
           ...(clienteId ? { clienteId } : {}),
           ...(depositoId ? { depositoId } : {}),
           ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+          ...(desde || hasta
+            ? {
+                fecha: {
+                  ...(desde ? { gte: desde } : {}),
+                  ...(hasta ? { lte: hasta } : {}),
+                },
+              }
+            : {}),
         },
         orderBy: { createdAt: 'desc' },
         take: 200,

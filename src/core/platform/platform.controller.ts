@@ -577,8 +577,11 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listIngresos(tenantId, clienteId, productoId);
+    return this.service.listIngresos(tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   @ApiOperation({ summary: 'Lotes históricos ingresados - autocompletado (superadmin)' })

@@ -90,7 +90,12 @@ export class ImportacionesService {
 
   // ── Confirm ───────────────────────────────────────────────────────────────
 
-  async confirm(tenantId: string, sessionId: string, createdBy: string) {
+  async confirm(
+    tenantId: string,
+    sessionId: string,
+    createdBy: string,
+    ciudadesNormalizadas?: { fila: number; origen?: string | null; destino?: string | null }[],
+  ) {
     const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, tenantId },
       include: { template: { select: { modulo: true } } },
@@ -108,6 +113,16 @@ export class ImportacionesService {
     }
 
     const filasValidas = session.filasValidas as unknown as ValidatedRow[];
+
+    if (ciudadesNormalizadas?.length) {
+      const byFila = new Map(ciudadesNormalizadas.map((c) => [c.fila, c]));
+      for (const fila of filasValidas) {
+        const patch = byFila.get(fila._rowNum);
+        if (!patch) continue;
+        if (patch.origen !== undefined) fila.origen = patch.origen;
+        if (patch.destino !== undefined) fila.destino = patch.destino;
+      }
+    }
 
     for (const fila of filasValidas) {
       for (const key of Object.keys(fila)) {

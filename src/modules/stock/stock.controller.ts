@@ -184,13 +184,14 @@ export class StockController {
 
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
-  @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, tipo, fechas, usuario).' })
+  @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, depósito, tipo, fechas, usuario).' })
   @Get('movimientos')
   @Roles('admin', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
+    @Query('depositoId') depositoId?: string,
     @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
@@ -198,6 +199,7 @@ export class StockController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listMovimientos(auth.tenantId, productoId, clienteId, {
+      depositoId,
       tipo,
       fechaDesde,
       fechaHasta,

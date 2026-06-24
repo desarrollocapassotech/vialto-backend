@@ -831,6 +831,7 @@ export class PlatformService {
     tenantId: string | undefined,
     productoId?: string,
     clienteId?: string,
+    depositoId?: string,
     tipo?: 'ingreso' | 'egreso' | 'division',
     fechaDesde?: string,
     fechaHasta?: string,
@@ -838,6 +839,7 @@ export class PlatformService {
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listMovimientos(scopedTenantId, productoId, clienteId, {
+      depositoId,
       tipo,
       fechaDesde,
       fechaHasta,

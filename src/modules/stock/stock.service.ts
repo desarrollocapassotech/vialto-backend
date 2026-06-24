@@ -991,7 +991,17 @@ export class StockService {
     };
   }
 
-  listEgresos(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
+  listEgresos(
+    tenantId: string,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
+    const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
+    const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
     return this.prisma.stockOperacion
       .findMany({
         where: {
@@ -1000,6 +1010,14 @@ export class StockService {
           ...(clienteId ? { clienteId } : {}),
           ...(depositoId ? { depositoId } : {}),
           ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+          ...(desde || hasta
+            ? {
+                fecha: {
+                  ...(desde ? { gte: desde } : {}),
+                  ...(hasta ? { lte: hasta } : {}),
+                },
+              }
+            : {}),
         },
         orderBy: { createdAt: 'desc' },
         take: 200,

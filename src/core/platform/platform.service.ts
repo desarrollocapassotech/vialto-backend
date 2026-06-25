@@ -746,9 +746,9 @@ export class PlatformService {
     return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
   }
 
-  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId, depositoId);
+    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
@@ -793,9 +793,9 @@ export class PlatformService {
     return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
   }
 
-  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId);
+    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   findEgreso(tenantId: string | undefined, id: string) {

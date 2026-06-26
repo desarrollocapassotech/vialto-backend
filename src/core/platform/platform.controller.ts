@@ -708,12 +708,13 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
+    @Query('depositoId') depositoId?: string,
     @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
     @Query('createdBy') createdBy?: string,
   ) {
-    return this.service.listMovimientosStock(tenantId, productoId, clienteId, tipo, fechaDesde, fechaHasta, createdBy);
+    return this.service.listMovimientosStock(tenantId, productoId, clienteId, depositoId, tipo, fechaDesde, fechaHasta, createdBy);
   }
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID (superadmin)' })

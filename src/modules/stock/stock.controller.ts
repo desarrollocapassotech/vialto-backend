@@ -40,6 +40,7 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
+import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 @ApiTags('Módulo: Stock')
 @ApiBearerAuth('clerk-jwt')
@@ -189,6 +190,7 @@ export class StockController {
   @Roles('admin', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
     @Query('depositoId') depositoId?: string,
@@ -198,7 +200,7 @@ export class StockController {
     @Query('createdBy') createdBy?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listMovimientos(auth.tenantId, productoId, clienteId, {
+    return this.service.listMovimientos(auth.tenantId, query, productoId, clienteId, {
       depositoId,
       tipo,
       fechaDesde,

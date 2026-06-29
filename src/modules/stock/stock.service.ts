@@ -27,6 +27,7 @@ import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.servic
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
+import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Helpers de normalización
@@ -431,7 +432,7 @@ export class StockService {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ MOVIMIENTOS / OPERACIONES (pendientes de rediseño) â”€â”€â”€â”€â”€
 
-  async listMovimientos(tenantId: string, productoId?: string, clienteId?: string, options?: {
+  async listMovimientos(tenantId: string, query: PaginationQueryDto, productoId?: string, clienteId?: string, options?: {
     depositoId?: string;
     tipo?: 'ingreso' | 'egreso' | 'division';
     fechaDesde?: string;
@@ -439,60 +440,68 @@ export class StockService {
     createdBy?: string;
   }) {
     const { depositoId, tipo, fechaDesde, fechaHasta, createdBy } = options ?? {};
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
 
-    const rows = await this.prisma.movimientoStock.findMany({
-      where: {
-        tenantId,
-        ...(productoId ? { productoId } : {}),
-        ...(fechaDesde || fechaHasta
-          ? {
-              fecha: {
-                ...(fechaDesde ? { gte: new Date(fechaDesde) } : {}),
-                ...(fechaHasta ? { lte: new Date(fechaHasta) } : {}),
-              },
-            }
-          : {}),
-        operacion: {
-          ...(clienteId ? { clienteId } : {}),
-          ...(depositoId ? { depositoId } : {}),
-          ...(tipo ? { tipo } : {}),
-          ...(createdBy ? { createdBy } : {}),
+    const where = {
+      tenantId,
+      ...(productoId ? { productoId } : {}),
+      ...(fechaDesde || fechaHasta ? {
+        fecha: {
+          ...(fechaDesde ? { gte: new Date(fechaDesde) } : {}),
+          ...(fechaHasta ? { lte: new Date(fechaHasta) } : {}),
         },
+      } : {}),
+      operacion: {
+        ...(clienteId ? { clienteId } : {}),
+        ...(depositoId ? { depositoId } : {}),
+        ...(tipo ? { tipo } : {}),
+        ...(createdBy ? { createdBy } : {}),
       },
-      orderBy: { fecha: 'desc' },
-      take: 500,
-      include: {
-        producto: { select: { id: true, nombre: true } },
-        presentacion: {
-          select: {
-            id: true,
-            unidadesPorBulto: true,
-            presentacion: { select: { id: true, nombre: true } },
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.movimientoStock.count({ where }),
+      this.prisma.movimientoStock.findMany({
+        where,
+        orderBy: { fecha: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          producto: { select: { id: true, nombre: true } },
+          presentacion: {
+            select: {
+              id: true,
+              unidadesPorBulto: true,
+              presentacion: { select: { id: true, nombre: true } },
+            },
+          },
+          operacion: {
+            select: {
+              id: true,
+              clienteId: true,
+              cliente: { select: { id: true, nombre: true } },
+              depositoId: true,
+              deposito: { select: { id: true, nombre: true } },
+              tipo: true,
+              observaciones: true,
+              numeroRemito: true,
+              remitoUrl: true,
+              fotosUrls: true,
+              entregadoPor: true,
+              destinatario: true,
+              destinoFinal: true,
+              createdBy: true,
+              createdAt: true,
+            },
           },
         },
-        operacion: {
-          select: {
-            id: true,
-            clienteId: true,
-            cliente: { select: { id: true, nombre: true } },
-            depositoId: true,
-            deposito: { select: { id: true, nombre: true } },
-            tipo: true,
-            observaciones: true,
-            numeroRemito: true,
-            remitoUrl: true,
-            fotosUrls: true,
-            entregadoPor: true,
-            destinatario: true,
-            destinoFinal: true,
-            createdBy: true,
-            createdAt: true,
-          },
-        },
-      },
-    });
+      }),
+    ]);
 
-    return rows.map((mov) => ({
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    const items = rows.map((mov) => ({
       id: mov.id,
       tenantId: mov.tenantId,
       operacionId: mov.operacionId,
@@ -523,6 +532,18 @@ export class StockService {
       cantidad1: mov.bultos,
       cantidad2: mov.unidades,
     }));
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async findMovimiento(id: string, tenantId: string) {

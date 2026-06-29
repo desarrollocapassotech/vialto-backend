@@ -40,6 +40,7 @@ import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update
 import { ArcaConfigService } from '../../modules/liquidaciones-arca/arca-config.service';
 import { LiquidacionesService } from '../../modules/liquidaciones-arca/liquidaciones.service';
 import { LiquidacionPdfService } from '../../modules/liquidaciones-arca/liquidacion-pdf.service';
+import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -829,6 +830,7 @@ export class PlatformService {
 
   listMovimientosStock(
     tenantId: string | undefined,
+    query: PaginationQueryDto,
     productoId?: string,
     clienteId?: string,
     depositoId?: string,
@@ -838,7 +840,7 @@ export class PlatformService {
     createdBy?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listMovimientos(scopedTenantId, productoId, clienteId, {
+    return this.stockService.listMovimientos(scopedTenantId, query, productoId, clienteId, {
       depositoId,
       tipo,
       fechaDesde,

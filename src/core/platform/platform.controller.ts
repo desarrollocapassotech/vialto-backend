@@ -53,6 +53,7 @@ import { CreatePagoDto } from '../../modules/facturacion/dto/create-pago.dto';
 import { queryParamFromRequest } from '../../shared/util/express-query-string';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
+import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 /**
  * Datos por tenant (query `tenantId` = clerkOrgId) — solo superadmin.
@@ -706,6 +707,7 @@ export class PlatformController {
   @Get('stock/movimientos')
   listMovimientosStock(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
     @Query('depositoId') depositoId?: string,
@@ -714,7 +716,7 @@ export class PlatformController {
     @Query('fechaHasta') fechaHasta?: string,
     @Query('createdBy') createdBy?: string,
   ) {
-    return this.service.listMovimientosStock(tenantId, productoId, clienteId, depositoId, tipo, fechaDesde, fechaHasta, createdBy);
+    return this.service.listMovimientosStock(tenantId, query, productoId, clienteId, depositoId, tipo, fechaDesde, fechaHasta, createdBy);
   }
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID (superadmin)' })

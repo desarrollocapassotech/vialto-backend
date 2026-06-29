@@ -40,6 +40,7 @@ import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update
 import { ArcaConfigService } from '../../modules/liquidaciones-arca/arca-config.service';
 import { LiquidacionesService } from '../../modules/liquidaciones-arca/liquidaciones.service';
 import { LiquidacionPdfService } from '../../modules/liquidaciones-arca/liquidacion-pdf.service';
+import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -731,9 +732,14 @@ export class PlatformService {
     return this.stockService.listDepositos(scopedTenantId, activo);
   }
 
-  uploadRemitoPdf(tenantId: string | undefined, file: Express.Multer.File) {
+  uploadIngresoFoto(tenantId: string | undefined, file: Express.Multer.File) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.uploadRemitoPdf(scopedTenantId, file);
+    return this.stockService.uploadIngresoFoto(scopedTenantId, file);
+  }
+
+  /** @deprecated Usar uploadIngresoFoto */
+  uploadRemitoPdf(tenantId: string | undefined, file: Express.Multer.File) {
+    return this.uploadIngresoFoto(tenantId, file);
   }
 
   createIngreso(tenantId: string | undefined, dto: CreateIngresoDto, createdBy: string) {
@@ -741,14 +747,36 @@ export class PlatformService {
     return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
   }
 
-  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId, depositoId);
+    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId, depositoId);
+  }
+
+  getLotesHistorico(
+    tenantId: string | undefined,
+    productoId: string,
+    clienteId: string,
+    depositoId: string,
+    presentacionId?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.getLotesHistorico(scopedTenantId, productoId, clienteId, depositoId, presentacionId);
+  }
+
+  getLotesDisponibles(
+    tenantId: string | undefined,
+    productoId: string,
+    clienteId: string,
+    depositoId: string,
+    presentacionId?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.getLotesDisponibles(scopedTenantId, productoId, clienteId, depositoId, presentacionId);
   }
 
   getEgresoRemitoConfig(tenantId: string | undefined) {
@@ -766,9 +794,28 @@ export class PlatformService {
     return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
   }
 
-  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId);
+    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+  }
+
+  findEgreso(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findEgreso(id, scopedTenantId);
+  }
+
+  ensureRemitoInternoPdf(tenantId: string | undefined, egresoId: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.ensureRemitoInternoPdf(egresoId, scopedTenantId);
+  }
+
+  streamRemitoInternoView(
+    tenantId: string | undefined,
+    egresoId: string,
+    res: import('express').Response,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.streamRemitoInternoView(egresoId, scopedTenantId, res);
   }
 
   createDivision(tenantId: string | undefined, dto: CreateDivisionDto, createdBy: string) {
@@ -783,13 +830,22 @@ export class PlatformService {
 
   listMovimientosStock(
     tenantId: string | undefined,
+    query: PaginationQueryDto,
     productoId?: string,
     clienteId?: string,
-    soloIngresoEgreso?: boolean,
+    depositoId?: string,
+    tipo?: 'ingreso' | 'egreso' | 'division',
+    fechaDesde?: string,
+    fechaHasta?: string,
+    createdBy?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listMovimientos(scopedTenantId, productoId, clienteId, {
-      soloIngresoEgreso: soloIngresoEgreso === true,
+    return this.stockService.listMovimientos(scopedTenantId, query, productoId, clienteId, {
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
     });
   }
 

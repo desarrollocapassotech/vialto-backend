@@ -821,10 +821,10 @@ export class DashboardService {
     const [totalProductos, totalClientes, ingresosHoy, egresosHoy] = await Promise.all([
       this.prisma.producto.count({ where: { tenantId, activo: true } }),
       this.prisma.cliente.count({ where: { tenantId } }),
-      this.prisma.movimientoStock.count({
+      this.prisma.stockOperacion.count({
         where: { tenantId, tipo: 'ingreso', fecha: { gte: start, lt: end } },
       }),
-      this.prisma.movimientoStock.count({
+      this.prisma.stockOperacion.count({
         where: { tenantId, tipo: 'egreso', fecha: { gte: start, lt: end } },
       }),
     ]);

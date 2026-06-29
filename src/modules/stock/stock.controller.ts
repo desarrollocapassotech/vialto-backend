@@ -40,6 +40,7 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
+import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 @ApiTags('Módulo: Stock')
 @ApiBearerAuth('clerk-jwt')
@@ -94,6 +95,19 @@ export class StockController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.updateProducto(id, auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Eliminar presentación de un producto (solo si sin movimientos)' })
+  @Delete('productos/:productoId/presentaciones/:ppId')
+  @RequireModule('stock', 'viajes')
+  @Roles('admin', 'superadmin')
+  removeProductoPresentacion(
+    @Param('productoId') productoId: string,
+    @Param('ppId') ppId: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.removeProductoPresentacion(productoId, ppId, auth.tenantId);
   }
 
   @ApiOperation({ summary: 'Listar presentaciones del catálogo' })
@@ -171,22 +185,27 @@ export class StockController {
 
   // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
 
-  @ApiOperation({ summary: 'Listar movimientos de stock (filtrar por producto o cliente). Con soloIngresoEgreso=1 ordena por fecha de movimiento descendente e incluye solo ingreso y egreso.' })
+  @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, depósito, tipo, fechas, usuario).' })
   @Get('movimientos')
   @Roles('admin', 'superadmin')
   listMovimientos(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
-    @Query('soloIngresoEgreso') soloIngresoEgresoRaw?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
   ) {
     assertTenantId(auth.tenantId);
-    const soloIngresoEgreso =
-      soloIngresoEgresoRaw === '1' ||
-      soloIngresoEgresoRaw === 'true' ||
-      soloIngresoEgresoRaw === 'yes';
-    return this.service.listMovimientos(auth.tenantId, productoId, clienteId, {
-      soloIngresoEgreso,
+    return this.service.listMovimientos(auth.tenantId, query, productoId, clienteId, {
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
     });
   }
 
@@ -198,7 +217,7 @@ export class StockController {
     return this.service.findMovimiento(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado del movimiento' })
+  @ApiOperation({ summary: 'Descargar / previsualizar remito PDF del egreso' })
   @Get('movimientos/:id/remito-adjunto')
   @Roles('admin', 'member', 'superadmin')
   async getRemitoAdjunto(
@@ -238,7 +257,24 @@ export class StockController {
     return this.service.removeMovimiento(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Subir remito escaneado (PDF) a almacenamiento' })
+  @ApiOperation({ summary: 'Subir foto del producto para ingreso' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('upload-foto-ingreso')
+  @Roles('admin', 'member', 'superadmin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadFotoIngreso(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(auth.tenantId, file);
+  }
+
+  @ApiOperation({ summary: 'Subir foto del producto (alias legacy)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
   @Post('upload-remito')
@@ -251,8 +287,8 @@ export class StockController {
   )
   uploadRemito(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
-    return this.service.uploadRemitoPdf(auth.tenantId, file);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(auth.tenantId, file);
   }
 
   // ───────────────── EGRESOS (DESPACHO) ─────────────────────────────────────
@@ -291,9 +327,40 @@ export class StockController {
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listEgresos(auth.tenantId, clienteId, productoId);
+    return this.service.listEgresos(auth.tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+  }
+
+  @ApiOperation({ summary: 'Obtener egreso por ID (remito interno)' })
+  @Get('egresos/:id')
+  @Roles('admin', 'member', 'superadmin')
+  getEgreso(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.findEgreso(id, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Visualizar remito interno en PDF (inline, sin descarga)' })
+  @Get('egresos/:id/remito-interno/view')
+  @Roles('admin', 'member', 'superadmin')
+  async viewRemitoInterno(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    await this.service.streamRemitoInternoView(id, auth.tenantId, res);
+  }
+
+  @ApiOperation({ summary: 'Generar (si falta) y obtener URL del remito interno en PDF' })
+  @Post('egresos/:id/remito-interno')
+  @Roles('admin', 'member', 'superadmin')
+  ensureRemitoInterno(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.ensureRemitoInternoPdf(id, auth.tenantId);
   }
 
   // ───────────────── INGRESOS AL DEPÓSITO ───────────────────────────────────
@@ -313,9 +380,12 @@ export class StockController {
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listIngresos(auth.tenantId, clienteId, productoId);
+    return this.service.listIngresos(auth.tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   // ───────────────── DIVISIONES ─────────────────────────────────────────────
@@ -335,9 +405,38 @@ export class StockController {
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listDivisiones(auth.tenantId, clienteId, productoId);
+    return this.service.listDivisiones(auth.tenantId, clienteId, productoId, depositoId);
+  }
+
+  @ApiOperation({ summary: 'Lotes históricos ingresados (para autocompletado)' })
+  @Get('lotes/historico')
+  @Roles('admin', 'superadmin')
+  getLotesHistorico(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getLotesHistorico(auth.tenantId, productoId, clienteId, depositoId, presentacionId);
+  }
+
+  @ApiOperation({ summary: 'Lotes disponibles para un producto/cliente/depósito' })
+  @Get('lotes')
+  @Roles('admin', 'superadmin')
+  getLotes(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getLotesDisponibles(auth.tenantId, productoId, clienteId, depositoId, presentacionId);
   }
 
   @ApiOperation({ summary: 'Stock disponible por producto/cliente' })

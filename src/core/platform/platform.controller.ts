@@ -53,6 +53,7 @@ import { CreatePagoDto } from '../../modules/facturacion/dto/create-pago.dto';
 import { queryParamFromRequest } from '../../shared/util/express-query-string';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
+import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 /**
  * Datos por tenant (query `tenantId` = clerkOrgId) — solo superadmin.
@@ -525,7 +526,25 @@ export class PlatformController {
     );
   }
 
-  @ApiOperation({ summary: 'Subir remito escaneado PDF (superadmin)' })
+  @ApiOperation({ summary: 'Subir foto del producto para ingreso (superadmin)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('stock/upload-foto-ingreso')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadFotoIngresoStock(
+    @Query('tenantId') tenantId: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(tenantId, file);
+  }
+
+  @ApiOperation({ summary: 'Subir foto del producto (alias legacy, superadmin)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
   @Post('stock/upload-remito')
@@ -539,8 +558,8 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('Se requiere un archivo PDF.');
-    return this.service.uploadRemitoPdf(tenantId, file);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadIngresoFoto(tenantId, file);
   }
 
   @ApiOperation({ summary: 'Registrar ingreso al depósito (superadmin)' })
@@ -559,8 +578,35 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listIngresos(tenantId, clienteId, productoId);
+    return this.service.listIngresos(tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+  }
+
+  @ApiOperation({ summary: 'Lotes históricos ingresados - autocompletado (superadmin)' })
+  @Get('stock/lotes/historico')
+  getLotesHistorico(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    return this.service.getLotesHistorico(tenantId!, productoId, clienteId, depositoId, presentacionId);
+  }
+
+  @ApiOperation({ summary: 'Lotes disponibles para un producto/cliente/depósito (superadmin)' })
+  @Get('stock/lotes')
+  getLotes(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('productoId') productoId: string,
+    @Query('clienteId') clienteId: string,
+    @Query('depositoId') depositoId: string,
+    @Query('presentacionId') presentacionId?: string,
+  ) {
+    return this.service.getLotesDisponibles(tenantId!, productoId, clienteId, depositoId, presentacionId);
   }
 
   @ApiOperation({ summary: 'Stock disponible (superadmin)' })
@@ -605,8 +651,35 @@ export class PlatformController {
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listEgresos(tenantId, clienteId, productoId, depositoId);
+    return this.service.listEgresos(tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+  }
+
+  @ApiOperation({ summary: 'Obtener egreso por ID (superadmin)' })
+  @Get('stock/egresos/:id')
+  getEgreso(@Query('tenantId') tenantId: string | undefined, @Param('id') id: string) {
+    return this.service.findEgreso(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Visualizar remito interno PDF inline (superadmin)' })
+  @Get('stock/egresos/:id/remito-interno/view')
+  async viewRemitoInterno(
+    @Query('tenantId') tenantId: string | undefined,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    await this.service.streamRemitoInternoView(tenantId, id, res);
+  }
+
+  @ApiOperation({ summary: 'Generar (si falta) remito interno PDF (superadmin)' })
+  @Post('stock/egresos/:id/remito-interno')
+  ensureRemitoInterno(
+    @Query('tenantId') tenantId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.service.ensureRemitoInternoPdf(tenantId, id);
   }
 
   @ApiOperation({ summary: 'Registrar división de bultos (superadmin)' })
@@ -634,15 +707,16 @@ export class PlatformController {
   @Get('stock/movimientos')
   listMovimientosStock(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('productoId') productoId?: string,
     @Query('clienteId') clienteId?: string,
-    @Query('soloIngresoEgreso') soloIngresoEgresoRaw?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
   ) {
-    const soloIngresoEgreso =
-      soloIngresoEgresoRaw === '1' ||
-      soloIngresoEgresoRaw === 'true' ||
-      soloIngresoEgresoRaw === 'yes';
-    return this.service.listMovimientosStock(tenantId, productoId, clienteId, soloIngresoEgreso);
+    return this.service.listMovimientosStock(tenantId, query, productoId, clienteId, depositoId, tipo, fechaDesde, fechaHasta, createdBy);
   }
 
   @ApiOperation({ summary: 'Obtener movimiento de stock por ID (superadmin)' })

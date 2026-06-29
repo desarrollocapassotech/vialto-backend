@@ -70,7 +70,7 @@ export class ImportacionesController {
   @Roles('admin', 'superadmin')
   confirm(@Body() dto: ConfirmImportDto, @CurrentAuth() auth: AuthPayload) {
     const tenantId = this.resolveTenantId(auth, dto.tenantId);
-    return this.service.confirm(tenantId, dto.sessionId, auth.userId);
+    return this.service.confirm(tenantId, dto.sessionId, auth.userId, dto.ciudadesNormalizadas);
   }
 
   /** Historial de importaciones del tenant */

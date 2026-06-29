@@ -1,4 +1,16 @@
-import { IsBoolean, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { ProductoPresentacionItemDto } from './create-producto.dto';
 
 export class UpdateProductoDto {
   @IsOptional()
@@ -12,13 +24,16 @@ export class UpdateProductoDto {
   descripcion?: string;
 
   @IsOptional()
-  @IsString()
-  presentacion1Id?: string;
+  @IsNumber()
+  @IsPositive()
+  pesoUnitarioKg?: number;
 
   @IsOptional()
-  @ValidateIf((_, v) => v !== null)
-  @IsString()
-  presentacion2Id?: string | null;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ProductoPresentacionItemDto)
+  presentaciones?: ProductoPresentacionItemDto[];
 
   @IsOptional()
   @IsBoolean()

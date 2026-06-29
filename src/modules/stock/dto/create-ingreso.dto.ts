@@ -1,55 +1,36 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsNotEmpty,
-  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
-  Min,
+  ValidateNested,
 } from 'class-validator';
+import { CreateIngresoLineaDto } from './create-ingreso-linea.dto';
 
 export class CreateIngresoDto {
-  @IsString()
-  @IsNotEmpty()
-  productoId: string;
+  @IsString() @IsNotEmpty() clienteId!: string;
+  @IsString() @IsNotEmpty() depositoId!: string;
 
-  @IsString()
-  @IsNotEmpty()
-  clienteId: string;
-
-  @IsString()
-  @IsNotEmpty()
-  depositoId: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad1?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  cantidad2?: number;
-
-  @IsString()
-  @IsNotEmpty()
   /** ISO 8601 (recomendado) o solo `YYYY-MM-DD` (medianoche Argentina). */
-  fecha: string;
+  @IsString() @IsNotEmpty() fecha!: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  lote?: string;
+  /** URLs de las fotos adjuntas (0 a 2), ya subidas a Cloudinary. */
+  @IsArray()
+  @ArrayMaxSize(2)
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(2048, { each: true })
+  fotosUrls!: string[];
 
-  @IsOptional()
-  @IsString()
-  observaciones?: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateIngresoLineaDto)
+  lineas!: CreateIngresoLineaDto[];
 
-  /** URL del remito (PDF o imagen) tras subida a Cloudinary. Obligatorio en ingresos. */
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(2048)
-  remitoEscaneadoUrl: string;
+  @IsOptional() @IsString() observaciones?: string;
 }

@@ -1208,7 +1208,7 @@ export class StockService {
     clienteId: string,
     depositoId: string,
     presentacionId?: string,
-  ): Promise<{ lote: string; cantidad1: number }[]> {
+  ): Promise<{ lote: string; cantidad1: number; cantidad2: number }[]> {
     const rows = await this.prisma.movimientoStock.findMany({
       where: {
         tenantId,
@@ -1220,22 +1220,29 @@ export class StockService {
       select: {
         lote: true,
         bultos: true,
+        unidades: true,
         operacion: { select: { tipo: true } },
       },
     });
 
-    // Calcula balance de bultos por lote: ingresos suman, egresos y divisiones restan
-    const map = new Map<string, number>();
+    // Balance por lote: ingresos suman, egresos y divisiones restan
+    const bultosPorLote = new Map<string, number>();
+    const sueltasPorLote = new Map<string, number>();
     for (const row of rows) {
       if (!row.lote) continue;
-      const prev = map.get(row.lote) ?? 0;
-      const delta = row.operacion.tipo === 'ingreso' ? row.bultos : -row.bultos;
-      map.set(row.lote, prev + delta);
+      const sign = row.operacion.tipo === 'ingreso' ? 1 : -1;
+      bultosPorLote.set(row.lote, (bultosPorLote.get(row.lote) ?? 0) + sign * row.bultos);
+      sueltasPorLote.set(row.lote, (sueltasPorLote.get(row.lote) ?? 0) + sign * row.unidades);
     }
 
-    return Array.from(map.entries())
-      .filter(([, cantidad1]) => cantidad1 > 0)
-      .map(([lote, cantidad1]) => ({ lote, cantidad1 }))
+    const lotes = new Set([...bultosPorLote.keys(), ...sueltasPorLote.keys()]);
+    return Array.from(lotes)
+      .map((lote) => ({
+        lote,
+        cantidad1: bultosPorLote.get(lote) ?? 0,
+        cantidad2: sueltasPorLote.get(lote) ?? 0,
+      }))
+      .filter((item) => item.cantidad1 > 0 || item.cantidad2 > 0)
       .sort((a, b) => a.lote.localeCompare(b.lote));
   }
 

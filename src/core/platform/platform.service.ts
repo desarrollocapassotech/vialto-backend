@@ -794,9 +794,9 @@ export class PlatformService {
     return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
   }
 
-  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
+  listEgresos(tenantId: string | undefined, query: PaginationQueryDto, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.stockService.listEgresos(scopedTenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   findEgreso(tenantId: string | undefined, id: string) {

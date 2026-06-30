@@ -755,7 +755,7 @@ export class StockService {
             bultos: linea.bultos,
             unidades: linea.sueltas,
             fechaVencimiento,
-            lote: linea.lote.trim(),
+            lote: linea.sinLote ? null : linea.lote!.trim(),
             fecha: fechaMov,
             createdBy,
           },

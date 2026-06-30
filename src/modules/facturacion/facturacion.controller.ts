@@ -9,6 +9,7 @@ import { FacturacionService } from './facturacion.service';
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
 import { CreatePagoDto } from './dto/create-pago.dto';
+import { FacturasPaginatedQueryDto } from './dto/facturas-paginated-query.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -36,6 +37,17 @@ export class FacturacionController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listFacturas(auth.tenantId, clienteId);
+  }
+
+  @ApiOperation({ summary: 'Listar facturas paginado con filtros' })
+  @Get('facturas/paginated')
+  @Roles('admin', 'member', 'superadmin')
+  findAllPaginated(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: FacturasPaginatedQueryDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.findAllPaginated(auth.tenantId, query);
   }
 
   @ApiOperation({ summary: 'Obtener factura por ID' })

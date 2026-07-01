@@ -33,4 +33,6 @@ export class CreateIngresoDto {
   lineas!: CreateIngresoLineaDto[];
 
   @IsOptional() @IsString() observaciones?: string;
+
+  @IsOptional() @IsString() @MaxLength(100) numeroRemitoProveedor?: string;
 }

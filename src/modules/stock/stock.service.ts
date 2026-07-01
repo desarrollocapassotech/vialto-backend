@@ -1194,6 +1194,7 @@ export class StockService {
         ...(clienteId ? { clienteId } : {}),
         ...(productoId ? { productoId } : {}),
         ...(depositoId ? { depositoId } : {}),
+        OR: [{ cantidad1: { gt: 0 } }, { cantidad2: { gt: 0 } }],
       },
       orderBy: [{ clienteId: 'asc' }, { productoId: 'asc' }],
       include: stockItemRelations,

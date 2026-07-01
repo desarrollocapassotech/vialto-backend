@@ -446,8 +446,9 @@ export class StockController {
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listStockDisponible(auth.tenantId, clienteId, productoId);
+    return this.service.listStockDisponible(auth.tenantId, clienteId, productoId, depositoId);
   }
 }

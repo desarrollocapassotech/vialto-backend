@@ -9,10 +9,12 @@ import { UpdateChoferDto } from './dto/update-chofer.dto';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 import { hashPin } from '../../shared/util/pin-hash';
 
-/** Nunca devolver el hash del PIN en respuestas de API. */
-function sanitize<T extends { pin?: string | null }>(chofer: T): Omit<T, 'pin'> {
-  const { pin: _pin, ...rest } = chofer;
-  return rest;
+/** Nunca devolver el hash del PIN en respuestas de API; exponer solo si está configurado. */
+function sanitize<T extends { pin?: string | null }>(
+  chofer: T,
+): Omit<T, 'pin'> & { pinConfigured: boolean } {
+  const { pin, ...rest } = chofer;
+  return { ...rest, pinConfigured: !!pin };
 }
 
 @Injectable()

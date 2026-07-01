@@ -292,28 +292,12 @@ export class PlatformService {
       return Promise.resolve([]);
     }
     const id = tenantId.trim();
-    return this.prisma.chofer
-      .findMany({
-        where: { tenantId: id },
-        take: TAKE,
-        orderBy: { createdAt: 'desc' },
-        include: { tenant: { select: { name: true } } },
-      })
-      .then((rows) =>
-        rows.map(({ tenant, ...rest }) => ({
-          ...rest,
-          empresaNombre: tenant.name,
-        })),
-      );
+    return this.choferesService.findAll(id);
   }
 
   async getChoferById(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    const row = await this.prisma.chofer.findFirst({
-      where: { id, tenantId: scopedTenantId },
-    });
-    if (!row) throw new NotFoundException('Chofer no encontrado');
-    return row;
+    return this.choferesService.findOne(id, scopedTenantId);
   }
 
   async createChofer(tenantId: string | undefined, dto: CreateChoferDto) {

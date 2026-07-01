@@ -6,5 +6,6 @@ env.production
 env.qa
 env.local
 serviceAccountKey.json
+scripts/*.json
 *.log
 dist/

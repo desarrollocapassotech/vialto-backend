@@ -16,7 +16,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "tenant:ensure": "ts-node scripts/ensure-tenant.ts"
+    "tenant:ensure": "ts-node scripts/ensure-tenant.ts",
+    "migrate:bressan": "ts-node scripts/migrate-bressan-cargas.ts",
+    "migrate:bressan:dry": "ts-node scripts/migrate-bressan-cargas.ts --dry-run"
   },
   "dependencies": {
     "@clerk/backend": "^1.26.0",
@@ -47,6 +49,7 @@
     "@types/node": "^22.13.9",
     "@types/pdfkit": "^0.17.6",
     "@types/qrcode": "^1.5.6",
+    "firebase-admin": "^14.1.0",
     "prisma": "^6.5.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2"

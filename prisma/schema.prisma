@@ -125,6 +125,8 @@ model Chofer {
   telefono        String?
   transportistaId String?
   transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  /** Hash del PIN de login para la app vialto-combustible (formato salt:hash, ver shared/util/pin-hash.ts). Nunca se expone en respuestas de API. */
+  pin             String?
   createdAt       DateTime       @default(now())
 
   viajes            Viaje[]

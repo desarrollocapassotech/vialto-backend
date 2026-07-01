@@ -10,6 +10,7 @@ import { BillingModule } from './core/billing/billing.module';
 import { ClientesModule } from './core/clientes/clientes.module';
 import { TransportistasModule } from './core/transportistas/transportistas.module';
 import { ChoferesModule } from './core/choferes/choferes.module';
+import { ChoferAuthModule } from './core/chofer-auth/chofer-auth.module';
 import { VehiculosModule } from './core/vehiculos/vehiculos.module';
 import { ViajesModule } from './modules/viajes/viajes.module';
 import { FacturacionModule } from './modules/facturacion/facturacion.module';
@@ -39,6 +40,7 @@ import { PlatformModule } from './core/platform/platform.module';
     ClientesModule,
     TransportistasModule,
     ChoferesModule,
+    ChoferAuthModule,
     VehiculosModule,
     ViajesModule,
     FacturacionModule,

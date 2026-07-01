@@ -833,6 +833,32 @@ export class PlatformService {
     });
   }
 
+  listOperacionesStockPaginated(
+    tenantId: string | undefined,
+    query: PaginationQueryDto,
+    productoId?: string,
+    clienteId?: string,
+    depositoId?: string,
+    tipo?: 'ingreso' | 'egreso' | 'division',
+    fechaDesde?: string,
+    fechaHasta?: string,
+    createdBy?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listOperacionesPaginated(scopedTenantId, query, productoId, clienteId, {
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
+    });
+  }
+
+  getOperacionStock(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findOperacion(id, scopedTenantId);
+  }
+
   getMovimientoStock(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.findMovimiento(id, scopedTenantId);

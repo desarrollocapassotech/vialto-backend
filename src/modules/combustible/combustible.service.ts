@@ -8,6 +8,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
+import { CreateCargaChoferDto } from './dto/create-carga-chofer.dto';
 
 /** Datos mínimos de contexto de autenticación que el servicio necesita. */
 interface CombustibleAuth {
@@ -128,6 +129,64 @@ export class CombustibleService {
     await this.findOne(id, auth);
     await this.prisma.cargaCombustible.delete({ where: { id } });
     return { deleted: id };
+  }
+
+  async findAllByChofer(choferId: string, tenantId: string, month?: string) {
+    const where: Record<string, unknown> = { tenantId, choferId };
+
+    if (month) {
+      const [year, mon] = month.split('-').map(Number);
+      where['fecha'] = {
+        gte: new Date(year, mon - 1, 1),
+        lt: new Date(year, mon, 1),
+      };
+    }
+
+    const cargas = await this.prisma.cargaCombustible.findMany({
+      where,
+      orderBy: { fecha: 'desc' },
+      take: 200,
+      include: {
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true, dni: true } },
+      },
+    });
+
+    return { cargas, count: cargas.length };
+  }
+
+  async createByChofer(
+    dto: CreateCargaChoferDto,
+    choferId: string,
+    tenantId: string,
+  ) {
+    const patenteClean = dto.patente.replace(/\s+/g, '').toUpperCase();
+    const vehiculo = await this.prisma.vehiculo.findFirst({
+      where: { tenantId, patente: { equals: patenteClean, mode: 'insensitive' } },
+    });
+    if (!vehiculo) {
+      throw new BadRequestException(
+        `No se encontró el vehículo con patente "${dto.patente}" en esta empresa`,
+      );
+    }
+    return this.prisma.cargaCombustible.create({
+      data: {
+        tenantId,
+        vehiculoId: vehiculo.id,
+        choferId,
+        estacion: dto.estacion,
+        litros: dto.litros,
+        importe: dto.importe,
+        km: dto.km,
+        formaPago: dto.formaPago ?? null,
+        fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
+        createdBy: choferId,
+      },
+      include: {
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true, dni: true } },
+      },
+    });
   }
 
   async getStats(auth: CombustibleAuth, month?: string) {

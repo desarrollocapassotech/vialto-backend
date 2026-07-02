@@ -88,6 +88,11 @@ export class PlatformController {
     const fechaHasta = parseFechaFiltroQuery(
       queryParamFromRequest(req, 'fechaHasta') ?? query.fechaHasta,
     );
+    const periodoRaw = queryParamFromRequest(req, 'periodo') ?? query.periodo;
+    const periodo: 'todos' | 'desde_hoy' | 'anteriores' | undefined =
+      periodoRaw === 'todos' || periodoRaw === 'desde_hoy' || periodoRaw === 'anteriores'
+        ? periodoRaw
+        : undefined;
     const sort = parseViajesSortParams(
       queryParamFromRequest(req, 'sortBy') ?? query.sortBy,
       queryParamFromRequest(req, 'sortDir') ?? query.sortDir,
@@ -103,6 +108,7 @@ export class PlatformController {
       fechaHasta,
       tipoUbicacion,
       ubicacion,
+      periodo,
       sortBy: sort.sortBy,
       sortDir: sort.sortDir,
     });

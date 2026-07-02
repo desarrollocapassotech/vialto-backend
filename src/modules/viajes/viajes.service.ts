@@ -423,13 +423,21 @@ export class ViajesService {
     // Lazy update: sincroniza estados por fecha antes de devolver resultados
     await this.autoEstado.actualizarEstadosPorFecha(tenantId);
 
-    const page = query.page ?? 1;
-    const pageSize = query.pageSize ?? 10;
+    const page = Math.max(1, Math.floor(Number(query.page) || 1));
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(query.pageSize) || 10)));
     const where = buildViajesPaginatedWhere(tenantId, query);
     const { sortBy, sortDir } = resolveViajesSort(query);
 
     if (sortBy === 'ganancia_bruta') {
       return this.findAllPaginatedOrdenGananciaBruta(where, page, pageSize, sortDir);
+    }
+
+    if (sortBy === 'fecha_carga' || sortBy === 'fecha_descarga') {
+      return this.findAllPaginatedOrdenFecha(where, page, pageSize, sortBy, sortDir);
+    }
+
+    if (sortBy === 'monto') {
+      return this.findAllPaginatedOrdenMonto(where, page, pageSize, sortDir);
     }
 
     const orderBy = buildViajesPrismaOrderBy(sortBy, sortDir);
@@ -480,6 +488,32 @@ export class ViajesService {
       }))
       .sort((a, b) =>
         compareViajesFechaAr(a.fecha, b.fecha, sortDir, () =>
+          a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+        ),
+      )
+      .map((row) => row.id);
+
+    return this.findAllPaginatedPageFromSortedIds(where, sortedIds, total, page, pageSize);
+  }
+
+  private async findAllPaginatedOrdenMonto(
+    where: Prisma.ViajeWhereInput,
+    page: number,
+    pageSize: number,
+    sortDir: ViajesSortDir,
+  ) {
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.viaje.count({ where }),
+      this.prisma.viaje.findMany({
+        where,
+        select: { id: true, monto: true },
+      }),
+    ]);
+
+    const sortedIds = rows
+      .map((row) => ({ id: row.id, valor: row.monto }))
+      .sort((a, b) =>
+        compareViajesOrdenNullable(a.valor, b.valor, sortDir, () =>
           a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
         ),
       )

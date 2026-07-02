@@ -60,6 +60,7 @@ import {
 const VIAJE_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
+type PagoTransportistaInput = { monto?: unknown; moneda?: unknown };
 type DestinoItem = { etiqueta: string };
 
 function resolveDestinosParaCreate(dto: CreateViajeDto): DestinoItem[] {
@@ -213,6 +214,38 @@ export class ViajesService {
       .filter((g) => ((g.moneda ?? 'ARS') === 'USD' ? 'USD' : 'ARS') === moneda)
       .reduce((acc, g) => acc + (typeof g.monto === 'number' ? g.monto : 0), 0);
     return monto + extraMismaMmoneda;
+  }
+
+  private assertPagosTransportistaNoSuperanSaldo(params: {
+    transportistaId?: string | null;
+    precioTransportistaExterno?: number | null;
+    monedaPrecioTransportistaExterno?: string | null;
+    pagosTransportista?: unknown;
+  }): void {
+    const pagos = Array.isArray(params.pagosTransportista)
+      ? (params.pagosTransportista as PagoTransportistaInput[])
+      : [];
+    if (pagos.length === 0) return;
+
+    if (!params.transportistaId) {
+      throw new BadRequestException('Este viaje no tiene transportista externo asignado.');
+    }
+
+    const monedaAcordada =
+      params.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
+    const totalAcordado = params.precioTransportistaExterno ?? 0;
+    const totalPagado = pagos
+      .filter((p) => (p.moneda === 'USD' ? 'USD' : 'ARS') === monedaAcordada)
+      .reduce((acc, p) => {
+        const monto = typeof p.monto === 'number' && Number.isFinite(p.monto) ? p.monto : 0;
+        return acc + monto;
+      }, 0);
+
+    if (totalPagado > totalAcordado + 1e-6) {
+      throw new BadRequestException(
+        'El monto del pago no puede superar el saldo pendiente del viaje',
+      );
+    }
   }
 
   private async upsertCargoFinalizacion(
@@ -634,6 +667,12 @@ export class ViajesService {
       },
       dto,
     );
+    this.assertPagosTransportistaNoSuperanSaldo({
+      transportistaId: refs.transportistaId,
+      precioTransportistaExterno,
+      monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
+      pagosTransportista: dto.pagosTransportista,
+    });
     const destinosNorm = resolveDestinosParaCreate(dto);
     const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
 
@@ -747,6 +786,14 @@ export class ViajesService {
     }
 
     const precioTransportistaExternoInput = dto.precioTransportistaExterno;
+    const precioTransportistaExternoResolved =
+      precioTransportistaExternoInput !== undefined
+        ? precioTransportistaExternoInput
+        : current.precioTransportistaExterno;
+    const monedaPrecioTransportistaExternoResolved =
+      dto.monedaPrecioTransportistaExterno ?? current.monedaPrecioTransportistaExterno;
+    const pagosTransportistaResolved =
+      dto.pagosTransportista !== undefined ? dto.pagosTransportista : current.pagosTransportista;
     const currentNorm = this.parseEstadoViaje(
       current.estado != null && String(current.estado).trim() !== ''
         ? String(current.estado)
@@ -834,6 +881,20 @@ export class ViajesService {
     delete (data as { monedaGananciaBrutaManual?: unknown }).monedaGananciaBrutaManual;
     (data as any).gananciaBrutaManual = gananciaPersist.gananciaBrutaManual;
     (data as any).monedaGananciaBrutaManual = gananciaPersist.monedaGananciaBrutaManual;
+    if (!op.transportistaId) {
+      (data as any).pagosTransportista = [];
+    } else if (
+      dto.pagosTransportista !== undefined ||
+      precioTransportistaExternoInput !== undefined ||
+      dto.monedaPrecioTransportistaExterno !== undefined
+    ) {
+      this.assertPagosTransportistaNoSuperanSaldo({
+        transportistaId: op.transportistaId,
+        precioTransportistaExterno: precioTransportistaExternoResolved,
+        monedaPrecioTransportistaExterno: monedaPrecioTransportistaExternoResolved,
+        pagosTransportista: pagosTransportistaResolved,
+      });
+    }
 
     const destinosUpdate = resolveDestinosParaUpdate(dto);
     if (destinosUpdate !== undefined) {
@@ -925,17 +986,6 @@ export class ViajesService {
       ? (viaje.pagosTransportista as Array<Record<string, unknown>>)
       : [];
 
-    const totalAcordado = viaje.precioTransportistaExterno ?? 0;
-    const totalPagado = pagosActuales
-      .filter((p) => p.moneda === dto.moneda)
-      .reduce((acc, p) => acc + (typeof p.monto === 'number' ? p.monto : 0), 0);
-    const saldo = totalAcordado - totalPagado;
-    if (dto.monto > saldo) {
-      throw new BadRequestException(
-        'El monto ingresado supera el saldo pendiente con el transportista.',
-      );
-    }
-
     const nuevoPago: Record<string, unknown> = {
       monto: dto.monto,
       moneda: dto.moneda,
@@ -947,6 +997,12 @@ export class ViajesService {
     if (dto.comprobante?.trim()) nuevoPago.comprobante = dto.comprobante.trim();
 
     const pagosActualizados = [...pagosActuales, nuevoPago];
+    this.assertPagosTransportistaNoSuperanSaldo({
+      transportistaId: viaje.transportistaId,
+      precioTransportistaExterno: viaje.precioTransportistaExterno,
+      monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
+      pagosTransportista: pagosActualizados,
+    });
 
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({

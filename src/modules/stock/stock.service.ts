@@ -739,6 +739,7 @@ export class StockService {
           fecha: fechaMov,
           fotosUrls: dto.fotosUrls.map((u) => u.trim()),
           observaciones: dto.observaciones?.trim() || null,
+          numeroRemitoProveedor: dto.numeroRemitoProveedor?.trim() || null,
           createdBy,
         },
       });

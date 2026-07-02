@@ -1,9 +1,12 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
+  IsOptional,
   IsString,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateIngresoLineaDto {
@@ -11,7 +14,6 @@ export class CreateIngresoLineaDto {
   @IsNotEmpty()
   productoId!: string;
 
-  /** ID de ProductoPresentacion (no de Presentacion). */
   @IsString()
   @IsNotEmpty()
   presentacionId!: string;
@@ -26,9 +28,15 @@ export class CreateIngresoLineaDto {
   @Type(() => Number)
   sueltas!: number;
 
+  @IsOptional()
+  @IsBoolean()
+  sinLote?: boolean;
+
+  /** Obligatorio salvo que sinLote sea true. */
+  @ValidateIf((o) => !o.sinLote)
   @IsString()
   @IsNotEmpty()
-  lote!: string;
+  lote?: string;
 
   /** Fecha de vencimiento en formato YYYY-MM-DD. */
   @IsString()

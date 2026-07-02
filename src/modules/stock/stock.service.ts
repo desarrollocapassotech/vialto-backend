@@ -899,6 +899,7 @@ export class StockService {
           fecha: fechaMov,
           fotosUrls: dto.fotosUrls.map((u) => u.trim()),
           observaciones: dto.observaciones?.trim() || null,
+          numeroRemitoProveedor: dto.numeroRemitoProveedor?.trim() || null,
           createdBy,
         },
       });
@@ -915,7 +916,7 @@ export class StockService {
             bultos: linea.bultos,
             unidades: linea.sueltas,
             fechaVencimiento,
-            lote: linea.lote.trim(),
+            lote: linea.sinLote ? null : linea.lote!.trim(),
             fecha: fechaMov,
             createdBy,
           },
@@ -950,36 +951,44 @@ export class StockService {
     });
   }
 
-  listIngresos(
+  async listIngresos(
     tenantId: string,
+    query: PaginationQueryDto,
     clienteId?: string,
     productoId?: string,
     depositoId?: string,
     fechaDesde?: string,
     fechaHasta?: string,
   ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
 
-    return this.prisma.stockOperacion
-      .findMany({
-        where: {
-          tenantId,
-          tipo: 'ingreso',
-          ...(clienteId ? { clienteId } : {}),
-          ...(depositoId ? { depositoId } : {}),
-          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-          ...(desde || hasta
-            ? {
-                fecha: {
-                  ...(desde ? { gte: desde } : {}),
-                  ...(hasta ? { lte: hasta } : {}),
-                },
-              }
-            : {}),
-        },
+    const where = {
+      tenantId,
+      tipo: 'ingreso' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: {
           cliente: { select: { id: true, nombre: true } },
           deposito: { select: { id: true, nombre: true } },
@@ -1003,8 +1012,22 @@ export class StockService {
             },
           },
         },
-      })
-      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows.map((op) => this.mapOperacionForApi(op)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
@@ -1172,39 +1195,61 @@ export class StockService {
     };
   }
 
-  listEgresos(
+  async listEgresos(
     tenantId: string,
+    query: PaginationQueryDto,
     clienteId?: string,
     productoId?: string,
     depositoId?: string,
     fechaDesde?: string,
     fechaHasta?: string,
   ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
 
-    return this.prisma.stockOperacion
-      .findMany({
-        where: {
-          tenantId,
-          tipo: 'egreso',
-          ...(clienteId ? { clienteId } : {}),
-          ...(depositoId ? { depositoId } : {}),
-          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-          ...(desde || hasta
-            ? {
-                fecha: {
-                  ...(desde ? { gte: desde } : {}),
-                  ...(hasta ? { lte: hasta } : {}),
-                },
-              }
-            : {}),
-        },
+    const where = {
+      tenantId,
+      tipo: 'egreso' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: this.egresoOperacionInclude(),
-      })
-      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows.map((op) => this.mapOperacionForApi(op)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {
@@ -1368,7 +1413,7 @@ export class StockService {
     clienteId: string,
     depositoId: string,
     presentacionId?: string,
-  ): Promise<{ lote: string; cantidad1: number }[]> {
+  ): Promise<{ lote: string; cantidad1: number; cantidad2: number }[]> {
     const rows = await this.prisma.movimientoStock.findMany({
       where: {
         tenantId,
@@ -1380,22 +1425,29 @@ export class StockService {
       select: {
         lote: true,
         bultos: true,
+        unidades: true,
         operacion: { select: { tipo: true } },
       },
     });
 
-    // Calcula balance de bultos por lote: ingresos suman, egresos y divisiones restan
-    const map = new Map<string, number>();
+    // Balance por lote: ingresos suman, egresos y divisiones restan
+    const bultosPorLote = new Map<string, number>();
+    const sueltasPorLote = new Map<string, number>();
     for (const row of rows) {
       if (!row.lote) continue;
-      const prev = map.get(row.lote) ?? 0;
-      const delta = row.operacion.tipo === 'ingreso' ? row.bultos : -row.bultos;
-      map.set(row.lote, prev + delta);
+      const sign = row.operacion.tipo === 'ingreso' ? 1 : -1;
+      bultosPorLote.set(row.lote, (bultosPorLote.get(row.lote) ?? 0) + sign * row.bultos);
+      sueltasPorLote.set(row.lote, (sueltasPorLote.get(row.lote) ?? 0) + sign * row.unidades);
     }
 
-    return Array.from(map.entries())
-      .filter(([, cantidad1]) => cantidad1 > 0)
-      .map(([lote, cantidad1]) => ({ lote, cantidad1 }))
+    const lotes = new Set([...bultosPorLote.keys(), ...sueltasPorLote.keys()]);
+    return Array.from(lotes)
+      .map((lote) => ({
+        lote,
+        cantidad1: bultosPorLote.get(lote) ?? 0,
+        cantidad2: sueltasPorLote.get(lote) ?? 0,
+      }))
+      .filter((item) => item.cantidad1 > 0 || item.cantidad2 > 0)
       .sort((a, b) => a.lote.localeCompare(b.lote));
   }
 

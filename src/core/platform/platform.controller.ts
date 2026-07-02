@@ -622,8 +622,9 @@ export class PlatformController {
     @Query('tenantId') tenantId: string | undefined,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
+    @Query('depositoId') depositoId?: string,
   ) {
-    return this.service.listStockDisponible(tenantId, clienteId, productoId);
+    return this.service.listStockDisponible(tenantId, clienteId, productoId, depositoId);
   }
 
   @ApiOperation({ summary: 'Formato número de remito egresos (superadmin)' })

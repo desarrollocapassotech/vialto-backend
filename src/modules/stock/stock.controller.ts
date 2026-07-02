@@ -601,19 +601,19 @@ export class StockController {
 
   @ApiOperation({ summary: "Stock disponible por producto/cliente/depósito" })
   @Get("disponible")
-  @Roles("admin", "member", "superadmin") // <-- Agregado 'member' para que el operador pueda verlo
+  @Roles("admin", "member", "superadmin")
   listStockDisponible(
     @CurrentAuth() auth: AuthPayload,
     @Query("clienteId") clienteId?: string,
     @Query("productoId") productoId?: string,
-    @Query("depositoId") depositoId?: string, // <-- Agregado para filtrar por depósito
+    @Query("depositoId") depositoId?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listStockDisponible(
       auth.tenantId,
       clienteId,
       productoId,
-      depositoId, // <-- Se lo pasamos al servicio
+      depositoId,
     );
   }
 }

@@ -27,6 +27,7 @@ model Tenant {
   clientes                Cliente[]
   transportistas          Transportista[]
   choferes                Chofer[]
+  destinatarios           Destinatario[]
   vehiculos               Vehiculo[]
   viajes                  Viaje[]
   facturas                Factura[]
@@ -135,6 +136,17 @@ model Chofer {
 
   @@index([tenantId])
   @@map("choferes")
+}
+
+model Destinatario {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre    String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("destinatarios")
 }
 
 model Vehiculo {
@@ -549,6 +561,8 @@ model StockOperacion {
   fotosUrls     String[]
   /** Número de remito interno generado al egresar (ej. R-2026-00001). */
   numeroRemito  String?
+  /** Número de remito del proveedor en ingresos. */
+  numeroRemitoProveedor String?
   remitoId      String?
   remito        Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   entregadoPor  String?

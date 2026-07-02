@@ -525,7 +525,7 @@ export class StockService {
       deposito: mov.operacion.deposito,
       numeroRemito: mov.operacion.numeroRemito,
       remitoUrl: mov.operacion.tipo === 'egreso' ? mov.operacion.remitoUrl : null,
-      fotosUrls: mov.operacion.tipo === 'ingreso' ? mov.operacion.fotosUrls : [],
+      fotosUrls: [],
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,
@@ -544,6 +544,166 @@ export class StockService {
         hasNext: page < totalPages,
       },
     };
+  }
+
+  private operacionListInclude() {
+    return {
+      cliente: { select: { id: true, nombre: true } },
+      deposito: { select: { id: true, nombre: true } },
+      movimientos: {
+        select: {
+          id: true,
+          productoId: true,
+          producto: { select: { id: true, nombre: true } },
+          presentacionId: true,
+          presentacion: {
+            select: {
+              id: true,
+              unidadesPorBulto: true,
+              presentacion: { select: { id: true, nombre: true } },
+            },
+          },
+          bultos: true,
+          unidades: true,
+          lote: true,
+          fechaVencimiento: true,
+        },
+      },
+    } as const;
+  }
+
+  private mapOperacionRowForApi(
+    op: {
+      id: string;
+      tenantId: string;
+      tipo: string;
+      fecha: Date;
+      clienteId: string;
+      cliente: { id: string; nombre: string };
+      depositoId: string;
+      deposito: { id: string; nombre: string };
+      remitoUrl?: string | null;
+      numeroRemito?: string | null;
+      entregadoPor?: string | null;
+      destinatario?: string | null;
+      destinoFinal?: string | null;
+      observaciones?: string | null;
+      fotosUrls?: string[];
+      createdBy: string;
+      createdAt: Date;
+      movimientos: Array<{
+        id: string;
+        productoId: string;
+        producto: { id: string; nombre: string };
+        presentacionId: string | null;
+        presentacion: {
+          id: string;
+          unidadesPorBulto: number;
+          presentacion: { id: string; nombre: string };
+        } | null;
+        bultos: number;
+        unidades: number;
+        lote: string | null;
+        fechaVencimiento: Date | null;
+      }>;
+    },
+  ) {
+    return this.mapOperacionForApi({
+      id: op.id,
+      tenantId: op.tenantId,
+      tipo: op.tipo,
+      fecha: op.fecha.toISOString(),
+      clienteId: op.clienteId,
+      cliente: op.cliente,
+      depositoId: op.depositoId,
+      deposito: op.deposito,
+      remitoUrl: op.remitoUrl,
+      numeroRemito: op.numeroRemito,
+      entregadoPor: op.entregadoPor,
+      destinatario: op.destinatario,
+      destinoFinal: op.destinoFinal,
+      observaciones: op.observaciones,
+      fotosUrls: op.fotosUrls,
+      createdBy: op.createdBy,
+      createdAt: op.createdAt.toISOString(),
+      movimientos: op.movimientos.map((m) => ({
+        ...m,
+        fechaVencimiento: m.fechaVencimiento?.toISOString() ?? null,
+      })),
+    });
+  }
+
+  /** Listado consolidado: una fila por operación (cabecera) con todas sus líneas de producto. */
+  async listOperacionesPaginated(
+    tenantId: string,
+    query: PaginationQueryDto,
+    productoId?: string,
+    clienteId?: string,
+    options?: {
+      depositoId?: string;
+      tipo?: 'ingreso' | 'egreso' | 'division';
+      fechaDesde?: string;
+      fechaHasta?: string;
+      createdBy?: string;
+    },
+  ) {
+    const { depositoId, tipo, fechaDesde, fechaHasta, createdBy } = options ?? {};
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
+    const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
+    const where = {
+      tenantId,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(tipo ? { tipo } : {}),
+      ...(createdBy ? { createdBy } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
+        orderBy: { fecha: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: this.operacionListInclude(),
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const items = rows.map((op) => this.mapOperacionRowForApi(op));
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
+  }
+
+  async findOperacion(id: string, tenantId: string) {
+    const op = await this.prisma.stockOperacion.findFirst({
+      where: { id, tenantId },
+      include: this.operacionListInclude(),
+    });
+    if (!op) throw new NotFoundException('Operación no encontrada.');
+    return this.mapOperacionRowForApi(op);
   }
 
   async findMovimiento(id: string, tenantId: string) {
@@ -611,7 +771,7 @@ export class StockService {
       deposito: mov.operacion.deposito,
       numeroRemito: mov.operacion.numeroRemito,
       remitoUrl: mov.operacion.tipo === 'egreso' ? mov.operacion.remitoUrl : null,
-      fotosUrls: mov.operacion.tipo === 'ingreso' ? mov.operacion.fotosUrls : [],
+      fotosUrls: [],
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,

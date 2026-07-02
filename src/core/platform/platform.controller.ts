@@ -711,6 +711,38 @@ export class PlatformController {
     return this.service.listDivisiones(tenantId, clienteId, productoId, depositoId);
   }
 
+  @ApiOperation({ summary: 'Listar operaciones de stock paginadas (superadmin)' })
+  @Get('stock/operaciones/paginated')
+  listOperacionesStockPaginated(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
+    @Query('productoId') productoId?: string,
+    @Query('clienteId') clienteId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
+  ) {
+    return this.service.listOperacionesStockPaginated(
+      tenantId,
+      query,
+      productoId,
+      clienteId,
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
+    );
+  }
+
+  @ApiOperation({ summary: 'Obtener operación de stock por ID (superadmin)' })
+  @Get('stock/operaciones/:id')
+  getOperacionStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getOperacionStock(tenantId, id);
+  }
+
   @ApiOperation({ summary: 'Listar movimientos de stock (superadmin)' })
   @Get('stock/movimientos')
   listMovimientosStock(

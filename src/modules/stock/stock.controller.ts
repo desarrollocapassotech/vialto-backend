@@ -212,7 +212,44 @@ export class StockController {
     return this.service.updateDeposito(id, auth.tenantId, dto);
   }
 
-  // ───────────────── MOVIMIENTOS DE STOCK ───────────────────────────────────
+  // ───────────────── OPERACIONES DE STOCK (cabecera consolidada) ────────────
+
+  @ApiOperation({
+    summary:
+      'Listar operaciones de stock (ingreso/egreso/división) paginadas — una cabecera por comprobante con todas sus líneas.',
+  })
+  @Get('operaciones/paginated')
+  @Roles('admin', 'superadmin')
+  listOperacionesPaginated(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
+    @Query('productoId') productoId?: string,
+    @Query('clienteId') clienteId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listOperacionesPaginated(auth.tenantId, query, productoId, clienteId, {
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
+    });
+  }
+
+  @ApiOperation({ summary: 'Obtener operación de stock por ID (cabecera + líneas + adjuntos)' })
+  @Get('operaciones/:id')
+  @Roles('admin', 'superadmin')
+  getOperacion(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.findOperacion(id, auth.tenantId);
+  }
+
+  // ───────────────── MOVIMIENTOS DE STOCK (líneas / legacy) ───────────────────
 
   @ApiOperation({
     summary:

@@ -325,6 +325,7 @@ export class StockController {
   @Roles('admin', 'member', 'superadmin')
   listEgresos(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
@@ -332,7 +333,7 @@ export class StockController {
     @Query('fechaHasta') fechaHasta?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listEgresos(auth.tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listEgresos(auth.tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   @ApiOperation({ summary: 'Obtener egreso por ID (remito interno)' })
@@ -378,6 +379,7 @@ export class StockController {
   @Roles('admin', 'member', 'superadmin')
   listIngresos(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
@@ -385,7 +387,7 @@ export class StockController {
     @Query('fechaHasta') fechaHasta?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.listIngresos(auth.tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listIngresos(auth.tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   // ───────────────── DIVISIONES ─────────────────────────────────────────────

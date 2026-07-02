@@ -576,13 +576,14 @@ export class PlatformController {
   @Get('stock/ingresos')
   listIngresos(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listIngresos(tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listIngresos(tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   @ApiOperation({ summary: 'Lotes históricos ingresados - autocompletado (superadmin)' })
@@ -648,13 +649,14 @@ export class PlatformController {
   @Get('stock/egresos')
   listEgresos(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listEgresos(tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listEgresos(tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   @ApiOperation({ summary: 'Obtener egreso por ID (superadmin)' })

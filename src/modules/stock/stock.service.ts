@@ -790,36 +790,44 @@ export class StockService {
     });
   }
 
-  listIngresos(
+  async listIngresos(
     tenantId: string,
+    query: PaginationQueryDto,
     clienteId?: string,
     productoId?: string,
     depositoId?: string,
     fechaDesde?: string,
     fechaHasta?: string,
   ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
 
-    return this.prisma.stockOperacion
-      .findMany({
-        where: {
-          tenantId,
-          tipo: 'ingreso',
-          ...(clienteId ? { clienteId } : {}),
-          ...(depositoId ? { depositoId } : {}),
-          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-          ...(desde || hasta
-            ? {
-                fecha: {
-                  ...(desde ? { gte: desde } : {}),
-                  ...(hasta ? { lte: hasta } : {}),
-                },
-              }
-            : {}),
-        },
+    const where = {
+      tenantId,
+      tipo: 'ingreso' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: {
           cliente: { select: { id: true, nombre: true } },
           deposito: { select: { id: true, nombre: true } },
@@ -843,8 +851,22 @@ export class StockService {
             },
           },
         },
-      })
-      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows.map((op) => this.mapOperacionForApi(op)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
@@ -1012,39 +1034,61 @@ export class StockService {
     };
   }
 
-  listEgresos(
+  async listEgresos(
     tenantId: string,
+    query: PaginationQueryDto,
     clienteId?: string,
     productoId?: string,
     depositoId?: string,
     fechaDesde?: string,
     fechaHasta?: string,
   ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
 
-    return this.prisma.stockOperacion
-      .findMany({
-        where: {
-          tenantId,
-          tipo: 'egreso',
-          ...(clienteId ? { clienteId } : {}),
-          ...(depositoId ? { depositoId } : {}),
-          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-          ...(desde || hasta
-            ? {
-                fecha: {
-                  ...(desde ? { gte: desde } : {}),
-                  ...(hasta ? { lte: hasta } : {}),
-                },
-              }
-            : {}),
-        },
+    const where = {
+      tenantId,
+      tipo: 'egreso' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: this.egresoOperacionInclude(),
-      })
-      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows.map((op) => this.mapOperacionForApi(op)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {

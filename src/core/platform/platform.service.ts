@@ -780,9 +780,9 @@ export class PlatformService {
     return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
   }
 
-  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
+  listIngresos(tenantId: string | undefined, query: PaginationQueryDto, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.stockService.listIngresos(scopedTenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
@@ -827,9 +827,9 @@ export class PlatformService {
     return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
   }
 
-  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
+  listEgresos(tenantId: string | undefined, query: PaginationQueryDto, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.stockService.listEgresos(scopedTenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   findEgreso(tenantId: string | undefined, id: string) {
@@ -880,6 +880,32 @@ export class PlatformService {
       fechaHasta,
       createdBy,
     });
+  }
+
+  listOperacionesStockPaginated(
+    tenantId: string | undefined,
+    query: PaginationQueryDto,
+    productoId?: string,
+    clienteId?: string,
+    depositoId?: string,
+    tipo?: 'ingreso' | 'egreso' | 'division',
+    fechaDesde?: string,
+    fechaHasta?: string,
+    createdBy?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listOperacionesPaginated(scopedTenantId, query, productoId, clienteId, {
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
+    });
+  }
+
+  getOperacionStock(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.findOperacion(id, scopedTenantId);
   }
 
   getMovimientoStock(tenantId: string | undefined, id: string) {

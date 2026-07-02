@@ -27,6 +27,8 @@ import { CreateClienteDto } from '../clientes/dto/create-cliente.dto';
 import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
 import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
+import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
+import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
 import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
@@ -298,6 +300,44 @@ export class PlatformController {
   @Delete('choferes/:id')
   removeChofer(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.removeChofer(tenantId, id);
+  }
+
+  @Get('direcciones-entrega')
+  direccionesEntrega(@Query('tenantId') tenantId?: string) {
+    return this.service.listDireccionesEntrega(tenantId);
+  }
+
+  @Get('direcciones-entrega/:id')
+  direccionEntregaById(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.getDireccionEntregaById(tenantId, id);
+  }
+
+  @Post('direcciones-entrega')
+  createDireccionEntrega(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateDireccionEntregaDto,
+  ) {
+    return this.service.createDireccionEntrega(tenantId, dto);
+  }
+
+  @Patch('direcciones-entrega/:id')
+  updateDireccionEntrega(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateDireccionEntregaDto,
+  ) {
+    return this.service.updateDireccionEntrega(tenantId, id, dto);
+  }
+
+  @Delete('direcciones-entrega/:id')
+  removeDireccionEntrega(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.removeDireccionEntrega(tenantId, id);
   }
 
   @Get('vehiculos')

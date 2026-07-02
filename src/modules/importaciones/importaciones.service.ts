@@ -3,13 +3,13 @@ import {
   GoneException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { PrismaService } from '../../shared/prisma/prisma.service';
-import { ParserService } from './engine/parser.service';
-import { ValidatorService } from './engine/validator.service';
-import { ViajesProcessor } from './processors/viajes.processor';
-import { ClientesProcessor } from './processors/clientes.processor';
-import type { IImportProcessor } from './processors/import-processor.interface';
+} from "@nestjs/common";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+import { ParserService } from "./engine/parser.service";
+import { ValidatorService } from "./engine/validator.service";
+import { ViajesProcessor } from "./processors/viajes.processor";
+import { ClientesProcessor } from "./processors/clientes.processor";
+import type { IImportProcessor } from "./processors/import-processor.interface";
 import type {
   TemplateConfig,
   ValidatedRow,
@@ -18,8 +18,8 @@ import type {
   PreviewViaje,
   PreviewFactura,
   PreviewEntidad,
-} from './types/import.types';
-import type { CreateTemplateDto } from './dto/create-template.dto';
+} from "./types/import.types";
+import type { CreateTemplateDto } from "./dto/create-template.dto";
 
 @Injectable()
 export class ImportacionesService {
@@ -51,10 +51,15 @@ export class ImportacionesService {
 
     const parsed = this.parser.parse(buffer, config);
     if (parsed.length === 0) {
-      throw new BadRequestException('El archivo no contiene filas de datos');
+      throw new BadRequestException("El archivo no contiene filas de datos");
     }
 
-    const { valid, errors, created } = await this.validator.validate(parsed, config.columns, tenantId, true);
+    const { valid, errors, created } = await this.validator.validate(
+      parsed,
+      config.columns,
+      tenantId,
+      true,
+    );
 
     // Guardar sesión (expira en 30 minutos)
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -81,7 +86,7 @@ export class ImportacionesService {
       detalleErrores: errors,
     };
 
-    if (modulo === 'viajes') {
+    if (modulo === "viajes") {
       Object.assign(result, this.buildViajesPreview(parsed, valid, created));
     }
 
@@ -94,22 +99,31 @@ export class ImportacionesService {
     tenantId: string,
     sessionId: string,
     createdBy: string,
-    ciudadesNormalizadas?: { fila: number; origen?: string | null; destino?: string | null }[],
+    ciudadesNormalizadas?: {
+      fila: number;
+      origen?: string | null;
+      destino?: string | null;
+    }[],
   ) {
     const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, tenantId },
       include: { template: { select: { modulo: true } } },
     });
 
-    if (!session) throw new NotFoundException('Sesión de importación no encontrada');
+    if (!session)
+      throw new NotFoundException("Sesión de importación no encontrada");
     if (session.expiresAt < new Date()) {
       await this.prisma.importSession.delete({ where: { id: sessionId } });
-      throw new GoneException('La sesión expiró. Volvé a subir el archivo para generar una nueva previsualización');
+      throw new GoneException(
+        "La sesión expiró. Volvé a subir el archivo para generar una nueva previsualización",
+      );
     }
 
     const processor = this.processors[session.template.modulo];
     if (!processor) {
-      throw new BadRequestException(`No hay processor para el módulo "${session.template.modulo}"`);
+      throw new BadRequestException(
+        `No hay processor para el módulo "${session.template.modulo}"`,
+      );
     }
 
     const filasValidas = session.filasValidas as unknown as ValidatedRow[];
@@ -127,9 +141,14 @@ export class ImportacionesService {
     for (const fila of filasValidas) {
       for (const key of Object.keys(fila)) {
         const value = fila[key];
-        if (typeof value === 'string' && value.startsWith('__pending__')) {
-          const [, , model, nombre] = value.split('__');
-          const id = await this.validator.createLookup(model, 'nombre', nombre, tenantId);
+        if (typeof value === "string" && value.startsWith("__pending__")) {
+          const [, , model, nombre] = value.split("__");
+          const id = await this.validator.createLookup(
+            model,
+            "nombre",
+            nombre,
+            tenantId,
+          );
           fila[key] = id;
         }
       }
@@ -142,17 +161,17 @@ export class ImportacionesService {
     for (const fila of filasValidas) {
       try {
         const id = await processor.insert(fila, tenantId, createdBy);
-        detalles.push({ fila: fila._rowNum, estado: 'ok', id });
+        detalles.push({ fila: fila._rowNum, estado: "ok", id });
         exitosas++;
       } catch (err: unknown) {
-        const mensaje = err instanceof Error ? err.message : 'Error inesperado';
-        detalles.push({ fila: fila._rowNum, estado: 'error', mensaje });
+        const mensaje = err instanceof Error ? err.message : "Error inesperado";
+        detalles.push({ fila: fila._rowNum, estado: "error", mensaje });
         errores++;
       }
     }
 
     const estado =
-      errores === 0 ? 'completado' : exitosas === 0 ? 'fallido' : 'con_errores';
+      errores === 0 ? "completado" : exitosas === 0 ? "fallido" : "con_errores";
 
     const log = await this.prisma.importLog.create({
       data: {
@@ -179,7 +198,7 @@ export class ImportacionesService {
   getLogs(tenantId: string, modulo?: string) {
     return this.prisma.importLog.findMany({
       where: { tenantId, ...(modulo ? { modulo } : {}) },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         modulo: true,
@@ -198,7 +217,7 @@ export class ImportacionesService {
     const log = await this.prisma.importLog.findFirst({
       where: { id, tenantId },
     });
-    if (!log) throw new NotFoundException('Log de importación no encontrado');
+    if (!log) throw new NotFoundException("Log de importación no encontrado");
     return log;
   }
 
@@ -206,7 +225,9 @@ export class ImportacionesService {
 
   createTemplate(dto: CreateTemplateDto) {
     return this.prisma.importTemplate.upsert({
-      where: { tenantId_modulo: { tenantId: dto.tenantId, modulo: dto.modulo } },
+      where: {
+        tenantId_modulo: { tenantId: dto.tenantId, modulo: dto.modulo },
+      },
       create: {
         tenantId: dto.tenantId,
         modulo: dto.modulo,
@@ -225,8 +246,14 @@ export class ImportacionesService {
   getTemplates(tenantId: string) {
     return this.prisma.importTemplate.findMany({
       where: { tenantId },
-      orderBy: { modulo: 'asc' },
-      select: { id: true, modulo: true, nombre: true, activo: true, updatedAt: true },
+      orderBy: { modulo: "asc" },
+      select: {
+        id: true,
+        modulo: true,
+        nombre: true,
+        activo: true,
+        updatedAt: true,
+      },
     });
   }
 
@@ -235,11 +262,24 @@ export class ImportacionesService {
   private buildViajesPreview(
     parsed: ParsedRow[],
     valid: ValidatedRow[],
-    created: { clientes: string[]; transportistas: string[]; choferes: string[] },
-  ): { viajes: PreviewViaje[]; facturas: PreviewFactura[]; clientes: PreviewEntidad[]; transportistas: PreviewEntidad[] } {
+    created: {
+      clientes: string[];
+      transportistas: string[];
+      choferes: string[];
+    },
+  ): {
+    viajes: PreviewViaje[];
+    facturas: PreviewFactura[];
+    clientes: PreviewEntidad[];
+    transportistas: PreviewEntidad[];
+  } {
     const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
-    const newClienteNames = new Set(created.clientes.map((n) => n.toLowerCase()));
-    const newTransportistaNames = new Set(created.transportistas.map((n) => n.toLowerCase()));
+    const newClienteNames = new Set(
+      created.clientes.map((n) => n.toLowerCase()),
+    );
+    const newTransportistaNames = new Set(
+      created.transportistas.map((n) => n.toLowerCase()),
+    );
 
     const viajes: PreviewViaje[] = [];
     const facturas: PreviewFactura[] = [];
@@ -254,7 +294,7 @@ export class ImportacionesService {
 
     const toDateStr = (v: unknown): string | null => {
       if (!v) return null;
-      if (v instanceof Date) return v.toLocaleDateString('es-AR');
+      if (v instanceof Date) return v.toLocaleDateString("es-AR");
       return toStr(v);
     };
 
@@ -262,7 +302,7 @@ export class ImportacionesService {
       const p = parsedByRow.get(validRow._rowNum);
       if (!p) continue;
 
-      const cliente = toStr(p.clienteId) ?? '';
+      const cliente = toStr(p.clienteId) ?? "";
       const transporte = toStr(p.transportistaId);
       if (cliente) clienteNamesSet.add(cliente);
       if (transporte) transportistaNamesSet.add(transporte);
@@ -287,13 +327,15 @@ export class ImportacionesService {
         monedaMonto: toStr(validRow.monedaMonto),
         nroFactura,
         precioTransportistaExterno: precioTransp,
-        monedaPrecioTransportistaExterno: toStr(validRow.monedaPrecioTransportistaExterno),
+        monedaPrecioTransportistaExterno: toStr(
+          validRow.monedaPrecioTransportistaExterno,
+        ),
         nroFacturaTransporte,
       });
 
       if (nroFactura) {
         facturas.push({
-          tipo: 'cliente',
+          tipo: "cliente",
           numero: nroFactura,
           nombre: cliente || null,
           importe: monto ?? 0,
@@ -304,7 +346,7 @@ export class ImportacionesService {
 
       if (nroFacturaTransporte) {
         facturas.push({
-          tipo: 'transportista_externo',
+          tipo: "transportista_externo",
           numero: nroFacturaTransporte,
           nombre: transporte,
           importe: precioTransp ?? 0,
@@ -317,8 +359,14 @@ export class ImportacionesService {
     return {
       viajes,
       facturas,
-      clientes: [...clienteNamesSet].map((nombre) => ({ nombre, esNuevo: newClienteNames.has(nombre.toLowerCase()) })),
-      transportistas: [...transportistaNamesSet].map((nombre) => ({ nombre, esNuevo: newTransportistaNames.has(nombre.toLowerCase()) })),
+      clientes: [...clienteNamesSet].map((nombre) => ({
+        nombre,
+        esNuevo: newClienteNames.has(nombre.toLowerCase()),
+      })),
+      transportistas: [...transportistaNamesSet].map((nombre) => ({
+        nombre,
+        esNuevo: newTransportistaNames.has(nombre.toLowerCase()),
+      })),
     };
   }
 

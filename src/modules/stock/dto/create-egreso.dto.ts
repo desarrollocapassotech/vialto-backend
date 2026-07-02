@@ -45,6 +45,12 @@ export class CreateEgresoDto {
   @MaxLength(300)
   destinoFinal?: string;
 
+  /** Número del documento externo o el literal «No tiene». Obligatorio al crear egreso. */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  numeroDocumentoExterno!: string;
+
   @IsOptional()
   @IsString()
   observaciones?: string;

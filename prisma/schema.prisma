@@ -549,11 +549,15 @@ model StockOperacion {
   fotosUrls     String[]
   /** Número de remito interno generado al egresar (ej. R-2026-00001). */
   numeroRemito  String?
+  /** Número de remito del proveedor en ingresos. */
+  numeroRemitoProveedor String?
   remitoId      String?
   remito        Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   entregadoPor  String?
   destinatario  String?
   destinoFinal  String?
+  /** Pedido del cliente, nota de despacho u otro documento externo. Valor «No tiene» si no aplica. */
+  numeroDocumentoExterno String?
   createdBy     String   @default("")
   createdAt     DateTime @default(now())
 

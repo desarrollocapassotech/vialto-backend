@@ -8,6 +8,8 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
+import { CreateCargaChoferDto } from './dto/create-carga-chofer.dto';
+import { UpdateCargaChoferDto } from './dto/update-carga-chofer.dto';
 
 /** Datos mínimos de contexto de autenticación que el servicio necesita. */
 interface CombustibleAuth {
@@ -128,6 +130,122 @@ export class CombustibleService {
     await this.findOne(id, auth);
     await this.prisma.cargaCombustible.delete({ where: { id } });
     return { deleted: id };
+  }
+
+  async findAllByChofer(choferId: string, tenantId: string, month?: string) {
+    const where: Record<string, unknown> = { tenantId, choferId };
+
+    if (month) {
+      const [year, mon] = month.split('-').map(Number);
+      where['fecha'] = {
+        gte: new Date(year, mon - 1, 1),
+        lt: new Date(year, mon, 1),
+      };
+    }
+
+    const cargas = await this.prisma.cargaCombustible.findMany({
+      where,
+      orderBy: { fecha: 'desc' },
+      take: 200,
+      include: {
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true, dni: true } },
+      },
+    });
+
+    return { cargas, count: cargas.length };
+  }
+
+  async createByChofer(
+    dto: CreateCargaChoferDto,
+    choferId: string,
+    tenantId: string,
+  ) {
+    const patenteClean = dto.patente.replace(/\s+/g, '').toUpperCase();
+    const vehiculo = await this.prisma.vehiculo.findFirst({
+      where: { tenantId, patente: { equals: patenteClean, mode: 'insensitive' } },
+    });
+    if (!vehiculo) {
+      throw new BadRequestException(
+        `No se encontró el vehículo con patente "${dto.patente}" en esta empresa`,
+      );
+    }
+    return this.prisma.cargaCombustible.create({
+      data: {
+        tenantId,
+        vehiculoId: vehiculo.id,
+        choferId,
+        estacion: dto.estacion,
+        litros: dto.litros,
+        importe: dto.importe,
+        km: dto.km,
+        formaPago: dto.formaPago ?? null,
+        fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
+        createdBy: choferId,
+      },
+      include: {
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true, dni: true } },
+      },
+    });
+  }
+
+  async deleteByChofer(id: string, choferId: string, tenantId: string) {
+    const carga = await this.prisma.cargaCombustible.findFirst({
+      where: { id, tenantId },
+    });
+    if (!carga) throw new NotFoundException('Carga no encontrada');
+    if (carga.choferId !== choferId) {
+      throw new ForbiddenException('Solo podés eliminar tus propias cargas');
+    }
+    await this.prisma.cargaCombustible.delete({ where: { id } });
+    return { deleted: id };
+  }
+
+  async updateByChofer(
+    id: string,
+    dto: UpdateCargaChoferDto,
+    choferId: string,
+    tenantId: string,
+  ) {
+    const carga = await this.prisma.cargaCombustible.findFirst({
+      where: { id, tenantId },
+    });
+    if (!carga) throw new NotFoundException('Carga no encontrada');
+    if (carga.choferId !== choferId) {
+      throw new ForbiddenException('Solo podés editar tus propias cargas');
+    }
+
+    let vehiculoId: string | undefined = undefined;
+    if (dto.patente !== undefined) {
+      const patenteClean = dto.patente.replace(/\s+/g, '').toUpperCase();
+      const vehiculo = await this.prisma.vehiculo.findFirst({
+        where: { tenantId, patente: { equals: patenteClean, mode: 'insensitive' } },
+      });
+      if (!vehiculo) {
+        throw new BadRequestException(
+          `No se encontró el vehículo con patente "${dto.patente}" en esta empresa`,
+        );
+      }
+      vehiculoId = vehiculo.id;
+    }
+
+    return this.prisma.cargaCombustible.update({
+      where: { id },
+      data: {
+        ...(vehiculoId !== undefined && { vehiculoId }),
+        ...(dto.estacion !== undefined && { estacion: dto.estacion }),
+        ...(dto.litros !== undefined && { litros: dto.litros }),
+        ...(dto.importe !== undefined && { importe: dto.importe }),
+        ...(dto.km !== undefined && { km: dto.km }),
+        ...(dto.formaPago !== undefined && { formaPago: dto.formaPago }),
+        ...(dto.fecha !== undefined && { fecha: new Date(dto.fecha) }),
+      },
+      include: {
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true, dni: true } },
+      },
+    });
   }
 
   async getStats(auth: CombustibleAuth, month?: string) {

@@ -27,4 +27,9 @@ export class CreateChoferDto {
   @IsOptional() @IsDateString() licenciaVence?: string;
   @IsOptional() @IsString() telefono?: string;
   @IsOptional() @IsString() transportistaId?: string;
+
+  /** PIN de login para la app vialto-combustible (4 dígitos). Se hashea antes de guardarse. */
+  @IsOptional()
+  @Matches(/^\d{4}$/, { message: 'PIN debe tener 4 dígitos' })
+  pin?: string;
 }

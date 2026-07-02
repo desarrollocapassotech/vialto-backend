@@ -125,6 +125,8 @@ model Chofer {
   telefono        String?
   transportistaId String?
   transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  /** Hash del PIN de login para la app vialto-combustible (formato salt:hash, ver shared/util/pin-hash.ts). Nunca se expone en respuestas de API. */
+  pin             String?
   createdAt       DateTime       @default(now())
 
   viajes            Viaje[]
@@ -547,6 +549,8 @@ model StockOperacion {
   fotosUrls     String[]
   /** Número de remito interno generado al egresar (ej. R-2026-00001). */
   numeroRemito  String?
+  /** Número de remito del proveedor, informado manualmente al registrar un ingreso. */
+  numeroRemitoProveedor String?
   remitoId      String?
   remito        Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   entregadoPor  String?

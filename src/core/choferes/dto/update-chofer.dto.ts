@@ -43,4 +43,9 @@ export class UpdateChoferDto {
   @ValidateIf((_, v) => v !== null && v !== undefined)
   @IsString()
   transportistaId?: string | null;
+
+  /** PIN de login para la app vialto-combustible (4 dígitos). Se hashea antes de guardarse. */
+  @IsOptional()
+  @Matches(/^\d{4}$/, { message: 'PIN debe tener 4 dígitos' })
+  pin?: string;
 }

@@ -131,6 +131,7 @@ export function idsProductosDelViaje(v: {
 }
 
 /** Args validados para el `include` de viajes con `vehiculosViaje` + `vehiculo` (exportado para que TS resuelva bien `ViajeGetPayload<typeof …>`). */
+
 export const viajeConVehiculosViajeArgs =
   Prisma.validator<Prisma.ViajeDefaultArgs>()({
     include: {
@@ -149,6 +150,7 @@ export const viajeConVehiculosViajeArgs =
       transportistaEfectivo: { select: { id: true, nombre: true } },
       /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */
       factura: { select: { id: true, numero: true } },
+      liquidacionesViaje: { select: { liquidacionId: true } },
       productosViaje: {
         orderBy: { orden: "asc" },
         include: {
@@ -157,10 +159,10 @@ export const viajeConVehiculosViajeArgs =
           },
         },
       },
+
       vehiculosViaje: {
-        orderBy: { orden: "asc" },
         include: {
-          vehiculo: { select: { id: true, patente: true, tipo: true } },
+          vehiculo: true,
         },
       },
     },

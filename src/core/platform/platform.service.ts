@@ -292,28 +292,12 @@ export class PlatformService {
       return Promise.resolve([]);
     }
     const id = tenantId.trim();
-    return this.prisma.chofer
-      .findMany({
-        where: { tenantId: id },
-        take: TAKE,
-        orderBy: { createdAt: 'desc' },
-        include: { tenant: { select: { name: true } } },
-      })
-      .then((rows) =>
-        rows.map(({ tenant, ...rest }) => ({
-          ...rest,
-          empresaNombre: tenant.name,
-        })),
-      );
+    return this.choferesService.findAll(id);
   }
 
   async getChoferById(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    const row = await this.prisma.chofer.findFirst({
-      where: { id, tenantId: scopedTenantId },
-    });
-    if (!row) throw new NotFoundException('Chofer no encontrado');
-    return row;
+    return this.choferesService.findOne(id, scopedTenantId);
   }
 
   async createChofer(tenantId: string | undefined, dto: CreateChoferDto) {
@@ -747,9 +731,9 @@ export class PlatformService {
     return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
   }
 
-  listIngresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
+  listIngresos(tenantId: string | undefined, query: PaginationQueryDto, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listIngresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.stockService.listIngresos(scopedTenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
@@ -794,9 +778,9 @@ export class PlatformService {
     return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
   }
 
-  listEgresos(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
+  listEgresos(tenantId: string | undefined, query: PaginationQueryDto, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listEgresos(scopedTenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.stockService.listEgresos(scopedTenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   findEgreso(tenantId: string | undefined, id: string) {

@@ -7,16 +7,26 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateChoferDto } from './dto/create-chofer.dto';
 import { UpdateChoferDto } from './dto/update-chofer.dto';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { hashPin } from '../../shared/util/pin-hash';
+
+/** Nunca devolver el hash del PIN en respuestas de API; exponer solo si está configurado. */
+function sanitize<T extends { pin?: string | null }>(
+  chofer: T,
+): Omit<T, 'pin'> & { pinConfigured: boolean } {
+  const { pin, ...rest } = chofer;
+  return { ...rest, pinConfigured: !!pin };
+}
 
 @Injectable()
 export class ChoferesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(tenantId: string) {
-    return this.prisma.chofer.findMany({
+  async findAll(tenantId: string) {
+    const rows = await this.prisma.chofer.findMany({
       where: { tenantId },
       orderBy: { createdAt: 'desc' },
     });
+    return rows.map(sanitize);
   }
 
   async findAllPaginated(tenantId: string, query: PaginationQueryDto) {
@@ -33,7 +43,7 @@ export class ChoferesService {
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
-      items,
+      items: items.map(sanitize),
       meta: {
         page,
         pageSize,
@@ -50,7 +60,7 @@ export class ChoferesService {
       where: { id, tenantId },
     });
     if (!row) throw new NotFoundException('Chofer no encontrado');
-    return row;
+    return sanitize(row);
   }
 
   private async assertTransportista(tenantId: string, transportistaId?: string) {
@@ -65,7 +75,7 @@ export class ChoferesService {
 
   async create(tenantId: string, dto: CreateChoferDto) {
     await this.assertTransportista(tenantId, dto.transportistaId);
-    return this.prisma.chofer.create({
+    const row = await this.prisma.chofer.create({
       data: {
         tenantId,
         nombre: dto.nombre,
@@ -75,8 +85,10 @@ export class ChoferesService {
         licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
         telefono: dto.telefono ?? null,
         transportistaId: dto.transportistaId ?? null,
+        pin: dto.pin ? hashPin(dto.pin) : null,
       },
     });
+    return sanitize(row);
   }
 
   async update(id: string, tenantId: string, dto: UpdateChoferDto) {
@@ -84,7 +96,7 @@ export class ChoferesService {
     if (dto.transportistaId !== undefined) {
       await this.assertTransportista(tenantId, dto.transportistaId ?? undefined);
     }
-    return this.prisma.chofer.update({
+    const row = await this.prisma.chofer.update({
       where: { id },
       data: {
         nombre: dto.nombre,
@@ -100,8 +112,10 @@ export class ChoferesService {
             : dto.licenciaVence
               ? new Date(dto.licenciaVence)
               : null,
+        pin: dto.pin === undefined ? undefined : hashPin(dto.pin),
       },
     });
+    return sanitize(row);
   }
 
   async remove(id: string, tenantId: string) {

@@ -13,6 +13,10 @@ import {
   computeEstadoFacturaLectura,
   importeOperativoFactura,
 } from './factura-estado-lectura';
+import {
+  syncViajeEstadoTrasComprobante,
+  syncViajesEstadoTrasComprobante,
+} from '../viajes/viaje-estado-financiero';
 
 type ViajeSnap = { id: string; estado: string; monto: number | null; monedaMonto: string };
 
@@ -165,15 +169,7 @@ export class FacturacionService {
           where: { id: { in: viajeIds }, tenantId },
           data: { facturaId: factura.id },
         });
-        // Corregir estado: solo los que aún no están en estado de facturación/cobro
-        await tx.viaje.updateMany({
-          where: {
-            id: { in: viajeIds },
-            tenantId,
-            estado: { notIn: ['facturado_sin_cobrar', 'cobrado'] },
-          },
-          data: { estado: 'facturado_sin_cobrar' },
-        });
+        await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
       }
       const updated = await tx.factura.findFirst({
         where: { id: factura.id },
@@ -235,33 +231,19 @@ export class FacturacionService {
         const idsDesvinculados = desvinculados.map((v) => v.id);
 
         if (idsDesvinculados.length > 0) {
-          // Revertir estado a 'finalizado' solo si estaban en 'facturado_sin_cobrar'
-          await tx.viaje.updateMany({
-            where: { id: { in: idsDesvinculados }, tenantId, estado: 'facturado_sin_cobrar' },
-            data: { estado: 'finalizado_sin_facturar' },
-          });
-          // Desvincular todos
           await tx.viaje.updateMany({
             where: { id: { in: idsDesvinculados }, tenantId },
             data: { facturaId: null },
           });
+          await syncViajesEstadoTrasComprobante(tx, tenantId, idsDesvinculados);
         }
 
-        // Vincular viajes nuevos y existentes
         if (newIds.length > 0) {
           await tx.viaje.updateMany({
             where: { id: { in: newIds }, tenantId },
             data: { facturaId: id },
           });
-          // Corregir estado de los viajes recién vinculados que no están en estado correcto
-          await tx.viaje.updateMany({
-            where: {
-              id: { in: newIds },
-              tenantId,
-              estado: { notIn: ['facturado_sin_cobrar', 'cobrado'] },
-            },
-            data: { estado: 'facturado_sin_cobrar' },
-          });
+          await syncViajesEstadoTrasComprobante(tx, tenantId, newIds);
         }
       }
 
@@ -284,18 +266,20 @@ export class FacturacionService {
   }
 
   async removeFactura(id: string, tenantId: string) {
-    await this.findFactura(id, tenantId);
-    // Revertir estado de viajes facturados_sin_cobrar a finalizado
-    await this.prisma.viaje.updateMany({
-      where: { facturaId: id, tenantId, estado: 'facturado_sin_cobrar' },
-      data: { estado: 'finalizado_sin_facturar' },
-    });
-    // Desvincular todos los viajes
-    await this.prisma.viaje.updateMany({
+    const viajesAfectados = await this.prisma.viaje.findMany({
       where: { facturaId: id, tenantId },
-      data: { facturaId: null },
+      select: { id: true },
     });
-    return this.prisma.factura.delete({ where: { id } });
+    const viajeIds = viajesAfectados.map((v) => v.id);
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.viaje.updateMany({
+        where: { facturaId: id, tenantId },
+        data: { facturaId: null },
+      });
+      await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
+      return tx.factura.delete({ where: { id } });
+    });
   }
 
   listPagos(tenantId: string, facturaId?: string) {

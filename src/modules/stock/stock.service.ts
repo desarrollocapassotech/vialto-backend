@@ -26,6 +26,7 @@ import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
+import { paginate, buildPaginatedResult } from '../../shared/util/pagination.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
@@ -325,11 +326,25 @@ export class StockService {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ DEPÓSITOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  async listDepositos(tenantId: string, activo?: boolean) {
-    return this.prisma.deposito.findMany({
-      where: { tenantId, ...(activo !== undefined ? { activo } : {}) },
-      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
-    });
+  async listDepositos(tenantId: string, query: PaginationQueryDto, activo?: boolean) {
+    const { page, pageSize, skip, take } = paginate(query.page, query.pageSize);
+
+    const where = {
+      tenantId,
+      ...(activo !== undefined ? { activo } : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.deposito.count({ where }),
+      this.prisma.deposito.findMany({
+        where,
+        orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+        skip,
+        take,
+      }),
+    ]);
+
+    return buildPaginatedResult(rows, total, page, pageSize);
   }
 
   async createDeposito(tenantId: string, dto: CreateDepositoDto) {

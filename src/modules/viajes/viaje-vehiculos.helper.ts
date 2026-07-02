@@ -1,13 +1,14 @@
-import { BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../shared/prisma/prisma.service';
-
-export function normalizarVehiculoIds(raw: string[] | undefined | null): string[] {
+import { BadRequestException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+export function normalizarVehiculoIds(
+  raw: string[] | undefined | null,
+): string[] {
   if (!raw?.length) return [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const id of raw) {
-    const s = String(id ?? '').trim();
+    const s = String(id ?? "").trim();
     if (!s || seen.has(s)) continue;
     seen.add(s);
     out.push(s);
@@ -22,20 +23,24 @@ export async function assertVehiculosDelViaje(
   opts: { requiereFlotaPropia: boolean },
 ): Promise<void> {
   if (vehiculoIds.length === 0) {
-    throw new BadRequestException('Debés asignar al menos un vehículo al viaje.');
+    throw new BadRequestException(
+      "Debés asignar al menos un vehículo al viaje.",
+    );
   }
   const rows = await db.vehiculo.findMany({
     where: { tenantId, id: { in: vehiculoIds } },
     select: { id: true, transportistaId: true },
   });
   if (rows.length !== vehiculoIds.length) {
-    throw new BadRequestException('Algún vehículo no existe o no pertenece a esta empresa.');
+    throw new BadRequestException(
+      "Algún vehículo no existe o no pertenece a esta empresa.",
+    );
   }
   if (opts.requiereFlotaPropia) {
     const bad = rows.some((r) => !!r.transportistaId?.trim());
     if (bad) {
       throw new BadRequestException(
-        'Solo se permiten vehículos de flota propia (sin transportista externo en su ficha).',
+        "Solo se permiten vehículos de flota propia (sin transportista externo en su ficha).",
       );
     }
   }
@@ -85,7 +90,7 @@ export function normalizarDestinosDelViaje(
   if (!raw?.length) return [];
   const out: Array<{ etiqueta: string }> = [];
   for (const item of raw) {
-    const etiqueta = String(item?.etiqueta ?? '').trim();
+    const etiqueta = String(item?.etiqueta ?? "").trim();
     if (!etiqueta) continue;
     out.push({ etiqueta });
   }
@@ -93,7 +98,9 @@ export function normalizarDestinosDelViaje(
 }
 
 /** Etiqueta del último destino (destino final de la ruta). */
-export function ultimoDestinoEtiqueta(destinos: Array<{ etiqueta: string }>): string | null {
+export function ultimoDestinoEtiqueta(
+  destinos: Array<{ etiqueta: string }>,
+): string | null {
   return destinos.length > 0 ? destinos[destinos.length - 1].etiqueta : null;
 }
 
@@ -118,41 +125,52 @@ export async function reemplazarDestinosDelViaje(
 export function idsProductosDelViaje(v: {
   productosViaje: Array<{ productoId: string; orden: number }>;
 }): string[] {
-  return [...v.productosViaje].sort((a, b) => a.orden - b.orden).map((x) => x.productoId);
+  return [...v.productosViaje]
+    .sort((a, b) => a.orden - b.orden)
+    .map((x) => x.productoId);
 }
 
 /** Args validados para el `include` de viajes con `vehiculosViaje` + `vehiculo` (exportado para que TS resuelva bien `ViajeGetPayload<typeof …>`). */
-export const viajeConVehiculosViajeArgs = Prisma.validator<Prisma.ViajeDefaultArgs>()({
-  include: {
-    cliente: { select: { id: true, nombre: true } },
-    chofer: {
-      select: { id: true, nombre: true, dni: true, cuit: true, telefono: true, transportistaId: true },
-    },
-    transportista: { select: { id: true, nombre: true } },
-    transportistaEfectivo: { select: { id: true, nombre: true } },
-    /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */
-    factura: { select: { id: true, numero: true } },
-    liquidacionesViaje: { select: { liquidacionId: true } },
-    productosViaje: {
-      orderBy: { orden: 'asc' },
-      include: {
-        producto: {
-          select: { id: true, nombre: true, activo: true },
+
+export const viajeConVehiculosViajeArgs =
+  Prisma.validator<Prisma.ViajeDefaultArgs>()({
+    include: {
+      cliente: { select: { id: true, nombre: true } },
+      chofer: {
+        select: {
+          id: true,
+          nombre: true,
+          dni: true,
+          cuit: true,
+          telefono: true,
+          transportistaId: true,
+        },
+      },
+      transportista: { select: { id: true, nombre: true } },
+      transportistaEfectivo: { select: { id: true, nombre: true } },
+      /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */
+      factura: { select: { id: true, numero: true } },
+      liquidacionesViaje: { select: { liquidacionId: true } },
+      productosViaje: {
+        orderBy: { orden: "asc" },
+        include: {
+          producto: {
+            select: { id: true, nombre: true, activo: true },
+          },
+        },
+      },
+
+      vehiculosViaje: {
+        include: {
+          vehiculo: true,
         },
       },
     },
-    vehiculosViaje: {
-      orderBy: { orden: 'asc' },
-      include: {
-        vehiculo: { select: { id: true, patente: true, tipo: true } },
-      },
-    },
-  },
-});
+  });
 
 /** Include de destinos (hasta que `prisma generate` incorpore la relación en el cliente). */
 export const viajeDestinosViajeInclude = {
-  orderBy: { orden: 'asc' as const },
+  orderBy: { orden: "asc" as const },
   select: { id: true, orden: true, etiqueta: true, createdAt: true },
 };
 
@@ -160,7 +178,9 @@ export const viajeDestinosViajeInclude = {
  * Viaje cargado con `vehiculosViaje` (cada fila incluye `vehiculo`).
  * Usar `Prisma.validator` + `typeof` para que `ViajeGetPayload` infiera bien (evita `vehiculosViaje: never[]` con un objeto literal suelto).
  */
-export type ViajeConVehiculosViaje = Prisma.ViajeGetPayload<typeof viajeConVehiculosViajeArgs> & {
+export type ViajeConVehiculosViaje = Prisma.ViajeGetPayload<
+  typeof viajeConVehiculosViajeArgs
+> & {
   destinosViaje?: Array<{
     id: string;
     orden: number;

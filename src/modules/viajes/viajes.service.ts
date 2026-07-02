@@ -2,19 +2,19 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { PrismaService } from '../../shared/prisma/prisma.service';
-import { ViajesAutoEstadoService } from './viajes-auto-estado.service';
-import { CreateViajeDto } from './dto/create-viaje.dto';
-import { AddGastoDto } from './dto/add-gasto.dto';
-import { AddPagoTransportistaDto } from './dto/add-pago-transportista.dto';
-import { generateNumeroViaje } from './generate-viaje-numero';
+} from "@nestjs/common";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+import { ViajesAutoEstadoService } from "./viajes-auto-estado.service";
+import { CreateViajeDto } from "./dto/create-viaje.dto";
+import { AddGastoDto } from "./dto/add-gasto.dto";
+import { AddPagoTransportistaDto } from "./dto/add-pago-transportista.dto";
+import { generateNumeroViaje } from "./generate-viaje-numero";
 import {
   assertTransportistaEfectivoSubcontratacion,
   mergeViajeOperacionIds,
   resolveContratanteRealizaFlete,
   resolveTransportistaEfectivoIdPersist,
-} from './viaje-operacion-exclusiva';
+} from "./viaje-operacion-exclusiva";
 import {
   assertVehiculosDelViaje,
   idsProductosDelViaje,
@@ -26,27 +26,27 @@ import {
   viajeDestinosViajeInclude,
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
   type ViajeConVehiculosViaje,
-} from './viaje-vehiculos.helper';
-import { UpdateViajeDto } from './dto/update-viaje.dto';
-import { ViajesPaginatedQueryDto } from './dto/viajes-paginated-query.dto';
-import { Prisma} from '@prisma/client';
+} from "./viaje-vehiculos.helper";
+import { UpdateViajeDto } from "./dto/update-viaje.dto";
+import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
+import { Prisma } from "@prisma/client";
 import {
   VIAJE_ESTADOS_SET,
   esEstadoViajeFinal,
   normalizarEstadoViaje,
   type ViajeEstado,
-} from './viaje-estados';
+} from "./viaje-estados";
 import {
   buildViajeExportacionesResponse,
   enrichViajeConExportaciones,
-} from './viaje-exportaciones.util';
+} from "./viaje-exportaciones.util";
 import {
   GananciaBrutaValidationError,
   buildGananciaBrutaResumen,
   enrichViajeConGananciaBruta,
   gananciaBrutaValorOrdenable,
   resolveGananciaBrutaPersist,
-} from './viaje-ganancia-bruta.util';
+} from "./viaje-ganancia-bruta.util";
 import {
   buildViajesPaginatedWhere,
   buildViajesPrismaOrderBy,
@@ -54,7 +54,7 @@ import {
   compareViajesOrdenNullable,
   resolveViajesSort,
   type ViajesSortDir,
-} from './viajes-paginated-query.util';
+} from "./viajes-paginated-query.util";
 
 /** Transacciones con varios writes + Neon pueden superar el default de 5s de Prisma. */
 const VIAJE_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
@@ -68,33 +68,37 @@ function resolveDestinosParaCreate(dto: CreateViajeDto): DestinoItem[] {
   if (fromArray.length > 0) return fromArray;
   const legacy = dto.destino?.trim();
   if (legacy) return [{ etiqueta: legacy }];
-  throw new BadRequestException('Ingresá al menos un destino.');
+  throw new BadRequestException("Ingresá al menos un destino.");
 }
 
-function resolveDestinosParaUpdate(dto: UpdateViajeDto): DestinoItem[] | undefined {
+function resolveDestinosParaUpdate(
+  dto: UpdateViajeDto,
+): DestinoItem[] | undefined {
   if (dto.destinos !== undefined) {
     const norm = normalizarDestinosDelViaje(dto.destinos);
     if (norm.length === 0) {
-      throw new BadRequestException('Ingresá al menos un destino.');
+      throw new BadRequestException("Ingresá al menos un destino.");
     }
     return norm;
   }
   if (dto.destino !== undefined) {
     const legacy = dto.destino?.trim();
     if (!legacy) {
-      throw new BadRequestException('El destino no puede estar vacío.');
+      throw new BadRequestException("El destino no puede estar vacío.");
     }
     return [{ etiqueta: legacy }];
   }
   return undefined;
 }
 
-function normalizarProductoItems(raw: ProductoItem[] | undefined | null): ProductoItem[] {
+function normalizarProductoItems(
+  raw: ProductoItem[] | undefined | null,
+): ProductoItem[] {
   if (!raw?.length) return [];
   const seen = new Set<string>();
   const out: ProductoItem[] = [];
   for (const item of raw) {
-    const id = String(item.productoId ?? '').trim();
+    const id = String(item.productoId ?? "").trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
     out.push({ productoId: id, cantidad: item.cantidad, pesoKg: item.pesoKg });
@@ -106,7 +110,7 @@ async function assertProductosAsignables(
   prisma: PrismaService,
   tenantId: string,
   items: ProductoItem[],
-  opts: { modo: 'create' | 'update'; currentProductoIds?: ReadonlySet<string> },
+  opts: { modo: "create" | "update"; currentProductoIds?: ReadonlySet<string> },
 ): Promise<void> {
   if (items.length === 0) return;
   const ids = items.map((i) => i.productoId);
@@ -115,27 +119,32 @@ async function assertProductosAsignables(
     select: { id: true, activo: true },
   });
   if (rows.length !== ids.length) {
-    throw new BadRequestException('Algún producto no existe o no pertenece a esta empresa.');
+    throw new BadRequestException(
+      "Algún producto no existe o no pertenece a esta empresa.",
+    );
   }
   const current = opts.currentProductoIds ?? new Set<string>();
   for (const row of rows) {
     if (!row.activo) {
-      const conserva = opts.modo === 'update' && current.has(row.id);
-      if (opts.modo === 'create' || !conserva) {
+      const conserva = opts.modo === "update" && current.has(row.id);
+      if (opts.modo === "create" || !conserva) {
         throw new BadRequestException(
-          'Ese producto está inactivo. Elegí otro o reactivalo desde Productos.',
+          "Ese producto está inactivo. Elegí otro o reactivalo desde Productos.",
         );
       }
     }
   }
 }
 
-function assertFechaDescargaValida(fechaCarga: Date, fechaDescarga: Date): void {
+function assertFechaDescargaValida(
+  fechaCarga: Date,
+  fechaDescarga: Date,
+): void {
   const fc = new Date(fechaCarga.toISOString().slice(0, 10));
   const fd = new Date(fechaDescarga.toISOString().slice(0, 10));
   if (fd < fc) {
     throw new BadRequestException(
-      'La fecha de descarga no puede ser anterior a la fecha de carga.',
+      "La fecha de descarga no puede ser anterior a la fecha de carga.",
     );
   }
 }
@@ -151,7 +160,7 @@ export class ViajesService {
   private parseEstadoViaje(estado: string): ViajeEstado {
     const n = normalizarEstadoViaje(estado);
     if (!VIAJE_ESTADOS_SET.has(n)) {
-      throw new BadRequestException('Estado de viaje inválido');
+      throw new BadRequestException("Estado de viaje inválido");
     }
     return n as ViajeEstado;
   }
@@ -174,15 +183,20 @@ export class ViajesService {
       gananciaBrutaManual?: number | null;
       monedaGananciaBrutaManual?: string | null;
     },
-  ): { gananciaBrutaManual: number | null; monedaGananciaBrutaManual: string | null } {
+  ): {
+    gananciaBrutaManual: number | null;
+    monedaGananciaBrutaManual: string | null;
+  } {
     try {
       return resolveGananciaBrutaPersist(
         {
           monto: viaje.monto,
           monedaMonto: dto.monedaMonto ?? viaje.monedaMonto,
           monedaPrecioTransportistaExterno:
-            dto.monedaPrecioTransportistaExterno ?? viaje.monedaPrecioTransportistaExterno,
-          otrosGastos: dto.otrosGastos !== undefined ? dto.otrosGastos : viaje.otrosGastos,
+            dto.monedaPrecioTransportistaExterno ??
+            viaje.monedaPrecioTransportistaExterno,
+          otrosGastos:
+            dto.otrosGastos !== undefined ? dto.otrosGastos : viaje.otrosGastos,
         },
         {
           gananciaBrutaManual: dto.gananciaBrutaManual,
@@ -198,21 +212,25 @@ export class ViajesService {
     }
   }
 
-  private getMontoFinal(viaje: { monto: number | null; monedaMonto?: string | null; otrosGastos?: unknown }) {
+  private getMontoFinal(viaje: {
+    monto: number | null;
+    monedaMonto?: string | null;
+    otrosGastos?: unknown;
+  }) {
     const monto = viaje.monto;
     if (monto == null || monto <= 0) {
       throw new BadRequestException(
-        'Para finalizar un viaje se requiere un monto mayor a 0',
+        "Para finalizar un viaje se requiere un monto mayor a 0",
       );
     }
     // Sumar otrosGastos en la misma moneda que monto
-    const moneda = (viaje.monedaMonto ?? 'ARS') === 'USD' ? 'USD' : 'ARS';
+    const moneda = (viaje.monedaMonto ?? "ARS") === "USD" ? "USD" : "ARS";
     const gastos = Array.isArray(viaje.otrosGastos)
       ? (viaje.otrosGastos as Array<{ monto?: number; moneda?: string }>)
       : [];
     const extraMismaMmoneda = gastos
-      .filter((g) => ((g.moneda ?? 'ARS') === 'USD' ? 'USD' : 'ARS') === moneda)
-      .reduce((acc, g) => acc + (typeof g.monto === 'number' ? g.monto : 0), 0);
+      .filter((g) => ((g.moneda ?? "ARS") === "USD" ? "USD" : "ARS") === moneda)
+      .reduce((acc, g) => acc + (typeof g.monto === "number" ? g.monto : 0), 0);
     return monto + extraMismaMmoneda;
   }
 
@@ -228,22 +246,25 @@ export class ViajesService {
     if (pagos.length === 0) return;
 
     if (!params.transportistaId) {
-      throw new BadRequestException('Este viaje no tiene transportista externo asignado.');
+      throw new BadRequestException(
+        "Este viaje no tiene transportista externo asignado.",
+      );
     }
 
     const monedaAcordada =
-      params.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
+      params.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
     const totalAcordado = params.precioTransportistaExterno ?? 0;
     const totalPagado = pagos
-      .filter((p) => (p.moneda === 'USD' ? 'USD' : 'ARS') === monedaAcordada)
+      .filter((p) => (p.moneda === "USD" ? "USD" : "ARS") === monedaAcordada)
       .reduce((acc, p) => {
-        const monto = typeof p.monto === 'number' && Number.isFinite(p.monto) ? p.monto : 0;
+        const monto =
+          typeof p.monto === "number" && Number.isFinite(p.monto) ? p.monto : 0;
         return acc + monto;
       }, 0);
 
     if (totalPagado > totalAcordado + 1e-6) {
       throw new BadRequestException(
-        'El monto del pago no puede superar el saldo pendiente del viaje',
+        "El monto del pago no puede superar el saldo pendiente del viaje",
       );
     }
   }
@@ -274,8 +295,8 @@ export class ViajesService {
       },
       update: {
         clienteId: viaje.clienteId,
-        tipo: 'cargo',
-        origen: 'viaje',
+        tipo: "cargo",
+        origen: "viaje",
         concepto,
         importe: monto,
         fecha,
@@ -285,8 +306,8 @@ export class ViajesService {
         tenantId: viaje.tenantId,
         clienteId: viaje.clienteId,
         viajeId: viaje.id,
-        tipo: 'cargo',
-        origen: 'viaje',
+        tipo: "cargo",
+        origen: "viaje",
         concepto,
         importe: monto,
         fecha,
@@ -295,44 +316,59 @@ export class ViajesService {
     });
   }
 
-  private async assertRefs(tenantId: string, dto: {
-    clienteId: string;
-    transportistaId?: string | null;
-    choferId?: string | null;
-    transportistaEfectivoId?: string | null;
-  }) {
+  private async assertRefs(
+    tenantId: string,
+    dto: {
+      clienteId: string;
+      transportistaId?: string | null;
+      choferId?: string | null;
+      transportistaEfectivoId?: string | null;
+    },
+  ) {
     const [c, t, ch, te] = await Promise.all([
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
       dto.transportistaId
-        ? this.prisma.transportista.findFirst({ where: { id: dto.transportistaId, tenantId } })
+        ? this.prisma.transportista.findFirst({
+            where: { id: dto.transportistaId, tenantId },
+          })
         : null,
       dto.choferId
-        ? this.prisma.chofer.findFirst({ where: { id: dto.choferId, tenantId } })
+        ? this.prisma.chofer.findFirst({
+            where: { id: dto.choferId, tenantId },
+          })
         : null,
       dto.transportistaEfectivoId
-        ? this.prisma.transportista.findFirst({ where: { id: dto.transportistaEfectivoId, tenantId } })
+        ? this.prisma.transportista.findFirst({
+            where: { id: dto.transportistaEfectivoId, tenantId },
+          })
         : null,
     ]);
 
-    if (!c) throw new BadRequestException('Cliente inválido para este tenant');
-    if (dto.transportistaId && !t) throw new BadRequestException('Transportista inválido');
-    if (dto.choferId && !ch) throw new BadRequestException('Chofer inválido');
+    if (!c) throw new BadRequestException("Cliente inválido para este tenant");
+    if (dto.transportistaId && !t)
+      throw new BadRequestException("Transportista inválido");
+    if (dto.choferId && !ch) throw new BadRequestException("Chofer inválido");
     if (dto.transportistaEfectivoId && !te)
-      throw new BadRequestException('Transportista efectivo inválido');
-    if (dto.transportistaEfectivoId && dto.transportistaEfectivoId === dto.transportistaId)
-      throw new BadRequestException('El transportista efectivo no puede ser el mismo que el contratante');
+      throw new BadRequestException("Transportista efectivo inválido");
+    if (
+      dto.transportistaEfectivoId &&
+      dto.transportistaEfectivoId === dto.transportistaId
+    )
+      throw new BadRequestException(
+        "El transportista efectivo no puede ser el mismo que el contratante",
+      );
   }
 
   async findAll(tenantId: string, estado?: string) {
     return this.prisma.viaje.findMany({
       where: { tenantId, ...(estado ? { estado: estado } : {}) },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: 200,
       include: {
-        cliente:              { select: { id: true, nombre: true } },
-        transportista:        { select: { id: true, nombre: true } },
+        cliente: { select: { id: true, nombre: true } },
+        transportista: { select: { id: true, nombre: true } },
         transportistaEfectivo: { select: { id: true, nombre: true } },
-        factura:              { select: { id: true, numero: true } },
+        factura: { select: { id: true, numero: true } },
         destinosViaje: viajeDestinosViajeInclude,
       } as any,
     });
@@ -355,28 +391,44 @@ export class ViajesService {
       saldoViajes,
     ] = await Promise.all([
       this.prisma.viaje.groupBy({
-        by: ['estado'],
+        by: ["estado"],
         where: { tenantId },
         _count: { _all: true },
       }),
       this.prisma.viaje.aggregate({
-        where: { ...baseWhere, monto: { not: null }, monedaMonto: { not: 'USD' } },
+        where: {
+          ...baseWhere,
+          monto: { not: null },
+          monedaMonto: { not: "USD" },
+        },
         _sum: { monto: true },
       }),
       this.prisma.viaje.aggregate({
-        where: { ...baseWhere, monto: { not: null }, monedaMonto: 'USD' },
+        where: { ...baseWhere, monto: { not: null }, monedaMonto: "USD" },
         _sum: { monto: true },
       }),
       this.prisma.viaje.aggregate({
-        where: { ...baseWhere, precioTransportistaExterno: { not: null }, monedaPrecioTransportistaExterno: { not: 'USD' } },
+        where: {
+          ...baseWhere,
+          precioTransportistaExterno: { not: null },
+          monedaPrecioTransportistaExterno: { not: "USD" },
+        },
         _sum: { precioTransportistaExterno: true },
       }),
       this.prisma.viaje.aggregate({
-        where: { ...baseWhere, precioTransportistaExterno: { not: null }, monedaPrecioTransportistaExterno: 'USD' },
+        where: {
+          ...baseWhere,
+          precioTransportistaExterno: { not: null },
+          monedaPrecioTransportistaExterno: "USD",
+        },
         _sum: { precioTransportistaExterno: true },
       }),
       this.prisma.viaje.findMany({
-        where: { tenantId, transportistaId: { not: null }, precioTransportistaExterno: { gt: 0 } },
+        where: {
+          tenantId,
+          transportistaId: { not: null },
+          precioTransportistaExterno: { gt: 0 },
+        },
         select: {
           precioTransportistaExterno: true,
           monedaPrecioTransportistaExterno: true,
@@ -388,17 +440,23 @@ export class ViajesService {
     let pendienteARS = 0;
     let pendienteUSD = 0;
     for (const v of saldoViajes) {
-      const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
+      const moneda =
+        v.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
       const acordado = v.precioTransportistaExterno ?? 0;
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
         : [];
       const pagado = pagos
-        .filter((p) => ((p.moneda ?? 'ARS') === 'USD' ? 'USD' : 'ARS') === moneda)
-        .reduce((sum, p) => sum + (typeof p.monto === 'number' ? p.monto : 0), 0);
+        .filter(
+          (p) => ((p.moneda ?? "ARS") === "USD" ? "USD" : "ARS") === moneda,
+        )
+        .reduce(
+          (sum, p) => sum + (typeof p.monto === "number" ? p.monto : 0),
+          0,
+        );
       const saldo = acordado - pagado;
       if (saldo > 0) {
-        if (moneda === 'ARS') pendienteARS += saldo;
+        if (moneda === "ARS") pendienteARS += saldo;
         else pendienteUSD += saldo;
       }
     }
@@ -424,19 +482,33 @@ export class ViajesService {
     await this.autoEstado.actualizarEstadosPorFecha(tenantId);
 
     const page = Math.max(1, Math.floor(Number(query.page) || 1));
-    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(query.pageSize) || 10)));
+    const pageSize = Math.min(
+      100,
+      Math.max(1, Math.floor(Number(query.pageSize) || 10)),
+    );
     const where = buildViajesPaginatedWhere(tenantId, query);
     const { sortBy, sortDir } = resolveViajesSort(query);
 
-    if (sortBy === 'ganancia_bruta') {
-      return this.findAllPaginatedOrdenGananciaBruta(where, page, pageSize, sortDir);
+    if (sortBy === "ganancia_bruta") {
+      return this.findAllPaginatedOrdenGananciaBruta(
+        where,
+        page,
+        pageSize,
+        sortDir,
+      );
     }
 
-    if (sortBy === 'fecha_carga' || sortBy === 'fecha_descarga') {
-      return this.findAllPaginatedOrdenFecha(where, page, pageSize, sortBy, sortDir);
+    if (sortBy === "fecha_carga" || sortBy === "fecha_descarga") {
+      return this.findAllPaginatedOrdenFecha(
+        where,
+        page,
+        pageSize,
+        sortBy,
+        sortDir,
+      );
     }
 
-    if (sortBy === 'monto') {
+    if (sortBy === "monto") {
       return this.findAllPaginatedOrdenMonto(where, page, pageSize, sortDir);
     }
 
@@ -469,10 +541,11 @@ export class ViajesService {
     where: Prisma.ViajeWhereInput,
     page: number,
     pageSize: number,
-    sortBy: 'fecha_carga' | 'fecha_descarga',
+    sortBy: "fecha_carga" | "fecha_descarga",
     sortDir: ViajesSortDir,
   ) {
-    const prismaField = sortBy === 'fecha_carga' ? 'fechaCarga' : 'fechaDescarga';
+    const prismaField =
+      sortBy === "fecha_carga" ? "fechaCarga" : "fechaDescarga";
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.viaje.count({ where }),
       this.prisma.viaje.findMany({
@@ -493,7 +566,13 @@ export class ViajesService {
       )
       .map((row) => row.id);
 
-    return this.findAllPaginatedPageFromSortedIds(where, sortedIds, total, page, pageSize);
+    return this.findAllPaginatedPageFromSortedIds(
+      where,
+      sortedIds,
+      total,
+      page,
+      pageSize,
+    );
   }
 
   private async findAllPaginatedOrdenMonto(
@@ -519,7 +598,13 @@ export class ViajesService {
       )
       .map((row) => row.id);
 
-    return this.findAllPaginatedPageFromSortedIds(where, sortedIds, total, page, pageSize);
+    return this.findAllPaginatedPageFromSortedIds(
+      where,
+      sortedIds,
+      total,
+      page,
+      pageSize,
+    );
   }
 
   private async findAllPaginatedOrdenGananciaBruta(
@@ -554,7 +639,13 @@ export class ViajesService {
       )
       .map((row) => row.id);
 
-    return this.findAllPaginatedPageFromSortedIds(where, sortedIds, total, page, pageSize);
+    return this.findAllPaginatedPageFromSortedIds(
+      where,
+      sortedIds,
+      total,
+      page,
+      pageSize,
+    );
   }
 
   private async findAllPaginatedPageFromSortedIds(
@@ -596,7 +687,7 @@ export class ViajesService {
       where: { id, tenantId },
       include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
     });
-    if (!row) throw new NotFoundException('Viaje no encontrado');
+    if (!row) throw new NotFoundException("Viaje no encontrado");
     return enrichViajeConGananciaBruta(
       enrichViajeConExportaciones(row as unknown as ViajeConVehiculosViaje),
     ) as ViajeConVehiculosViaje;
@@ -615,7 +706,7 @@ export class ViajesService {
         monedaGananciaBrutaManual: true,
       },
     });
-    if (!row) throw new NotFoundException('Viaje no encontrado');
+    if (!row) throw new NotFoundException("Viaje no encontrado");
     return buildGananciaBrutaResumen(row);
   }
 
@@ -624,7 +715,7 @@ export class ViajesService {
       where: { id, tenantId },
       select: { id: true, numero: true, transportistaId: true },
     });
-    if (!row) throw new NotFoundException('Viaje no encontrado');
+    if (!row) throw new NotFoundException("Viaje no encontrado");
     return buildViajeExportacionesResponse(row);
   }
 
@@ -640,7 +731,8 @@ export class ViajesService {
     const transportistaExterno = op.transportistaId?.trim();
     const vehiculoIds = op.vehiculoIds;
     const contratanteRealizaFlete =
-      dto.contratanteRealizaFlete === true || dto.contratanteRealizaFlete === false
+      dto.contratanteRealizaFlete === true ||
+      dto.contratanteRealizaFlete === false
         ? dto.contratanteRealizaFlete
         : resolveContratanteRealizaFlete({
             flag: dto.contratanteRealizaFlete,
@@ -649,7 +741,7 @@ export class ViajesService {
           });
     const transportistaEfectivoId =
       dto.contratanteRealizaFlete === false
-        ? (dto.transportistaEfectivoId ?? '').trim() || null
+        ? (dto.transportistaEfectivoId ?? "").trim() || null
         : dto.contratanteRealizaFlete === true
           ? null
           : resolveTransportistaEfectivoIdPersist({
@@ -680,13 +772,16 @@ export class ViajesService {
     }
     const productoItemsNorm = normalizarProductoItems(dto.productoItems);
     await assertProductosAsignables(this.prisma, tenantId, productoItemsNorm, {
-      modo: 'create',
+      modo: "create",
     });
-    assertFechaDescargaValida(new Date(dto.fechaCarga), new Date(dto.fechaDescarga));
+    assertFechaDescargaValida(
+      new Date(dto.fechaCarga),
+      new Date(dto.fechaDescarga),
+    );
     const estado = this.parseEstadoViaje(dto.estado);
     if (esEstadoViajeFinal(estado)) {
       throw new BadRequestException(
-        'Un viaje no puede crearse en un estado final',
+        "Un viaje no puede crearse en un estado final",
       );
     }
     const precioTransportistaExterno = dto.precioTransportistaExterno;
@@ -727,20 +822,29 @@ export class ViajesService {
         kmRecorridos: dto.kmRecorridos ?? null,
         litrosConsumidos: dto.litrosConsumidos ?? null,
         monto: dto.monto,
-        monedaMonto: dto.monedaMonto === 'USD' ? 'USD' : 'ARS',
+        monedaMonto: dto.monedaMonto === "USD" ? "USD" : "ARS",
         precioTransportistaExterno: precioTransportistaExterno ?? null,
         monedaPrecioTransportistaExterno:
-          dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS',
+          dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS",
         gananciaBrutaManual: gananciaPersist.gananciaBrutaManual,
         monedaGananciaBrutaManual: gananciaPersist.monedaGananciaBrutaManual,
         observaciones: dto.observaciones ?? null,
-        otrosGastos: dto.otrosGastos ? (dto.otrosGastos as unknown as Prisma.InputJsonValue) : [],
-        pagosTransportista: dto.pagosTransportista ? (dto.pagosTransportista as unknown as Prisma.InputJsonValue) : [],
+        otrosGastos: dto.otrosGastos
+          ? (dto.otrosGastos as unknown as Prisma.InputJsonValue)
+          : [],
+        pagosTransportista: dto.pagosTransportista
+          ? (dto.pagosTransportista as unknown as Prisma.InputJsonValue)
+          : [],
         createdBy: userId,
       };
       const viaje = await tx.viaje.create({ data });
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
-      await reemplazarProductosDelViaje(tx, viaje.id, productoItemsNorm, tenantId);
+      await reemplazarProductosDelViaje(
+        tx,
+        viaje.id,
+        productoItemsNorm,
+        tenantId,
+      );
       await reemplazarDestinosDelViaje(tx, viaje.id, destinosNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id, tenantId },
@@ -766,7 +870,8 @@ export class ViajesService {
     const currentTeId = (current as { transportistaEfectivoId?: string | null })
       .transportistaEfectivoId;
     const contratanteRealizaFlete =
-      dto.contratanteRealizaFlete === true || dto.contratanteRealizaFlete === false
+      dto.contratanteRealizaFlete === true ||
+      dto.contratanteRealizaFlete === false
         ? dto.contratanteRealizaFlete
         : resolveContratanteRealizaFlete({
             flag: dto.contratanteRealizaFlete,
@@ -777,7 +882,7 @@ export class ViajesService {
     const transportistaEfectivoIdUpdate = !op.transportistaId
       ? null
       : dto.contratanteRealizaFlete === false
-        ? (dto.transportistaEfectivoId ?? '').trim() || null
+        ? (dto.transportistaEfectivoId ?? "").trim() || null
         : dto.contratanteRealizaFlete === true
           ? null
           : resolveTransportistaEfectivoIdPersist({
@@ -799,12 +904,17 @@ export class ViajesService {
     };
     await this.assertRefs(tenantId, merged);
     if (dto.fechaCarga !== undefined && !dto.fechaCarga)
-      throw new BadRequestException('La fecha de carga es requerida');
+      throw new BadRequestException("La fecha de carga es requerida");
     if (dto.fechaDescarga !== undefined && !dto.fechaDescarga)
-      throw new BadRequestException('La fecha de descarga es requerida');
-    const fcResolved = dto.fechaCarga ? new Date(dto.fechaCarga) : current.fechaCarga;
-    const fdResolved = dto.fechaDescarga ? new Date(dto.fechaDescarga) : current.fechaDescarga;
-    if (fcResolved && fdResolved) assertFechaDescargaValida(fcResolved, fdResolved);
+      throw new BadRequestException("La fecha de descarga es requerida");
+    const fcResolved = dto.fechaCarga
+      ? new Date(dto.fechaCarga)
+      : current.fechaCarga;
+    const fdResolved = dto.fechaDescarga
+      ? new Date(dto.fechaDescarga)
+      : current.fechaDescarga;
+    if (fcResolved && fdResolved)
+      assertFechaDescargaValida(fcResolved, fdResolved);
     if (!op.transportistaId) {
       await assertVehiculosDelViaje(this.prisma, tenantId, op.vehiculoIds, {
         requiereFlotaPropia: true,
@@ -814,7 +924,7 @@ export class ViajesService {
     if (dto.productoItems !== undefined) {
       const nextProductos = normalizarProductoItems(dto.productoItems);
       await assertProductosAsignables(this.prisma, tenantId, nextProductos, {
-        modo: 'update',
+        modo: "update",
         currentProductoIds: new Set(idsProductosDelViaje(current)),
       });
     }
@@ -825,23 +935,25 @@ export class ViajesService {
         ? precioTransportistaExternoInput
         : current.precioTransportistaExterno;
     const monedaPrecioTransportistaExternoResolved =
-      dto.monedaPrecioTransportistaExterno ?? current.monedaPrecioTransportistaExterno;
+      dto.monedaPrecioTransportistaExterno ??
+      current.monedaPrecioTransportistaExterno;
     const pagosTransportistaResolved =
-      dto.pagosTransportista !== undefined ? dto.pagosTransportista : current.pagosTransportista;
+      dto.pagosTransportista !== undefined
+        ? dto.pagosTransportista
+        : current.pagosTransportista;
     const currentNorm = this.parseEstadoViaje(
-      current.estado != null && String(current.estado).trim() !== ''
+      current.estado != null && String(current.estado).trim() !== ""
         ? String(current.estado)
-        : 'pendiente',
+        : "pendiente",
     );
     const estadoSiguiente =
-      dto.estado != null && String(dto.estado).trim() !== ''
+      dto.estado != null && String(dto.estado).trim() !== ""
         ? this.parseEstadoViaje(String(dto.estado))
         : currentNorm;
 
     const data: Prisma.ViajeUpdateInput = {
       ...dto,
-      monto:
-        dto.monto !== undefined ? dto.monto : current.monto ?? undefined,
+      monto: dto.monto !== undefined ? dto.monto : (current.monto ?? undefined),
       fechaCarga:
         dto.fechaCarga === undefined
           ? undefined
@@ -858,24 +970,29 @@ export class ViajesService {
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
     delete (data as { productoItems?: unknown }).productoItems;
     delete (data as { destinos?: unknown }).destinos;
-    delete (data as { contratanteRealizaFlete?: unknown }).contratanteRealizaFlete;
-    delete (data as { transportistaEfectivoId?: unknown }).transportistaEfectivoId;
+    delete (data as { contratanteRealizaFlete?: unknown })
+      .contratanteRealizaFlete;
+    delete (data as { transportistaEfectivoId?: unknown })
+      .transportistaEfectivoId;
     if (dto.otrosGastos !== undefined) {
-      (data as any).otrosGastos = dto.otrosGastos as unknown as Prisma.InputJsonValue;
+      (data as any).otrosGastos =
+        dto.otrosGastos as unknown as Prisma.InputJsonValue;
     }
     if (dto.pagosTransportista !== undefined) {
-      (data as any).pagosTransportista = dto.pagosTransportista as unknown as Prisma.InputJsonValue;
+      (data as any).pagosTransportista =
+        dto.pagosTransportista as unknown as Prisma.InputJsonValue;
     }
 
     if (precioTransportistaExternoInput !== undefined) {
-      (data as any).precioTransportistaExterno = precioTransportistaExternoInput;
+      (data as any).precioTransportistaExterno =
+        precioTransportistaExternoInput;
     }
     if (dto.monedaMonto !== undefined) {
-      (data as any).monedaMonto = dto.monedaMonto === 'USD' ? 'USD' : 'ARS';
+      (data as any).monedaMonto = dto.monedaMonto === "USD" ? "USD" : "ARS";
     }
     if (dto.monedaPrecioTransportistaExterno !== undefined) {
       (data as any).monedaPrecioTransportistaExterno =
-        dto.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
+        dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
     }
     if (
       !esEstadoViajeFinal(currentNorm) &&
@@ -892,10 +1009,12 @@ export class ViajesService {
     const gananciaPersist = this.applyGananciaBrutaFields(
       {
         monto: (data as { monto?: number }).monto ?? current.monto,
-        monedaMonto: (data as { monedaMonto?: string }).monedaMonto ?? current.monedaMonto,
+        monedaMonto:
+          (data as { monedaMonto?: string }).monedaMonto ?? current.monedaMonto,
         monedaPrecioTransportistaExterno:
           (data as { monedaPrecioTransportistaExterno?: string })
-            .monedaPrecioTransportistaExterno ?? current.monedaPrecioTransportistaExterno,
+            .monedaPrecioTransportistaExterno ??
+          current.monedaPrecioTransportistaExterno,
         otrosGastos:
           dto.otrosGastos !== undefined ? dto.otrosGastos : current.otrosGastos,
       },
@@ -912,9 +1031,12 @@ export class ViajesService {
       },
     );
     delete (data as { gananciaBrutaManual?: unknown }).gananciaBrutaManual;
-    delete (data as { monedaGananciaBrutaManual?: unknown }).monedaGananciaBrutaManual;
+    delete (data as { monedaGananciaBrutaManual?: unknown })
+      .monedaGananciaBrutaManual;
     (data as any).gananciaBrutaManual = gananciaPersist.gananciaBrutaManual;
-    (data as any).monedaGananciaBrutaManual = gananciaPersist.monedaGananciaBrutaManual;
+
+    (data as any).monedaGananciaBrutaManual =
+      gananciaPersist.monedaGananciaBrutaManual;
     if (!op.transportistaId) {
       (data as any).pagosTransportista = [];
     } else if (
@@ -925,7 +1047,8 @@ export class ViajesService {
       this.assertPagosTransportistaNoSuperanSaldo({
         transportistaId: op.transportistaId,
         precioTransportistaExterno: precioTransportistaExternoResolved,
-        monedaPrecioTransportistaExterno: monedaPrecioTransportistaExternoResolved,
+        monedaPrecioTransportistaExterno:
+          monedaPrecioTransportistaExternoResolved,
         pagosTransportista: pagosTransportistaResolved,
       });
     }
@@ -963,13 +1086,18 @@ export class ViajesService {
     }, VIAJE_INTERACTIVE_TX);
   }
 
-  async addGasto(id: string, tenantId: string, userId: string, dto: AddGastoDto) {
+  async addGasto(
+    id: string,
+    tenantId: string,
+    userId: string,
+    dto: AddGastoDto,
+  ) {
     const viaje = await this.findOne(id, tenantId);
 
-    const ESTADOS_BLOQUEADOS = ['facturado_sin_cobrar', 'cobrado', 'cancelado'];
+    const ESTADOS_BLOQUEADOS = ["facturado_sin_cobrar", "cobrado", "cancelado"];
     if (ESTADOS_BLOQUEADOS.includes(viaje.estado)) {
       throw new BadRequestException(
-        'No se pueden agregar gastos a un viaje facturado o cancelado.',
+        "No se pueden agregar gastos a un viaje facturado o cancelado.",
       );
     }
 
@@ -990,7 +1118,9 @@ export class ViajesService {
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id },
-        data: { otrosGastos: gastosActualizados as unknown as Prisma.InputJsonValue },
+        data: {
+          otrosGastos: gastosActualizados as unknown as Prisma.InputJsonValue,
+        },
       });
 
       const full = (await tx.viaje.findFirstOrThrow({
@@ -1006,14 +1136,23 @@ export class ViajesService {
     }, VIAJE_INTERACTIVE_TX);
   }
 
-  async addPagoTransportista(id: string, tenantId: string, userId: string, dto: AddPagoTransportistaDto) {
+  async addPagoTransportista(
+    id: string,
+    tenantId: string,
+    userId: string,
+    dto: AddPagoTransportistaDto,
+  ) {
     const viaje = await this.findOne(id, tenantId);
 
-    if (viaje.estado === 'cancelado') {
-      throw new BadRequestException('No se pueden registrar pagos en un viaje cancelado.');
+    if (viaje.estado === "cancelado") {
+      throw new BadRequestException(
+        "No se pueden registrar pagos en un viaje cancelado.",
+      );
     }
     if (!viaje.transportistaId) {
-      throw new BadRequestException('Este viaje no tiene transportista externo asignado.');
+      throw new BadRequestException(
+        "Este viaje no tiene transportista externo asignado.",
+      );
     }
 
     const pagosActuales = Array.isArray(viaje.pagosTransportista)
@@ -1027,7 +1166,8 @@ export class ViajesService {
       createdBy: userId,
       createdAt: new Date().toISOString(),
     };
-    if (dto.observaciones?.trim()) nuevoPago.observaciones = dto.observaciones.trim();
+    if (dto.observaciones?.trim())
+      nuevoPago.observaciones = dto.observaciones.trim();
     if (dto.comprobante?.trim()) nuevoPago.comprobante = dto.comprobante.trim();
 
     const pagosActualizados = [...pagosActuales, nuevoPago];
@@ -1041,7 +1181,10 @@ export class ViajesService {
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id },
-        data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
+        data: {
+          pagosTransportista:
+            pagosActualizados as unknown as Prisma.InputJsonValue,
+        },
       });
       return (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
@@ -1050,14 +1193,23 @@ export class ViajesService {
     }, VIAJE_INTERACTIVE_TX);
   }
 
-  async deletePagoTransportista(id: string, tenantId: string, userId: string, index: number) {
+  async deletePagoTransportista(
+    id: string,
+    tenantId: string,
+    userId: string,
+    index: number,
+  ) {
     const viaje = await this.findOne(id, tenantId);
 
-    if (viaje.estado === 'cancelado') {
-      throw new BadRequestException('No se pueden eliminar pagos en un viaje cancelado.');
+    if (viaje.estado === "cancelado") {
+      throw new BadRequestException(
+        "No se pueden eliminar pagos en un viaje cancelado.",
+      );
     }
     if (!viaje.transportistaId) {
-      throw new BadRequestException('Este viaje no tiene transportista externo asignado.');
+      throw new BadRequestException(
+        "Este viaje no tiene transportista externo asignado.",
+      );
     }
 
     const pagosActuales = Array.isArray(viaje.pagosTransportista)
@@ -1065,7 +1217,7 @@ export class ViajesService {
       : [];
 
     if (index < 0 || index >= pagosActuales.length) {
-      throw new BadRequestException('Pago inválido.');
+      throw new BadRequestException("Pago inválido.");
     }
 
     const pagosActualizados = pagosActuales.filter((_, idx) => idx !== index);
@@ -1073,7 +1225,10 @@ export class ViajesService {
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id },
-        data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
+        data: {
+          pagosTransportista:
+            pagosActualizados as unknown as Prisma.InputJsonValue,
+        },
       });
       return (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
@@ -1084,8 +1239,12 @@ export class ViajesService {
 
   async getViajesSaldoPendienteTransportista(tenantId: string) {
     const viajes = await this.prisma.viaje.findMany({
-      where: { tenantId, transportistaId: { not: null }, precioTransportistaExterno: { gt: 0 } },
-      orderBy: { createdAt: 'desc' },
+      where: {
+        tenantId,
+        transportistaId: { not: null },
+        precioTransportistaExterno: { gt: 0 },
+      },
+      orderBy: { createdAt: "desc" },
       include: {
         cliente: { select: { id: true, nombre: true } },
         transportista: { select: { id: true, nombre: true } },
@@ -1094,14 +1253,20 @@ export class ViajesService {
     });
 
     return viajes.filter((v) => {
-      const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
+      const moneda =
+        v.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
       const acordado = v.precioTransportistaExterno ?? 0;
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
         : [];
       const pagado = pagos
-        .filter((p) => ((p.moneda ?? 'ARS') === 'USD' ? 'USD' : 'ARS') === moneda)
-        .reduce((acc, p) => acc + (typeof p.monto === 'number' ? p.monto : 0), 0);
+        .filter(
+          (p) => ((p.moneda ?? "ARS") === "USD" ? "USD" : "ARS") === moneda,
+        )
+        .reduce(
+          (acc, p) => acc + (typeof p.monto === "number" ? p.monto : 0),
+          0,
+        );
       return pagado < acordado;
     });
   }

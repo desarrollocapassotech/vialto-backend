@@ -166,11 +166,16 @@ export function buildViajesPaginatedWhere(
     const hoy = inicioHoyArgentina();
     const periodoRange: Prisma.DateTimeNullableFilter =
       periodo === 'desde_hoy' ? { gte: hoy } : { lt: hoy };
-    const existing = where.fechaCarga;
+    const periodoField =
+      tipoFecha === 'descarga' ? 'fechaDescarga' : 'fechaCarga';
+    const existing = where[periodoField];
     if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
-      where.fechaCarga = { ...(existing as Prisma.DateTimeNullableFilter), ...periodoRange };
+      where[periodoField] = {
+        ...(existing as Prisma.DateTimeNullableFilter),
+        ...periodoRange,
+      };
     } else {
-      where.fechaCarga = periodoRange;
+      where[periodoField] = periodoRange;
     }
   }
 

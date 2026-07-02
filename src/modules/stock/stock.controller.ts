@@ -391,6 +391,7 @@ export class StockController {
   @Roles("admin", "member", "superadmin")
   listEgresos(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query("clienteId") clienteId?: string,
     @Query("productoId") productoId?: string,
     @Query("depositoId") depositoId?: string,
@@ -400,6 +401,7 @@ export class StockController {
     assertTenantId(auth.tenantId);
     return this.service.listEgresos(
       auth.tenantId,
+      query,
       clienteId,
       productoId,
       depositoId,
@@ -463,6 +465,7 @@ export class StockController {
   @Roles("admin", "member", "superadmin")
   listIngresos(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query("clienteId") clienteId?: string,
     @Query("productoId") productoId?: string,
     @Query("depositoId") depositoId?: string,
@@ -472,6 +475,7 @@ export class StockController {
     assertTenantId(auth.tenantId);
     return this.service.listIngresos(
       auth.tenantId,
+      query,
       clienteId,
       productoId,
       depositoId,

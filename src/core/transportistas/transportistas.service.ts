@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateTransportistaDto } from './dto/create-transportista.dto';
 import { UpdateTransportistaDto } from './dto/update-transportista.dto';
+import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
 
 @Injectable()
@@ -13,6 +14,32 @@ export class TransportistasService {
       where: { tenantId },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async findAllPaginated(tenantId: string, query: PaginationQueryDto) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.transportista.count({ where: { tenantId } }),
+      this.prisma.transportista.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   private async ensureExists(id: string, tenantId: string) {

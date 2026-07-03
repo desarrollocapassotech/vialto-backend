@@ -706,11 +706,22 @@ export class PlatformController {
   @Get('stock/divisiones')
   listDivisiones(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listDivisiones(tenantId, clienteId, productoId, depositoId);
+    return this.service.listDivisiones(
+      tenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
   @ApiOperation({ summary: 'Listar operaciones de stock paginadas (superadmin)' })

@@ -520,14 +520,15 @@ export class PlatformController {
     return this.service.removePresentacion(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Listar depósitos (superadmin)' })
   @Get('stock/depositos')
   listDepositos(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('activo') activo?: string,
   ) {
     return this.service.listDepositos(
       tenantId,
+      query,
       activo === '0' ? false : activo === '1' ? true : undefined,
     );
   }

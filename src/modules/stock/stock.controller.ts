@@ -180,11 +180,13 @@ export class StockController {
   @Roles("admin", "member", "superadmin")
   listDepositos(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query("activo") activo?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listDepositos(
       auth.tenantId,
+      query,
       activo === "0" ? false : activo === "1" ? true : undefined,
     );
   }

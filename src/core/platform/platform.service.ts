@@ -711,9 +711,9 @@ export class PlatformService {
     return this.stockService.removePresentacion(id, scopedTenantId);
   }
 
-  listDepositos(tenantId: string | undefined, activo?: boolean) {
+  listDepositos(tenantId: string | undefined, query: PaginationQueryDto, activo?: boolean) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listDepositos(scopedTenantId, activo);
+    return this.stockService.listDepositos(scopedTenantId, query, activo);
   }
 
   uploadIngresoFoto(tenantId: string | undefined, file: Express.Multer.File) {

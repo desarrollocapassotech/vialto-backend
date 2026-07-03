@@ -36,6 +36,37 @@ export class ViajesProcessor implements IImportProcessor {
         if (!fechaDescarga)
           throw new Error("La fecha de descarga es requerida.");
 
+        // ── Clasificación explícita de flota ──────────────────────────────
+        // No se infiere nada destructivo. Si la columna TIPO DE FLOTA no viene
+        // en el Excel (imports viejos), `tipoFlota` queda null y el viaje se
+        // persiste tal cual — comportamiento retrocompatible. Cuando SÍ viene,
+        // se valida la coherencia y se corta con error de fila antes de crear
+        // un viaje con datos financieros perdidos.
+        const tipoFlota =
+          typeof row.tipoFlota === "string"
+            ? row.tipoFlota.toUpperCase()
+            : null;
+        const transportistaId = (row.transportistaId as string | null) ?? null;
+        const precioFlete =
+          row.precioTransportistaExterno != null
+            ? Number(row.precioTransportistaExterno)
+            : null;
+
+        if (tipoFlota === "TERCERO") {
+          if (!transportistaId)
+            throw new Error(
+              "Flota TERCERO sin transportista: completá la columna TRANSPORTE.",
+            );
+          if (precioFlete == null)
+            throw new Error(
+              "Flota TERCERO sin VALOR FLETERO: se perdería el costo del flete.",
+            );
+        }
+        if (tipoFlota === "PROPIA" && transportistaId)
+          throw new Error(
+            "Flota PROPIA con transportista externo asignado: datos incoherentes.",
+          );
+
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
 
@@ -81,7 +112,7 @@ export class ViajesProcessor implements IImportProcessor {
             numero,
             estado,
             clienteId,
-            transportistaId: (row.transportistaId as string | null) ?? null,
+            transportistaId,
             choferId: (row.choferId as string | null) ?? null,
             origen: (row.origen as string | null) ?? null,
             destino: (row.destino as string | null) ?? null,
@@ -92,10 +123,7 @@ export class ViajesProcessor implements IImportProcessor {
               row.kmRecorridos != null ? Number(row.kmRecorridos) : null,
             monto: row.monto != null ? Number(row.monto) : null,
             monedaMonto: (row.monedaMonto as string | null) ?? "ARS",
-            precioTransportistaExterno:
-              row.precioTransportistaExterno != null
-                ? Number(row.precioTransportistaExterno)
-                : null,
+            precioTransportistaExterno: precioFlete,
             monedaPrecioTransportistaExterno:
               (row.monedaPrecioTransportistaExterno as string | null) ?? "ARS",
             facturaId: facturaClienteId,
@@ -123,16 +151,19 @@ export class ViajesProcessor implements IImportProcessor {
             (row.fechaEmisionFacturaTransp as Date | null) ??
             fechaCarga ??
             new Date();
-          // Usamos tx para la factura externa
+          // Usamos tx para la factura externa.
+          // Vinculamos transportista y moneda para no perder la trazabilidad
+          // financiera del flete (antes la factura quedaba huérfana y en ARS).
           await tx.factura.create({
             data: {
               tenantId,
               numero: row.nroFacturaTransporte as string,
               tipo: "transportista_externo",
-              importe:
-                row.precioTransportistaExterno != null
-                  ? Number(row.precioTransportistaExterno)
-                  : 0,
+              transportistaId,
+              importe: precioFlete ?? 0,
+              moneda:
+                (row.monedaPrecioTransportistaExterno as string | null) ??
+                "ARS",
               fechaEmision,
               fechaVencimiento:
                 (row.fechaVencimientoFacturaTransp as Date | null) ?? null,

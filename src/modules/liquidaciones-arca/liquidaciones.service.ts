@@ -13,6 +13,7 @@ import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
+import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 
 // IVA aliquot Id para 21%
@@ -191,6 +192,10 @@ export class LiquidacionesService {
       },
       include: { viajes: true },
     });
+
+    for (const viajeId of dto.viajeIds) {
+      await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
+    }
 
     return liquidacion;
   }
@@ -406,7 +411,11 @@ export class LiquidacionesService {
   async deleteLiquidacion(tenantId: string, id: string) {
     const liq = await this.db.liquidacion.findUnique({
       where: { id },
-      select: { tenantId: true, estado: true },
+      select: {
+        tenantId: true,
+        estado: true,
+        viajes: { select: { viajeId: true } },
+      },
     });
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
@@ -416,8 +425,12 @@ export class LiquidacionesService {
         'No se puede eliminar una liquidación autorizada o anulada',
       );
     }
+    const viajeIds = liq.viajes.map((v) => v.viajeId);
     await this.db.liquidacionViaje.deleteMany({ where: { liquidacionId: id } });
     await this.db.liquidacion.delete({ where: { id } });
+    for (const viajeId of viajeIds) {
+      await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
+    }
   }
 
   async findAll(tenantId: string, estado?: string) {

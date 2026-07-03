@@ -31,5 +31,10 @@ export class CreateEgresoLineaDto {
   @IsOptional()
   @IsString()
   @MaxLength(200)
-  lote?: string;
+  lote?: string | null;
+
+  /** Fecha de vencimiento del lote (ISO). El backend la valida contra el ingreso si no se envía. */
+  @IsOptional()
+  @IsString()
+  fechaVencimiento?: string;
 }

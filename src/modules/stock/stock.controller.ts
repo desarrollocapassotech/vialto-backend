@@ -542,16 +542,22 @@ export class StockController {
   @Roles("admin", "superadmin")
   listDivisiones(
     @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
     @Query("clienteId") clienteId?: string,
     @Query("productoId") productoId?: string,
     @Query("depositoId") depositoId?: string,
+    @Query("fechaDesde") fechaDesde?: string,
+    @Query("fechaHasta") fechaHasta?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listDivisiones(
       auth.tenantId,
+      query,
       clienteId,
       productoId,
       depositoId,
+      fechaDesde,
+      fechaHasta,
     );
   }
 

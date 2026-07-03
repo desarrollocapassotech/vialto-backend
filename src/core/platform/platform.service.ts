@@ -807,9 +807,25 @@ export class PlatformService {
     return this.stockService.createDivision(scopedTenantId, dto, createdBy);
   }
 
-  listDivisiones(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+  listDivisiones(
+    tenantId: string | undefined,
+    query: PaginationQueryDto,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listDivisiones(scopedTenantId, clienteId, productoId, depositoId);
+    return this.stockService.listDivisiones(
+      scopedTenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
   listMovimientosStock(

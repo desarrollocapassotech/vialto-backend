@@ -1114,15 +1114,35 @@ export class StockService {
           },
         });
 
+        const stockKey = {
+          productoId: linea.productoId,
+          presentacionId: linea.presentacionId,
+          clienteId: dto.clienteId,
+          depositoId: dto.depositoId,
+        };
+
+        const stockItem = await tx.stockItem.findUnique({
+          where: { productoId_presentacionId_clienteId_depositoId: stockKey },
+        });
+
+        if (!stockItem) {
+          throw new BadRequestException(
+            'No hay stock del producto seleccionado en el depósito indicado.',
+          );
+        }
+        if (stockItem.cantidad1 < linea.bultos) {
+          throw new BadRequestException(
+            `Stock insuficiente de bultos para uno de los productos. Disponible: ${stockItem.cantidad1}.`,
+          );
+        }
+        if (stockItem.cantidad2 < linea.sueltas) {
+          throw new BadRequestException(
+            `Stock insuficiente de sueltas para uno de los productos. Disponible: ${stockItem.cantidad2}.`,
+          );
+        }
+
         const updated = await tx.stockItem.update({
-          where: {
-            productoId_presentacionId_clienteId_depositoId: {
-              productoId: linea.productoId,
-              presentacionId: linea.presentacionId,
-              clienteId: dto.clienteId,
-              depositoId: dto.depositoId,
-            },
-          },
+          where: { productoId_presentacionId_clienteId_depositoId: stockKey },
           data: {
             cantidad1: { decrement: linea.bultos },
             cantidad2: { decrement: linea.sueltas },

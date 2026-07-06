@@ -568,6 +568,8 @@ model StockOperacion {
   entregadoPor  String?
   destinatario  String?
   destinoFinal  String?
+  /** Pedido del cliente, nota de despacho u otro documento externo. Valor «No tiene» si no aplica. */
+  numeroDocumentoExterno String?
   createdBy     String   @default("")
   createdAt     DateTime @default(now())
 

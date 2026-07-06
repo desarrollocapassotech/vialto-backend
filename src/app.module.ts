@@ -11,6 +11,7 @@ import { ClientesModule } from './core/clientes/clientes.module';
 import { TransportistasModule } from './core/transportistas/transportistas.module';
 import { ChoferesModule } from './core/choferes/choferes.module';
 import { DestinatariosModule } from './core/destinatarios/destinatarios.module';
+import { DireccionesEntregaModule } from './core/direcciones-entrega/direcciones-entrega.module';
 import { ChoferAuthModule } from './core/chofer-auth/chofer-auth.module';
 import { VehiculosModule } from './core/vehiculos/vehiculos.module';
 import { ViajesModule } from './modules/viajes/viajes.module';
@@ -42,6 +43,7 @@ import { PlatformModule } from './core/platform/platform.module';
     TransportistasModule,
     ChoferesModule,
     DestinatariosModule,
+    DireccionesEntregaModule,
     ChoferAuthModule,
     VehiculosModule,
     ViajesModule,

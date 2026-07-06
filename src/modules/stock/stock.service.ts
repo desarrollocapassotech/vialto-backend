@@ -26,6 +26,7 @@ import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
+import { paginate, buildPaginatedResult } from '../../shared/util/pagination.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
@@ -325,11 +326,25 @@ export class StockService {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ DEPÓSITOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  async listDepositos(tenantId: string, activo?: boolean) {
-    return this.prisma.deposito.findMany({
-      where: { tenantId, ...(activo !== undefined ? { activo } : {}) },
-      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
-    });
+  async listDepositos(tenantId: string, query: PaginationQueryDto, activo?: boolean) {
+    const { page, pageSize, skip, take } = paginate(query.page, query.pageSize);
+
+    const where = {
+      tenantId,
+      ...(activo !== undefined ? { activo } : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.deposito.count({ where }),
+      this.prisma.deposito.findMany({
+        where,
+        orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+        skip,
+        take,
+      }),
+    ]);
+
+    return buildPaginatedResult(rows, total, page, pageSize);
   }
 
   async createDeposito(tenantId: string, dto: CreateDepositoDto) {
@@ -491,6 +506,7 @@ export class StockService {
               entregadoPor: true,
               destinatario: true,
               destinoFinal: true,
+              numeroDocumentoExterno: true,
               createdBy: true,
               createdAt: true,
             },
@@ -529,6 +545,7 @@ export class StockService {
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,
+      numeroDocumentoExterno: mov.operacion.numeroDocumentoExterno,
       cantidad1: mov.bultos,
       cantidad2: mov.unidades,
     }));
@@ -731,6 +748,7 @@ export class StockService {
           entregadoPor: true,
           destinatario: true,
           destinoFinal: true,
+          numeroDocumentoExterno: true,
           createdBy: true,
           createdAt: true,
         },
@@ -775,6 +793,7 @@ export class StockService {
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,
+      numeroDocumentoExterno: mov.operacion.numeroDocumentoExterno,
       cantidad1: mov.bultos,
       cantidad2: mov.unidades,
     };
@@ -1071,6 +1090,7 @@ export class StockService {
           entregadoPor: dto.entregadoPor?.trim() || null,
           destinatario: dto.destinatario?.trim() || null,
           destinoFinal: dto.destinoFinal?.trim() || null,
+          numeroDocumentoExterno: dto.numeroDocumentoExterno.trim(),
           observaciones: dto.observaciones?.trim() || null,
           createdBy,
         },
@@ -1099,15 +1119,35 @@ export class StockService {
           },
         });
 
+        const stockKey = {
+          productoId: linea.productoId,
+          presentacionId: linea.presentacionId,
+          clienteId: dto.clienteId,
+          depositoId: dto.depositoId,
+        };
+
+        const stockItem = await tx.stockItem.findUnique({
+          where: { productoId_presentacionId_clienteId_depositoId: stockKey },
+        });
+
+        if (!stockItem) {
+          throw new BadRequestException(
+            'No hay stock del producto seleccionado en el depósito indicado.',
+          );
+        }
+        if (stockItem.cantidad1 < linea.bultos) {
+          throw new BadRequestException(
+            `Stock insuficiente de bultos para uno de los productos. Disponible: ${stockItem.cantidad1}.`,
+          );
+        }
+        if (stockItem.cantidad2 < linea.sueltas) {
+          throw new BadRequestException(
+            `Stock insuficiente de sueltas para uno de los productos. Disponible: ${stockItem.cantidad2}.`,
+          );
+        }
+
         const updated = await tx.stockItem.update({
-          where: {
-            productoId_presentacionId_clienteId_depositoId: {
-              productoId: linea.productoId,
-              presentacionId: linea.presentacionId,
-              clienteId: dto.clienteId,
-              depositoId: dto.depositoId,
-            },
-          },
+          where: { productoId_presentacionId_clienteId_depositoId: stockKey },
           data: {
             cantidad1: { decrement: linea.bultos },
             cantidad2: { decrement: linea.sueltas },
@@ -1364,40 +1404,82 @@ export class StockService {
     });
   }
 
-  listDivisiones(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.stockOperacion.findMany({
-      where: {
-        tenantId,
-        tipo: 'division',
-        ...(clienteId ? { clienteId } : {}),
-        ...(depositoId ? { depositoId } : {}),
-        ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: {
-        cliente: { select: { id: true, nombre: true } },
-        deposito: { select: { id: true, nombre: true } },
-        movimientos: {
-          select: {
-            id: true,
-            productoId: true,
-            producto: { select: { id: true, nombre: true } },
-            presentacionId: true,
-            presentacion: {
-              select: {
-                id: true,
-                unidadesPorBulto: true,
-                presentacion: { select: { id: true, nombre: true } },
-              },
+  async listDivisiones(
+    tenantId: string,
+    query: PaginationQueryDto,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
+    const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
+    const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
+    const where = {
+      tenantId,
+      tipo: 'division' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
             },
-            bultos: true,
-            unidades: true,
-            movimientoVinculadoId: true,
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          cliente: { select: { id: true, nombre: true } },
+          deposito: { select: { id: true, nombre: true } },
+          movimientos: {
+            select: {
+              id: true,
+              productoId: true,
+              producto: { select: { id: true, nombre: true } },
+              presentacionId: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  unidadesPorBulto: true,
+                  presentacion: { select: { id: true, nombre: true } },
+                },
+              },
+              bultos: true,
+              unidades: true,
+              movimientoVinculadoId: true,
+            },
           },
         },
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
       },
-    });
+    };
   }
 
   listStockDisponible(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {

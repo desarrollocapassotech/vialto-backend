@@ -29,6 +29,8 @@ import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
 import { CreateDestinatarioDto } from '../destinatarios/dto/create-destinatario.dto';
 import { UpdateDestinatarioDto } from '../destinatarios/dto/update-destinatario.dto';
+import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
+import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
 import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
@@ -340,6 +342,44 @@ export class PlatformController {
     return this.service.removeDestinatario(tenantId, id);
   }
 
+  @Get('direcciones-entrega')
+  direccionesEntrega(@Query('tenantId') tenantId?: string) {
+    return this.service.listDireccionesEntrega(tenantId);
+  }
+
+  @Get('direcciones-entrega/:id')
+  direccionEntregaById(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.getDireccionEntregaById(tenantId, id);
+  }
+
+  @Post('direcciones-entrega')
+  createDireccionEntrega(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateDireccionEntregaDto,
+  ) {
+    return this.service.createDireccionEntrega(tenantId, dto);
+  }
+
+  @Patch('direcciones-entrega/:id')
+  updateDireccionEntrega(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateDireccionEntregaDto,
+  ) {
+    return this.service.updateDireccionEntrega(tenantId, id, dto);
+  }
+
+  @Delete('direcciones-entrega/:id')
+  removeDireccionEntrega(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.removeDireccionEntrega(tenantId, id);
+  }
+
   @Get('vehiculos')
   vehiculos(@Query('tenantId') tenantId?: string) {
     return this.service.listVehiculos(tenantId);
@@ -554,14 +594,15 @@ export class PlatformController {
     return this.service.removePresentacion(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Listar depósitos (superadmin)' })
   @Get('stock/depositos')
   listDepositos(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('activo') activo?: string,
   ) {
     return this.service.listDepositos(
       tenantId,
+      query,
       activo === '0' ? false : activo === '1' ? true : undefined,
     );
   }
@@ -739,11 +780,22 @@ export class PlatformController {
   @Get('stock/divisiones')
   listDivisiones(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listDivisiones(tenantId, clienteId, productoId, depositoId);
+    return this.service.listDivisiones(
+      tenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
   @ApiOperation({ summary: 'Listar operaciones de stock paginadas (superadmin)' })

@@ -3,6 +3,7 @@ import { PlatformController } from './platform.controller';
 import { PlatformService } from './platform.service';
 import { ChoferesModule } from '../choferes/choferes.module';
 import { DestinatariosModule } from '../destinatarios/destinatarios.module';
+import { DireccionesEntregaModule } from '../direcciones-entrega/direcciones-entrega.module';
 import { VehiculosModule } from '../vehiculos/vehiculos.module';
 import { ViajesModule } from '../../modules/viajes/viajes.module';
 import { StockModule } from '../../modules/stock/stock.module';
@@ -13,6 +14,7 @@ import { IntegracionArcaModule } from '../../modules/liquidaciones-arca/liquidac
   imports: [
     ChoferesModule,
     DestinatariosModule,
+    DireccionesEntregaModule,
     VehiculosModule,
     ViajesModule,
     StockModule,

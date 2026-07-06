@@ -628,8 +628,8 @@ model CargaCombustible {
   id         String   @id @default(cuid())
   tenantId   String
   tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  vehiculoId String
-  vehiculo   Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
+  vehiculoId String?
+  vehiculo   Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
   choferId   String?
   chofer     Chofer?  @relation(fields: [choferId], references: [id], onDelete: SetNull)
   estacion   String

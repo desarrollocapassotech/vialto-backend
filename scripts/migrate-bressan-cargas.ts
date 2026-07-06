@@ -181,9 +181,15 @@ async function main() {
       const dniStr = String(carga.driverDni ?? '').trim();
 
       // ── Resolver / crear vehículo ──────────────────────────────────────────
-      let vehiculoId = vehiculoMap.get(patenteNorm);
+      let vehiculoId: string | null = vehiculoMap.get(patenteNorm) ?? null;
       if (!vehiculoId) {
-        if (isDryRun) {
+        if (!patenteNorm) {
+          // Carga sin patente en Firestore → se migra con vehiculoId null en lugar de
+          // crear un vehículo fantasma con patente vacía
+          console.warn(
+            `  ⚠️  Doc ${carga.id} sin licensePlate — la carga se migrará sin vehículo asociado`,
+          );
+        } else if (isDryRun) {
           console.log(`  [DRY] Crearía vehículo: ${patenteNorm} (tipo="otro")`);
           vehiculoId = `[nuevo:${patenteNorm}]`;
         } else {
@@ -203,7 +209,7 @@ async function main() {
           console.log(`  🚗 Vehículo creado: ${patenteNorm} → ${v.id}`);
           vehiculosCreados++;
         }
-        vehiculoMap.set(patenteNorm, vehiculoId);
+        if (patenteNorm && vehiculoId) vehiculoMap.set(patenteNorm, vehiculoId);
       }
 
       // ── Resolver / crear chofer ────────────────────────────────────────────

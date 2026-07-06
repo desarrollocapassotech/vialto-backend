@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createClerkClient } from '@clerk/backend';
 import { toClerkOrganizationRole, toDisplayOrgRole, toVialtoRole, isVialtoTenantRole } from '../auth/clerk-organization-roles';
 
@@ -106,6 +106,15 @@ export class UsersService {
       if (!alreadyExisted) {
         await clerk.users.deleteUser(userId).catch(() => null);
       }
+
+      const clerkError = (err as any)?.errors?.[0];
+
+      if (clerkError?.code === 'organization_membership_quota_exceeded') {
+        throw new ConflictException(
+          'Límite de miembros alcanzado. Liberá espacio o contactá a un administrador.',
+        );
+      }
+
       throw err;
     }
 

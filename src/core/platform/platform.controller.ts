@@ -27,6 +27,8 @@ import { CreateClienteDto } from '../clientes/dto/create-cliente.dto';
 import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
 import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
+import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
+import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
 import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
@@ -88,6 +90,11 @@ export class PlatformController {
     const fechaHasta = parseFechaFiltroQuery(
       queryParamFromRequest(req, 'fechaHasta') ?? query.fechaHasta,
     );
+    const periodoRaw = queryParamFromRequest(req, 'periodo') ?? query.periodo;
+    const periodo: 'todos' | 'desde_hoy' | 'anteriores' | undefined =
+      periodoRaw === 'todos' || periodoRaw === 'desde_hoy' || periodoRaw === 'anteriores'
+        ? periodoRaw
+        : undefined;
     const sort = parseViajesSortParams(
       queryParamFromRequest(req, 'sortBy') ?? query.sortBy,
       queryParamFromRequest(req, 'sortDir') ?? query.sortDir,
@@ -103,6 +110,7 @@ export class PlatformController {
       fechaHasta,
       tipoUbicacion,
       ubicacion,
+      periodo,
       sortBy: sort.sortBy,
       sortDir: sort.sortDir,
     });
@@ -298,6 +306,44 @@ export class PlatformController {
   @Delete('choferes/:id')
   removeChofer(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.removeChofer(tenantId, id);
+  }
+
+  @Get('direcciones-entrega')
+  direccionesEntrega(@Query('tenantId') tenantId?: string) {
+    return this.service.listDireccionesEntrega(tenantId);
+  }
+
+  @Get('direcciones-entrega/:id')
+  direccionEntregaById(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.getDireccionEntregaById(tenantId, id);
+  }
+
+  @Post('direcciones-entrega')
+  createDireccionEntrega(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateDireccionEntregaDto,
+  ) {
+    return this.service.createDireccionEntrega(tenantId, dto);
+  }
+
+  @Patch('direcciones-entrega/:id')
+  updateDireccionEntrega(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateDireccionEntregaDto,
+  ) {
+    return this.service.updateDireccionEntrega(tenantId, id, dto);
+  }
+
+  @Delete('direcciones-entrega/:id')
+  removeDireccionEntrega(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.removeDireccionEntrega(tenantId, id);
   }
 
   @Get('vehiculos')
@@ -514,14 +560,15 @@ export class PlatformController {
     return this.service.removePresentacion(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Listar depósitos (superadmin)' })
   @Get('stock/depositos')
   listDepositos(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('activo') activo?: string,
   ) {
     return this.service.listDepositos(
       tenantId,
+      query,
       activo === '0' ? false : activo === '1' ? true : undefined,
     );
   }
@@ -576,13 +623,14 @@ export class PlatformController {
   @Get('stock/ingresos')
   listIngresos(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listIngresos(tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listIngresos(tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   @ApiOperation({ summary: 'Lotes históricos ingresados - autocompletado (superadmin)' })
@@ -649,13 +697,14 @@ export class PlatformController {
   @Get('stock/egresos')
   listEgresos(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listEgresos(tenantId, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listEgresos(tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
   }
 
   @ApiOperation({ summary: 'Obtener egreso por ID (superadmin)' })
@@ -697,11 +746,54 @@ export class PlatformController {
   @Get('stock/divisiones')
   listDivisiones(
     @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
     @Query('clienteId') clienteId?: string,
     @Query('productoId') productoId?: string,
     @Query('depositoId') depositoId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.service.listDivisiones(tenantId, clienteId, productoId, depositoId);
+    return this.service.listDivisiones(
+      tenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
+  }
+
+  @ApiOperation({ summary: 'Listar operaciones de stock paginadas (superadmin)' })
+  @Get('stock/operaciones/paginated')
+  listOperacionesStockPaginated(
+    @Query('tenantId') tenantId: string | undefined,
+    @Query() query: PaginationQueryDto,
+    @Query('productoId') productoId?: string,
+    @Query('clienteId') clienteId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
+  ) {
+    return this.service.listOperacionesStockPaginated(
+      tenantId,
+      query,
+      productoId,
+      clienteId,
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
+    );
+  }
+
+  @ApiOperation({ summary: 'Obtener operación de stock por ID (superadmin)' })
+  @Get('stock/operaciones/:id')
+  getOperacionStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getOperacionStock(tenantId, id);
   }
 
   @ApiOperation({ summary: 'Listar movimientos de stock (superadmin)' })

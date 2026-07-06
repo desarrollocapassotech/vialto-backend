@@ -10,9 +10,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { TransportistasService } from './transportistas.service';
-import { CreateTransportistaDto } from './dto/create-transportista.dto';
-import { UpdateTransportistaDto } from './dto/update-transportista.dto';
+import { DireccionesEntregaService } from './direcciones-entrega.service';
+import { CreateDireccionEntregaDto } from './dto/create-direccion-entrega.dto';
+import { UpdateDireccionEntregaDto } from './dto/update-direccion-entrega.dto';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -22,14 +22,14 @@ import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
 
-@ApiTags('Core — Transportistas')
+@ApiTags('Core — Direcciones de entrega')
 @ApiBearerAuth('clerk-jwt')
-@Controller('transportistas')
+@Controller('direcciones-entrega')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
-export class TransportistasController {
-  constructor(private readonly service: TransportistasService) {}
+export class DireccionesEntregaController {
+  constructor(private readonly service: DireccionesEntregaService) {}
 
-  @ApiOperation({ summary: 'Listar todos los transportistas' })
+  @ApiOperation({ summary: 'Listar todas las direcciones/rutas de entrega' })
   @Get()
   @Roles('admin', 'member', 'superadmin')
   findAll(@CurrentAuth() auth: AuthPayload) {
@@ -37,7 +37,7 @@ export class TransportistasController {
     return this.service.findAll(auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Listar transportistas paginado' })
+  @ApiOperation({ summary: 'Listar direcciones/rutas paginado' })
   @Get('paginated')
   @Roles('admin', 'member', 'superadmin')
   findAllPaginated(
@@ -48,7 +48,7 @@ export class TransportistasController {
     return this.service.findAllPaginated(auth.tenantId, query);
   }
 
-  @ApiOperation({ summary: 'Obtener transportista por ID' })
+  @ApiOperation({ summary: 'Obtener dirección/ruta por ID' })
   @Get(':id')
   @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -56,27 +56,30 @@ export class TransportistasController {
     return this.service.findOne(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Crear transportista' })
+  @ApiOperation({ summary: 'Crear dirección/ruta de entrega' })
   @Post()
-  @Roles('admin', 'superadmin')
-  create(@Body() dto: CreateTransportistaDto, @CurrentAuth() auth: AuthPayload) {
+  @Roles('admin', 'member', 'superadmin')
+  create(
+    @Body() dto: CreateDireccionEntregaDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar datos del transportista' })
+  @ApiOperation({ summary: 'Actualizar dirección/ruta de entrega' })
   @Patch(':id')
   @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
-    @Body() dto: UpdateTransportistaDto,
+    @Body() dto: UpdateDireccionEntregaDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.update(id, auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Eliminar transportista' })
+  @ApiOperation({ summary: 'Eliminar dirección/ruta de entrega' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

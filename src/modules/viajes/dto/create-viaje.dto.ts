@@ -9,11 +9,11 @@ import {
   IsDateString,
   Min,
   ValidateNested,
-} from 'class-validator';
-import { Transform, Type } from 'class-transformer';
-import { normalizarEstadoViaje, VIAJE_ESTADOS } from '../viaje-estados';
-import { ViajeProductoItemDto } from './viaje-producto-item.dto';
-import { ViajeDestinoItemDto } from './viaje-destino-item.dto';
+} from "class-validator";
+import { Transform, Type } from "class-transformer";
+import { normalizarEstadoViaje, VIAJE_ESTADOS } from "../viaje-estados";
+import { ViajeProductoItemDto } from "./viaje-producto-item.dto";
+import { ViajeDestinoItemDto } from "./viaje-destino-item.dto";
 
 /** Normaliza ids opcionales del body: trim y convierte "" en null. */
 export function normalizeOptionalId({
@@ -24,21 +24,25 @@ export function normalizeOptionalId({
   if (value === undefined) return undefined;
   if (value === null) return null;
   const s = String(value).trim();
-  return s === '' ? null : s;
+  return s === "" ? null : s;
 }
 
 export class OtroGastoDto {
   @IsString() @IsNotEmpty() descripcion: string;
   @IsNumber() @Min(0) @Type(() => Number) monto: number;
-  @IsIn(['ARS', 'USD']) moneda: string;
+  @IsIn(["ARS", "USD"]) moneda: string;
   @IsOptional() @IsDateString() fecha?: string;
+  // Agrego createdBy en el dto
+  @IsOptional() @IsString() createdBy?: string;
 }
 
 export class PagoTransportistaDto {
   @IsNumber() @Min(0) @Type(() => Number) monto: number;
-  @IsIn(['ARS', 'USD']) moneda: string;
+  @IsIn(["ARS", "USD"]) moneda: string;
   @IsDateString() fecha: string;
   @IsOptional() @IsString() observaciones?: string;
+  // Agrego createdBy en el dto
+  @IsOptional() @IsString() createdBy?: string;
 }
 
 export class CreateViajeDto {
@@ -46,7 +50,7 @@ export class CreateViajeDto {
   @IsOptional() @IsString() numero?: string;
 
   @Transform(({ value }) =>
-    typeof value === 'string' ? normalizarEstadoViaje(value) : value,
+    typeof value === "string" ? normalizarEstadoViaje(value) : value,
   )
   @IsIn(VIAJE_ESTADOS as unknown as [string, ...string[]])
   estado: string;
@@ -60,8 +64,10 @@ export class CreateViajeDto {
   @IsOptional()
   @Transform(({ value }) => {
     if (value === undefined || value === null) return undefined;
-    if (value === true || value === 'true' || value === 1 || value === '1') return true;
-    if (value === false || value === 'false' || value === 0 || value === '0') return false;
+    if (value === true || value === "true" || value === 1 || value === "1")
+      return true;
+    if (value === false || value === "false" || value === 0 || value === "0")
+      return false;
     return value;
   })
   @IsBoolean()
@@ -87,20 +93,39 @@ export class CreateViajeDto {
   @IsDateString() fechaCarga: string;
   @IsDateString() fechaDescarga: string;
   /** Productos a transportar (orden = orden del array). */
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ViajeProductoItemDto) productoItems?: ViajeProductoItemDto[];
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ViajeProductoItemDto)
+  productoItems?: ViajeProductoItemDto[];
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
   @IsNumber() @Min(0.01) @Type(() => Number) monto: number;
   /** ARS (default) o USD. */
-  @IsOptional() @IsIn(['ARS', 'USD']) monedaMonto?: string;
-  @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
+  @IsOptional() @IsIn(["ARS", "USD"]) monedaMonto?: string;
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  precioTransportistaExterno?: number;
   /** ARS (default) o USD. */
-  @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
+  @IsOptional() @IsIn(["ARS", "USD"]) monedaPrecioTransportistaExterno?: string;
   /** Solo si monedaMonto ≠ monedaPrecioTransportistaExterno. */
-  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) gananciaBrutaManual?: number;
-  @IsOptional() @IsIn(['ARS', 'USD']) monedaGananciaBrutaManual?: string;
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  gananciaBrutaManual?: number;
+  @IsOptional() @IsIn(["ARS", "USD"]) monedaGananciaBrutaManual?: string;
   @IsOptional() @IsString() observaciones?: string;
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PagoTransportistaDto) pagosTransportista?: PagoTransportistaDto[];
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OtroGastoDto)
+  otrosGastos?: OtroGastoDto[];
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PagoTransportistaDto)
+  pagosTransportista?: PagoTransportistaDto[];
 }

@@ -26,6 +26,7 @@ import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
+import { paginate, buildPaginatedResult } from '../../shared/util/pagination.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
@@ -325,11 +326,25 @@ export class StockService {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ DEPÓSITOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  async listDepositos(tenantId: string, activo?: boolean) {
-    return this.prisma.deposito.findMany({
-      where: { tenantId, ...(activo !== undefined ? { activo } : {}) },
-      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
-    });
+  async listDepositos(tenantId: string, query: PaginationQueryDto, activo?: boolean) {
+    const { page, pageSize, skip, take } = paginate(query.page, query.pageSize);
+
+    const where = {
+      tenantId,
+      ...(activo !== undefined ? { activo } : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.deposito.count({ where }),
+      this.prisma.deposito.findMany({
+        where,
+        orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+        skip,
+        take,
+      }),
+    ]);
+
+    return buildPaginatedResult(rows, total, page, pageSize);
   }
 
   async createDeposito(tenantId: string, dto: CreateDepositoDto) {
@@ -525,7 +540,7 @@ export class StockService {
       deposito: mov.operacion.deposito,
       numeroRemito: mov.operacion.numeroRemito,
       remitoUrl: mov.operacion.tipo === 'egreso' ? mov.operacion.remitoUrl : null,
-      fotosUrls: mov.operacion.tipo === 'ingreso' ? mov.operacion.fotosUrls : [],
+      fotosUrls: [],
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,
@@ -544,6 +559,166 @@ export class StockService {
         hasNext: page < totalPages,
       },
     };
+  }
+
+  private operacionListInclude() {
+    return {
+      cliente: { select: { id: true, nombre: true } },
+      deposito: { select: { id: true, nombre: true } },
+      movimientos: {
+        select: {
+          id: true,
+          productoId: true,
+          producto: { select: { id: true, nombre: true } },
+          presentacionId: true,
+          presentacion: {
+            select: {
+              id: true,
+              unidadesPorBulto: true,
+              presentacion: { select: { id: true, nombre: true } },
+            },
+          },
+          bultos: true,
+          unidades: true,
+          lote: true,
+          fechaVencimiento: true,
+        },
+      },
+    } as const;
+  }
+
+  private mapOperacionRowForApi(
+    op: {
+      id: string;
+      tenantId: string;
+      tipo: string;
+      fecha: Date;
+      clienteId: string;
+      cliente: { id: string; nombre: string };
+      depositoId: string;
+      deposito: { id: string; nombre: string };
+      remitoUrl?: string | null;
+      numeroRemito?: string | null;
+      entregadoPor?: string | null;
+      destinatario?: string | null;
+      destinoFinal?: string | null;
+      observaciones?: string | null;
+      fotosUrls?: string[];
+      createdBy: string;
+      createdAt: Date;
+      movimientos: Array<{
+        id: string;
+        productoId: string;
+        producto: { id: string; nombre: string };
+        presentacionId: string | null;
+        presentacion: {
+          id: string;
+          unidadesPorBulto: number;
+          presentacion: { id: string; nombre: string };
+        } | null;
+        bultos: number;
+        unidades: number;
+        lote: string | null;
+        fechaVencimiento: Date | null;
+      }>;
+    },
+  ) {
+    return this.mapOperacionForApi({
+      id: op.id,
+      tenantId: op.tenantId,
+      tipo: op.tipo,
+      fecha: op.fecha.toISOString(),
+      clienteId: op.clienteId,
+      cliente: op.cliente,
+      depositoId: op.depositoId,
+      deposito: op.deposito,
+      remitoUrl: op.remitoUrl,
+      numeroRemito: op.numeroRemito,
+      entregadoPor: op.entregadoPor,
+      destinatario: op.destinatario,
+      destinoFinal: op.destinoFinal,
+      observaciones: op.observaciones,
+      fotosUrls: op.fotosUrls,
+      createdBy: op.createdBy,
+      createdAt: op.createdAt.toISOString(),
+      movimientos: op.movimientos.map((m) => ({
+        ...m,
+        fechaVencimiento: m.fechaVencimiento?.toISOString() ?? null,
+      })),
+    });
+  }
+
+  /** Listado consolidado: una fila por operación (cabecera) con todas sus líneas de producto. */
+  async listOperacionesPaginated(
+    tenantId: string,
+    query: PaginationQueryDto,
+    productoId?: string,
+    clienteId?: string,
+    options?: {
+      depositoId?: string;
+      tipo?: 'ingreso' | 'egreso' | 'division';
+      fechaDesde?: string;
+      fechaHasta?: string;
+      createdBy?: string;
+    },
+  ) {
+    const { depositoId, tipo, fechaDesde, fechaHasta, createdBy } = options ?? {};
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
+    const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
+    const where = {
+      tenantId,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(tipo ? { tipo } : {}),
+      ...(createdBy ? { createdBy } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
+        orderBy: { fecha: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: this.operacionListInclude(),
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const items = rows.map((op) => this.mapOperacionRowForApi(op));
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
+  }
+
+  async findOperacion(id: string, tenantId: string) {
+    const op = await this.prisma.stockOperacion.findFirst({
+      where: { id, tenantId },
+      include: this.operacionListInclude(),
+    });
+    if (!op) throw new NotFoundException('Operación no encontrada.');
+    return this.mapOperacionRowForApi(op);
   }
 
   async findMovimiento(id: string, tenantId: string) {
@@ -611,7 +786,7 @@ export class StockService {
       deposito: mov.operacion.deposito,
       numeroRemito: mov.operacion.numeroRemito,
       remitoUrl: mov.operacion.tipo === 'egreso' ? mov.operacion.remitoUrl : null,
-      fotosUrls: mov.operacion.tipo === 'ingreso' ? mov.operacion.fotosUrls : [],
+      fotosUrls: [],
       entregadoPor: mov.operacion.entregadoPor,
       destinatario: mov.operacion.destinatario,
       destinoFinal: mov.operacion.destinoFinal,
@@ -739,6 +914,7 @@ export class StockService {
           fecha: fechaMov,
           fotosUrls: dto.fotosUrls.map((u) => u.trim()),
           observaciones: dto.observaciones?.trim() || null,
+          numeroRemitoProveedor: dto.numeroRemitoProveedor?.trim() || null,
           createdBy,
         },
       });
@@ -755,7 +931,7 @@ export class StockService {
             bultos: linea.bultos,
             unidades: linea.sueltas,
             fechaVencimiento,
-            lote: linea.lote.trim(),
+            lote: linea.sinLote ? null : linea.lote!.trim(),
             fecha: fechaMov,
             createdBy,
           },
@@ -790,36 +966,44 @@ export class StockService {
     });
   }
 
-  listIngresos(
+  async listIngresos(
     tenantId: string,
+    query: PaginationQueryDto,
     clienteId?: string,
     productoId?: string,
     depositoId?: string,
     fechaDesde?: string,
     fechaHasta?: string,
   ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
 
-    return this.prisma.stockOperacion
-      .findMany({
-        where: {
-          tenantId,
-          tipo: 'ingreso',
-          ...(clienteId ? { clienteId } : {}),
-          ...(depositoId ? { depositoId } : {}),
-          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-          ...(desde || hasta
-            ? {
-                fecha: {
-                  ...(desde ? { gte: desde } : {}),
-                  ...(hasta ? { lte: hasta } : {}),
-                },
-              }
-            : {}),
-        },
+    const where = {
+      tenantId,
+      tipo: 'ingreso' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: {
           cliente: { select: { id: true, nombre: true } },
           deposito: { select: { id: true, nombre: true } },
@@ -843,8 +1027,22 @@ export class StockService {
             },
           },
         },
-      })
-      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows.map((op) => this.mapOperacionForApi(op)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async createEgreso(tenantId: string, dto: CreateEgresoDto, createdBy: string) {
@@ -894,6 +1092,13 @@ export class StockService {
       });
 
       for (const linea of dto.lineas) {
+        const { lote, fechaVencimiento } = await this.validarLineaEgresoConLote(
+          tenantId,
+          dto.clienteId,
+          dto.depositoId,
+          linea,
+        );
+
         await tx.movimientoStock.create({
           data: {
             tenantId,
@@ -902,7 +1107,8 @@ export class StockService {
             presentacionId: linea.presentacionId,
             bultos: linea.bultos,
             unidades: linea.sueltas,
-            lote: linea.lote?.trim() || null,
+            lote,
+            fechaVencimiento,
             fecha: fechaMov,
             createdBy,
           },
@@ -1032,39 +1238,61 @@ export class StockService {
     };
   }
 
-  listEgresos(
+  async listEgresos(
     tenantId: string,
+    query: PaginationQueryDto,
     clienteId?: string,
     productoId?: string,
     depositoId?: string,
     fechaDesde?: string,
     fechaHasta?: string,
   ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
 
-    return this.prisma.stockOperacion
-      .findMany({
-        where: {
-          tenantId,
-          tipo: 'egreso',
-          ...(clienteId ? { clienteId } : {}),
-          ...(depositoId ? { depositoId } : {}),
-          ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-          ...(desde || hasta
-            ? {
-                fecha: {
-                  ...(desde ? { gte: desde } : {}),
-                  ...(hasta ? { lte: hasta } : {}),
-                },
-              }
-            : {}),
-        },
+    const where = {
+      tenantId,
+      tipo: 'egreso' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: this.egresoOperacionInclude(),
-      })
-      .then((rows) => rows.map((op) => this.mapOperacionForApi(op)));
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows.map((op) => this.mapOperacionForApi(op)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    };
   }
 
   async createDivision(tenantId: string, dto: CreateDivisionDto, createdBy: string) {
@@ -1171,40 +1399,82 @@ export class StockService {
     });
   }
 
-  listDivisiones(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.stockOperacion.findMany({
-      where: {
-        tenantId,
-        tipo: 'division',
-        ...(clienteId ? { clienteId } : {}),
-        ...(depositoId ? { depositoId } : {}),
-        ...(productoId ? { movimientos: { some: { productoId } } } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: {
-        cliente: { select: { id: true, nombre: true } },
-        deposito: { select: { id: true, nombre: true } },
-        movimientos: {
-          select: {
-            id: true,
-            productoId: true,
-            producto: { select: { id: true, nombre: true } },
-            presentacionId: true,
-            presentacion: {
-              select: {
-                id: true,
-                unidadesPorBulto: true,
-                presentacion: { select: { id: true, nombre: true } },
-              },
+  async listDivisiones(
+    tenantId: string,
+    query: PaginationQueryDto,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+
+    const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
+    const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
+    const where = {
+      tenantId,
+      tipo: 'division' as const,
+      ...(clienteId ? { clienteId } : {}),
+      ...(depositoId ? { depositoId } : {}),
+      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(desde || hasta
+        ? {
+            fecha: {
+              ...(desde ? { gte: desde } : {}),
+              ...(hasta ? { lte: hasta } : {}),
             },
-            bultos: true,
-            unidades: true,
-            movimientoVinculadoId: true,
+          }
+        : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.stockOperacion.count({ where }),
+      this.prisma.stockOperacion.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          cliente: { select: { id: true, nombre: true } },
+          deposito: { select: { id: true, nombre: true } },
+          movimientos: {
+            select: {
+              id: true,
+              productoId: true,
+              producto: { select: { id: true, nombre: true } },
+              presentacionId: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  unidadesPorBulto: true,
+                  presentacion: { select: { id: true, nombre: true } },
+                },
+              },
+              bultos: true,
+              unidades: true,
+              movimientoVinculadoId: true,
+            },
           },
         },
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items: rows,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
       },
-    });
+    };
   }
 
   listStockDisponible(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
@@ -1214,6 +1484,7 @@ export class StockService {
         ...(clienteId ? { clienteId } : {}),
         ...(productoId ? { productoId } : {}),
         ...(depositoId ? { depositoId } : {}),
+        OR: [{ cantidad1: { gt: 0 } }, { cantidad2: { gt: 0 } }],
       },
       orderBy: [{ clienteId: 'asc' }, { productoId: 'asc' }],
       include: stockItemRelations,
@@ -1228,35 +1499,166 @@ export class StockService {
     clienteId: string,
     depositoId: string,
     presentacionId?: string,
-  ): Promise<{ lote: string; cantidad1: number }[]> {
-    const rows = await this.prisma.movimientoStock.findMany({
+  ) {
+    const rows = await this.fetchMovimientosParaSaldoLote(
+      tenantId,
+      productoId,
+      clienteId,
+      depositoId,
+      presentacionId,
+    );
+    const { lotes, sinLote } = this.buildSaldosPorLote(rows);
+
+    const lotesDisponibles = Array.from(lotes.entries())
+      .filter(([, s]) => s.bultos > 0 || s.sueltas > 0)
+      .map(([lote, s]) => ({
+        lote,
+        cantidad1: s.bultos,
+        cantidad2: s.sueltas,
+        fechaVencimiento: s.fechaVencimiento?.toISOString() ?? null,
+      }))
+      .sort((a, b) => a.lote.localeCompare(b.lote));
+
+    const sinLoteDisponible =
+      sinLote.bultos > 0 || sinLote.sueltas > 0
+        ? { cantidad1: Math.max(0, sinLote.bultos), cantidad2: Math.max(0, sinLote.sueltas) }
+        : null;
+
+    return { lotes: lotesDisponibles, sinLote: sinLoteDisponible };
+  }
+
+  private async fetchMovimientosParaSaldoLote(
+    tenantId: string,
+    productoId: string,
+    clienteId: string,
+    depositoId: string,
+    presentacionId?: string,
+  ) {
+    return this.prisma.movimientoStock.findMany({
       where: {
         tenantId,
         productoId,
         ...(presentacionId ? { presentacionId } : {}),
-        lote: { not: null },
         operacion: { clienteId, depositoId },
       },
       select: {
         lote: true,
         bultos: true,
+        unidades: true,
+        fechaVencimiento: true,
+        fecha: true,
         operacion: { select: { tipo: true } },
       },
     });
+  }
 
-    // Calcula balance de bultos por lote: ingresos suman, egresos y divisiones restan
-    const map = new Map<string, number>();
+  private buildSaldosPorLote(
+    rows: Array<{
+      lote: string | null;
+      bultos: number;
+      unidades: number;
+      fechaVencimiento: Date | null;
+      fecha: Date;
+      operacion: { tipo: string };
+    }>,
+  ) {
+    const lotes = new Map<string, { bultos: number; sueltas: number; fechaVencimiento: Date | null }>();
+    let sinBultos = 0;
+    let sinSueltas = 0;
+    const vencimientoReciente = new Map<string, { fecha: Date; venc: Date }>();
+
     for (const row of rows) {
-      if (!row.lote) continue;
-      const prev = map.get(row.lote) ?? 0;
-      const delta = row.operacion.tipo === 'ingreso' ? row.bultos : -row.bultos;
-      map.set(row.lote, prev + delta);
+      const sign = row.operacion.tipo === 'ingreso' ? 1 : -1;
+      if (!row.lote) {
+        sinBultos += sign * row.bultos;
+        sinSueltas += sign * row.unidades;
+        continue;
+      }
+      const key = row.lote;
+      const prev = lotes.get(key) ?? { bultos: 0, sueltas: 0, fechaVencimiento: null };
+      prev.bultos += sign * row.bultos;
+      prev.sueltas += sign * row.unidades;
+      lotes.set(key, prev);
+
+      if (row.operacion.tipo === 'ingreso' && row.fechaVencimiento) {
+        const cur = vencimientoReciente.get(key);
+        if (!cur || row.fecha > cur.fecha) {
+          vencimientoReciente.set(key, { fecha: row.fecha, venc: row.fechaVencimiento });
+        }
+      }
     }
 
-    return Array.from(map.entries())
-      .filter(([, cantidad1]) => cantidad1 > 0)
-      .map(([lote, cantidad1]) => ({ lote, cantidad1 }))
-      .sort((a, b) => a.lote.localeCompare(b.lote));
+    for (const [key, saldo] of lotes) {
+      const v = vencimientoReciente.get(key);
+      if (v) saldo.fechaVencimiento = v.venc;
+    }
+
+    return { lotes, sinLote: { bultos: sinBultos, sueltas: sinSueltas } };
+  }
+
+  private async validarLineaEgresoConLote(
+    tenantId: string,
+    clienteId: string,
+    depositoId: string,
+    linea: { productoId: string; presentacionId: string; bultos: number; sueltas: number; lote?: string | null; fechaVencimiento?: string },
+  ): Promise<{ lote: string | null; fechaVencimiento: Date | null }> {
+    if (linea.lote === undefined) {
+      throw new BadRequestException('Cada línea debe indicar un lote o «Sin lote».');
+    }
+
+    const rows = await this.fetchMovimientosParaSaldoLote(
+      tenantId,
+      linea.productoId,
+      clienteId,
+      depositoId,
+      linea.presentacionId,
+    );
+    const { lotes, sinLote } = this.buildSaldosPorLote(rows);
+
+    const loteKey = linea.lote === null ? null : linea.lote.trim();
+    if (loteKey === '') {
+      throw new BadRequestException('El lote indicado no es válido.');
+    }
+
+    if (loteKey === null) {
+      if (sinLote.bultos <= 0 && sinLote.sueltas <= 0) {
+        throw new BadRequestException('No hay stock sin lote para uno de los productos seleccionados.');
+      }
+      if (linea.bultos > sinLote.bultos) {
+        throw new BadRequestException(
+          `Stock sin lote insuficiente en bultos. Disponible: ${Math.max(0, sinLote.bultos)}.`,
+        );
+      }
+      if (linea.sueltas > sinLote.sueltas) {
+        throw new BadRequestException(
+          `Stock sin lote insuficiente en sueltas. Disponible: ${Math.max(0, sinLote.sueltas)}.`,
+        );
+      }
+      return { lote: null, fechaVencimiento: null };
+    }
+
+    const saldoLote = lotes.get(loteKey);
+    if (!saldoLote || (saldoLote.bultos <= 0 && saldoLote.sueltas <= 0)) {
+      throw new BadRequestException(`No hay stock disponible para el lote «${loteKey}».`);
+    }
+    if (linea.bultos > saldoLote.bultos) {
+      throw new BadRequestException(
+        `Stock insuficiente en el lote «${loteKey}». Disponible: ${saldoLote.bultos} bulto(s).`,
+      );
+    }
+    if (linea.sueltas > saldoLote.sueltas) {
+      throw new BadRequestException(
+        `Stock insuficiente en el lote «${loteKey}». Disponible: ${saldoLote.sueltas} suelta(s).`,
+      );
+    }
+
+    let fechaVencimiento = saldoLote.fechaVencimiento;
+    if (linea.fechaVencimiento?.trim()) {
+      const parsed = parseFechaMovimientoStock(linea.fechaVencimiento);
+      if (!isNaN(parsed.getTime())) fechaVencimiento = parsed;
+    }
+
+    return { lote: loteKey, fechaVencimiento };
   }
 
   async getLotesHistorico(

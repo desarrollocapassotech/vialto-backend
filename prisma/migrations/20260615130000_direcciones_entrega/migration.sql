@@ -4,7 +4,12 @@ CREATE TABLE "direcciones_entrega" (
     "tenantId" TEXT NOT NULL,
     "direccion" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
     CONSTRAINT "direcciones_entrega_pkey" PRIMARY KEY ("id")
 );
+
+-- CreateIndex
 CREATE INDEX "direcciones_entrega_tenantId_idx" ON "direcciones_entrega"("tenantId");
+
+-- AddForeignKey
 ALTER TABLE "direcciones_entrega" ADD CONSTRAINT "direcciones_entrega_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("clerkOrgId") ON DELETE CASCADE ON UPDATE CASCADE;

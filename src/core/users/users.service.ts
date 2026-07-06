@@ -1,12 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createClerkClient } from '@clerk/backend';
+import { toClerkOrganizationRole, toDisplayOrgRole, toVialtoRole, isVialtoTenantRole } from '../auth/clerk-organization-roles';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
-
-function toClerkOrganizationRole(appRole: string): string {
-  if (appRole === 'admin') return 'org:admin';
-  return 'org:member';
-}
 
 async function getPlatformRole(userId: string | null | undefined): Promise<string | null> {
   if (!userId) return null;
@@ -34,12 +30,17 @@ export class UsersService {
       memberships.data.map(async (m) => {
         const userId = m.publicUserData?.userId ?? null;
         const platformRole = await getPlatformRole(userId);
+        const effectiveRole =
+          platformRole && platformRole !== 'superadmin' && isVialtoTenantRole(platformRole)
+            ? toDisplayOrgRole(platformRole)
+            : m.role;
+
         return {
           userId,
           firstName: m.publicUserData?.firstName ?? null,
           lastName: m.publicUserData?.lastName ?? null,
           email: m.publicUserData?.identifier ?? null,
-          role: m.role,
+          role: effectiveRole,
           createdAt: m.createdAt,
           platformRole,
         };
@@ -94,10 +95,26 @@ export class UsersService {
           role: toClerkOrganizationRole(role),
         });
       }
+
+      await clerk.users.updateUserMetadata(userId, {
+        publicMetadata: {
+          vialtoRole: toVialtoRole(role),
+          tenantId,
+        },
+      });
     } catch (err) {
       if (!alreadyExisted) {
         await clerk.users.deleteUser(userId).catch(() => null);
       }
+
+      const clerkError = (err as any)?.errors?.[0];
+
+      if (clerkError?.code === 'organization_membership_quota_exceeded') {
+        throw new ConflictException(
+          'Límite de miembros alcanzado. Liberá espacio o contactá a un administrador.',
+        );
+      }
+
       throw err;
     }
 
@@ -111,11 +128,18 @@ export class UsersService {
     const membership = memberships.data.find((m) => m.publicUserData?.userId === userId);
     if (!membership) throw new NotFoundException('Usuario no encontrado en esta organización');
 
-    return clerk.organizations.updateOrganizationMembership({
+    const result = await clerk.organizations.updateOrganizationMembership({
       organizationId: tenantId,
       userId,
       role: toClerkOrganizationRole(role),
     });
+    await clerk.users.updateUserMetadata(userId, {
+      publicMetadata: {
+        vialtoRole: toVialtoRole(role),
+        tenantId,
+      },
+    });
+    return result;
   }
 
   async removeFromOrg(tenantId: string, userId: string) {

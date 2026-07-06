@@ -1,11 +1,11 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { Injectable, BadRequestException } from "@nestjs/common";
+import { PrismaService } from "../../../shared/prisma/prisma.service";
 import type {
   ColumnConfig,
   ParsedRow,
   RowError,
   ValidatedRow,
-} from '../types/import.types';
+} from "../types/import.types";
 
 export interface ValidationResult {
   valid: ValidatedRow[];
@@ -34,13 +34,18 @@ export class ValidatorService {
       );
       if (missingCols.length > 0) {
         throw new BadRequestException(
-          `Faltan columnas obligatorias en el archivo: ${missingCols.map((c) => c.excelHeader).join(', ')}`,
+          `Faltan columnas obligatorias en el archivo: ${missingCols.map((c) => c.excelHeader).join(", ")}`,
         );
       }
     }
 
     // Pre-cargar lookups para evitar N queries por fila
-    const { caches, created } = await this.buildLookupCaches(rows, columns, tenantId, readOnly);
+    const { caches, created } = await this.buildLookupCaches(
+      rows,
+      columns,
+      tenantId,
+      readOnly,
+    );
 
     const valid: ValidatedRow[] = [];
     const errors: RowError[] = [];
@@ -74,9 +79,9 @@ export class ValidatorService {
       valid,
       errors,
       created: {
-        clientes: created['clientes'] ?? [],
-        transportistas: created['transportistas'] ?? [],
-        choferes: created['choferes'] ?? [],
+        clientes: created["clientes"] ?? [],
+        transportistas: created["transportistas"] ?? [],
+        choferes: created["choferes"] ?? [],
       },
     };
   }
@@ -86,8 +91,10 @@ export class ValidatorService {
     col: ColumnConfig,
     caches: LookupCaches,
     rowNum: number,
-  ): { value: ValidatedRow[string]; error?: undefined } | { value?: undefined; error: RowError } {
-    const isEmpty = raw == null || String(raw).trim() === '';
+  ):
+    | { value: ValidatedRow[string]; error?: undefined }
+    | { value?: undefined; error: RowError } {
+    const isEmpty = raw == null || String(raw).trim() === "";
 
     if (isEmpty) {
       if (col.required) {
@@ -105,36 +112,47 @@ export class ValidatorService {
     const str = String(raw).trim();
 
     switch (col.type) {
-      case 'string':
+      case "string":
         return { value: str };
 
-      case 'number': {
-        const n = parseFloat(str.replace(',', '.'));
+      case "number": {
+        const n = parseFloat(str.replace(",", "."));
         if (isNaN(n)) {
           return {
-            error: { fila: rowNum, campo: col.excelHeader, error: `Valor numérico inválido`, valor: raw },
+            error: {
+              fila: rowNum,
+              campo: col.excelHeader,
+              error: `Valor numérico inválido`,
+              valor: raw,
+            },
           };
         }
         return { value: n };
       }
 
-      case 'boolean': {
+      case "boolean": {
         const lower = str.toLowerCase();
-        if (['si', 'sí', 'yes', '1', 'true', 'verdadero'].includes(lower)) return { value: 1 };
-        if (['no', '0', 'false', 'falso'].includes(lower)) return { value: 0 };
+        if (["si", "sí", "yes", "1", "true", "verdadero"].includes(lower))
+          return { value: 1 };
+        if (["no", "0", "false", "falso"].includes(lower)) return { value: 0 };
         return {
-          error: { fila: rowNum, campo: col.excelHeader, error: `Valor booleano inválido`, valor: raw },
+          error: {
+            fila: rowNum,
+            campo: col.excelHeader,
+            error: `Valor booleano inválido`,
+            valor: raw,
+          },
         };
       }
 
-      case 'date': {
+      case "date": {
         const date = this.parseDate(raw, col.format);
         if (!date) {
           return {
             error: {
               fila: rowNum,
               campo: col.excelHeader,
-              error: `Formato de fecha inválido (esperado: ${col.format ?? 'DD/MM/YYYY'})`,
+              error: `Formato de fecha inválido (esperado: ${col.format ?? "DD/MM/YYYY"})`,
               valor: raw,
             },
           };
@@ -142,9 +160,9 @@ export class ValidatorService {
         return { value: date };
       }
 
-      case 'lookup': {
-        const model = col.lookupModel ?? 'clientes';
-        const field = col.lookupField ?? 'nombre';
+      case "lookup": {
+        const model = col.lookupModel ?? "clientes";
+        const field = col.lookupField ?? "nombre";
         const cacheKey = `${model}:${field}`;
         const cache = caches[cacheKey] ?? {};
         const id = cache[str.toLowerCase()];
@@ -161,14 +179,14 @@ export class ValidatorService {
         return { value: id };
       }
 
-      case 'enum': {
+      case "enum": {
         const upper = str.toUpperCase();
         if (!col.allowedValues?.includes(upper)) {
           return {
             error: {
               fila: rowNum,
               campo: col.excelHeader,
-              error: `Valor inválido. Los valores permitidos son: ${col.allowedValues?.join(', ')}`,
+              error: `Valor inválido. Los valores permitidos son: ${col.allowedValues?.join(", ")}`,
               valor: raw,
             },
           };
@@ -188,19 +206,25 @@ export class ValidatorService {
     }
 
     const str = String(raw).trim();
-    const fmt = (format ?? 'DD/MM/YYYY').toUpperCase();
+    const fmt = (format ?? "DD/MM/YYYY").toUpperCase();
 
-    if (fmt === 'DD/MM/YYYY') {
+    if (fmt === "DD/MM/YYYY") {
       const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-      if (m) return new Date(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}T00:00:00.000Z`);
+      if (m)
+        return new Date(
+          `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}T00:00:00.000Z`,
+        );
     }
 
-    if (fmt === 'MM/DD/YYYY') {
+    if (fmt === "MM/DD/YYYY") {
       const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-      if (m) return new Date(`${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}T00:00:00.000Z`);
+      if (m)
+        return new Date(
+          `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}T00:00:00.000Z`,
+        );
     }
 
-    if (fmt === 'YYYY-MM-DD') {
+    if (fmt === "YYYY-MM-DD") {
       const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (m) return new Date(`${str}T00:00:00.000Z`);
     }
@@ -220,11 +244,13 @@ export class ValidatorService {
     const caches: LookupCaches = {};
     const created: Record<string, string[]> = {};
 
-    const lookupCols = columns.filter((c) => c.type === 'lookup' && c.lookupModel);
+    const lookupCols = columns.filter(
+      (c) => c.type === "lookup" && c.lookupModel,
+    );
 
     for (const col of lookupCols) {
       const model = col.lookupModel!;
-      const field = col.lookupField ?? 'nombre';
+      const field = col.lookupField ?? "nombre";
       const cacheKey = `${model}:${field}`;
 
       if (caches[cacheKey]) continue;
@@ -248,7 +274,9 @@ export class ValidatorService {
       const records = await this.queryLookup(model, field, tenantId);
       const map: Record<string, string> = {};
       for (const r of records) {
-        const key = String((r as Record<string, unknown>)[field] ?? '').toLowerCase();
+        const key = String(
+          (r as Record<string, unknown>)[field] ?? "",
+        ).toLowerCase();
         map[key] = (r as { id: string }).id;
       }
 
@@ -260,7 +288,12 @@ export class ValidatorService {
               (created[model] ??= []).push(original);
               map[lower] = `__pending__${model}__${original}`;
             } else {
-              const id = await this.createLookup(model, field, original, tenantId);
+              const id = await this.createLookup(
+                model,
+                field,
+                original,
+                tenantId,
+              );
               if (id) {
                 map[lower] = id;
                 (created[model] ??= []).push(original);
@@ -284,20 +317,41 @@ export class ValidatorService {
   ): Promise<string | null> {
     const nombre = value.trim();
     switch (model) {
-      case 'clientes': {
-        const r = await this.prisma.cliente.create({ data: { tenantId, nombre }, select: { id: true } });
+      case "clientes": {
+        const r = await this.prisma.cliente.create({
+          data: { tenantId, nombre },
+          select: { id: true },
+        });
         return r.id;
       }
-      case 'transportistas': {
-        const r = await this.prisma.transportista.create({ data: { tenantId, nombre }, select: { id: true } });
+      case "transportistas": {
+        const r = await this.prisma.transportista.create({
+          data: { tenantId, nombre },
+          select: { id: true },
+        });
         return r.id;
       }
-      case 'choferes': {
-        const r = await this.prisma.chofer.create({ data: { tenantId, nombre }, select: { id: true } });
+      case "choferes": {
+        const r = await this.prisma.chofer.create({
+          data: { tenantId, nombre },
+          select: { id: true },
+        });
         return r.id;
       }
+      // 'vehiculos' NO se autocrea: Vehiculo exige patente + tipo, e inventar un
+      // tipo por defecto sería exactamente la suposición silenciosa que queremos
+      // evitar. queryLookup sí soporta vehiculos, así que la asimetría era una
+      // trampa: si alguien pone createIfNotFound=true en VEHICULO, antes esto
+      // devolvía null y el vehículo se descartaba sin aviso. Ahora falla claro.
+      case "vehiculos":
+        throw new BadRequestException(
+          "La creación automática de vehículos no está soportada: un vehículo requiere patente y tipo. " +
+            'Cargá el vehículo primero, o dejá "createIfNotFound": false en la columna VEHICULO.',
+        );
       default:
-        return null;
+        throw new BadRequestException(
+          `No se puede crear automáticamente un registro en "${model}": modelo no soportado.`,
+        );
     }
   }
 
@@ -311,16 +365,16 @@ export class ValidatorService {
 
     let raw: unknown;
     switch (model) {
-      case 'clientes':
+      case "clientes":
         raw = await this.prisma.cliente.findMany({ where, select });
         break;
-      case 'choferes':
+      case "choferes":
         raw = await this.prisma.chofer.findMany({ where, select });
         break;
-      case 'vehiculos':
+      case "vehiculos":
         raw = await this.prisma.vehiculo.findMany({ where, select });
         break;
-      case 'transportistas':
+      case "transportistas":
         raw = await this.prisma.transportista.findMany({ where, select });
         break;
       default:

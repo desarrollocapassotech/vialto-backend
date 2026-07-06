@@ -149,6 +149,13 @@ export class ImportacionesService {
             nombre,
             tenantId,
           );
+          // Antes: si createLookup devolvía null, se asignaba null en silencio
+          // y el dato se descartaba sin que nadie se enterara. Ahora corta.
+          if (!id) {
+            throw new BadRequestException(
+              `No se pudo crear "${nombre}" en "${model}". Revisá la configuración de la importación.`,
+            );
+          }
           fila[key] = id;
         }
       }

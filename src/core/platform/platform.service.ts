@@ -5,6 +5,9 @@ import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
 import { ChoferesService } from '../choferes/choferes.service';
 import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
+import { DireccionesEntregaService } from '../direcciones-entrega/direcciones-entrega.service';
+import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
+import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
 import { VehiculosService } from '../vehiculos/vehiculos.service';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
@@ -45,15 +48,7 @@ import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
-function toClerkOrganizationRole(appRole: string): string {
-  if (appRole === 'admin') return 'org:admin';
-  return 'org:member';
-}
-
-function toVialtoRole(appRole: string): string {
-  if (appRole === 'admin') return 'admin';
-  return 'member';
-}
+import { toClerkOrganizationRole, toVialtoRole } from '../auth/clerk-organization-roles';
 
 function splitFullName(fullName: string) {
   const normalized = fullName.trim().replace(/\s+/g, ' ');
@@ -89,6 +84,7 @@ export class PlatformService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly choferesService: ChoferesService,
+    private readonly direccionesEntregaService: DireccionesEntregaService,
     private readonly vehiculosService: VehiculosService,
     private readonly viajesService: ViajesService,
     private readonly stockService: StockService,
@@ -315,6 +311,54 @@ export class PlatformService {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.getChoferById(scopedTenantId, id);
     return this.prisma.chofer.delete({ where: { id } });
+  }
+
+  listDireccionesEntrega(tenantId?: string) {
+    if (!tenantId?.trim()) {
+      return Promise.resolve([]);
+    }
+    const id = tenantId.trim();
+    return this.prisma.direccionEntrega
+      .findMany({
+        where: { tenantId: id },
+        orderBy: { direccion: 'asc' },
+        include: { tenant: { select: { name: true } } },
+      })
+      .then((rows) =>
+        rows.map(({ tenant, ...rest }) => ({
+          ...rest,
+          empresaNombre: tenant.name,
+        })),
+      );
+  }
+
+  async getDireccionEntregaById(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.direccionesEntregaService.findOne(id, scopedTenantId);
+  }
+
+  async createDireccionEntrega(
+    tenantId: string | undefined,
+    dto: CreateDireccionEntregaDto,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.assertTenantExists(scopedTenantId);
+    return this.direccionesEntregaService.create(scopedTenantId, dto);
+  }
+
+  async updateDireccionEntrega(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateDireccionEntregaDto,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.direccionesEntregaService.update(id, scopedTenantId, dto);
+  }
+
+  async removeDireccionEntrega(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.getDireccionEntregaById(scopedTenantId, id);
+    return this.prisma.direccionEntrega.delete({ where: { id } });
   }
 
   listVehiculos(tenantId?: string) {
@@ -711,9 +755,9 @@ export class PlatformService {
     return this.stockService.removePresentacion(id, scopedTenantId);
   }
 
-  listDepositos(tenantId: string | undefined, activo?: boolean) {
+  listDepositos(tenantId: string | undefined, query: PaginationQueryDto, activo?: boolean) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listDepositos(scopedTenantId, activo);
+    return this.stockService.listDepositos(scopedTenantId, query, activo);
   }
 
   uploadIngresoFoto(tenantId: string | undefined, file: Express.Multer.File) {
@@ -807,9 +851,25 @@ export class PlatformService {
     return this.stockService.createDivision(scopedTenantId, dto, createdBy);
   }
 
-  listDivisiones(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+  listDivisiones(
+    tenantId: string | undefined,
+    query: PaginationQueryDto,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listDivisiones(scopedTenantId, clienteId, productoId, depositoId);
+    return this.stockService.listDivisiones(
+      scopedTenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
   listMovimientosStock(

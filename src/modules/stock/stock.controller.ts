@@ -60,10 +60,10 @@ export class StockController {
   // Los endpoints de CRUD de productos se habilitan con stock O viajes,
   // ya que los tenants con viajes también gestionan un catálogo de productos.
 
-  @ApiOperation({ summary: "Listar productos paginado con búsqueda y filtro" })
-  @Get("productos/paginated")
-  @RequireModule("stock", "viajes")
-  @Roles("admin", "member", "superadmin")
+  @ApiOperation({ summary: 'Listar productos paginado con búsqueda y filtro' })
+  @Get('productos/paginated')
+  @RequireModule('stock', 'viajes')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   findProductosPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ProductosPaginatedQueryDto,
@@ -72,11 +72,11 @@ export class StockController {
     return this.service.findAllProductosPaginated(auth.tenantId, query);
   }
 
-  @ApiOperation({ summary: "Obtener producto por ID" })
-  @Get("productos/:id")
-  @RequireModule("stock", "viajes")
-  @Roles("admin", "member", "superadmin")
-  getProducto(@Param("id") id: string, @CurrentAuth() auth: AuthPayload) {
+  @ApiOperation({ summary: 'Obtener producto por ID' })
+  @Get('productos/:id')
+  @RequireModule('stock', 'viajes')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
+  getProducto(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findProducto(id, auth.tenantId);
   }
@@ -127,9 +127,9 @@ export class StockController {
     );
   }
 
-  @ApiOperation({ summary: "Listar presentaciones del catálogo" })
-  @Get("presentaciones")
-  @Roles("admin", "member", "superadmin")
+  @ApiOperation({ summary: 'Listar presentaciones del catálogo' })
+  @Get('presentaciones')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   listPresentaciones(
     @CurrentAuth() auth: AuthPayload,
     @Query("activo") activo?: string,
@@ -175,13 +175,13 @@ export class StockController {
     return this.service.removePresentacion(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: "Listar depósitos" })
-  @Get("depositos")
-  @Roles("admin", "member", "superadmin")
+  @ApiOperation({ summary: 'Listar depósitos' })
+  @Get('depositos')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   listDepositos(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
-    @Query("activo") activo?: string,
+    @Query('activo') activo?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listDepositos(
@@ -216,13 +216,10 @@ export class StockController {
 
   // ───────────────── OPERACIONES DE STOCK (cabecera consolidada) ────────────
 
-  @ApiOperation({
-    summary:
-      'Listar operaciones de stock (ingreso/egreso/división) paginadas — una cabecera por comprobante con todas sus líneas.',
-  })
-  @Get('operaciones/paginated')
-  @Roles('admin', 'superadmin')
-  listOperacionesPaginated(
+  @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, depósito, tipo, fechas, usuario).' })
+  @Get('movimientos')
+  @Roles('admin', 'superadmin', 'stock_viewer')
+  listMovimientos(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
     @Query('productoId') productoId?: string,
@@ -243,60 +240,17 @@ export class StockController {
     });
   }
 
-  @ApiOperation({ summary: 'Obtener operación de stock por ID (cabecera + líneas + adjuntos)' })
-  @Get('operaciones/:id')
-  @Roles('admin', 'superadmin')
-  getOperacion(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.findOperacion(id, auth.tenantId);
-  }
-
-  // ───────────────── MOVIMIENTOS DE STOCK (líneas / legacy) ───────────────────
-
-  @ApiOperation({
-    summary:
-      "Listar movimientos de stock con filtros opcionales (producto, cliente, depósito, tipo, fechas, usuario).",
-  })
-  @Get("movimientos")
-  @Roles("admin", "superadmin")
-  listMovimientos(
-    @CurrentAuth() auth: AuthPayload,
-    @Query() query: PaginationQueryDto,
-    @Query("productoId") productoId?: string,
-    @Query("clienteId") clienteId?: string,
-    @Query("depositoId") depositoId?: string,
-    @Query("tipo") tipo?: "ingreso" | "egreso" | "division",
-    @Query("fechaDesde") fechaDesde?: string,
-    @Query("fechaHasta") fechaHasta?: string,
-    @Query("createdBy") createdBy?: string,
-  ) {
-    assertTenantId(auth.tenantId);
-    return this.service.listMovimientos(
-      auth.tenantId,
-      query,
-      productoId,
-      clienteId,
-      {
-        depositoId,
-        tipo,
-        fechaDesde,
-        fechaHasta,
-        createdBy,
-      },
-    );
-  }
-
-  @ApiOperation({ summary: "Obtener movimiento de stock por ID" })
-  @Get("movimientos/:id")
-  @Roles("admin", "superadmin")
-  getMovimiento(@Param("id") id: string, @CurrentAuth() auth: AuthPayload) {
+  @ApiOperation({ summary: 'Obtener movimiento de stock por ID' })
+  @Get('movimientos/:id')
+  @Roles('admin', 'superadmin', 'stock_viewer')
+  getMovimiento(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findMovimiento(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: "Descargar / previsualizar remito PDF del egreso" })
-  @Get("movimientos/:id/remito-adjunto")
-  @Roles("admin", "member", "superadmin")
+  @ApiOperation({ summary: 'Descargar / previsualizar remito PDF del egreso' })
+  @Get('movimientos/:id/remito-adjunto')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   async getRemitoAdjunto(
     @Param("id") id: string,
     @CurrentAuth() auth: AuthPayload,
@@ -457,11 +411,9 @@ export class StockController {
     return this.service.findEgreso(id, auth.tenantId);
   }
 
-  @ApiOperation({
-    summary: "Visualizar remito interno en PDF (inline, sin descarga)",
-  })
-  @Get("egresos/:id/remito-interno/view")
-  @Roles("admin", "member", "superadmin")
+  @ApiOperation({ summary: 'Visualizar remito interno en PDF (inline, sin descarga)' })
+  @Get('egresos/:id/remito-interno/view')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   async viewRemitoInterno(
     @Param("id") id: string,
     @CurrentAuth() auth: AuthPayload,
@@ -607,9 +559,9 @@ export class StockController {
     );
   }
 
-  @ApiOperation({ summary: "Stock disponible por producto/cliente/depósito" })
-  @Get("disponible")
-  @Roles("admin", "member", "superadmin")
+  @ApiOperation({ summary: 'Stock disponible por producto/cliente' })
+  @Get('disponible')
+  @Roles('admin', 'superadmin', 'stock_viewer')
   listStockDisponible(
     @CurrentAuth() auth: AuthPayload,
     @Query("clienteId") clienteId?: string,

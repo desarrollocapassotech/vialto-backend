@@ -23,7 +23,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Listar todos los clientes' })
   @Get()
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   findAll(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId);
@@ -31,7 +31,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Listar clientes paginado con búsqueda' })
   @Get('paginated')
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   findAllPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
@@ -42,7 +42,7 @@ export class ClientesController {
 
   @ApiOperation({ summary: 'Obtener cliente por ID' })
   @Get(':id')
-  @Roles('admin', 'member', 'superadmin')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth.tenantId);

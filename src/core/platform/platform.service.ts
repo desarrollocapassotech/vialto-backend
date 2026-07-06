@@ -48,15 +48,7 @@ import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
-function toClerkOrganizationRole(appRole: string): string {
-  if (appRole === 'admin') return 'org:admin';
-  return 'org:member';
-}
-
-function toVialtoRole(appRole: string): string {
-  if (appRole === 'admin') return 'admin';
-  return 'member';
-}
+import { toClerkOrganizationRole, toVialtoRole } from '../auth/clerk-organization-roles';
 
 function splitFullName(fullName: string) {
   const normalized = fullName.trim().replace(/\s+/g, ' ');

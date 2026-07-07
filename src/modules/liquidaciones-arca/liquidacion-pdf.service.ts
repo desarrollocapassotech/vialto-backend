@@ -394,7 +394,7 @@ export class LiquidacionPdfService {
       .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 80 });
 
     // Totales (derecha)
-    const impNeto = liq.bruto - liq.comision - liq.gastosAdmin;
+    const impNeto = liq.bruto - liq.comision;
     const iva = liq.gastosAdminIva;
     const totX = M + CW - 200;
     const totW = 190;

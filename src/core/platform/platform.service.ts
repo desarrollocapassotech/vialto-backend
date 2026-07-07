@@ -5,6 +5,9 @@ import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
 import { ChoferesService } from '../choferes/choferes.service';
 import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
+import { DestinatariosService } from '../destinatarios/destinatarios.service';
+import { CreateDestinatarioDto } from '../destinatarios/dto/create-destinatario.dto';
+import { UpdateDestinatarioDto } from '../destinatarios/dto/update-destinatario.dto';
 import { DireccionesEntregaService } from '../direcciones-entrega/direcciones-entrega.service';
 import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
 import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
@@ -48,15 +51,7 @@ import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
-function toClerkOrganizationRole(appRole: string): string {
-  if (appRole === 'admin') return 'org:admin';
-  return 'org:member';
-}
-
-function toVialtoRole(appRole: string): string {
-  if (appRole === 'admin') return 'admin';
-  return 'member';
-}
+import { toClerkOrganizationRole, toVialtoRole } from '../auth/clerk-organization-roles';
 
 function splitFullName(fullName: string) {
   const normalized = fullName.trim().replace(/\s+/g, ' ');
@@ -92,6 +87,7 @@ export class PlatformService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly choferesService: ChoferesService,
+    private readonly destinatariosService: DestinatariosService,
     private readonly direccionesEntregaService: DireccionesEntregaService,
     private readonly vehiculosService: VehiculosService,
     private readonly viajesService: ViajesService,
@@ -319,6 +315,51 @@ export class PlatformService {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.getChoferById(scopedTenantId, id);
     return this.prisma.chofer.delete({ where: { id } });
+  }
+
+  listDestinatarios(tenantId?: string) {
+    if (!tenantId?.trim()) {
+      return Promise.resolve([]);
+    }
+    const id = tenantId.trim();
+    return this.prisma.destinatario
+      .findMany({
+        where: { tenantId: id },
+        orderBy: { nombre: 'asc' },
+        include: { tenant: { select: { name: true } } },
+      })
+      .then((rows) =>
+        rows.map(({ tenant, ...rest }) => ({
+          ...rest,
+          empresaNombre: tenant.name,
+        })),
+      );
+  }
+
+  async getDestinatarioById(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.destinatariosService.findOne(id, scopedTenantId);
+  }
+
+  async createDestinatario(tenantId: string | undefined, dto: CreateDestinatarioDto) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.assertTenantExists(scopedTenantId);
+    return this.destinatariosService.create(scopedTenantId, dto);
+  }
+
+  async updateDestinatario(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateDestinatarioDto,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.destinatariosService.update(id, scopedTenantId, dto);
+  }
+
+  async removeDestinatario(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.getDestinatarioById(scopedTenantId, id);
+    return this.prisma.destinatario.delete({ where: { id } });
   }
 
   listDireccionesEntrega(tenantId?: string) {

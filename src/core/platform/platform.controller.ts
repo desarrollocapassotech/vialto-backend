@@ -27,6 +27,8 @@ import { CreateClienteDto } from '../clientes/dto/create-cliente.dto';
 import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
 import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
 import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
+import { CreateDestinatarioDto } from '../destinatarios/dto/create-destinatario.dto';
+import { UpdateDestinatarioDto } from '../destinatarios/dto/update-destinatario.dto';
 import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
 import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
 import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
@@ -306,6 +308,38 @@ export class PlatformController {
   @Delete('choferes/:id')
   removeChofer(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.service.removeChofer(tenantId, id);
+  }
+
+  @Get('destinatarios')
+  destinatarios(@Query('tenantId') tenantId?: string) {
+    return this.service.listDestinatarios(tenantId);
+  }
+
+  @Get('destinatarios/:id')
+  destinatarioById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.getDestinatarioById(tenantId, id);
+  }
+
+  @Post('destinatarios')
+  createDestinatario(
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: CreateDestinatarioDto,
+  ) {
+    return this.service.createDestinatario(tenantId, dto);
+  }
+
+  @Patch('destinatarios/:id')
+  updateDestinatario(
+    @Param('id') id: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: UpdateDestinatarioDto,
+  ) {
+    return this.service.updateDestinatario(tenantId, id, dto);
+  }
+
+  @Delete('destinatarios/:id')
+  removeDestinatario(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.service.removeDestinatario(tenantId, id);
   }
 
   @Get('direcciones-entrega')

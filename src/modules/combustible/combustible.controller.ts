@@ -38,9 +38,18 @@ export class CombustibleController {
     @Query('vehiculoId') vehiculoId?: string,
     @Query('choferId') choferId?: string,
     @Query('month') month?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.findAll(auth, vehiculoId, choferId, month);
+    return this.service.findAll(
+      auth,
+      vehiculoId,
+      choferId,
+      month,
+      page ? parseInt(page, 10) : undefined,
+      limit ? parseInt(limit, 10) : undefined,
+    );
   }
 
   @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })

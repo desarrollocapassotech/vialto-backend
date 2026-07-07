@@ -44,7 +44,12 @@ export class CombustibleService {
     vehiculoId?: string,
     choferId?: string,
     month?: string,
+    page = 1,
+    limit = 10,
   ) {
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(200, Math.max(1, limit));
+
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
 
     if (auth.role === 'member') {
@@ -62,13 +67,21 @@ export class CombustibleService {
       };
     }
 
-    const cargas = await this.prisma.cargaCombustible.findMany({
-      where,
-      orderBy: { fecha: 'desc' },
-      take: 200,
-    });
+    const [total, cargas] = await Promise.all([
+      this.prisma.cargaCombustible.count({ where }),
+      this.prisma.cargaCombustible.findMany({
+        where,
+        orderBy: { fecha: 'desc' },
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+        include: {
+          vehiculo: { select: { patente: true } },
+          chofer: { select: { nombre: true } },
+        },
+      }),
+    ]);
 
-    return { cargas, count: cargas.length };
+    return { cargas, total, page: safePage, limit: safeLimit };
   }
 
   async findOne(id: string, auth: CombustibleAuth) {
@@ -102,10 +115,12 @@ export class CombustibleService {
 
   async update(id: string, dto: UpdateCargaDto, auth: CombustibleAuth) {
     const carga = await this.findOne(id, auth);
-    const nextVehiculo = dto.vehiculoId ?? carga.vehiculoId;
+    const nextVehiculo = dto.vehiculoId ?? carga.vehiculoId ?? null;
     const nextChofer =
       dto.choferId === undefined ? carga.choferId : dto.choferId;
-    await this.assertVehiculoChofer(auth.tenantId, nextVehiculo, nextChofer);
+    if (nextVehiculo) {
+      await this.assertVehiculoChofer(auth.tenantId, nextVehiculo, nextChofer);
+    }
 
     if (auth.role === 'member' && carga.createdBy !== auth.userId) {
       throw new ForbiddenException('No podés editar esta carga');

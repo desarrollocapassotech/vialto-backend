@@ -351,8 +351,20 @@ export class ValidatorService {
         });
         return r.id;
       }
+      // 'vehiculos' NO se autocrea: Vehiculo exige patente + tipo, e inventar un
+      // tipo por defecto sería exactamente la suposición silenciosa que queremos
+      // evitar. queryLookup sí soporta vehiculos, así que la asimetría era una
+      // trampa: si alguien pone createIfNotFound=true en VEHICULO, antes esto
+      // devolvía null y el vehículo se descartaba sin aviso. Ahora falla claro.
+      case "vehiculos":
+        throw new BadRequestException(
+          "La creación automática de vehículos no está soportada: un vehículo requiere patente y tipo. " +
+            'Cargá el vehículo primero, o dejá "createIfNotFound": false en la columna VEHICULO.',
+        );
       default:
-        return null;
+        throw new BadRequestException(
+          `No se puede crear automáticamente un registro en "${model}": modelo no soportado.`,
+        );
     }
   }
 

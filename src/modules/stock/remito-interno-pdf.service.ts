@@ -12,6 +12,7 @@ type EgresoPdfRow = {
   entregadoPor: string | null;
   destinatario: string | null;
   destinoFinal: string | null;
+  numeroDocumentoExterno?: string | null;
   observaciones: string | null;
   cliente: { nombre: string };
   deposito: { nombre: string };
@@ -130,6 +131,7 @@ export class RemitoInternoPdfService {
         const fields: Array<[string, string]> = [
           ['Cliente / Empresa', op.cliente.nombre],
           ['Depósito origen', op.deposito.nombre],
+          ['Nº doc. externo', dash(op.numeroDocumentoExterno)],
           ['Destinatario', dash(op.destinatario)],
           ['Dirección / Ruta', dash(op.destinoFinal)],
           ['Conductor', dash(op.entregadoPor)],

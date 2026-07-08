@@ -162,6 +162,15 @@ export class ValidatorService {
 
       case "lookup": {
         const model = col.lookupModel ?? "clientes";
+
+        // ──────────────────────────────────────────────────────────
+        // EXCEPCIÓN PARA CIUDADES: Dejamos pasar el texto crudo
+        // sin validar contra la base de datos ni bloquear la fila.
+        // ──────────────────────────────────────────────────────────
+        if ((model as string) === "ciudades") {
+          return { value: str };
+        }
+
         const field = col.lookupField ?? "nombre";
         const cacheKey = `${model}:${field}`;
         const cache = caches[cacheKey] ?? {};
@@ -250,6 +259,10 @@ export class ValidatorService {
 
     for (const col of lookupCols) {
       const model = col.lookupModel!;
+
+      // Si el modelo es "ciudades", no necesitamos hacer un query a la base de datos
+      if ((model as string) === "ciudades") continue;
+
       const field = col.lookupField ?? "nombre";
       const cacheKey = `${model}:${field}`;
 

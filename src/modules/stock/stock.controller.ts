@@ -216,6 +216,38 @@ export class StockController {
 
   // ───────────────── OPERACIONES DE STOCK (cabecera consolidada) ────────────
 
+  @ApiOperation({ summary: 'Listar operaciones de stock paginadas (cabecera consolidada)' })
+  @Get('operaciones/paginated')
+  @Roles('admin', 'superadmin', 'stock_viewer')
+  listOperacionesPaginated(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: PaginationQueryDto,
+    @Query('productoId') productoId?: string,
+    @Query('clienteId') clienteId?: string,
+    @Query('depositoId') depositoId?: string,
+    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('createdBy') createdBy?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listOperacionesPaginated(auth.tenantId, query, productoId, clienteId, {
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
+    });
+  }
+
+  @ApiOperation({ summary: 'Obtener operación de stock por ID' })
+  @Get('operaciones/:id')
+  @Roles('admin', 'superadmin', 'stock_viewer')
+  getOperacion(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.findOperacion(id, auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, depósito, tipo, fechas, usuario).' })
   @Get('movimientos')
   @Roles('admin', 'superadmin', 'stock_viewer')

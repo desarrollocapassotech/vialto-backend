@@ -132,29 +132,27 @@ export class LiquidacionesService {
       const tnOrigen = (meta.tnOrigen as number | null) ?? null;
       const tarifaTransportista = (meta.tarifaTransportista as number | null) ?? null;
 
-      const gastos = Array.isArray((v as { otrosGastos?: unknown }).otrosGastos)
-        ? ((v as { otrosGastos: Array<{ monto?: number; moneda?: string }> }).otrosGastos)
-        : [];
-      const gastosAdminViaje = round2(
-        gastos
-          .filter((g) => (g.moneda ?? 'ARS') === 'ARS')
-          .reduce((acc, g) => acc + (g.monto ?? 0), 0),
-      );
-
       // Granel (NyM): tnDestino × tarifaTransportista. Viaje estándar: precioTransportistaExterno.
       const subtotal = tnDestino != null && tarifaTransportista != null
         ? round2(tnDestino * tarifaTransportista)
         : round2((v as { precioTransportistaExterno?: number | null }).precioTransportistaExterno ?? 0);
 
       bruto += subtotal;
-      viajesDetalle.push({ viajeId: v.id, tnOrigen, tnDestino, tarifaTransportista, subtotal, gastosAdmin: gastosAdminViaje });
+      viajesDetalle.push({
+        viajeId: v.id,
+        tnOrigen,
+        tnDestino,
+        tarifaTransportista,
+        subtotal,
+        gastosAdmin: 0,
+      });
     }
 
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
-    const gastosAdmin = round2(viajesDetalle.reduce((acc, d) => acc + d.gastosAdmin, 0));
-    // netoGravado = bruto - comision - gastos; IVA se aplica sobre el neto gravado
-    const netoGravado = round2(bruto - comision - gastosAdmin);
+    const gastosAdmin = 0;
+    // Los gastos extra del viaje (otrosGastos) no participan del cálculo del comprobante.
+    const netoGravado = round2(bruto - comision);
     const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
     const gastosAdminIva = round2(netoGravado * ivaPct / 100);
     const liquido = round2(netoGravado + gastosAdminIva);
@@ -258,12 +256,12 @@ export class LiquidacionesService {
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
       const condicionIvaReceptorId = transportista?.condicionIva ?? 1;
 
-      // impNeto  = todos los ítems sin IVA (bruto - comision - gastosAdmin)
-      // ivaBase  = base gravada al 21% = bruto - comision (gastosAdmin va al 0%)
-      // ImpTotal = impNeto + impIva = liquido
-      const impNeto = round2(liquidacion.bruto - liquidacion.comision - liquidacion.gastosAdmin);
-      const impIva = round2(liquidacion.gastosAdminIva);
-      const ivaBase = round2(liquidacion.bruto - liquidacion.comision);
+      // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
+      const ivaPct = config?.ivaGastosAdmin ?? 21;
+      const impNeto = round2(liquidacion.bruto - liquidacion.comision);
+      const impIva = round2(impNeto * ivaPct / 100);
+      const impTotal = round2(impNeto + impIva);
+      const ivaBase = impNeto;
       const response = await this.arcaClient.autorizarComprobante(
         config.apiKey,
         {
@@ -281,7 +279,7 @@ export class LiquidacionesService {
           condicionIvaReceptorId,
           impNeto,
           impIva,
-          impTotal: liquidacion.liquido,
+          impTotal,
           alicuotasIva: [{ Id: IVA_21_ID, BaseImp: ivaBase, Importe: impIva }],
         },
         tenantId,
@@ -299,6 +297,9 @@ export class LiquidacionesService {
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaError: null,
+          gastosAdmin: 0,
+          gastosAdminIva: impIva,
+          liquido: impTotal,
           updatedAt: new Date(),
         },
       });

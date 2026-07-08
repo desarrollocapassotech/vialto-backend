@@ -487,8 +487,6 @@ export class StockService {
             select: {
               id: true,
               nombre: true,
-              unidad1Nombre: true,
-              unidad2Nombre: true,
             },
           },
           presentacion: {
@@ -582,8 +580,6 @@ export class StockService {
             select: {
               id: true,
               nombre: true,
-              unidad1Nombre: true,
-              unidad2Nombre: true,
             },
           },
           presentacionId: true,
@@ -1033,8 +1029,6 @@ export class StockService {
             select: {
               id: true,
               nombre: true,
-              unidad1Nombre: true,
-              unidad2Nombre: true,
             },
           },
               presentacionId: true,
@@ -1207,8 +1201,6 @@ export class StockService {
             select: {
               id: true,
               nombre: true,
-              unidad1Nombre: true,
-              unidad2Nombre: true,
             },
           },
           presentacionId: true,
@@ -1481,8 +1473,6 @@ export class StockService {
             select: {
               id: true,
               nombre: true,
-              unidad1Nombre: true,
-              unidad2Nombre: true,
             },
           },
               presentacionId: true,

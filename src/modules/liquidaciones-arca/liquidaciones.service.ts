@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { ArcaClientService } from './arca-client.service';
@@ -95,19 +96,8 @@ export class LiquidacionesService {
       );
     }
 
-    // Verificar que ningún viaje ya esté en otra liquidación
-    const viajeIds = viajes.map((v) => v.id);
-    const liquidacionViajesExistentes = await this.db.liquidacionViaje.findMany({
-      where: { viajeId: { in: viajeIds } },
-      select: { viajeId: true },
-    });
-    const yaLiquidadosIds = new Set(liquidacionViajesExistentes.map((lv) => lv.viajeId));
-    const yaLiquidados = viajes.filter((v) => yaLiquidadosIds.has(v.id));
-    if (yaLiquidados.length > 0) {
-      throw new ConflictException(
-        `Los viajes ${yaLiquidados.map((v) => v.id).join(', ')} ya están en otra liquidación`,
-      );
-    }
+    // Verificar que ningún viaje ya tenga liquidación activa para este transportista
+    await this.assertViajesSinLiquidacionActiva(tenantId, dto.transportistaId, viajes);
 
     // Obtener metadata de cada viaje para calcular montos
     const viajesConMeta = await this.prisma.viaje.findMany({
@@ -157,39 +147,49 @@ export class LiquidacionesService {
     const gastosAdminIva = round2(netoGravado * ivaPct / 100);
     const liquido = round2(netoGravado + gastosAdminIva);
 
-    const liquidacion = await this.db.liquidacion.create({
-      data: {
-        tenantId,
-        transportistaId: dto.transportistaId,
-        periodoDesde: new Date(dto.periodoDesde),
-        periodoHasta: new Date(dto.periodoHasta),
-        cantViajes: dto.viajeIds.length,
-        bruto,
-        comisionPct,
-        comision,
-        gastosAdmin,
-        gastosAdminIva,
-        liquido,
-        estado: 'borrador',
-        cbteTipo: 60,
-        ptoVenta: config?.ptoVentaCvlp ?? 0,
-        comprobanteUrl: dto.comprobanteUrl ?? null,
-        createdBy: userId,
-        updatedAt: new Date(),
-        viajes: {
-          create: viajesDetalle.map((d) => ({
-            tenantId,
-            viajeId: d.viajeId,
-            tnOrigen: d.tnOrigen,
-            tnDestino: d.tnDestino,
-            tarifaTransportista: d.tarifaTransportista,
-            subtotal: d.subtotal,
-            gastosAdmin: d.gastosAdmin,
-          })),
+    let liquidacion;
+    try {
+      liquidacion = await this.db.liquidacion.create({
+        data: {
+          tenantId,
+          transportistaId: dto.transportistaId,
+          periodoDesde: new Date(dto.periodoDesde),
+          periodoHasta: new Date(dto.periodoHasta),
+          cantViajes: dto.viajeIds.length,
+          bruto,
+          comisionPct,
+          comision,
+          gastosAdmin,
+          gastosAdminIva,
+          liquido,
+          estado: 'borrador',
+          cbteTipo: 60,
+          ptoVenta: config?.ptoVentaCvlp ?? 0,
+          comprobanteUrl: dto.comprobanteUrl ?? null,
+          createdBy: userId,
+          updatedAt: new Date(),
+          viajes: {
+            create: viajesDetalle.map((d) => ({
+              tenantId,
+              viajeId: d.viajeId,
+              tnOrigen: d.tnOrigen,
+              tnDestino: d.tnDestino,
+              tarifaTransportista: d.tarifaTransportista,
+              subtotal: d.subtotal,
+              gastosAdmin: d.gastosAdmin,
+            })),
+          },
         },
-      },
-      include: { viajes: true },
-    });
+        include: { viajes: true },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException(
+          'La acción no es válida. Ya existe una liquidación previa para este transportista en uno de los viajes seleccionados.',
+        );
+      }
+      throw e;
+    }
 
     for (const viajeId of dto.viajeIds) {
       await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
@@ -616,6 +616,47 @@ export class LiquidacionesService {
   }
 
   // ── Helpers privados ──────────────────────────────────────────────────────
+
+  private async assertViajesSinLiquidacionActiva(
+    tenantId: string,
+    transportistaId: string,
+    viajes: Array<{ id: string; numero: string | null }>,
+  ): Promise<void> {
+    const viajeIds = viajes.map((v) => v.id);
+    const existentes = await this.db.liquidacionViaje.findMany({
+      where: {
+        tenantId,
+        viajeId: { in: viajeIds },
+        liquidacion: {
+          tenantId,
+          transportistaId,
+          estado: { not: 'anulado' },
+        },
+      },
+      select: {
+        viajeId: true,
+        viaje: { select: { numero: true } },
+      },
+    });
+    if (!existentes.length) return;
+
+    const numeros = existentes
+      .map((lv) => lv.viaje?.numero)
+      .filter((n): n is string => Boolean(n?.trim()));
+    if (numeros.length === 1) {
+      throw new ConflictException(
+        `La acción no es válida. Ya existe una liquidación previa para este transportista en el viaje #${numeros[0]}.`,
+      );
+    }
+    if (numeros.length > 1) {
+      throw new ConflictException(
+        `La acción no es válida. Ya existen liquidaciones previas para este transportista en los viajes: ${numeros.map((n) => `#${n}`).join(', ')}.`,
+      );
+    }
+    throw new ConflictException(
+      'La acción no es válida. Ya existe una liquidación previa para este transportista en uno de los viajes seleccionados.',
+    );
+  }
 
   private buildPayloadHash(id: string, liquido: number, ambiente: string): string {
     return crypto

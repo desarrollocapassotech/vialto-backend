@@ -13,12 +13,11 @@ import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
+import { computeAfipGravadoIva, round2 } from './arca-iva.util';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 
-// IVA aliquot Id para 21%
-const IVA_21_ID = 5;
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
 const DOC_TIPO_CF = 99;
@@ -140,12 +139,12 @@ export class LiquidacionesService {
 
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
-    const gastosAdmin = 0;
     // Los gastos extra del viaje (otrosGastos) no participan del cálculo del comprobante.
-    const netoGravado = round2(bruto - comision);
     const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
-    const gastosAdminIva = round2(netoGravado * ivaPct / 100);
-    const liquido = round2(netoGravado + gastosAdminIva);
+    const montos = computeAfipGravadoIva(bruto, comision, ivaPct);
+    const gastosAdmin = 0;
+    const gastosAdminIva = montos.impIva;
+    const liquido = montos.liquido;
 
     let liquidacion;
     try {
@@ -258,10 +257,7 @@ export class LiquidacionesService {
 
       // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
       const ivaPct = config?.ivaGastosAdmin ?? 21;
-      const impNeto = round2(liquidacion.bruto - liquidacion.comision);
-      const impIva = round2(impNeto * ivaPct / 100);
-      const impTotal = round2(impNeto + impIva);
-      const ivaBase = impNeto;
+      const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, ivaPct);
       const response = await this.arcaClient.autorizarComprobante(
         config.apiKey,
         {
@@ -277,10 +273,10 @@ export class LiquidacionesService {
           docTipo,
           docNro,
           condicionIvaReceptorId,
-          impNeto,
-          impIva,
-          impTotal,
-          alicuotasIva: [{ Id: IVA_21_ID, BaseImp: ivaBase, Importe: impIva }],
+          impNeto: montos.impNeto,
+          impIva: montos.impIva,
+          impTotal: montos.liquido,
+          alicuotasIva: [montos.alicuota],
         },
         tenantId,
         liquidacionId,
@@ -298,8 +294,8 @@ export class LiquidacionesService {
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaError: null,
           gastosAdmin: 0,
-          gastosAdminIva: impIva,
-          liquido: impTotal,
+          gastosAdminIva: montos.impIva,
+          liquido: montos.liquido,
           updatedAt: new Date(),
         },
       });
@@ -308,7 +304,12 @@ export class LiquidacionesService {
     } catch (err) {
       const isConectividad =
         err instanceof ArcaException && err.code === ARCA_ERROR_CODES.CONECTIVIDAD;
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const errMsg =
+        err instanceof ArcaException
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
 
       await this.db.liquidacion.update({
         where: { id: liquidacionId },
@@ -362,10 +363,8 @@ export class LiquidacionesService {
     const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
     const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
 
-    // Comprobante negativo — misma estructura que la emisión original pero negativa
-    const anulIva = round2(liquidacion.gastosAdminIva);
-    const anulIvaBase = round2(liquidacion.bruto - liquidacion.comision);
-    const anulNeto = round2(liquidacion.bruto - liquidacion.comision - liquidacion.gastosAdmin);
+    const ivaPct = config?.ivaGastosAdmin ?? 21;
+    const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, ivaPct);
     await this.arcaClient.autorizarComprobante(
       config.apiKey,
       {
@@ -381,10 +380,16 @@ export class LiquidacionesService {
         docTipo,
         docNro,
         condicionIvaReceptorId: transportista?.condicionIva ?? 1,
-        impNeto: -anulNeto,
-        impIva: -anulIva,
-        impTotal: -liquidacion.liquido,
-        alicuotasIva: [{ Id: IVA_21_ID, BaseImp: -anulIvaBase, Importe: -anulIva }],
+        impNeto: -montos.impNeto,
+        impIva: -montos.impIva,
+        impTotal: -montos.liquido,
+        alicuotasIva: [
+          {
+            Id: montos.alicuota.Id,
+            BaseImp: -montos.alicuota.BaseImp,
+            Importe: -montos.alicuota.Importe,
+          },
+        ],
       },
       tenantId,
       liquidacionId,
@@ -536,9 +541,10 @@ export class LiquidacionesService {
 
       // Calcular IVA 21% sobre el importe (ImpNeto = importe / 1.21 si ya es c/IVA,
       // o importe directamente si es neto). Aquí asumimos que factura.importe = neto.
-      const impNeto = round2(factura.importe);
-      const impIva = round2(impNeto * 0.21);
-      const impTotal = round2(impNeto + impIva);
+      const montos = computeAfipGravadoIva(factura.importe, 0, 21);
+      const impNeto = montos.impNeto;
+      const impIva = montos.impIva;
+      const impTotal = montos.liquido;
 
       const docNro = factura.clienteDatos?.idFiscal
         ? Number(factura.clienteDatos.idFiscal.replace(/-/g, ''))
@@ -564,7 +570,7 @@ export class LiquidacionesService {
           impNeto,
           impIva,
           impTotal,
-          alicuotasIva: [{ Id: IVA_21_ID, BaseImp: impNeto, Importe: impIva }],
+          alicuotasIva: [montos.alicuota],
         },
         tenantId,
         undefined,
@@ -593,7 +599,12 @@ export class LiquidacionesService {
         where: { id: facturaId },
         data: {
           arcaEstado: isConectividad ? 'pendiente_cae' : 'error',
-          arcaError: err instanceof Error ? err.message : String(err),
+          arcaError:
+            err instanceof ArcaException
+              ? err.message
+              : err instanceof Error
+                ? err.message
+                : String(err),
         },
       });
 
@@ -664,10 +675,6 @@ export class LiquidacionesService {
       .update(`${id}|${liquido}|${ambiente}`)
       .digest('hex');
   }
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 function formatFechaCbte(date: Date): string {

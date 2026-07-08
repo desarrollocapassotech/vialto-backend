@@ -10,6 +10,8 @@ import {
   ArcaTokenResponse,
   ARCA_ERROR_CODES,
 } from './types/arca.types';
+import { extractAfipRejectionMessage, formatAfipRejectionForUser } from './arca-error.util';
+import { round2 } from './arca-iva.util';
 
 const AFIP_SDK_BASE = 'https://app.afipsdk.com/api/v1';
 
@@ -156,29 +158,29 @@ export class ArcaClientService {
     const detArr = detResp?.FECAEDetResponse as Record<string, unknown>[] | undefined;
     const det = Array.isArray(detArr) ? detArr[0] : (detArr as Record<string, unknown> | undefined);
 
-    // Surfacea errores AFIP (Errors.Err)
     const errores = (solResult?.Errors as Record<string, unknown>)?.Err;
     if (errores) {
       const errArr = Array.isArray(errores) ? errores : [errores];
       const msgs = (errArr as Record<string, unknown>[])
-        .map((e) => `[${e.Code}] ${e.Msg}`)
-        .join(' | ');
-      this.logger.error(`FECAESolicitar AFIP Errors: ${msgs}`);
-      throw new ArcaException(ARCA_ERROR_CODES.GENERICO, `AFIP rechazó el comprobante: ${msgs}`, undefined, response);
+        .map((e) => String(e.Msg ?? e.Message ?? '').trim())
+        .filter(Boolean);
+      const userMsg = msgs.length
+        ? `Rechazado por AFIP: ${msgs.join(' ')}`
+        : formatAfipRejectionForUser(response);
+      this.logger.error(`FECAESolicitar AFIP Errors: ${msgs.join(' | ') || userMsg}`);
+      throw new ArcaException(ARCA_ERROR_CODES.GENERICO, userMsg, undefined, response);
     }
 
     const cae = det?.CAE as string | undefined;
     const caeFchVto = det?.CAEFchVto as string | undefined;
 
     if (!cae) {
-      const rawStr = JSON.stringify(response);
-      this.logger.error(`FECAESolicitar sin CAE: ${rawStr}`);
-      throw new ArcaException(
-        ARCA_ERROR_CODES.GENERICO,
-        `AFIP SDK no devolvió CAE. Respuesta: ${rawStr}`,
-        undefined,
-        response,
+      const userMsg = formatAfipRejectionForUser(response);
+      const detail = extractAfipRejectionMessage(response);
+      this.logger.error(
+        `FECAESolicitar sin CAE${detail ? `: ${detail}` : ''} | ${JSON.stringify(response)}`,
       );
+      throw new ArcaException(ARCA_ERROR_CODES.GENERICO, userMsg, undefined, response);
     }
 
     return {
@@ -375,8 +377,4 @@ export class ArcaClientService {
     }
     return new ArcaException(ARCA_ERROR_CODES.GENERICO, raw, httpStatus, raw);
   }
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

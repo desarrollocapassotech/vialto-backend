@@ -18,7 +18,7 @@ export class UsersController {
 
   @ApiOperation({ summary: 'Listar usuarios de la organización' })
   @Get()
-  @Roles('admin', 'superadmin')
+  @Roles('admin', 'superadmin', 'stock_viewer')
   list(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.listByTenant(auth.tenantId);

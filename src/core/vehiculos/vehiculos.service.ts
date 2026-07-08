@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
@@ -90,35 +92,51 @@ export class VehiculosService {
     if (dto.transportistaId !== undefined) {
       await this.assertTransportista(tenantId, dto.transportistaId ?? undefined);
     }
-    return this.prisma.vehiculo.update({
-      where: { id },
-      data: {
-        patente: dto.patente ? dto.patente.toUpperCase() : undefined,
-        tipo: dto.tipo,
-        marca: dto.marca,
-        modelo: dto.modelo,
-        anio: dto.anio,
-        kmActual: dto.kmActual,
-        nroChasis:
-          dto.nroChasis !== undefined ? (dto.nroChasis?.trim() || null) : undefined,
-        poliza: dto.poliza !== undefined ? (dto.poliza?.trim() || null) : undefined,
-        vencimientoPoliza:
-          dto.vencimientoPoliza !== undefined
-            ? dto.vencimientoPoliza
-              ? new Date(dto.vencimientoPoliza)
-              : null
-            : undefined,
-        tara: dto.tara !== undefined ? dto.tara : undefined,
-        precinto:
-          dto.precinto !== undefined ? (dto.precinto?.trim() || null) : undefined,
-        transportistaId:
-          dto.transportistaId === undefined ? undefined : dto.transportistaId,
-      },
-    });
+    try {
+      return await this.prisma.vehiculo.update({
+        where: { id },
+        data: {
+          patente: dto.patente ? dto.patente.toUpperCase() : undefined,
+          tipo: dto.tipo,
+          marca: dto.marca,
+          modelo: dto.modelo,
+          anio: dto.anio,
+          kmActual: dto.kmActual,
+          nroChasis:
+            dto.nroChasis !== undefined ? (dto.nroChasis?.trim() || null) : undefined,
+          poliza: dto.poliza !== undefined ? (dto.poliza?.trim() || null) : undefined,
+          vencimientoPoliza:
+            dto.vencimientoPoliza !== undefined
+              ? dto.vencimientoPoliza
+                ? new Date(dto.vencimientoPoliza)
+                : null
+              : undefined,
+          tara: dto.tara !== undefined ? dto.tara : undefined,
+          precinto:
+            dto.precinto !== undefined ? (dto.precinto?.trim() || null) : undefined,
+          transportistaId:
+            dto.transportistaId === undefined ? undefined : dto.transportistaId,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un vehículo con esa patente en esta empresa.');
+      }
+      throw e;
+    }
   }
 
   async remove(id: string, tenantId: string) {
     await this.findOne(id, tenantId);
-    return this.prisma.vehiculo.delete({ where: { id } });
+    try {
+      return await this.prisma.vehiculo.delete({ where: { id } });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2003') {
+        throw new ConflictException(
+          'No se puede eliminar el vehículo porque tiene registros asociados (cargas de combustible, viajes u otros).',
+        );
+      }
+      throw e;
+    }
   }
 }

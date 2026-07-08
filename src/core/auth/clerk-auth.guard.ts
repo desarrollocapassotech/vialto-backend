@@ -6,18 +6,12 @@ import {
 } from '@nestjs/common';
 import { verifyToken } from '@clerk/backend';
 import { ClerkVialtoRoleService } from './clerk-vialto-role.service';
+import { resolveAuthRole } from './clerk-organization-roles';
 
 export interface AuthPayload {
   userId: string;
   tenantId: string | null;
   role: string | null;
-}
-
-function normalizeRole(orgRole: string | undefined): string | null {
-  if (!orgRole) return null;
-  if (orgRole === 'org:admin') return 'admin';
-  if (orgRole === 'org:member') return 'member';
-  return orgRole.replace(/^org:/, '');
 }
 
 @Injectable()
@@ -70,10 +64,7 @@ export class ClerkAuthGuard implements CanActivate {
         claims.org_role ??
         (claims.o?.rol ? `org:${claims.o.rol}` : undefined);
 
-      const role: string | null =
-        vialtoRole === 'superadmin'
-          ? 'superadmin'
-          : normalizeRole(orgRoleClaim);
+      const role = resolveAuthRole(vialtoRole, orgRoleClaim);
 
       request.auth = {
         userId: claims.sub,

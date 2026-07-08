@@ -483,7 +483,14 @@ export class StockService {
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          producto: { select: { id: true, nombre: true } },
+          producto: {
+            select: {
+              id: true,
+              nombre: true,
+              unidad1Nombre: true,
+              unidad2Nombre: true,
+            },
+          },
           presentacion: {
             select: {
               id: true,
@@ -571,7 +578,14 @@ export class StockService {
         select: {
           id: true,
           productoId: true,
-          producto: { select: { id: true, nombre: true } },
+          producto: {
+            select: {
+              id: true,
+              nombre: true,
+              unidad1Nombre: true,
+              unidad2Nombre: true,
+            },
+          },
           presentacionId: true,
           presentacion: {
             select: {
@@ -1015,7 +1029,14 @@ export class StockService {
             select: {
               id: true,
               productoId: true,
-              producto: { select: { id: true, nombre: true } },
+              producto: {
+            select: {
+              id: true,
+              nombre: true,
+              unidad1Nombre: true,
+              unidad2Nombre: true,
+            },
+          },
               presentacionId: true,
               presentacion: {
                 select: {
@@ -1182,7 +1203,14 @@ export class StockService {
         select: {
           id: true,
           productoId: true,
-          producto: { select: { id: true, nombre: true } },
+          producto: {
+            select: {
+              id: true,
+              nombre: true,
+              unidad1Nombre: true,
+              unidad2Nombre: true,
+            },
+          },
           presentacionId: true,
           presentacion: {
             select: {
@@ -1449,7 +1477,14 @@ export class StockService {
             select: {
               id: true,
               productoId: true,
-              producto: { select: { id: true, nombre: true } },
+              producto: {
+            select: {
+              id: true,
+              nombre: true,
+              unidad1Nombre: true,
+              unidad2Nombre: true,
+            },
+          },
               presentacionId: true,
               presentacion: {
                 select: {

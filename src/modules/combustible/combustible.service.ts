@@ -336,6 +336,88 @@ export class CombustibleService {
     });
   }
 
+  async getDashboard(auth: CombustibleAuth, from?: string, to?: string) {
+    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+
+    if (from || to) {
+      const fechaWhere: Record<string, Date> = {};
+      if (from) fechaWhere.gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        fechaWhere.lte = toDate;
+      }
+      where['fecha'] = fechaWhere;
+    }
+
+    const [todasCargas, ultimasCargas] = await Promise.all([
+      this.prisma.cargaCombustible.findMany({
+        where,
+        select: { litros: true, importe: true, vehiculoId: true, estacion: true },
+      }),
+      this.prisma.cargaCombustible.findMany({
+        where,
+        orderBy: { fecha: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          fecha: true,
+          litros: true,
+          importe: true,
+          km: true,
+          estacion: true,
+          formaPago: true,
+          vehiculo: { select: { patente: true } },
+          chofer: { select: { nombre: true } },
+        },
+      }),
+    ]);
+
+    const totalCargas = todasCargas.length;
+    const totalLitros = todasCargas.reduce((s, c) => s + c.litros, 0);
+    const totalImporte = todasCargas.reduce((s, c) => s + c.importe, 0);
+    const precioPorLitro = totalLitros > 0 ? totalImporte / totalLitros : 0;
+    const litrosPorCarga = totalCargas > 0 ? totalLitros / totalCargas : 0;
+
+    const estacionMap: Record<string, number> = {};
+    for (const c of todasCargas) {
+      estacionMap[c.estacion] = (estacionMap[c.estacion] ?? 0) + c.litros;
+    }
+    const topEstaciones = Object.entries(estacionMap)
+      .map(([nombre, litros]) => ({ nombre, litros }))
+      .sort((a, b) => b.litros - a.litros)
+      .slice(0, 5);
+
+    const vehiculoLitrosMap: Record<string, number> = {};
+    for (const c of todasCargas) {
+      if (!c.vehiculoId) continue;
+      vehiculoLitrosMap[c.vehiculoId] = (vehiculoLitrosMap[c.vehiculoId] ?? 0) + c.litros;
+    }
+    const vehiculoIds = Object.keys(vehiculoLitrosMap);
+    const vehiculos = vehiculoIds.length > 0
+      ? await this.prisma.vehiculo.findMany({
+          where: { id: { in: vehiculoIds } },
+          select: { id: true, patente: true },
+        })
+      : [];
+    const vehiculoMap = new Map(vehiculos.map(v => [v.id, v.patente]));
+    const topVehiculos = Object.entries(vehiculoLitrosMap)
+      .map(([id, litros]) => ({ patente: vehiculoMap.get(id) ?? id, litros }))
+      .sort((a, b) => b.litros - a.litros)
+      .slice(0, 5);
+
+    return {
+      totalCargas,
+      totalLitros,
+      totalImporte,
+      precioPorLitro,
+      litrosPorCarga,
+      topEstaciones,
+      topVehiculos,
+      ultimasCargas,
+    };
+  }
+
   async getStats(auth: CombustibleAuth, month?: string) {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
 

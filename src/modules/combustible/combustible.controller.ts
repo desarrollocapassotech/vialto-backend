@@ -56,6 +56,18 @@ export class CombustibleController {
     );
   }
 
+  @ApiOperation({ summary: 'Dashboard de combustible — métricas y últimas cargas del período' })
+  @Get('dashboard')
+  @Roles('admin', 'superadmin')
+  getDashboard(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getDashboard(auth, from, to);
+  }
+
   @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

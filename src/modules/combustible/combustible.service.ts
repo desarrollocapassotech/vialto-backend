@@ -22,6 +22,36 @@ interface CombustibleAuth {
 export class CombustibleService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async assertKmNoRetroceso(
+    tenantId: string,
+    vehiculoId: string,
+    fecha: Date,
+    km: number,
+    excludeId?: string,
+  ) {
+    const prev = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        fecha: { lt: fecha },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: { fecha: 'desc' },
+      select: { km: true, fecha: true },
+    });
+    if (prev && km < prev.km) {
+      const fechaFmt = new Intl.DateTimeFormat('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }).format(prev.fecha);
+      throw new BadRequestException(
+        `KM ingresados son inferiores a los de la carga anterior del vehículo en el ${fechaFmt}`,
+      );
+    }
+  }
+
   private async assertVehiculoChofer(
     tenantId: string,
     vehiculoId: string,
@@ -46,6 +76,8 @@ export class CombustibleService {
     month?: string,
     page = 1,
     limit = 10,
+    estacion?: string,
+    formaPago?: string,
   ) {
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(200, Math.max(1, limit));
@@ -58,6 +90,8 @@ export class CombustibleService {
 
     if (vehiculoId) where['vehiculoId'] = vehiculoId;
     if (choferId) where['choferId'] = choferId;
+    if (estacion) where['estacion'] = { contains: estacion, mode: 'insensitive' };
+    if (formaPago) where['formaPago'] = formaPago;
 
     if (month) {
       const [year, mon] = month.split('-').map(Number);
@@ -185,6 +219,8 @@ export class CombustibleService {
         `No se encontró el vehículo con patente "${dto.patente}" en esta empresa`,
       );
     }
+    const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
+    await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km);
     return this.prisma.cargaCombustible.create({
       data: {
         tenantId,
@@ -203,6 +239,35 @@ export class CombustibleService {
         chofer: { select: { nombre: true, dni: true } },
       },
     });
+  }
+
+  async getUltimaCargaChofer(choferId: string, tenantId: string) {
+    const ultima = await this.prisma.cargaCombustible.findFirst({
+      where: { tenantId, choferId },
+      orderBy: { fecha: 'desc' },
+      include: { vehiculo: { select: { patente: true } } },
+    });
+    if (!ultima) return null;
+    return { patente: ultima.vehiculo?.patente ?? null };
+  }
+
+  async getUltimoKmPorPatente(patente: string, tenantId: string, excludeId?: string) {
+    const patenteClean = patente.replace(/\s+/g, '').toUpperCase();
+    const vehiculo = await this.prisma.vehiculo.findFirst({
+      where: { tenantId, patente: { equals: patenteClean, mode: 'insensitive' } },
+    });
+    if (!vehiculo) return null;
+    const ultima = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId: vehiculo.id,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: { fecha: 'desc' },
+      select: { km: true, fecha: true },
+    });
+    if (!ultima) return null;
+    return { km: ultima.km, fecha: ultima.fecha.toISOString() };
   }
 
   async deleteByChofer(id: string, choferId: string, tenantId: string) {
@@ -243,6 +308,14 @@ export class CombustibleService {
         );
       }
       vehiculoId = vehiculo.id;
+    }
+
+    if (dto.km !== undefined) {
+      const efectivoVehiculoId = vehiculoId ?? carga.vehiculoId;
+      const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
+      if (efectivoVehiculoId) {
+        await this.assertKmNoRetroceso(tenantId, efectivoVehiculoId, efectivaFecha, dto.km, id);
+      }
     }
 
     return this.prisma.cargaCombustible.update({

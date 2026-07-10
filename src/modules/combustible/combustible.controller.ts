@@ -40,6 +40,8 @@ export class CombustibleController {
     @Query('month') month?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('estacion') estacion?: string,
+    @Query('formaPago') formaPago?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(
@@ -49,6 +51,8 @@ export class CombustibleController {
       month,
       page ? parseInt(page, 10) : undefined,
       limit ? parseInt(limit, 10) : undefined,
+      estacion,
+      formaPago,
     );
   }
 

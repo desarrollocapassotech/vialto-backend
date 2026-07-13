@@ -10,4 +10,6 @@ export class UpdateCargaChoferDto {
   @IsOptional() @IsNumber() @Type(() => Number) km?: number;
   @IsOptional() @IsString() formaPago?: string;
   @IsOptional() @IsDateString() fecha?: string;
+  @IsOptional() @IsString() fotoTacometro?: string;
+  @IsOptional() @IsString() fotoTicket?: string;
 }

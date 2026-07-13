@@ -32,7 +32,7 @@ export class CreateIngresoLineaDto {
   @IsBoolean()
   sinLote?: boolean;
 
-  /** Obligatorio salvo que sinLote sea true. */
+  /** Obligatorio salvo que sinLote sea true (el servidor asignará un lote interno único). */
   @ValidateIf((o) => !o.sinLote)
   @IsString()
   @IsNotEmpty()

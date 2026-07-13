@@ -22,6 +22,21 @@ interface CombustibleAuth {
 export class CombustibleService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private assertCoherenciaImporte(litros: number, precioPorLitro: number, importe: number) {
+    if (!litros || !precioPorLitro) {
+      return; // Omitir validación si los litros o el precio son 0 o no están definidos
+    }
+    const expectedImporte = litros * precioPorLitro;
+    const diff = Math.abs(importe - expectedImporte);
+    const tolerance = expectedImporte * 0.01;
+
+    if (diff > tolerance) {
+      throw new BadRequestException(
+        `El importe ingresado ($${importe.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) no coincide con el cálculo de litros x precio por litro ($${expectedImporte.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). La diferencia supera el 1% de tolerancia permitido.`,
+      );
+    }
+  }
+
   private async assertKmNoRetroceso(
     tenantId: string,
     vehiculoId: string,
@@ -130,6 +145,7 @@ export class CombustibleService {
   }
 
   async create(dto: CreateCargaDto, auth: CombustibleAuth) {
+    this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
     await this.assertVehiculoChofer(auth.tenantId, dto.vehiculoId, dto.choferId);
     return this.prisma.cargaCombustible.create({
       data: {
@@ -160,6 +176,11 @@ export class CombustibleService {
     if (auth.role === 'member' && carga.createdBy !== auth.userId) {
       throw new ForbiddenException('No podés editar esta carga');
     }
+
+    const nextLitros = dto.litros !== undefined ? dto.litros : carga.litros;
+    const nextPrecio = dto.precioPorLitro !== undefined ? dto.precioPorLitro : carga.precioPorLitro;
+    const nextImporte = dto.importe !== undefined ? dto.importe : carga.importe;
+    this.assertCoherenciaImporte(nextLitros, nextPrecio, nextImporte);
 
     return this.prisma.cargaCombustible.update({
       where: { id },
@@ -223,6 +244,7 @@ export class CombustibleService {
     }
     const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
     await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km);
+    this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
     return this.prisma.cargaCombustible.create({
       data: {
         tenantId,
@@ -320,6 +342,11 @@ export class CombustibleService {
         await this.assertKmNoRetroceso(tenantId, efectivoVehiculoId, efectivaFecha, dto.km, id);
       }
     }
+
+    const nextLitros = dto.litros !== undefined ? dto.litros : carga.litros;
+    const nextPrecio = dto.precioPorLitro !== undefined ? dto.precioPorLitro : carga.precioPorLitro;
+    const nextImporte = dto.importe !== undefined ? dto.importe : carga.importe;
+    this.assertCoherenciaImporte(nextLitros, nextPrecio, nextImporte);
 
     return this.prisma.cargaCombustible.update({
       where: { id },

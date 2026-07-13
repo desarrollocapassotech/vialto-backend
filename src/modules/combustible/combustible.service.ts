@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
@@ -20,7 +21,24 @@ interface CombustibleAuth {
 
 @Injectable()
 export class CombustibleService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
+
+  async uploadFoto(
+    tenantId: string,
+    file: Express.Multer.File,
+    tipo: 'tacometro' | 'ticket',
+  ) {
+    const url = await this.cloudinary.uploadCombustibleFoto(
+      tenantId,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    return { url };
+  }
 
   private assertCoherenciaImporte(litros: number, precioPorLitro: number, importe: number) {
     if (!litros || !precioPorLitro) {

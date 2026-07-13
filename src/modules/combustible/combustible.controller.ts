@@ -1,7 +1,9 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { CombustibleService } from './combustible.service';
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
@@ -99,5 +101,36 @@ export class CombustibleController {
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.remove(id, auth);
+  }
+
+  @ApiOperation({ summary: 'Subir foto para carga de combustible' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        tipo: { type: 'string', enum: ['tacometro', 'ticket'] },
+      },
+    },
+  })
+  @Post('fotos')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadFoto(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('tipo') tipo: 'tacometro' | 'ticket',
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    if (!tipo || !['tacometro', 'ticket'].includes(tipo)) {
+      throw new BadRequestException('Tipo inválido o no especificado.');
+    }
+    return this.service.uploadFoto(auth.tenantId, file, tipo);
   }
 }

@@ -7,55 +7,77 @@ Estrategia en capas:
 
 El backup corre automáticamente vía GitHub Actions: `.github/workflows/db-backup.yml`.
 
+**Dashboard de backups (Cloudflare):**  
+https://dash.cloudflare.com/02191c7fc6065df27a1a363ff14bab2d/home
+
+Account ID: `02191c7fc6065df27a1a363ff14bab2d`  
+Endpoint S3 de R2: `https://02191c7fc6065df27a1a363ff14bab2d.r2.cloudflarestorage.com`  
+Bucket: `vialto-db-backups`
+
+> Los secrets se llaman `S3_*` porque R2 habla el protocolo S3 y el workflow usa `aws s3`. El storage real es **solo Cloudflare R2**, no AWS ni otro proveedor.
+
 ---
 
 ## Setup inicial (una sola vez)
 
-### 1. Crear el bucket en Cloudflare R2
+### 1. Crear / verificar el bucket en Cloudflare R2
 
-1. En el dashboard de Cloudflare, ir a **R2** (si es la primera vez, habilitar R2 — pide una tarjeta pero el tier de 10 GB es gratis).
-2. **Create bucket** → nombre (ej. `vialto-db-backups`). Location: Automatic.
-3. Anotar el **endpoint S3** del bucket. Tiene la forma:
-   `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
-   (lo ves en *R2 → Overview* o en la pestaña *Settings* del bucket, como "S3 API").
+1. Entrá al [dashboard de Cloudflare](https://dash.cloudflare.com/02191c7fc6065df27a1a363ff14bab2d/home).
+2. Menú → **R2 Object Storage**.
+3. Si no hay bucket: **Create bucket** → nombre `vialto-db-backups`. Location: Automatic.
+4. **Cifrado en reposo:** R2 cifra los objetos en reposo por defecto (SSE). No hace falta un toggle extra.
 
 ### 2. Crear un API Token de R2
 
-1. **R2 → Manage R2 API Tokens → Create API Token**.
-2. Permisos: **Object Read & Write**; alcance: solo ese bucket.
-3. Al crearlo te muestra (una sola vez) un **Access Key ID** y un **Secret Access Key** — copialos.
+1. R2 → **Overview** → **Account Details** → **API Tokens** → **Manage**.
+2. **Create API token**.
+3. Permisos: **Object Read & Write**; alcance: solo el bucket `vialto-db-backups`.
+4. Al crearlo te muestra (una sola vez) **Access Key ID** y **Secret Access Key** — copialos.
+5. El token necesita poder **listar y borrar** objetos del bucket (la rotación elimina dumps vencidos).
 
 ### 3. Cargar los secrets en GitHub
 
-En el repo → **Settings → Secrets and variables → Actions → New repository secret**:
+En el repo → **Settings → Secrets and variables → Actions**:
 
 | Secret | Valor |
 |---|---|
 | `PROD_DATABASE_URL_UNPOOLED` | Connection string **directa (sin `-pooler`)** de la rama production de Neon |
-| `S3_ENDPOINT` | Endpoint S3 de R2 (`https://<ACCOUNT_ID>.r2.cloudflarestorage.com`) |
-| `S3_BUCKET` | Nombre del bucket |
-| `S3_ACCESS_KEY_ID` | Access Key ID del API Token |
-| `S3_SECRET_ACCESS_KEY` | Secret Access Key del API Token |
+| `S3_ENDPOINT` | `https://02191c7fc6065df27a1a363ff14bab2d.r2.cloudflarestorage.com` |
+| `S3_BUCKET` | `vialto-db-backups` |
+| `S3_ACCESS_KEY_ID` | Access Key ID del API Token de R2 |
+| `S3_SECRET_ACCESS_KEY` | Secret Access Key del API Token de R2 |
 
-> La `PROD_DATABASE_URL_UNPOOLED` vive **solo** acá (en los secrets), nunca en el repo.
-> Los secrets usan nombres genéricos `S3_*`, así que si en el futuro cambiás de proveedor S3-compatible solo actualizás los valores, no el workflow.
+> Estos secrets viven **solo** en GitHub Actions, nunca en el repo.  
+> Si había valores viejos de pruebas con otro proveedor, **editá** (Update) cada secret con los valores de R2.
 
-### 4. Configurar la rotación (Lifecycle Rule del bucket)
+### 4. Rotación (en el workflow, no lifecycle de 30 días)
 
-En el bucket de R2 → **Settings → Object lifecycle rules → Add rule**:
+La rotación la hace el mismo job de backup (no uses una lifecycle rule de “borrar a los 30 días” que contradiga esto):
 
-- Aplicar a todos los objetos (o al prefijo `daily/`).
-- Acción: **Delete objects** N días después de creados (ej. **30 días**).
+| Prefijo | Cuántos se conservan | Cuándo se escribe |
+|---|---|---|
+| `daily/` | **7** más recientes | Cada corrida nocturna |
+| `weekly/` | **4** más recientes | Domingos UTC (copia del dump del día) |
+| `monthly/` | **6** más recientes | Día 1 de cada mes UTC |
 
-Con eso, los dumps de más de 30 días se borran solos y no hace falta lógica de rotación en el workflow.
+Estructura en el bucket:
+
+```
+vialto-db-backups/
+  daily/vialto_prod_AAAA-MM-DD_HHMMSS.dump
+  weekly/vialto_prod_AAAA-Www.dump
+  monthly/vialto_prod_AAAA-MM.dump
+```
+
+Si en el bucket hay una lifecycle rule antigua de borrado por días, **eliminála** para no pelear con esta política.
 
 ---
 
 ## Cómo corre
 
-- **Automático:** todas las noches a las **01:00 ART** (04:00 UTC). Los workflows con `schedule` solo se ejecutan desde la rama **`main`**, así que el archivo debe estar mergeado a main.
+- **Automático:** todas las noches a las **01:00 ART** (04:00 UTC). Los workflows con `schedule` solo se ejecutan desde la rama **`main`**.
 - **Manual:** pestaña **Actions → DB Backup (producción) → Run workflow**.
-- Cada corrida sube un archivo `vialto_prod_AAAA-MM-DD_HHMMSS.dump` a `s3://<bucket>/daily/`.
+- Tras dump + upload: promo weekly/monthly si corresponde, y prune 7/4/6.
 
 > Los workflows programados pueden demorarse en horarios de alta carga de GitHub y se desactivan tras 60 días de inactividad del repo. Si dejás de ver backups, revisá que el workflow siga activo.
 
@@ -63,11 +85,11 @@ Con eso, los dumps de más de 30 días se borran solos y no hace falta lógica d
 
 ## Cómo restaurar
 
-1. Descargar el dump deseado desde R2 (consola web o aws cli):
+1. Descargar el dump deseado desde R2 (consola web o aws cli), desde `daily/`, `weekly/` o `monthly/`:
 
    ```bash
-   aws s3 cp s3://<bucket>/daily/<archivo>.dump ./ \
-     --endpoint-url https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+   aws s3 cp s3://vialto-db-backups/daily/<archivo>.dump ./ \
+     --endpoint-url https://02191c7fc6065df27a1a363ff14bab2d.r2.cloudflarestorage.com
    ```
 
 2. **Importante:** restaurar **siempre en una base/rama de prueba primero**, nunca directo sobre producción. Lo más seguro es crear una rama scratch en Neon y restaurar ahí:
@@ -96,3 +118,4 @@ Un dump que nunca se restauró no es un backup. Una vez por mes:
 - **Versión de `pg_dump`:** el workflow instala el client 17, que sirve para dumpear servidores PG 16 o 17 (la regla es: versión del client ≥ versión del servidor). Si tu Neon usa una versión mayor, actualizar el `postgresql-client-XX` en el workflow.
 - **RPO:** con dump nocturno se pueden perder hasta 24 h de datos. Para una ventana más fina, combinar con la Capa 1 (PITR de Neon).
 - **Conexión:** siempre la URL **unpooled** (directa), nunca el pooler.
+- **Cifrado:** los objetos en R2 están cifrados en reposo (SSE por defecto de Cloudflare).

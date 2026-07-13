@@ -40,6 +40,8 @@ export class CombustibleController {
     @Query('month') month?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('estacion') estacion?: string,
+    @Query('formaPago') formaPago?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(
@@ -49,7 +51,21 @@ export class CombustibleController {
       month,
       page ? parseInt(page, 10) : undefined,
       limit ? parseInt(limit, 10) : undefined,
+      estacion,
+      formaPago,
     );
+  }
+
+  @ApiOperation({ summary: 'Dashboard de combustible — métricas y últimas cargas del período' })
+  @Get('dashboard')
+  @Roles('admin', 'superadmin')
+  getDashboard(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getDashboard(auth, from, to);
   }
 
   @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })

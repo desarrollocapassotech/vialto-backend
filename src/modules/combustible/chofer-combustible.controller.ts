@@ -30,6 +30,24 @@ export class ChoferCombustibleController {
     return this.service.findAllByChofer(choferId, tenantId, month);
   }
 
+  @ApiOperation({ summary: 'Última carga del chofer (sin filtro de mes) — para default de patente' })
+  @Get('ultima-carga')
+  getUltimaCarga(@Req() req: ChoferAuthRequest) {
+    const { sub: choferId, tenantId } = req.choferAuth;
+    return this.service.getUltimaCargaChofer(choferId, tenantId);
+  }
+
+  @ApiOperation({ summary: 'Último km registrado para un vehículo (por patente)' })
+  @Get('ultimo-km')
+  getUltimoKm(
+    @Req() req: ChoferAuthRequest,
+    @Query('patente') patente: string,
+    @Query('excludeId') excludeId?: string,
+  ) {
+    const { tenantId } = req.choferAuth;
+    return this.service.getUltimoKmPorPatente(patente, tenantId, excludeId);
+  }
+
   @ApiOperation({ summary: 'Registrar una carga de combustible (usa patente en lugar de vehiculoId)' })
   @Post('cargas')
   createCarga(

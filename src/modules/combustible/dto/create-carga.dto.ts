@@ -6,6 +6,7 @@ export class CreateCargaDto {
   @IsOptional() @IsString() choferId?: string;
   @IsString() @IsNotEmpty() estacion: string;
   @IsNumber() @Type(() => Number) litros: number;
+  @IsNumber() @Type(() => Number) precioPorLitro: number;
   @IsNumber() @Type(() => Number) importe: number;
   @IsNumber() @Type(() => Number) km: number;
   @IsOptional() @IsString() formaPago?: string;

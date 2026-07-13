@@ -89,7 +89,7 @@ export class LiquidacionPdfService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly arcaConfig: ArcaConfigService,
-  ) {}
+  ) { }
 
   private get db(): PrismaAny {
     return this.prisma as PrismaAny;
@@ -247,24 +247,40 @@ export class LiquidacionPdfService {
     y += hdrH + 2;
 
     // ── Sección 2: receptor (transportista) ──────────────────────────────────
-    const rcpH = 48;
+    const t = liq.transportista;
+    const condLabel = t?.condicionIva ? (CONDICION_IVA_LABEL[t.condicionIva] ?? String(t.condicionIva)) : '';
+    const colW = CW / 2 - 8;
+    const nameText = `Sr.(es): ${t?.nombre ?? ''}`;
+    const domText = `Domicilio: ${t?.domicilio ?? ''}`;
+
+    const nameH = doc.heightOfString(nameText, { width: colW });
+    const domH = doc.heightOfString(domText, { width: colW });
+
+    const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
+    const rcpH = Math.max(leftTotalH, 48);
+
     doc.rect(M, y, CW, rcpH).stroke('#aaa');
     doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke('#aaa');
 
-    const t = liq.transportista;
-    const condLabel = t?.condicionIva ? (CONDICION_IVA_LABEL[t.condicionIva] ?? String(t.condicionIva)) : '';
+    let ly = y + 5;
     doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
-      .text(`Sr.(es): ${t?.nombre ?? ''}`, M + 4, y + 5, { width: CW / 2 - 8 });
+      .text(nameText, M + 4, ly, { width: colW });
+    ly += nameH + 2;
+
     doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-      .text(`Domicilio: ${t?.domicilio ?? ''}`, M + 4, y + 17, { width: CW / 2 - 8 })
-      .text(`Cond. IVA: ${condLabel}`, M + 4, y + 28, { width: CW / 2 - 8 })
-      .text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, M + 4, y + 38, { width: CW / 2 - 8 });
+      .text(domText, M + 4, ly, { width: colW });
+    ly += domH + 2;
+
+    doc.text(`Cond. IVA: ${condLabel}`, M + 4, ly, { width: colW });
+    ly += 12;
+
+    doc.text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, M + 4, ly, { width: colW });
 
     const rx2 = M + CW / 2 + 4;
     doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-      .text('Condición de Venta: CTA CTE', rx2, y + 5, { width: CW / 2 - 8 })
-      .text('Moneda: Pesos', rx2, y + 17, { width: CW / 2 - 8 })
-      .text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, rx2, y + 28, { width: CW / 2 - 8 });
+      .text('Condición de Venta: CTA CTE', rx2, y + 5, { width: colW })
+      .text('Moneda: Pesos', rx2, y + 17, { width: colW })
+      .text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, rx2, y + 28, { width: colW });
 
     y += rcpH + 2;
 
@@ -282,7 +298,7 @@ export class LiquidacionPdfService {
     }
 
     // ── Tabla de ítems ────────────────────────────────────────────────────────
-    const colWidths = [100, 168, 44, 65, 65, 38, 70]; // total = ~550
+    const colWidths = [100, 157.28, 40, 65, 65, 42, 70]; // total = 539.28 (CW)
     const colX: number[] = [];
     let cx = M;
     for (const w of colWidths) { colX.push(cx); cx += w; }
@@ -388,16 +404,17 @@ export class LiquidacionPdfService {
 
     // ARCA text
     doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
-      .text('ARCA', M + 72, footerBoxY + 14, { width: 80 });
+      .text('ARCA', M + 72, footerBoxY + 14, { width: 150 });
     doc.fontSize(6).font('Helvetica').fillColor('#555')
-      .text('AGENCIA DE RECAUDACIÓN', M + 72, footerBoxY + 27, { width: 80 })
-      .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 80 });
+      .text('AGENCIA DE RECAUDACIÓN', M + 72, footerBoxY + 27, { width: 150 })
+      .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 150 });
 
     // Totales (derecha)
-    const impNeto = liq.bruto - liq.comision - liq.gastosAdmin;
+    const impNeto = liq.bruto - liq.comision;
     const iva = liq.gastosAdminIva;
     const totX = M + CW - 200;
-    const totW = 190;
+    const labelW = 120;
+    const valW = 70;
     doc.fontSize(7.5).font('Helvetica').fillColor('#000');
     const totRows: [string, string][] = [
       ['Importe Neto Gravado: $', fmtNum(impNeto)],
@@ -405,20 +422,29 @@ export class LiquidacionPdfService {
       ['IVA: $', fmtNum(iva)],
       ['Importe Total: $', fmtNum(impTotal)],
     ];
-    totRows.forEach(([label, val], i) => {
-      const ry = footerBoxY + 6 + i * 12;
-      doc.text(label, totX, ry, { width: 130, align: 'left' });
-      doc.font('Helvetica-Bold').text(val, totX + 130, ry, { width: 60, align: 'right' });
+
+    let currentY = footerBoxY + 6;
+    totRows.forEach(([label, val]) => {
+      const labelHeight = doc.heightOfString(label, { width: labelW });
+      const valHeight = doc.heightOfString(val, { width: valW });
+      const rowHeight = Math.max(labelHeight, valHeight, 10);
+
+      doc.text(label, totX, currentY, { width: labelW, align: 'left', lineBreak: true });
+      doc.font('Helvetica-Bold').text(val, totX + labelW, currentY, { width: valW, align: 'right' });
       doc.font('Helvetica');
+
+      currentY += rowHeight + 1.5;
     });
+
+    currentY = Math.max(currentY, footerBoxY + 52);
 
     if (liq.cae) {
       doc.fontSize(7.5).font('Helvetica').fillColor('#000')
-        .text(`CAE N°: ${liq.cae}`, totX, footerBoxY + 54, { width: 190 })
-        .text(`Vto CAE: ${fmtDate(liq.caeFechaVto)}`, totX, footerBoxY + 64, { width: 190 });
+        .text(`CAE N°: ${liq.cae}`, totX, currentY, { width: 190 })
+        .text(`Vto CAE: ${fmtDate(liq.caeFechaVto)}`, totX, currentY + 10, { width: 190 });
     } else {
       doc.fontSize(7.5).font('Helvetica').fillColor('#999')
-        .text('Pendiente de emisión (sin CAE)', totX, footerBoxY + 54, { width: 190 });
+        .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });
     }
   }
 }

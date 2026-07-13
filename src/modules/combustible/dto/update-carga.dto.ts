@@ -6,6 +6,7 @@ export class UpdateCargaDto {
   @IsOptional() @IsString() choferId?: string;
   @IsOptional() @IsString() estacion?: string;
   @IsOptional() @IsNumber() @Type(() => Number) litros?: number;
+  @IsOptional() @IsNumber() @Type(() => Number) precioPorLitro?: number;
   @IsOptional() @IsNumber() @Type(() => Number) importe?: number;
   @IsOptional() @IsNumber() @Type(() => Number) km?: number;
   @IsOptional() @IsString() formaPago?: string;

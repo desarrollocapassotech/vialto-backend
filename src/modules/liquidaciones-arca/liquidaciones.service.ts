@@ -7,17 +7,17 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
+import { computeAfipGravadoIva, round2 } from './arca-iva.util';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 
-// IVA aliquot Id para 21%
-const IVA_21_ID = 5;
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
 const DOC_TIPO_CF = 99;
@@ -95,19 +95,8 @@ export class LiquidacionesService {
       );
     }
 
-    // Verificar que ningún viaje ya esté en otra liquidación
-    const viajeIds = viajes.map((v) => v.id);
-    const liquidacionViajesExistentes = await this.db.liquidacionViaje.findMany({
-      where: { viajeId: { in: viajeIds } },
-      select: { viajeId: true },
-    });
-    const yaLiquidadosIds = new Set(liquidacionViajesExistentes.map((lv) => lv.viajeId));
-    const yaLiquidados = viajes.filter((v) => yaLiquidadosIds.has(v.id));
-    if (yaLiquidados.length > 0) {
-      throw new ConflictException(
-        `Los viajes ${yaLiquidados.map((v) => v.id).join(', ')} ya están en otra liquidación`,
-      );
-    }
+    // Verificar que ningún viaje ya tenga liquidación activa para este transportista
+    await this.assertViajesSinLiquidacionActiva(tenantId, dto.transportistaId, viajes);
 
     // Obtener metadata de cada viaje para calcular montos
     const viajesConMeta = await this.prisma.viaje.findMany({
@@ -132,66 +121,74 @@ export class LiquidacionesService {
       const tnOrigen = (meta.tnOrigen as number | null) ?? null;
       const tarifaTransportista = (meta.tarifaTransportista as number | null) ?? null;
 
-      const gastos = Array.isArray((v as { otrosGastos?: unknown }).otrosGastos)
-        ? ((v as { otrosGastos: Array<{ monto?: number; moneda?: string }> }).otrosGastos)
-        : [];
-      const gastosAdminViaje = round2(
-        gastos
-          .filter((g) => (g.moneda ?? 'ARS') === 'ARS')
-          .reduce((acc, g) => acc + (g.monto ?? 0), 0),
-      );
-
       // Granel (NyM): tnDestino × tarifaTransportista. Viaje estándar: precioTransportistaExterno.
       const subtotal = tnDestino != null && tarifaTransportista != null
         ? round2(tnDestino * tarifaTransportista)
         : round2((v as { precioTransportistaExterno?: number | null }).precioTransportistaExterno ?? 0);
 
       bruto += subtotal;
-      viajesDetalle.push({ viajeId: v.id, tnOrigen, tnDestino, tarifaTransportista, subtotal, gastosAdmin: gastosAdminViaje });
+      viajesDetalle.push({
+        viajeId: v.id,
+        tnOrigen,
+        tnDestino,
+        tarifaTransportista,
+        subtotal,
+        gastosAdmin: 0,
+      });
     }
 
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
-    const gastosAdmin = round2(viajesDetalle.reduce((acc, d) => acc + d.gastosAdmin, 0));
-    // netoGravado = bruto - comision - gastos; IVA se aplica sobre el neto gravado
-    const netoGravado = round2(bruto - comision - gastosAdmin);
+    // Los gastos extra del viaje (otrosGastos) no participan del cálculo del comprobante.
     const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
-    const gastosAdminIva = round2(netoGravado * ivaPct / 100);
-    const liquido = round2(netoGravado + gastosAdminIva);
+    const montos = computeAfipGravadoIva(bruto, comision, ivaPct);
+    const gastosAdmin = 0;
+    const gastosAdminIva = montos.impIva;
+    const liquido = montos.liquido;
 
-    const liquidacion = await this.db.liquidacion.create({
-      data: {
-        tenantId,
-        transportistaId: dto.transportistaId,
-        periodoDesde: new Date(dto.periodoDesde),
-        periodoHasta: new Date(dto.periodoHasta),
-        cantViajes: dto.viajeIds.length,
-        bruto,
-        comisionPct,
-        comision,
-        gastosAdmin,
-        gastosAdminIva,
-        liquido,
-        estado: 'borrador',
-        cbteTipo: 60,
-        ptoVenta: config?.ptoVentaCvlp ?? 0,
-        comprobanteUrl: dto.comprobanteUrl ?? null,
-        createdBy: userId,
-        updatedAt: new Date(),
-        viajes: {
-          create: viajesDetalle.map((d) => ({
-            tenantId,
-            viajeId: d.viajeId,
-            tnOrigen: d.tnOrigen,
-            tnDestino: d.tnDestino,
-            tarifaTransportista: d.tarifaTransportista,
-            subtotal: d.subtotal,
-            gastosAdmin: d.gastosAdmin,
-          })),
+    let liquidacion;
+    try {
+      liquidacion = await this.db.liquidacion.create({
+        data: {
+          tenantId,
+          transportistaId: dto.transportistaId,
+          periodoDesde: new Date(dto.periodoDesde),
+          periodoHasta: new Date(dto.periodoHasta),
+          cantViajes: dto.viajeIds.length,
+          bruto,
+          comisionPct,
+          comision,
+          gastosAdmin,
+          gastosAdminIva,
+          liquido,
+          estado: 'borrador',
+          cbteTipo: 60,
+          ptoVenta: config?.ptoVentaCvlp ?? 0,
+          comprobanteUrl: dto.comprobanteUrl ?? null,
+          createdBy: userId,
+          updatedAt: new Date(),
+          viajes: {
+            create: viajesDetalle.map((d) => ({
+              tenantId,
+              viajeId: d.viajeId,
+              tnOrigen: d.tnOrigen,
+              tnDestino: d.tnDestino,
+              tarifaTransportista: d.tarifaTransportista,
+              subtotal: d.subtotal,
+              gastosAdmin: d.gastosAdmin,
+            })),
+          },
         },
-      },
-      include: { viajes: true },
-    });
+        include: { viajes: true },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException(
+          'La acción no es válida. Ya existe una liquidación previa para este transportista en uno de los viajes seleccionados.',
+        );
+      }
+      throw e;
+    }
 
     for (const viajeId of dto.viajeIds) {
       await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
@@ -258,12 +255,9 @@ export class LiquidacionesService {
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
       const condicionIvaReceptorId = transportista?.condicionIva ?? 1;
 
-      // impNeto  = todos los ítems sin IVA (bruto - comision - gastosAdmin)
-      // ivaBase  = base gravada al 21% = bruto - comision (gastosAdmin va al 0%)
-      // ImpTotal = impNeto + impIva = liquido
-      const impNeto = round2(liquidacion.bruto - liquidacion.comision - liquidacion.gastosAdmin);
-      const impIva = round2(liquidacion.gastosAdminIva);
-      const ivaBase = round2(liquidacion.bruto - liquidacion.comision);
+      // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
+      const ivaPct = config?.ivaGastosAdmin ?? 21;
+      const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, ivaPct);
       const response = await this.arcaClient.autorizarComprobante(
         config.apiKey,
         {
@@ -279,10 +273,10 @@ export class LiquidacionesService {
           docTipo,
           docNro,
           condicionIvaReceptorId,
-          impNeto,
-          impIva,
-          impTotal: liquidacion.liquido,
-          alicuotasIva: [{ Id: IVA_21_ID, BaseImp: ivaBase, Importe: impIva }],
+          impNeto: montos.impNeto,
+          impIva: montos.impIva,
+          impTotal: montos.liquido,
+          alicuotasIva: [montos.alicuota],
         },
         tenantId,
         liquidacionId,
@@ -299,6 +293,9 @@ export class LiquidacionesService {
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaError: null,
+          gastosAdmin: 0,
+          gastosAdminIva: montos.impIva,
+          liquido: montos.liquido,
           updatedAt: new Date(),
         },
       });
@@ -307,7 +304,12 @@ export class LiquidacionesService {
     } catch (err) {
       const isConectividad =
         err instanceof ArcaException && err.code === ARCA_ERROR_CODES.CONECTIVIDAD;
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const errMsg =
+        err instanceof ArcaException
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
 
       await this.db.liquidacion.update({
         where: { id: liquidacionId },
@@ -361,10 +363,8 @@ export class LiquidacionesService {
     const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
     const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
 
-    // Comprobante negativo — misma estructura que la emisión original pero negativa
-    const anulIva = round2(liquidacion.gastosAdminIva);
-    const anulIvaBase = round2(liquidacion.bruto - liquidacion.comision);
-    const anulNeto = round2(liquidacion.bruto - liquidacion.comision - liquidacion.gastosAdmin);
+    const ivaPct = config?.ivaGastosAdmin ?? 21;
+    const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, ivaPct);
     await this.arcaClient.autorizarComprobante(
       config.apiKey,
       {
@@ -380,10 +380,16 @@ export class LiquidacionesService {
         docTipo,
         docNro,
         condicionIvaReceptorId: transportista?.condicionIva ?? 1,
-        impNeto: -anulNeto,
-        impIva: -anulIva,
-        impTotal: -liquidacion.liquido,
-        alicuotasIva: [{ Id: IVA_21_ID, BaseImp: -anulIvaBase, Importe: -anulIva }],
+        impNeto: -montos.impNeto,
+        impIva: -montos.impIva,
+        impTotal: -montos.liquido,
+        alicuotasIva: [
+          {
+            Id: montos.alicuota.Id,
+            BaseImp: -montos.alicuota.BaseImp,
+            Importe: -montos.alicuota.Importe,
+          },
+        ],
       },
       tenantId,
       liquidacionId,
@@ -535,9 +541,10 @@ export class LiquidacionesService {
 
       // Calcular IVA 21% sobre el importe (ImpNeto = importe / 1.21 si ya es c/IVA,
       // o importe directamente si es neto). Aquí asumimos que factura.importe = neto.
-      const impNeto = round2(factura.importe);
-      const impIva = round2(impNeto * 0.21);
-      const impTotal = round2(impNeto + impIva);
+      const montos = computeAfipGravadoIva(factura.importe, 0, 21);
+      const impNeto = montos.impNeto;
+      const impIva = montos.impIva;
+      const impTotal = montos.liquido;
 
       const docNro = factura.clienteDatos?.idFiscal
         ? Number(factura.clienteDatos.idFiscal.replace(/-/g, ''))
@@ -563,7 +570,7 @@ export class LiquidacionesService {
           impNeto,
           impIva,
           impTotal,
-          alicuotasIva: [{ Id: IVA_21_ID, BaseImp: impNeto, Importe: impIva }],
+          alicuotasIva: [montos.alicuota],
         },
         tenantId,
         undefined,
@@ -592,7 +599,12 @@ export class LiquidacionesService {
         where: { id: facturaId },
         data: {
           arcaEstado: isConectividad ? 'pendiente_cae' : 'error',
-          arcaError: err instanceof Error ? err.message : String(err),
+          arcaError:
+            err instanceof ArcaException
+              ? err.message
+              : err instanceof Error
+                ? err.message
+                : String(err),
         },
       });
 
@@ -616,16 +628,53 @@ export class LiquidacionesService {
 
   // ── Helpers privados ──────────────────────────────────────────────────────
 
+  private async assertViajesSinLiquidacionActiva(
+    tenantId: string,
+    transportistaId: string,
+    viajes: Array<{ id: string; numero: string | null }>,
+  ): Promise<void> {
+    const viajeIds = viajes.map((v) => v.id);
+    const existentes = await this.db.liquidacionViaje.findMany({
+      where: {
+        tenantId,
+        viajeId: { in: viajeIds },
+        liquidacion: {
+          tenantId,
+          transportistaId,
+          estado: { not: 'anulado' },
+        },
+      },
+      select: {
+        viajeId: true,
+        viaje: { select: { numero: true } },
+      },
+    });
+    if (!existentes.length) return;
+
+    const numeros = existentes
+      .map((lv) => lv.viaje?.numero)
+      .filter((n): n is string => Boolean(n?.trim()));
+    if (numeros.length === 1) {
+      throw new ConflictException(
+        `La acción no es válida. Ya existe una liquidación previa para este transportista en el viaje #${numeros[0]}.`,
+      );
+    }
+    if (numeros.length > 1) {
+      throw new ConflictException(
+        `La acción no es válida. Ya existen liquidaciones previas para este transportista en los viajes: ${numeros.map((n) => `#${n}`).join(', ')}.`,
+      );
+    }
+    throw new ConflictException(
+      'La acción no es válida. Ya existe una liquidación previa para este transportista en uno de los viajes seleccionados.',
+    );
+  }
+
   private buildPayloadHash(id: string, liquido: number, ambiente: string): string {
     return crypto
       .createHash('sha256')
       .update(`${id}|${liquido}|${ambiente}`)
       .digest('hex');
   }
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 function formatFechaCbte(date: Date): string {

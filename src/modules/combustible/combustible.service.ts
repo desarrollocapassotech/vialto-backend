@@ -22,6 +22,51 @@ interface CombustibleAuth {
 export class CombustibleService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private assertCoherenciaImporte(litros: number, precioPorLitro: number, importe: number) {
+    if (!litros || !precioPorLitro) {
+      return; // Omitir validación si los litros o el precio son 0 o no están definidos
+    }
+    const expectedImporte = litros * precioPorLitro;
+    const diff = Math.abs(importe - expectedImporte);
+    const tolerance = expectedImporte * 0.01;
+
+    if (diff > tolerance) {
+      throw new BadRequestException(
+        `El importe ingresado ($${importe.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) no coincide con el cálculo de litros x precio por litro ($${expectedImporte.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). La diferencia supera el 1% de tolerancia permitido.`,
+      );
+    }
+  }
+
+  private async assertKmNoRetroceso(
+    tenantId: string,
+    vehiculoId: string,
+    fecha: Date,
+    km: number,
+    excludeId?: string,
+  ) {
+    const prev = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        fecha: { lt: fecha },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: { fecha: 'desc' },
+      select: { km: true, fecha: true },
+    });
+    if (prev && km < prev.km) {
+      const fechaFmt = new Intl.DateTimeFormat('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }).format(prev.fecha);
+      throw new BadRequestException(
+        `KM ingresados son inferiores a los de la carga anterior del vehículo en el ${fechaFmt}`,
+      );
+    }
+  }
+
   private async assertVehiculoChofer(
     tenantId: string,
     vehiculoId: string,
@@ -46,6 +91,8 @@ export class CombustibleService {
     month?: string,
     page = 1,
     limit = 10,
+    estacion?: string,
+    formaPago?: string,
   ) {
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(200, Math.max(1, limit));
@@ -58,6 +105,8 @@ export class CombustibleService {
 
     if (vehiculoId) where['vehiculoId'] = vehiculoId;
     if (choferId) where['choferId'] = choferId;
+    if (estacion) where['estacion'] = { contains: estacion, mode: 'insensitive' };
+    if (formaPago) where['formaPago'] = formaPago;
 
     if (month) {
       const [year, mon] = month.split('-').map(Number);
@@ -96,6 +145,7 @@ export class CombustibleService {
   }
 
   async create(dto: CreateCargaDto, auth: CombustibleAuth) {
+    this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
     await this.assertVehiculoChofer(auth.tenantId, dto.vehiculoId, dto.choferId);
     return this.prisma.cargaCombustible.create({
       data: {
@@ -104,6 +154,7 @@ export class CombustibleService {
         choferId: dto.choferId ?? null,
         estacion: dto.estacion,
         litros: dto.litros,
+        precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
         formaPago: (dto.formaPago ?? null),
@@ -126,6 +177,11 @@ export class CombustibleService {
       throw new ForbiddenException('No podés editar esta carga');
     }
 
+    const nextLitros = dto.litros !== undefined ? dto.litros : carga.litros;
+    const nextPrecio = dto.precioPorLitro !== undefined ? dto.precioPorLitro : carga.precioPorLitro;
+    const nextImporte = dto.importe !== undefined ? dto.importe : carga.importe;
+    this.assertCoherenciaImporte(nextLitros, nextPrecio, nextImporte);
+
     return this.prisma.cargaCombustible.update({
       where: { id },
       data: {
@@ -133,6 +189,7 @@ export class CombustibleService {
         choferId: dto.choferId,
         estacion: dto.estacion,
         litros: dto.litros,
+        precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
         formaPago: dto.formaPago,
@@ -185,6 +242,9 @@ export class CombustibleService {
         `No se encontró el vehículo con patente "${dto.patente}" en esta empresa`,
       );
     }
+    const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
+    await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km);
+    this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
     return this.prisma.cargaCombustible.create({
       data: {
         tenantId,
@@ -192,6 +252,7 @@ export class CombustibleService {
         choferId,
         estacion: dto.estacion,
         litros: dto.litros,
+        precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
         formaPago: dto.formaPago ?? null,
@@ -203,6 +264,35 @@ export class CombustibleService {
         chofer: { select: { nombre: true, dni: true } },
       },
     });
+  }
+
+  async getUltimaCargaChofer(choferId: string, tenantId: string) {
+    const ultima = await this.prisma.cargaCombustible.findFirst({
+      where: { tenantId, choferId },
+      orderBy: { fecha: 'desc' },
+      include: { vehiculo: { select: { patente: true } } },
+    });
+    if (!ultima) return null;
+    return { patente: ultima.vehiculo?.patente ?? null };
+  }
+
+  async getUltimoKmPorPatente(patente: string, tenantId: string, excludeId?: string) {
+    const patenteClean = patente.replace(/\s+/g, '').toUpperCase();
+    const vehiculo = await this.prisma.vehiculo.findFirst({
+      where: { tenantId, patente: { equals: patenteClean, mode: 'insensitive' } },
+    });
+    if (!vehiculo) return null;
+    const ultima = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId: vehiculo.id,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: { fecha: 'desc' },
+      select: { km: true, fecha: true },
+    });
+    if (!ultima) return null;
+    return { km: ultima.km, fecha: ultima.fecha.toISOString() };
   }
 
   async deleteByChofer(id: string, choferId: string, tenantId: string) {
@@ -245,12 +335,26 @@ export class CombustibleService {
       vehiculoId = vehiculo.id;
     }
 
+    if (dto.km !== undefined) {
+      const efectivoVehiculoId = vehiculoId ?? carga.vehiculoId;
+      const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
+      if (efectivoVehiculoId) {
+        await this.assertKmNoRetroceso(tenantId, efectivoVehiculoId, efectivaFecha, dto.km, id);
+      }
+    }
+
+    const nextLitros = dto.litros !== undefined ? dto.litros : carga.litros;
+    const nextPrecio = dto.precioPorLitro !== undefined ? dto.precioPorLitro : carga.precioPorLitro;
+    const nextImporte = dto.importe !== undefined ? dto.importe : carga.importe;
+    this.assertCoherenciaImporte(nextLitros, nextPrecio, nextImporte);
+
     return this.prisma.cargaCombustible.update({
       where: { id },
       data: {
         ...(vehiculoId !== undefined && { vehiculoId }),
         ...(dto.estacion !== undefined && { estacion: dto.estacion }),
         ...(dto.litros !== undefined && { litros: dto.litros }),
+        ...(dto.precioPorLitro !== undefined && { precioPorLitro: dto.precioPorLitro }),
         ...(dto.importe !== undefined && { importe: dto.importe }),
         ...(dto.km !== undefined && { km: dto.km }),
         ...(dto.formaPago !== undefined && { formaPago: dto.formaPago }),
@@ -261,6 +365,88 @@ export class CombustibleService {
         chofer: { select: { nombre: true, dni: true } },
       },
     });
+  }
+
+  async getDashboard(auth: CombustibleAuth, from?: string, to?: string) {
+    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+
+    if (from || to) {
+      const fechaWhere: Record<string, Date> = {};
+      if (from) fechaWhere.gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        fechaWhere.lte = toDate;
+      }
+      where['fecha'] = fechaWhere;
+    }
+
+    const [todasCargas, ultimasCargas] = await Promise.all([
+      this.prisma.cargaCombustible.findMany({
+        where,
+        select: { litros: true, importe: true, vehiculoId: true, estacion: true },
+      }),
+      this.prisma.cargaCombustible.findMany({
+        where,
+        orderBy: { fecha: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          fecha: true,
+          litros: true,
+          importe: true,
+          km: true,
+          estacion: true,
+          formaPago: true,
+          vehiculo: { select: { patente: true } },
+          chofer: { select: { nombre: true } },
+        },
+      }),
+    ]);
+
+    const totalCargas = todasCargas.length;
+    const totalLitros = todasCargas.reduce((s, c) => s + c.litros, 0);
+    const totalImporte = todasCargas.reduce((s, c) => s + c.importe, 0);
+    const precioPorLitro = totalLitros > 0 ? totalImporte / totalLitros : 0;
+    const litrosPorCarga = totalCargas > 0 ? totalLitros / totalCargas : 0;
+
+    const estacionMap: Record<string, number> = {};
+    for (const c of todasCargas) {
+      estacionMap[c.estacion] = (estacionMap[c.estacion] ?? 0) + c.litros;
+    }
+    const topEstaciones = Object.entries(estacionMap)
+      .map(([nombre, litros]) => ({ nombre, litros }))
+      .sort((a, b) => b.litros - a.litros)
+      .slice(0, 5);
+
+    const vehiculoLitrosMap: Record<string, number> = {};
+    for (const c of todasCargas) {
+      if (!c.vehiculoId) continue;
+      vehiculoLitrosMap[c.vehiculoId] = (vehiculoLitrosMap[c.vehiculoId] ?? 0) + c.litros;
+    }
+    const vehiculoIds = Object.keys(vehiculoLitrosMap);
+    const vehiculos = vehiculoIds.length > 0
+      ? await this.prisma.vehiculo.findMany({
+          where: { id: { in: vehiculoIds } },
+          select: { id: true, patente: true },
+        })
+      : [];
+    const vehiculoMap = new Map(vehiculos.map(v => [v.id, v.patente]));
+    const topVehiculos = Object.entries(vehiculoLitrosMap)
+      .map(([id, litros]) => ({ patente: vehiculoMap.get(id) ?? id, litros }))
+      .sort((a, b) => b.litros - a.litros)
+      .slice(0, 5);
+
+    return {
+      totalCargas,
+      totalLitros,
+      totalImporte,
+      precioPorLitro,
+      litrosPorCarga,
+      topEstaciones,
+      topVehiculos,
+      ultimasCargas,
+    };
   }
 
   async getStats(auth: CombustibleAuth, month?: string) {

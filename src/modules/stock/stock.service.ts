@@ -26,6 +26,7 @@ import { UpdateDepositoDto } from './dto/update-deposito.dto';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
+import { resolverLoteIngreso } from './stock-lote.util';
 import { paginate, buildPaginatedResult } from '../../shared/util/pagination.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
@@ -483,7 +484,12 @@ export class StockService {
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          producto: { select: { id: true, nombre: true } },
+          producto: {
+            select: {
+              id: true,
+              nombre: true,
+            },
+          },
           presentacion: {
             select: {
               id: true,
@@ -571,7 +577,12 @@ export class StockService {
         select: {
           id: true,
           productoId: true,
-          producto: { select: { id: true, nombre: true } },
+          producto: {
+            select: {
+              id: true,
+              nombre: true,
+            },
+          },
           presentacionId: true,
           presentacion: {
             select: {
@@ -925,6 +936,7 @@ export class StockService {
 
       for (const linea of dto.lineas) {
         const fechaVencimiento = parseFechaMovimientoStock(linea.fechaVencimiento);
+        const lote = resolverLoteIngreso(linea);
 
         await tx.movimientoStock.create({
           data: {
@@ -935,7 +947,7 @@ export class StockService {
             bultos: linea.bultos,
             unidades: linea.sueltas,
             fechaVencimiento,
-            lote: linea.sinLote ? null : linea.lote!.trim(),
+            lote,
             fecha: fechaMov,
             createdBy,
           },
@@ -1015,7 +1027,12 @@ export class StockService {
             select: {
               id: true,
               productoId: true,
-              producto: { select: { id: true, nombre: true } },
+              producto: {
+            select: {
+              id: true,
+              nombre: true,
+            },
+          },
               presentacionId: true,
               presentacion: {
                 select: {
@@ -1182,7 +1199,12 @@ export class StockService {
         select: {
           id: true,
           productoId: true,
-          producto: { select: { id: true, nombre: true } },
+          producto: {
+            select: {
+              id: true,
+              nombre: true,
+            },
+          },
           presentacionId: true,
           presentacion: {
             select: {
@@ -1449,7 +1471,12 @@ export class StockService {
             select: {
               id: true,
               productoId: true,
-              producto: { select: { id: true, nombre: true } },
+              producto: {
+            select: {
+              id: true,
+              nombre: true,
+            },
+          },
               presentacionId: true,
               presentacion: {
                 select: {

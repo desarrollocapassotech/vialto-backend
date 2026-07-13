@@ -634,6 +634,7 @@ model CargaCombustible {
   chofer     Chofer?  @relation(fields: [choferId], references: [id], onDelete: SetNull)
   estacion   String
   litros     Float
+  precioPorLitro Float @default(0)
   importe    Float
   km         Int
   formaPago  String? // transferencia | cheque | efectivo

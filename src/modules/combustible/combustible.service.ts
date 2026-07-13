@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
@@ -20,7 +21,24 @@ interface CombustibleAuth {
 
 @Injectable()
 export class CombustibleService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
+
+  async uploadFoto(
+    tenantId: string,
+    file: Express.Multer.File,
+    tipo: 'tacometro' | 'ticket',
+  ) {
+    const url = await this.cloudinary.uploadCombustibleFoto(
+      tenantId,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    return { url };
+  }
 
   private assertCoherenciaImporte(litros: number, precioPorLitro: number, importe: number) {
     if (!litros || !precioPorLitro) {
@@ -160,6 +178,8 @@ export class CombustibleService {
         formaPago: (dto.formaPago ?? null),
         fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
         createdBy: auth.userId,
+        fotoTacometro: dto.fotoTacometro ?? null,
+        fotoTicket: dto.fotoTicket ?? null,
       },
     });
   }
@@ -182,6 +202,13 @@ export class CombustibleService {
     const nextImporte = dto.importe !== undefined ? dto.importe : carga.importe;
     this.assertCoherenciaImporte(nextLitros, nextPrecio, nextImporte);
 
+    if (carga.fotoTacometro && dto.fotoTacometro !== undefined && dto.fotoTacometro !== carga.fotoTacometro) {
+      throw new BadRequestException('La foto del tacómetro ya está guardada y no puede ser modificada');
+    }
+    if (carga.fotoTicket && dto.fotoTicket !== undefined && dto.fotoTicket !== carga.fotoTicket) {
+      throw new BadRequestException('La foto del ticket ya está guardada y no puede ser modificada');
+    }
+
     return this.prisma.cargaCombustible.update({
       where: { id },
       data: {
@@ -194,6 +221,8 @@ export class CombustibleService {
         km: dto.km,
         formaPago: dto.formaPago,
         fecha: dto.fecha === undefined ? undefined : dto.fecha ? new Date(dto.fecha) : undefined,
+        fotoTacometro: dto.fotoTacometro,
+        fotoTicket: dto.fotoTicket,
       },
     });
   }
@@ -258,6 +287,8 @@ export class CombustibleService {
         formaPago: dto.formaPago ?? null,
         fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
         createdBy: choferId,
+        fotoTacometro: dto.fotoTacometro ?? null,
+        fotoTicket: dto.fotoTicket ?? null,
       },
       include: {
         vehiculo: { select: { patente: true } },
@@ -348,6 +379,13 @@ export class CombustibleService {
     const nextImporte = dto.importe !== undefined ? dto.importe : carga.importe;
     this.assertCoherenciaImporte(nextLitros, nextPrecio, nextImporte);
 
+    if (carga.fotoTacometro && dto.fotoTacometro !== undefined && dto.fotoTacometro !== carga.fotoTacometro) {
+      throw new BadRequestException('La foto del tacómetro ya está guardada y no puede ser modificada');
+    }
+    if (carga.fotoTicket && dto.fotoTicket !== undefined && dto.fotoTicket !== carga.fotoTicket) {
+      throw new BadRequestException('La foto del ticket ya está guardada y no puede ser modificada');
+    }
+
     return this.prisma.cargaCombustible.update({
       where: { id },
       data: {
@@ -359,6 +397,8 @@ export class CombustibleService {
         ...(dto.km !== undefined && { km: dto.km }),
         ...(dto.formaPago !== undefined && { formaPago: dto.formaPago }),
         ...(dto.fecha !== undefined && { fecha: new Date(dto.fecha) }),
+        ...(dto.fotoTacometro !== undefined && { fotoTacometro: dto.fotoTacometro }),
+        ...(dto.fotoTicket !== undefined && { fotoTicket: dto.fotoTicket }),
       },
       include: {
         vehiculo: { select: { patente: true } },

@@ -641,6 +641,8 @@ model CargaCombustible {
   fecha      DateTime
   createdAt  DateTime @default(now())
   createdBy  String
+  fotoTacometro String?
+  fotoTicket    String?
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])

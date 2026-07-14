@@ -1216,6 +1216,7 @@ export class StockService {
           bultos: true,
           unidades: true,
           lote: true,
+          fechaVencimiento: true,
         },
       },
     } as const;

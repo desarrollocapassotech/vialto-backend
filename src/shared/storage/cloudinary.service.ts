@@ -110,6 +110,65 @@ export class CloudinaryService {
     }
   }
 
+  async uploadCombustibleFoto(
+    tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ): Promise<string> {
+    if (!this.configured) {
+      throw new ServiceUnavailableException(
+        'El almacenamiento de fotos no está configurado. Contactá al administrador.',
+      );
+    }
+    if (buffer.length > MAX_REMITO_PDF_BYTES) {
+      throw new ServiceUnavailableException('La imagen no puede superar 10 MB.');
+    }
+
+    const isImage =
+      mimeType.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(originalName ?? '');
+    if (!isImage) {
+      throw new ServiceUnavailableException('Solo se permiten imágenes JPG, PNG o WEBP.');
+    }
+
+    const baseName = String(originalName ?? 'foto')
+      .replace(/\.[^.]+$/i, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'foto';
+
+    const publicId = `${Date.now()}-${baseName}`;
+
+    try {
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `vialto/combustible/${tenantId}`,
+            resource_type: 'image',
+            public_id: publicId,
+            access_mode: 'public',
+            type: 'upload',
+            quality: 'auto',
+          },
+          (error, uploadResult) => {
+            if (error || !uploadResult) {
+              reject(error ?? new Error('Cloudinary no devolvió resultado'));
+              return;
+            }
+            resolve(uploadResult);
+          },
+        );
+        stream.end(buffer);
+      });
+
+      return result.secure_url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al subir la imagen';
+      this.logger.error(`Cloudinary combustible upload failed: ${message}`);
+      throw new BadGatewayException('No se pudo subir la foto. Intentá de nuevo más tarde.');
+    }
+  }
+
   async uploadRemitoInternoPdf(tenantId: string, buffer: Buffer, originalName: string): Promise<string> {
     return this.uploadRemitoArchivo(tenantId, buffer, originalName, 'application/pdf', 'remitos-internos');
   }

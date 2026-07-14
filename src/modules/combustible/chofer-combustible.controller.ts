@@ -1,5 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { ApiOperation, ApiTags, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { CreateCargaChoferDto } from './dto/create-carga-chofer.dto';
 import { UpdateCargaChoferDto } from './dto/update-carga-chofer.dto';
 import {
@@ -77,5 +79,36 @@ export class ChoferCombustibleController {
   ) {
     const { sub: choferId, tenantId } = req.choferAuth;
     return this.service.updateByChofer(id, dto, choferId, tenantId);
+  }
+
+  @ApiOperation({ summary: 'Subir foto para carga de combustible (chofer)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        tipo: { type: 'string', enum: ['tacometro', 'ticket'] },
+      },
+    },
+  })
+  @Post('fotos')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadFoto(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('tipo') tipo: 'tacometro' | 'ticket',
+    @Req() req: ChoferAuthRequest,
+  ) {
+    const { tenantId } = req.choferAuth;
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    if (!tipo || !['tacometro', 'ticket'].includes(tipo)) {
+      throw new BadRequestException('Tipo inválido o no especificado.');
+    }
+    return this.service.uploadFoto(tenantId, file, tipo);
   }
 }

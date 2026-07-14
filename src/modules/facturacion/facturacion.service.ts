@@ -2,25 +2,29 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { PrismaService } from '../../shared/prisma/prisma.service';
-import { CloudinaryService } from '../../shared/storage/cloudinary.service';
-
-import { CreateFacturaDto } from './dto/create-factura.dto';
-import { UpdateFacturaDto } from './dto/update-factura.dto';
-import { CreatePagoDto } from './dto/create-pago.dto';
-import { FacturasPaginatedQueryDto } from './dto/facturas-paginated-query.dto';
-import type { Prisma } from '@prisma/client';
+} from "@nestjs/common";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+import { Prisma } from "@prisma/client";
+import { CloudinaryService } from "../../shared/storage/cloudinary.service";
+import { CreateFacturaDto } from "./dto/create-factura.dto";
+import { UpdateFacturaDto } from "./dto/update-factura.dto";
+import { CreatePagoDto } from "./dto/create-pago.dto";
+import { FacturasPaginatedQueryDto } from "./dto/facturas-paginated-query.dto";
 import {
   computeEstadoFacturaLectura,
   importeOperativoFactura,
-} from './factura-estado-lectura';
+} from "./factura-estado-lectura";
 import {
   syncViajeEstadoTrasComprobante,
   syncViajesEstadoTrasComprobante,
-} from '../viajes/viaje-estado-financiero';
+} from "../viajes/viaje-estado-financiero";
 
-type ViajeSnap = { id: string; estado: string; monto: number | null; monedaMonto: string };
+type ViajeSnap = {
+  id: string;
+  estado: string;
+  monto: number | null;
+  monedaMonto: string;
+};
 
 @Injectable()
 export class FacturacionService {
@@ -34,11 +38,19 @@ export class FacturacionService {
   }
 
   private toShape(row: {
-    id: string; tenantId: string; numero: string; tipo: string;
-    clienteId: string | null; transportistaId: string | null; importe: number;
+    id: string;
+    tenantId: string;
+    numero: string;
+    tipo: string;
+    clienteId: string | null;
+    transportistaId: string | null;
+    importe: number;
     moneda: string;
-    fechaEmision: Date; fechaVencimiento: Date | null;
-    estado: string; diferencia: number | null; createdAt: Date;
+    fechaEmision: Date;
+    fechaVencimiento: Date | null;
+    estado: string;
+    diferencia: number | null;
+    createdAt: Date;
     viajes: ViajeSnap[];
     pagos?: { importe: number }[];
   }) {
@@ -59,50 +71,95 @@ export class FacturacionService {
 
   private async assertClienteCtx(tenantId: string, clienteId?: string | null) {
     if (clienteId) {
-      const c = await this.prisma.cliente.findFirst({ where: { id: clienteId, tenantId } });
-      if (!c) throw new BadRequestException('Cliente inválido');
+      const c = await this.prisma.cliente.findFirst({
+        where: { id: clienteId, tenantId },
+      });
+      if (!c) throw new BadRequestException("Cliente inválido");
     }
   }
 
-  private async assertTransportistaCtx(tenantId: string, transportistaId?: string | null) {
+  private async assertTransportistaCtx(
+    tenantId: string,
+    transportistaId?: string | null,
+  ) {
     if (transportistaId) {
-      const t = await this.prisma.transportista.findFirst({ where: { id: transportistaId, tenantId } });
-      if (!t) throw new BadRequestException('Transportista inválido');
+      const t = await this.prisma.transportista.findFirst({
+        where: { id: transportistaId, tenantId },
+      });
+      if (!t) throw new BadRequestException("Transportista inválido");
     }
   }
 
-  private async resolveViajes(tenantId: string, viajeIds: string[]): Promise<ViajeSnap[]> {
+  private async assertNumeroFacturaUnico(
+    tenantId: string,
+    numero: string,
+    excludeId?: string,
+  ) {
+    const existe = await this.prisma.factura.findFirst({
+      where: {
+        tenantId,
+        numero,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (existe) {
+      throw new BadRequestException(
+        "No se pudo guardar la factura. El número de comprobante ingresado ya se encuentra registrado.",
+      );
+    }
+  }
+
+  private async resolveViajes(
+    tenantId: string,
+    viajeIds: string[],
+  ): Promise<ViajeSnap[]> {
     if (viajeIds.length === 0) return [];
     const rows = await this.prisma.viaje.findMany({
       where: { id: { in: viajeIds }, tenantId },
       select: { id: true, estado: true, monto: true, monedaMonto: true },
     });
     if (rows.length !== viajeIds.length) {
-      throw new BadRequestException('Uno o más viajes inválidos para este tenant');
+      throw new BadRequestException(
+        "Uno o más viajes inválidos para este tenant",
+      );
     }
     return rows;
   }
 
   private assertMonedaUnica(viajes: { monedaMonto: string }[]): string {
-    if (viajes.length === 0) return 'ARS';
-    const monedas = new Set(viajes.map((v) => v.monedaMonto ?? 'ARS'));
+    if (viajes.length === 0) return "ARS";
+    const monedas = new Set(viajes.map((v) => v.monedaMonto ?? "ARS"));
     if (monedas.size > 1) {
       throw new BadRequestException(
-        'Una factura no puede contener viajes en distintas monedas. Generá una factura por moneda.',
+        "Una factura no puede contener viajes en distintas monedas. Generá una factura por moneda.",
       );
     }
     return [...monedas][0];
   }
 
-  private readonly VIAJE_SELECT = { id: true, estado: true, monto: true, monedaMonto: true } as const;
+  private readonly VIAJE_SELECT = {
+    id: true,
+    estado: true,
+    monto: true,
+    monedaMonto: true,
+  } as const;
   private readonly PAGO_SELECT = { importe: true } as const;
 
-  async uploadComprobante(tenantId: string, file: Express.Multer.File): Promise<{ url: string }> {
+  async uploadComprobante(
+    tenantId: string,
+    file: Express.Multer.File,
+  ): Promise<{ url: string }> {
     const name = file.originalname.toLowerCase();
-    const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
-    const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(name);
+    const isPdf = file.mimetype === "application/pdf" || name.endsWith(".pdf");
+    const isImage =
+      file.mimetype.startsWith("image/") ||
+      /\.(jpe?g|png|webp|heic|heif)$/.test(name);
     if (!isPdf && !isImage) {
-      throw new BadRequestException('El comprobante debe ser un PDF o una imagen.');
+      throw new BadRequestException(
+        "El comprobante debe ser un PDF o una imagen.",
+      );
     }
     const url = await this.cloudinary.uploadComprobanteArchivo(
       tenantId,
@@ -117,19 +174,19 @@ export class FacturacionService {
     tenantId: string,
     query: Pick<
       FacturasPaginatedQueryDto,
-      | 'numero'
-      | 'tipo'
-      | 'clienteId'
-      | 'emisionDesde'
-      | 'emisionHasta'
-      | 'vencimientoDesde'
-      | 'vencimientoHasta'
+      | "numero"
+      | "tipo"
+      | "clienteId"
+      | "emisionDesde"
+      | "emisionHasta"
+      | "vencimientoDesde"
+      | "vencimientoHasta"
     >,
   ): Prisma.FacturaWhereInput {
     const where: Prisma.FacturaWhereInput = { tenantId };
 
     if (query.numero?.trim()) {
-      where.numero = { contains: query.numero.trim(), mode: 'insensitive' };
+      where.numero = { contains: query.numero.trim(), mode: "insensitive" };
     }
     if (query.tipo) where.tipo = query.tipo;
     if (query.clienteId) where.clienteId = query.clienteId;
@@ -137,20 +194,28 @@ export class FacturacionService {
     if (query.emisionDesde || query.emisionHasta) {
       where.fechaEmision = {};
       if (query.emisionDesde) {
-        where.fechaEmision.gte = new Date(`${query.emisionDesde}T00:00:00.000Z`);
+        where.fechaEmision.gte = new Date(
+          `${query.emisionDesde}T00:00:00.000Z`,
+        );
       }
       if (query.emisionHasta) {
-        where.fechaEmision.lte = new Date(`${query.emisionHasta}T23:59:59.999Z`);
+        where.fechaEmision.lte = new Date(
+          `${query.emisionHasta}T23:59:59.999Z`,
+        );
       }
     }
 
     if (query.vencimientoDesde || query.vencimientoHasta) {
       where.fechaVencimiento = { not: null };
       if (query.vencimientoDesde) {
-        where.fechaVencimiento.gte = new Date(`${query.vencimientoDesde}T00:00:00.000Z`);
+        where.fechaVencimiento.gte = new Date(
+          `${query.vencimientoDesde}T00:00:00.000Z`,
+        );
       }
       if (query.vencimientoHasta) {
-        where.fechaVencimiento.lte = new Date(`${query.vencimientoHasta}T23:59:59.999Z`);
+        where.fechaVencimiento.lte = new Date(
+          `${query.vencimientoHasta}T23:59:59.999Z`,
+        );
       }
     }
 
@@ -172,7 +237,7 @@ export class FacturacionService {
   async listFacturas(tenantId: string, clienteId?: string) {
     const rows = await this.prisma.factura.findMany({
       where: { tenantId, ...(clienteId ? { clienteId } : {}) },
-      orderBy: { fechaEmision: 'desc' },
+      orderBy: { fechaEmision: "desc" },
       include: {
         viajes: { select: this.VIAJE_SELECT },
         pagos: { select: this.PAGO_SELECT },
@@ -194,7 +259,7 @@ export class FacturacionService {
     if (query.estado) {
       const rows = await this.prisma.factura.findMany({
         where,
-        orderBy: { fechaEmision: 'desc' },
+        orderBy: { fechaEmision: "desc" },
         include,
       });
       const filtered = rows
@@ -209,7 +274,7 @@ export class FacturacionService {
       this.prisma.factura.count({ where }),
       this.prisma.factura.findMany({
         where,
-        orderBy: { fechaEmision: 'desc' },
+        orderBy: { fechaEmision: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
         include,
@@ -230,60 +295,90 @@ export class FacturacionService {
         pagos: { select: this.PAGO_SELECT },
       },
     });
-    if (!row) throw new NotFoundException('Factura no encontrada');
+    if (!row) throw new NotFoundException("Factura no encontrada");
     return this.toShape(row);
   }
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
+
+    // Validación previa para atrapar el 99% de los casos antes de abrir transacción
+    await this.assertNumeroFacturaUnico(tenantId, dto.numero);
+
     const viajeIds = dto.viajeIds ?? [];
     const viajes = await this.resolveViajes(tenantId, viajeIds);
     const moneda = this.assertMonedaUnica(viajes);
     const importe = this.computeImporte(viajes);
 
-    return this.prisma.$transaction(async (tx) => {
-      const factura = await tx.factura.create({
-        data: {
-          tenantId,
-          numero: dto.numero,
-          tipo: dto.tipo,
-          clienteId: dto.clienteId ?? null,
-          transportistaId: dto.transportistaId ?? null,
-          importe,
-          moneda,
-          fechaEmision: new Date(dto.fechaEmision),
-          fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
-          estado: 'pendiente',
-          diferencia: dto.diferencia ?? null,
-          ivaPct: dto.ivaPct ?? 21,
-          comprobanteUrl: dto.comprobanteUrl ?? null,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-      });
-      if (viajeIds.length > 0) {
-        // Vincular viajes y guardar nro de factura
-        await tx.viaje.updateMany({
-          where: { id: { in: viajeIds }, tenantId },
-          data: { facturaId: factura.id },
+    try {
+      // Retornamos el resultado de la transacción esperando su resolución con 'await'
+      return await this.prisma.$transaction(async (tx) => {
+        const factura = await tx.factura.create({
+          data: {
+            tenantId,
+            numero: dto.numero,
+            tipo: dto.tipo,
+            clienteId: dto.clienteId ?? null,
+            transportistaId: dto.transportistaId ?? null,
+            importe,
+            moneda,
+            fechaEmision: new Date(dto.fechaEmision),
+            fechaVencimiento: dto.fechaVencimiento
+              ? new Date(dto.fechaVencimiento)
+              : null,
+            estado: "pendiente",
+            diferencia: dto.diferencia ?? null,
+            ivaPct: dto.ivaPct ?? 21,
+            comprobanteUrl: dto.comprobanteUrl ?? null,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any,
         });
-        await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
-      }
-      const updated = await tx.factura.findFirst({
-        where: { id: factura.id },
-        include: {
-          viajes: { select: this.VIAJE_SELECT },
-          pagos: { select: this.PAGO_SELECT },
-        },
+
+        if (viajeIds.length > 0) {
+          // Vincular viajes y guardar nro de factura
+          await tx.viaje.updateMany({
+            where: { id: { in: viajeIds }, tenantId },
+            data: { facturaId: factura.id },
+          });
+          await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
+        }
+
+        const updated = await tx.factura.findFirst({
+          where: { id: factura.id },
+          include: {
+            viajes: { select: this.VIAJE_SELECT },
+            pagos: { select: this.PAGO_SELECT },
+          },
+        });
+
+        return this.toShape(updated!);
       });
-      return this.toShape(updated!);
-    });
+    } catch (error) {
+      // Capturamos el error P2002 de Prisma (Unique constraint failed)
+      // para evitar el Error 500 en caso de una condición de carrera
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new BadRequestException(
+          "No se pudo guardar la factura. El número de comprobante ingresado ya se encuentra registrado.",
+        );
+      }
+
+      // Si es otro tipo de error (ej. base de datos caída), dejamos que suba el 500
+      throw error;
+    }
   }
 
   async updateFactura(id: string, tenantId: string, dto: UpdateFacturaDto) {
     await this.findFactura(id, tenantId);
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
+
+    if (dto.numero) {
+      await this.assertNumeroFacturaUnico(tenantId, dto.numero, id);
+    }
 
     let monedaNueva: string | undefined;
     if (dto.viajeIds !== undefined && dto.viajeIds.length > 0) {
@@ -292,7 +387,7 @@ export class FacturacionService {
         select: { id: true, monedaMonto: true },
       });
       if (viajesNuevos.length !== dto.viajeIds.length) {
-        throw new BadRequestException('Uno o más viajes inválidos');
+        throw new BadRequestException("Uno o más viajes inválidos");
       }
       monedaNueva = this.assertMonedaUnica(viajesNuevos);
     }
@@ -304,16 +399,30 @@ export class FacturacionService {
         data: {
           ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
           ...(dto.tipo !== undefined ? { tipo: dto.tipo } : {}),
-          ...(dto.clienteId !== undefined ? { clienteId: dto.clienteId || null } : {}),
-          ...(dto.transportistaId !== undefined ? { transportistaId: dto.transportistaId || null } : {}),
-          ...(dto.diferencia !== undefined ? { diferencia: dto.diferencia } : {}),
-          ...(dto.fechaEmision !== undefined ? { fechaEmision: new Date(dto.fechaEmision) } : {}),
+          ...(dto.clienteId !== undefined
+            ? { clienteId: dto.clienteId || null }
+            : {}),
+          ...(dto.transportistaId !== undefined
+            ? { transportistaId: dto.transportistaId || null }
+            : {}),
+          ...(dto.diferencia !== undefined
+            ? { diferencia: dto.diferencia }
+            : {}),
+          ...(dto.fechaEmision !== undefined
+            ? { fechaEmision: new Date(dto.fechaEmision) }
+            : {}),
           ...(dto.fechaVencimiento !== undefined
-            ? { fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null }
+            ? {
+                fechaVencimiento: dto.fechaVencimiento
+                  ? new Date(dto.fechaVencimiento)
+                  : null,
+              }
             : {}),
           ...(dto.ivaPct !== undefined ? { ivaPct: dto.ivaPct } : {}),
-          ...(dto.comprobanteUrl !== undefined ? { comprobanteUrl: dto.comprobanteUrl || null } : {}),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ...(dto.comprobanteUrl !== undefined
+            ? { comprobanteUrl: dto.comprobanteUrl || null }
+            : {}),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
 
@@ -353,7 +462,10 @@ export class FacturacionService {
       const importe = this.computeImporte(viajes);
       const updated = await tx.factura.update({
         where: { id },
-        data: { importe, ...(monedaNueva !== undefined ? { moneda: monedaNueva } : {}) },
+        data: {
+          importe,
+          ...(monedaNueva !== undefined ? { moneda: monedaNueva } : {}),
+        },
         include: {
           viajes: { select: this.VIAJE_SELECT },
           pagos: { select: this.PAGO_SELECT },
@@ -383,7 +495,7 @@ export class FacturacionService {
   listPagos(tenantId: string, facturaId?: string) {
     return this.prisma.pago.findMany({
       where: { tenantId, ...(facturaId ? { facturaId } : {}) },
-      orderBy: { fecha: 'desc' },
+      orderBy: { fecha: "desc" },
       take: 200,
     });
   }
@@ -405,14 +517,17 @@ export class FacturacionService {
 
   async removePago(id: string, tenantId: string) {
     const row = await this.prisma.pago.findFirst({ where: { id, tenantId } });
-    if (!row) throw new NotFoundException('Pago no encontrado');
+    if (!row) throw new NotFoundException("Pago no encontrado");
     await this.prisma.pago.delete({ where: { id } });
     await this.syncViajesEstadoTrasPago(row.facturaId, tenantId);
     return row;
   }
 
   /** Alinea estado de viajes vinculados con cobro total o parcial de la factura. */
-  private async syncViajesEstadoTrasPago(facturaId: string, tenantId: string): Promise<void> {
+  private async syncViajesEstadoTrasPago(
+    facturaId: string,
+    tenantId: string,
+  ): Promise<void> {
     const factura = await this.prisma.factura.findFirst({
       where: { id: facturaId, tenantId },
       include: {
@@ -429,21 +544,21 @@ export class FacturacionService {
       pagos: factura.pagos,
     });
 
-    if (estadoLectura === 'cobrada') {
+    if (estadoLectura === "cobrada") {
       await this.prisma.viaje.updateMany({
         where: {
           facturaId,
           tenantId,
-          estado: { in: ['facturado_sin_cobrar', 'finalizado_facturado'] },
+          estado: { in: ["facturado_sin_cobrar", "finalizado_facturado"] },
         },
-        data: { estado: 'cobrado' },
+        data: { estado: "cobrado" },
       });
       return;
     }
 
     await this.prisma.viaje.updateMany({
-      where: { facturaId, tenantId, estado: 'cobrado' },
-      data: { estado: 'facturado_sin_cobrar' },
+      where: { facturaId, tenantId, estado: "cobrado" },
+      data: { estado: "facturado_sin_cobrar" },
     });
   }
 }

@@ -20,6 +20,7 @@ function corsOriginMatchers(): (string | RegExp)[] {
   return [
     /^https:\/\/[\w-]+\.vialto\.uno$/,
     /^https:\/\/vialto-frontend[\w-]*\.onrender\.com$/,
+    /^https:\/\/vialto-combustible[\w-]*\.onrender\.com$/,
     'https://registro-combustible-logistica.web.app',
     'https://registro-combustible-logistica.firebaseapp.com',
     /localhost:\d+/,

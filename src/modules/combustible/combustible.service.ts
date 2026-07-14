@@ -165,6 +165,8 @@ export class CombustibleService {
   async create(dto: CreateCargaDto, auth: CombustibleAuth) {
     this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
     await this.assertVehiculoChofer(auth.tenantId, dto.vehiculoId, dto.choferId);
+    const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
+    await this.assertKmNoRetroceso(auth.tenantId, dto.vehiculoId, fechaCarga, dto.km);
     return this.prisma.cargaCombustible.create({
       data: {
         tenantId: auth.tenantId,
@@ -176,7 +178,7 @@ export class CombustibleService {
         importe: dto.importe,
         km: dto.km,
         formaPago: (dto.formaPago ?? null),
-        fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
+        fecha: fechaCarga,
         createdBy: auth.userId,
         fotoTacometro: dto.fotoTacometro ?? null,
         fotoTicket: dto.fotoTicket ?? null,
@@ -195,6 +197,12 @@ export class CombustibleService {
 
     if (auth.role === 'member' && carga.createdBy !== auth.userId) {
       throw new ForbiddenException('No podés editar esta carga');
+    }
+
+    const nextKm = dto.km !== undefined ? dto.km : carga.km;
+    const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
+    if (nextVehiculo) {
+      await this.assertKmNoRetroceso(auth.tenantId, nextVehiculo, efectivaFecha, nextKm, id);
     }
 
     const nextLitros = dto.litros !== undefined ? dto.litros : carga.litros;
@@ -366,12 +374,11 @@ export class CombustibleService {
       vehiculoId = vehiculo.id;
     }
 
-    if (dto.km !== undefined) {
-      const efectivoVehiculoId = vehiculoId ?? carga.vehiculoId;
-      const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
-      if (efectivoVehiculoId) {
-        await this.assertKmNoRetroceso(tenantId, efectivoVehiculoId, efectivaFecha, dto.km, id);
-      }
+    const nextKm = dto.km !== undefined ? dto.km : carga.km;
+    const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
+    const efectivoVehiculoId = vehiculoId ?? carga.vehiculoId;
+    if (efectivoVehiculoId) {
+      await this.assertKmNoRetroceso(tenantId, efectivoVehiculoId, efectivaFecha, nextKm, id);
     }
 
     const nextLitros = dto.litros !== undefined ? dto.litros : carga.litros;

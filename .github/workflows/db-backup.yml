@@ -2,7 +2,7 @@ name: DB Backup (producción)
 
 # Capa 2 de backups: dump lógico nocturno de la rama production de Neon,
 # subido a Cloudflare R2 (storage externo, S3-compatible).
-# La rotación se maneja con una Lifecycle Rule del bucket (ver BACKUPS.md).
+# Rotación GFS en el script: 7 diarios + 4 semanales + 6 mensuales (ver BACKUPS.md).
 #
 # Nota: los workflows con schedule solo corren desde la rama default (main).
 
@@ -27,11 +27,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
 
-      - name: Generar dump y subir a Cloudflare R2
+      - name: Generar dump, subir a R2 y rotar
         env:
           # Connection string DIRECTA (unpooled) de la rama production
           DATABASE_URL_UNPOOLED: ${{ secrets.PROD_DATABASE_URL_UNPOOLED }}
-          # Credenciales S3-compatibles (mapeadas a las variables que entiende aws cli)
+          # Credenciales S3-compatibles (R2); nombres S3_* = protocolo, no AWS
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
@@ -54,5 +54,52 @@ jobs:
           echo "→ Subiendo a s3://${S3_BUCKET}/daily/${FILE}"
           aws s3 cp "$FILE" "s3://${S3_BUCKET}/daily/${FILE}" \
             --endpoint-url "$S3_ENDPOINT"
+
+          # Promoción GFS: domingo UTC → weekly; día 1 del mes UTC → monthly
+          if [ "$(date -u +%u)" = "7" ]; then
+            WEEKLY="vialto_prod_$(date -u +%G-W%V).dump"
+            echo "→ Promoviendo a weekly/${WEEKLY}"
+            aws s3 cp "s3://${S3_BUCKET}/daily/${FILE}" \
+              "s3://${S3_BUCKET}/weekly/${WEEKLY}" \
+              --endpoint-url "$S3_ENDPOINT"
+          fi
+
+          if [ "$(date -u +%d)" = "01" ]; then
+            MONTHLY="vialto_prod_$(date -u +%Y-%m).dump"
+            echo "→ Promoviendo a monthly/${MONTHLY}"
+            aws s3 cp "s3://${S3_BUCKET}/daily/${FILE}" \
+              "s3://${S3_BUCKET}/monthly/${MONTHLY}" \
+              --endpoint-url "$S3_ENDPOINT"
+          fi
+
+          # Mantener solo N objetos más recientes por prefijo (nombres ordenables por fecha)
+          prune() {
+            local prefix="$1"
+            local keep="$2"
+            echo "→ Rotación ${prefix}/: conservar ${keep} más recientes"
+            mapfile -t objects < <(
+              aws s3 ls "s3://${S3_BUCKET}/${prefix}/" --endpoint-url "$S3_ENDPOINT" \
+                | awk '{print $4}' \
+                | grep -E '\.dump$' \
+                | sort \
+                || true
+            )
+            local total="${#objects[@]}"
+            if [ "$total" -le "$keep" ]; then
+              echo "   ${total} objeto(s); nada que borrar"
+              return 0
+            fi
+            local to_delete=$((total - keep))
+            local i
+            for ((i = 0; i < to_delete; i++)); do
+              echo "   borrando ${prefix}/${objects[$i]}"
+              aws s3 rm "s3://${S3_BUCKET}/${prefix}/${objects[$i]}" \
+                --endpoint-url "$S3_ENDPOINT"
+            done
+          }
+
+          prune daily 7
+          prune weekly 4
+          prune monthly 6
 
           echo "✓ Backup completado: ${FILE} ($(du -h "$FILE" | cut -f1))"

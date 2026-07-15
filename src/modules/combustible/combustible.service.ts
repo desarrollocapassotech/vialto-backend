@@ -152,8 +152,12 @@ export class CombustibleService {
   }
 
   async findOne(id: string, auth: CombustibleAuth) {
+    const where: Record<string, any> = { id };
+    if (auth.role !== 'superadmin') {
+      where.tenantId = auth.tenantId;
+    }
     const carga = await this.prisma.cargaCombustible.findFirst({
-      where: { id, tenantId: auth.tenantId },
+      where,
     });
     if (!carga) throw new NotFoundException('Carga no encontrada');
     if (auth.role === 'member' && carga.createdBy !== auth.userId) {
@@ -335,15 +339,7 @@ export class CombustibleService {
   }
 
   async deleteByChofer(id: string, choferId: string, tenantId: string) {
-    const carga = await this.prisma.cargaCombustible.findFirst({
-      where: { id, tenantId },
-    });
-    if (!carga) throw new NotFoundException('Carga no encontrada');
-    if (carga.choferId !== choferId) {
-      throw new ForbiddenException('Solo podés eliminar tus propias cargas');
-    }
-    await this.prisma.cargaCombustible.delete({ where: { id } });
-    return { deleted: id };
+    throw new ForbiddenException('Los conductores no tienen permitido eliminar cargas');
   }
 
   async updateByChofer(

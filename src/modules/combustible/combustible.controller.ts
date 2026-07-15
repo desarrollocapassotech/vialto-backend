@@ -70,6 +70,18 @@ export class CombustibleController {
     return this.service.getDashboard(auth, from, to);
   }
 
+  @ApiOperation({ summary: 'Exportar cargas de combustible del período (Excel)' })
+  @Get('export')
+  @Roles('admin', 'superadmin')
+  getExport(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getCargasParaExport(auth, from, to);
+  }
+
   @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

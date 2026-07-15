@@ -19,6 +19,55 @@ interface CombustibleAuth {
   role: string | null;
 }
 
+/** Umbrales de detección de anomalías y semáforo — constantes ajustables a mano. */
+const ANOMALIA_PCT_SOBRE_PROMEDIO = 0.3; // +30% sobre el promedio histórico de la unidad
+const ANOMALIA_MIN_HISTORICO = 3; // mínimo de cargas previas para evaluar la unidad
+const ANOMALIA_RECARGA_HORAS = 6; // menos de N horas desde la carga anterior
+const ANOMALIA_RECARGA_KM = 50; // menos de N km desde la carga anterior
+const OUTLIER_PCT_CATEGORIA = 0.3; // +30% de litros sobre el promedio de su categoría (tipo de vehículo)
+const SEMAFORO_AMARILLO_PCT = 0.15; // costo/km +15% sobre el promedio de su categoría
+const SEMAFORO_ROJO_PCT = 0.5; // costo/km +50% sobre el promedio de su categoría
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function avg(arr: number[]): number {
+  return arr.length > 0 ? arr.reduce((s, n) => s + n, 0) / arr.length : 0;
+}
+
+type CargaHistorica = {
+  id: string;
+  vehiculoId: string | null;
+  km: number;
+  fecha: Date;
+  litros: number;
+  importe: number;
+};
+
+type Alerta = {
+  cargaId: string;
+  vehiculoId: string;
+  patente: string;
+  fecha: string;
+  tipo: 'consumo_alto' | 'recarga_rapida';
+  detalle: string;
+};
+
+type PorVehiculoRow = {
+  vehiculoId: string;
+  patente: string;
+  tipo: string;
+  litros: number;
+  monto: number;
+  cantidad: number;
+  kmRecorridos: number | null;
+  costoPorKm: number | null;
+  litrosPor100Km: number | null;
+  esOutlier: boolean;
+  semaforo: 'verde' | 'amarillo' | 'rojo';
+};
+
 @Injectable()
 export class CombustibleService {
   constructor(
@@ -411,23 +460,38 @@ export class CombustibleService {
   }
 
   async getDashboard(auth: CombustibleAuth, from?: string, to?: string) {
-    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+    const tenantId = auth.tenantId as string;
+    const where: Record<string, unknown> = { tenantId };
 
+    let fromDate: Date | null = null;
+    let toDate: Date | null = null;
     if (from || to) {
       const fechaWhere: Record<string, Date> = {};
-      if (from) fechaWhere.gte = new Date(from);
+      if (from) {
+        fromDate = new Date(from);
+        fechaWhere.gte = fromDate;
+      }
       if (to) {
-        const toDate = new Date(to);
+        toDate = new Date(to);
         toDate.setHours(23, 59, 59, 999);
         fechaWhere.lte = toDate;
       }
       where['fecha'] = fechaWhere;
     }
 
-    const [todasCargas, ultimasCargas] = await Promise.all([
+    const [todasCargas, ultimasCargas, tenant] = await Promise.all([
       this.prisma.cargaCombustible.findMany({
         where,
-        select: { litros: true, importe: true, vehiculoId: true, estacion: true },
+        select: {
+          id: true,
+          litros: true,
+          importe: true,
+          vehiculoId: true,
+          choferId: true,
+          estacion: true,
+          formaPago: true,
+          fecha: true,
+        },
       }),
       this.prisma.cargaCombustible.findMany({
         where,
@@ -445,6 +509,7 @@ export class CombustibleService {
           chofer: { select: { nombre: true } },
         },
       }),
+      this.prisma.tenant.findUnique({ where: { clerkOrgId: tenantId }, select: { modules: true } }),
     ]);
 
     const totalCargas = todasCargas.length;
@@ -453,32 +518,68 @@ export class CombustibleService {
     const precioPorLitro = totalLitros > 0 ? totalImporte / totalLitros : 0;
     const litrosPorCarga = totalCargas > 0 ? totalLitros / totalCargas : 0;
 
-    const estacionMap: Record<string, number> = {};
-    for (const c of todasCargas) {
-      estacionMap[c.estacion] = (estacionMap[c.estacion] ?? 0) + c.litros;
-    }
-    const topEstaciones = Object.entries(estacionMap)
-      .map(([nombre, litros]) => ({ nombre, litros }))
-      .sort((a, b) => b.litros - a.litros)
-      .slice(0, 5);
+    const costoTotalPeriodo = await this.buildCostoTotalPeriodo(tenantId, totalImporte, fromDate, toDate);
+    const proyeccionMesActual = await this.getProyeccionMesActual(tenantId);
 
-    const vehiculoLitrosMap: Record<string, number> = {};
-    for (const c of todasCargas) {
-      if (!c.vehiculoId) continue;
-      vehiculoLitrosMap[c.vehiculoId] = (vehiculoLitrosMap[c.vehiculoId] ?? 0) + c.litros;
-    }
-    const vehiculoIds = Object.keys(vehiculoLitrosMap);
-    const vehiculos = vehiculoIds.length > 0
-      ? await this.prisma.vehiculo.findMany({
-          where: { id: { in: vehiculoIds } },
-          select: { id: true, patente: true },
-        })
-      : [];
-    const vehiculoMap = new Map(vehiculos.map(v => [v.id, v.patente]));
-    const topVehiculos = Object.entries(vehiculoLitrosMap)
-      .map(([id, litros]) => ({ patente: vehiculoMap.get(id) ?? id, litros }))
-      .sort((a, b) => b.litros - a.litros)
-      .slice(0, 5);
+    const distribucionEstaciones = this.buildDistribucion(todasCargas, (c) => c.estacion);
+    const distribucionFormaPago = this.buildDistribucion(
+      todasCargas,
+      (c) => c.formaPago ?? 'sin_especificar',
+    );
+
+    const vehiculoIds = Array.from(
+      new Set(todasCargas.map((c) => c.vehiculoId).filter((v): v is string => !!v)),
+    );
+    const choferIds = Array.from(
+      new Set(todasCargas.map((c) => c.choferId).filter((v): v is string => !!v)),
+    );
+
+    const [vehiculos, historicas, choferes] = await Promise.all([
+      vehiculoIds.length > 0
+        ? this.prisma.vehiculo.findMany({
+            where: { id: { in: vehiculoIds } },
+            select: { id: true, patente: true, tipo: true },
+          })
+        : Promise.resolve([]),
+      vehiculoIds.length > 0
+        ? this.prisma.cargaCombustible.findMany({
+            where: { tenantId, vehiculoId: { in: vehiculoIds } },
+            orderBy: [{ vehiculoId: 'asc' }, { fecha: 'asc' }],
+            select: { id: true, vehiculoId: true, km: true, fecha: true, litros: true, importe: true },
+          })
+        : Promise.resolve([]),
+      choferIds.length > 0
+        ? this.prisma.chofer.findMany({ where: { id: { in: choferIds } }, select: { id: true, nombre: true } })
+        : Promise.resolve([]),
+    ]);
+
+    const vehiculoMap = new Map(vehiculos.map((v) => [v.id, v]));
+
+    const { alertas, kmPeriodoPorVehiculo } = this.buildAlertasYKmPeriodo(
+      historicas,
+      vehiculoMap,
+      fromDate,
+      toDate,
+    );
+
+    const { porVehiculo, semaforoResumen } = this.buildPorVehiculo(
+      todasCargas,
+      vehiculoMap,
+      kmPeriodoPorVehiculo,
+      alertas,
+    );
+
+    const choferNombreMap = new Map(choferes.map((c) => [c.id, c.nombre]));
+    const porChofer = this.buildPorChofer(todasCargas, choferNombreMap);
+
+    const evolucionPrecio = this.buildEvolucionPrecio(todasCargas, fromDate, toDate);
+    const evolucionCostoPorKm = this.buildEvolucionCostoPorKm(historicas, fromDate, toDate);
+
+    const modules = (tenant?.modules ?? []).map((m) => m.toLowerCase());
+    const viajesCruce =
+      modules.includes('viajes') && fromDate && toDate
+        ? await this.getViajesCruce(tenantId, porVehiculo, fromDate, toDate)
+        : null;
 
     return {
       totalCargas,
@@ -486,10 +587,490 @@ export class CombustibleService {
       totalImporte,
       precioPorLitro,
       litrosPorCarga,
-      topEstaciones,
-      topVehiculos,
+      costoTotalPeriodo,
+      proyeccionMesActual,
+      distribucionEstaciones,
+      distribucionFormaPago,
+      porVehiculo,
+      porChofer,
+      alertas: alertas
+        .slice()
+        .sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
+        .slice(0, 50),
+      evolucionPrecio,
+      evolucionCostoPorKm,
+      semaforoResumen,
+      viajesCruce,
       ultimasCargas,
     };
+  }
+
+  /** Costo total del período vs. el período inmediatamente anterior de igual duración. */
+  private async buildCostoTotalPeriodo(
+    tenantId: string,
+    totalImporte: number,
+    fromDate: Date | null,
+    toDate: Date | null,
+  ): Promise<{ current: number; previous: number; changePct: number | null } | null> {
+    if (!fromDate || !toDate) return null;
+    const spanMs = toDate.getTime() - fromDate.getTime();
+    const prevTo = fromDate;
+    const prevFrom = new Date(fromDate.getTime() - spanMs);
+    const prevAgg = await this.prisma.cargaCombustible.aggregate({
+      where: { tenantId, fecha: { gte: prevFrom, lt: prevTo } },
+      _sum: { importe: true },
+    });
+    const previous = roundMoney(prevAgg._sum.importe ?? 0);
+    const current = roundMoney(totalImporte);
+    if (previous === 0) {
+      return { current, previous, changePct: current === 0 ? 0 : null };
+    }
+    return {
+      current,
+      previous,
+      changePct: Math.round(((current - previous) / previous) * 1000) / 10,
+    };
+  }
+
+  /** Proyección de gasto del mes calendario actual (independiente del período seleccionado en el dashboard). */
+  private async getProyeccionMesActual(tenantId: string) {
+    const now = new Date();
+    const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const finMes = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+    const agg = await this.prisma.cargaCombustible.aggregate({
+      where: { tenantId, fecha: { gte: inicioMes, lt: finMes } },
+      _sum: { importe: true },
+    });
+    const gastoAcumulado = roundMoney(agg._sum.importe ?? 0);
+    const diasTranscurridos = Math.max(
+      1,
+      Math.floor((now.getTime() - inicioMes.getTime()) / 86_400_000) + 1,
+    );
+    const diasEnMes = Math.round((finMes.getTime() - inicioMes.getTime()) / 86_400_000);
+    const proyeccionTotal = roundMoney((gastoAcumulado / diasTranscurridos) * diasEnMes);
+    return { gastoAcumulado, diasTranscurridos, diasEnMes, proyeccionTotal };
+  }
+
+  /** Agrupa cargas por la clave dada, sumando litros/importe y contando cargas. Orden desc por monto. */
+  private buildDistribucion<T extends { litros: number; importe: number }>(
+    cargas: T[],
+    keyOf: (c: T) => string,
+  ): Array<{ clave: string; litros: number; monto: number; cantidad: number; precioPromedio: number }> {
+    const map = new Map<string, { litros: number; monto: number; cantidad: number }>();
+    for (const c of cargas) {
+      const key = keyOf(c);
+      const acc = map.get(key) ?? { litros: 0, monto: 0, cantidad: 0 };
+      acc.litros += c.litros;
+      acc.monto += c.importe;
+      acc.cantidad += 1;
+      map.set(key, acc);
+    }
+    return Array.from(map.entries())
+      .map(([clave, acc]) => ({
+        clave,
+        litros: roundMoney(acc.litros),
+        monto: roundMoney(acc.monto),
+        cantidad: acc.cantidad,
+        precioPromedio: acc.litros > 0 ? roundMoney(acc.monto / acc.litros) : 0,
+      }))
+      .sort((a, b) => b.monto - a.monto);
+  }
+
+  /**
+   * Recorre el histórico completo (no solo el período) de cada vehículo, en orden cronológico, para:
+   * - acumular el km recorrido entre cargas consecutivas cuya carga posterior cae en el período;
+   * - detectar consumo anómalo (carga muy por encima del promedio histórico previo de la unidad);
+   * - detectar recargas sospechosas (muy seguidas en tiempo o en km respecto de la carga anterior).
+   */
+  private buildAlertasYKmPeriodo(
+    historicas: CargaHistorica[],
+    vehiculoMap: Map<string, { patente: string; tipo: string }>,
+    fromDate: Date | null,
+    toDate: Date | null,
+  ): { alertas: Alerta[]; kmPeriodoPorVehiculo: Map<string, number> } {
+    function enPeriodo(fecha: Date): boolean {
+      if (fromDate && fecha < fromDate) return false;
+      if (toDate && fecha > toDate) return false;
+      return true;
+    }
+
+    const porVehiculo = this.groupHistoricasPorVehiculo(historicas);
+
+    const alertas: Alerta[] = [];
+    const kmPeriodoPorVehiculo = new Map<string, number>();
+
+    for (const [vehiculoId, lista] of porVehiculo) {
+      const patente = vehiculoMap.get(vehiculoId)?.patente ?? vehiculoId;
+      let kmPeriodo = 0;
+
+      for (let i = 0; i < lista.length; i++) {
+        const actual = lista[i];
+        if (!enPeriodo(actual.fecha)) continue;
+
+        if (i > 0) {
+          const anterior = lista[i - 1];
+          const delta = actual.km - anterior.km;
+          if (delta > 0) kmPeriodo += delta;
+
+          const horas = (actual.fecha.getTime() - anterior.fecha.getTime()) / 3_600_000;
+          if (horas < ANOMALIA_RECARGA_HORAS || delta < ANOMALIA_RECARGA_KM) {
+            alertas.push({
+              cargaId: actual.id,
+              vehiculoId,
+              patente,
+              fecha: actual.fecha.toISOString(),
+              tipo: 'recarga_rapida',
+              detalle: `Recarga a ${horas.toFixed(1)}hs y ${delta}km de la carga anterior`,
+            });
+          }
+        }
+
+        const previas = lista.slice(0, i);
+        if (previas.length >= ANOMALIA_MIN_HISTORICO) {
+          const avgLitros = avg(previas.map((p) => p.litros));
+          const avgImporte = avg(previas.map((p) => p.importe));
+          const superaLitros = avgLitros > 0 && actual.litros > avgLitros * (1 + ANOMALIA_PCT_SOBRE_PROMEDIO);
+          const superaImporte = avgImporte > 0 && actual.importe > avgImporte * (1 + ANOMALIA_PCT_SOBRE_PROMEDIO);
+          if (superaLitros || superaImporte) {
+            alertas.push({
+              cargaId: actual.id,
+              vehiculoId,
+              patente,
+              fecha: actual.fecha.toISOString(),
+              tipo: 'consumo_alto',
+              detalle: `${Math.round(actual.litros)} L / $${Math.round(actual.importe)} — supera en +${Math.round(ANOMALIA_PCT_SOBRE_PROMEDIO * 100)}% el promedio histórico de la unidad`,
+            });
+          }
+        }
+      }
+
+      kmPeriodoPorVehiculo.set(vehiculoId, kmPeriodo);
+    }
+
+    return { alertas, kmPeriodoPorVehiculo };
+  }
+
+  /** Ranking por vehículo (litros/monto/cantidad del período + eficiencia + outlier + semáforo). */
+  private buildPorVehiculo(
+    todasCargas: Array<{ vehiculoId: string | null; litros: number; importe: number }>,
+    vehiculoMap: Map<string, { patente: string; tipo: string }>,
+    kmPeriodoPorVehiculo: Map<string, number>,
+    alertas: Alerta[],
+  ): { porVehiculo: PorVehiculoRow[]; semaforoResumen: { verde: number; amarillo: number; rojo: number } } {
+    const agg = new Map<string, { litros: number; monto: number; cantidad: number }>();
+    for (const c of todasCargas) {
+      if (!c.vehiculoId) continue;
+      const acc = agg.get(c.vehiculoId) ?? { litros: 0, monto: 0, cantidad: 0 };
+      acc.litros += c.litros;
+      acc.monto += c.importe;
+      acc.cantidad += 1;
+      agg.set(c.vehiculoId, acc);
+    }
+
+    const filasBase = Array.from(agg.entries()).map(([vehiculoId, acc]) => {
+      const v = vehiculoMap.get(vehiculoId);
+      const kmPeriodo = kmPeriodoPorVehiculo.get(vehiculoId) ?? 0;
+      const kmRecorridos = kmPeriodo > 0 ? kmPeriodo : null;
+      const litros = roundMoney(acc.litros);
+      const monto = roundMoney(acc.monto);
+      return {
+        vehiculoId,
+        patente: v?.patente ?? vehiculoId,
+        tipo: v?.tipo ?? 'otro',
+        litros,
+        monto,
+        cantidad: acc.cantidad,
+        kmRecorridos,
+        costoPorKm: kmRecorridos ? roundMoney(monto / kmRecorridos) : null,
+        litrosPor100Km: kmRecorridos ? roundMoney((litros / kmRecorridos) * 100) : null,
+      };
+    });
+
+    const litrosPorTipo = new Map<string, number[]>();
+    const costoKmPorTipo = new Map<string, number[]>();
+    for (const f of filasBase) {
+      const litrosArr = litrosPorTipo.get(f.tipo) ?? [];
+      litrosArr.push(f.litros);
+      litrosPorTipo.set(f.tipo, litrosArr);
+      if (f.costoPorKm != null) {
+        const costoArr = costoKmPorTipo.get(f.tipo) ?? [];
+        costoArr.push(f.costoPorKm);
+        costoKmPorTipo.set(f.tipo, costoArr);
+      }
+    }
+
+    const alertaVehiculoIds = new Set(alertas.map((a) => a.vehiculoId));
+
+    const porVehiculo: PorVehiculoRow[] = filasBase
+      .map((f) => {
+        const litrosGrupo = litrosPorTipo.get(f.tipo) ?? [];
+        const promedioLitrosCategoria = litrosGrupo.length > 1 ? avg(litrosGrupo) : 0;
+        const esOutlier =
+          promedioLitrosCategoria > 0 && f.litros > promedioLitrosCategoria * (1 + OUTLIER_PCT_CATEGORIA);
+
+        const costoKmGrupo = costoKmPorTipo.get(f.tipo) ?? [];
+        const promedioCostoKmCategoria = costoKmGrupo.length > 1 ? avg(costoKmGrupo) : 0;
+
+        let semaforo: 'verde' | 'amarillo' | 'rojo' = 'verde';
+        if (alertaVehiculoIds.has(f.vehiculoId)) {
+          semaforo = 'rojo';
+        } else if (promedioCostoKmCategoria > 0 && f.costoPorKm != null) {
+          if (f.costoPorKm > promedioCostoKmCategoria * (1 + SEMAFORO_ROJO_PCT)) semaforo = 'rojo';
+          else if (f.costoPorKm > promedioCostoKmCategoria * (1 + SEMAFORO_AMARILLO_PCT)) semaforo = 'amarillo';
+        }
+
+        return { ...f, esOutlier, semaforo };
+      })
+      .sort((a, b) => b.monto - a.monto);
+
+    const semaforoResumen = {
+      verde: porVehiculo.filter((v) => v.semaforo === 'verde').length,
+      amarillo: porVehiculo.filter((v) => v.semaforo === 'amarillo').length,
+      rojo: porVehiculo.filter((v) => v.semaforo === 'rojo').length,
+    };
+
+    return { porVehiculo, semaforoResumen };
+  }
+
+  /** Ranking por chofer (litros/monto/cantidad del período). Sin chofer asignado se agrupa aparte. */
+  private buildPorChofer(
+    todasCargas: Array<{ choferId: string | null; litros: number; importe: number }>,
+    choferNombreMap: Map<string, string>,
+  ): Array<{ choferId: string | null; nombre: string; litros: number; monto: number; cantidad: number }> {
+    const SIN_CHOFER = '__sin_chofer__';
+    const agg = new Map<string, { litros: number; monto: number; cantidad: number }>();
+    for (const c of todasCargas) {
+      const key = c.choferId ?? SIN_CHOFER;
+      const acc = agg.get(key) ?? { litros: 0, monto: 0, cantidad: 0 };
+      acc.litros += c.litros;
+      acc.monto += c.importe;
+      acc.cantidad += 1;
+      agg.set(key, acc);
+    }
+    return Array.from(agg.entries())
+      .map(([key, acc]) => ({
+        choferId: key === SIN_CHOFER ? null : key,
+        nombre: key === SIN_CHOFER ? 'Sin chofer asignado' : (choferNombreMap.get(key) ?? key),
+        litros: roundMoney(acc.litros),
+        monto: roundMoney(acc.monto),
+        cantidad: acc.cantidad,
+      }))
+      .sort((a, b) => b.monto - a.monto);
+  }
+
+  /** Agrupa el histórico de cargas por vehículo, preservando el orden cronológico ya dado por la query. */
+  private groupHistoricasPorVehiculo(historicas: CargaHistorica[]): Map<string, CargaHistorica[]> {
+    const map = new Map<string, CargaHistorica[]>();
+    for (const h of historicas) {
+      if (!h.vehiculoId) continue;
+      const arr = map.get(h.vehiculoId) ?? [];
+      arr.push(h);
+      map.set(h.vehiculoId, arr);
+    }
+    return map;
+  }
+
+  /** Decide el tamaño de bucket (día/semana/mes) según el largo del rango, para cualquier serie temporal del dashboard. */
+  private resolveBucketPlan(
+    fromDate: Date | null,
+    toDate: Date | null,
+    fallbackFechasMs: number[],
+  ): { desde: Date; bucketDias: number } | null {
+    if (!fromDate && !toDate && fallbackFechasMs.length === 0) return null;
+    const desde = fromDate ?? new Date(Math.min(...fallbackFechasMs));
+    const hasta = toDate ?? new Date(Math.max(...fallbackFechasMs));
+    const rangoDias = Math.max(1, Math.ceil((hasta.getTime() - desde.getTime()) / 86_400_000));
+    const bucketDias = rangoDias <= 31 ? 1 : rangoDias <= 120 ? 7 : 30;
+    return { desde, bucketDias };
+  }
+
+  private formatBucketLabel(desde: Date, hasta: Date, bucketDias: number): string {
+    const fmt = (d: Date) =>
+      new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' }).format(d);
+    return bucketDias === 1 ? fmt(desde) : `${fmt(desde)}–${fmt(hasta)}`;
+  }
+
+  /** Bucketiza las cargas del período por día (≤31 días), semana (≤120) o mes, para ver la evolución del precio pagado. */
+  private buildEvolucionPrecio(
+    cargas: Array<{ litros: number; importe: number; fecha: Date }>,
+    fromDate: Date | null,
+    toDate: Date | null,
+  ): Array<{ etiqueta: string; desde: string; hasta: string; precioPromedio: number }> {
+    if (cargas.length === 0) return [];
+    const plan = this.resolveBucketPlan(fromDate, toDate, cargas.map((c) => c.fecha.getTime()));
+    if (!plan) return [];
+    const { desde, bucketDias } = plan;
+
+    const buckets = new Map<number, { litros: number; monto: number; desde: Date; hasta: Date }>();
+    for (const c of cargas) {
+      const offset = Math.floor((c.fecha.getTime() - desde.getTime()) / (86_400_000 * bucketDias));
+      const bucketInicio = new Date(desde.getTime() + offset * bucketDias * 86_400_000);
+      const bucketFin = new Date(bucketInicio.getTime() + bucketDias * 86_400_000 - 1);
+      const acc = buckets.get(offset) ?? { litros: 0, monto: 0, desde: bucketInicio, hasta: bucketFin };
+      acc.litros += c.litros;
+      acc.monto += c.importe;
+      buckets.set(offset, acc);
+    }
+
+    return Array.from(buckets.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([, acc]) => ({
+        etiqueta: this.formatBucketLabel(acc.desde, acc.hasta, bucketDias),
+        desde: acc.desde.toISOString(),
+        hasta: acc.hasta.toISOString(),
+        precioPromedio: acc.litros > 0 ? roundMoney(acc.monto / acc.litros) : 0,
+      }));
+  }
+
+  /**
+   * Bucketiza el costo por km recorrido en el tiempo: por cada carga del período, atribuye su
+   * importe y el km recorrido desde la carga anterior del mismo vehículo (mismo criterio que
+   * `porVehiculo`) al bucket de la fecha de esa carga.
+   */
+  private buildEvolucionCostoPorKm(
+    historicas: CargaHistorica[],
+    fromDate: Date | null,
+    toDate: Date | null,
+  ): Array<{ etiqueta: string; desde: string; hasta: string; costoPorKm: number }> {
+    function enPeriodo(fecha: Date): boolean {
+      if (fromDate && fecha < fromDate) return false;
+      if (toDate && fecha > toDate) return false;
+      return true;
+    }
+
+    const fechasEnPeriodo = historicas.filter((h) => enPeriodo(h.fecha)).map((h) => h.fecha.getTime());
+    const plan = this.resolveBucketPlan(fromDate, toDate, fechasEnPeriodo);
+    if (!plan) return [];
+    const { desde, bucketDias } = plan;
+
+    const buckets = new Map<number, { km: number; monto: number; desde: Date; hasta: Date }>();
+    function addToBucket(fecha: Date, km: number, monto: number) {
+      const offset = Math.floor((fecha.getTime() - desde.getTime()) / (86_400_000 * bucketDias));
+      const bucketInicio = new Date(desde.getTime() + offset * bucketDias * 86_400_000);
+      const bucketFin = new Date(bucketInicio.getTime() + bucketDias * 86_400_000 - 1);
+      const acc = buckets.get(offset) ?? { km: 0, monto: 0, desde: bucketInicio, hasta: bucketFin };
+      acc.km += km;
+      acc.monto += monto;
+      buckets.set(offset, acc);
+    }
+
+    const porVehiculo = this.groupHistoricasPorVehiculo(historicas);
+    for (const [, lista] of porVehiculo) {
+      for (let i = 0; i < lista.length; i++) {
+        const actual = lista[i];
+        if (!enPeriodo(actual.fecha)) continue;
+        let kmDelta = 0;
+        if (i > 0) {
+          const delta = actual.km - lista[i - 1].km;
+          if (delta > 0) kmDelta = delta;
+        }
+        addToBucket(actual.fecha, kmDelta, actual.importe);
+      }
+    }
+
+    return Array.from(buckets.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([, acc]) => ({
+        etiqueta: this.formatBucketLabel(acc.desde, acc.hasta, bucketDias),
+        desde: acc.desde.toISOString(),
+        hasta: acc.hasta.toISOString(),
+        costoPorKm: acc.km > 0 ? roundMoney(acc.monto / acc.km) : 0,
+      }));
+  }
+
+  /**
+   * Cruce simplificado con Viajes: litros cargados del período vs. km facturados de los viajes
+   * en los que participó el vehículo (vía la tabla puente ViajeVehiculo, sin prorratear entre
+   * varios vehículos de un mismo viaje). Solo se llama si el tenant tiene `viajes` contratado.
+   */
+  private async getViajesCruce(
+    tenantId: string,
+    porVehiculo: PorVehiculoRow[],
+    from: Date,
+    to: Date,
+  ): Promise<
+    Array<{
+      vehiculoId: string;
+      patente: string;
+      litrosPeriodo: number;
+      kmFacturadosPeriodo: number | null;
+      litrosPor100KmFacturado: number | null;
+    }>
+  > {
+    const vehiculoIds = porVehiculo.map((f) => f.vehiculoId);
+    if (vehiculoIds.length === 0) return [];
+
+    const vinculos = await this.prisma.viajeVehiculo.findMany({
+      where: {
+        tenantId,
+        vehiculoId: { in: vehiculoIds },
+        viaje: {
+          OR: [
+            { fechaCarga: { gte: from, lte: to } },
+            { fechaCarga: null, fechaFinalizado: { gte: from, lte: to } },
+            { fechaCarga: null, fechaFinalizado: null, createdAt: { gte: from, lte: to } },
+          ],
+        },
+      },
+      select: { vehiculoId: true, viaje: { select: { kmRecorridos: true } } },
+    });
+
+    const kmPorVehiculo = new Map<string, number>();
+    for (const v of vinculos) {
+      const km = v.viaje.kmRecorridos ?? 0;
+      kmPorVehiculo.set(v.vehiculoId, (kmPorVehiculo.get(v.vehiculoId) ?? 0) + km);
+    }
+
+    return porVehiculo
+      .map((f) => {
+        const km = kmPorVehiculo.get(f.vehiculoId) ?? 0;
+        const kmFacturadosPeriodo = km > 0 ? km : null;
+        return {
+          vehiculoId: f.vehiculoId,
+          patente: f.patente,
+          litrosPeriodo: f.litros,
+          kmFacturadosPeriodo,
+          litrosPor100KmFacturado: kmFacturadosPeriodo
+            ? roundMoney((f.litros / kmFacturadosPeriodo) * 100)
+            : null,
+        };
+      })
+      .sort((a, b) => b.litrosPeriodo - a.litrosPeriodo);
+  }
+
+  /** Cargas completas del rango (con patente/chofer) para exportar a Excel. Sin paginar, capado a 5000 filas. */
+  async getCargasParaExport(auth: CombustibleAuth, from?: string, to?: string) {
+    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+    if (from || to) {
+      const fechaWhere: Record<string, Date> = {};
+      if (from) fechaWhere.gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        fechaWhere.lte = toDate;
+      }
+      where['fecha'] = fechaWhere;
+    }
+
+    const cargas = await this.prisma.cargaCombustible.findMany({
+      where,
+      orderBy: { fecha: 'desc' },
+      take: 5000,
+      select: {
+        id: true,
+        fecha: true,
+        estacion: true,
+        litros: true,
+        precioPorLitro: true,
+        importe: true,
+        km: true,
+        formaPago: true,
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true } },
+      },
+    });
+
+    return { cargas, total: cargas.length };
   }
 
   async getStats(auth: CombustibleAuth, month?: string) {

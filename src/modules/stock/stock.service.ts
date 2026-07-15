@@ -673,13 +673,33 @@ export class StockService {
       fechaDesde?: string;
       fechaHasta?: string;
       createdBy?: string;
+      /** Filtro por lote (`__sin_lote__` = stock sin lote asignado). */
+      lote?: string;
     },
   ) {
-    const { depositoId, tipo, fechaDesde, fechaHasta, createdBy } = options ?? {};
+    const { depositoId, tipo, fechaDesde, fechaHasta, createdBy, lote } = options ?? {};
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
+    const loteTrim = lote?.trim();
+    const filtroLote =
+      loteTrim === undefined || loteTrim === ''
+        ? undefined
+        : loteTrim === '__sin_lote__'
+          ? null
+          : loteTrim;
+
+    const movimientoSome =
+      productoId || filtroLote !== undefined
+        ? {
+            some: {
+              ...(productoId ? { productoId } : {}),
+              ...(filtroLote !== undefined ? { lote: filtroLote } : {}),
+            },
+          }
+        : undefined;
 
     const where = {
       tenantId,
@@ -687,7 +707,7 @@ export class StockService {
       ...(depositoId ? { depositoId } : {}),
       ...(tipo ? { tipo } : {}),
       ...(createdBy ? { createdBy } : {}),
-      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(movimientoSome ? { movimientos: movimientoSome } : {}),
       ...(desde || hasta
         ? {
             fecha: {

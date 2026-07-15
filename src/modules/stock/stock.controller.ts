@@ -248,7 +248,7 @@ export class StockController {
     return this.service.findOperacion(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, depósito, tipo, fechas, usuario).' })
+  @ApiOperation({ summary: 'Listar movimientos de stock con filtros opcionales (producto, cliente, depósito, tipo, fechas, usuario, lote).' })
   @Get('movimientos')
   @Roles('admin', 'superadmin', 'stock_viewer')
   listMovimientos(
@@ -261,6 +261,7 @@ export class StockController {
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
     @Query('createdBy') createdBy?: string,
+    @Query('lote') lote?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listOperacionesPaginated(auth.tenantId, query, productoId, clienteId, {
@@ -269,6 +270,7 @@ export class StockController {
       fechaDesde,
       fechaHasta,
       createdBy,
+      lote,
     });
   }
 
@@ -573,7 +575,7 @@ export class StockController {
     summary: "Lotes disponibles para un producto/cliente/depósito",
   })
   @Get("lotes")
-  @Roles("admin", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_viewer")
   getLotes(
     @CurrentAuth() auth: AuthPayload,
     @Query("productoId") productoId: string,

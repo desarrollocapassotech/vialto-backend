@@ -810,6 +810,7 @@ export class PlatformController {
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
     @Query('createdBy') createdBy?: string,
+    @Query('lote') lote?: string,
   ) {
     return this.service.listOperacionesStockPaginated(
       tenantId,
@@ -821,6 +822,7 @@ export class PlatformController {
       fechaDesde,
       fechaHasta,
       createdBy,
+      lote,
     );
   }
 

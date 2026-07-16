@@ -647,8 +647,9 @@ model CargaCombustible {
   fotoTicket    String?
 
   sospechoso      Boolean @default(false)
-  motivoSospecha  String? // litros_extremo | importe_invalido | precio_litro_fuera_de_rango
-  litrosOriginal  Float?  // valor previo a la corrección automática (regla ÷1000), null si nunca se corrigió
+  motivoSospecha  String? // litros_extremo | importe_invalido | precio_litro_fuera_de_rango | km_delta_invalido
+  litrosOriginal  Float?  // valor previo a la corrección automática de litros (regla ÷1000), null si nunca se corrigió
+  kmOriginal      Int?    // valor previo a la corrección automática de km (÷10 | ÷100 | ÷1000 validado contra vecinos), null si nunca se corrigió
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])

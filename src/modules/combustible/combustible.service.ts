@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
+import { KM_DELTA_PLAUSIBLE_MAX } from '../../shared/util/combustible-km.constants';
 
 import { CreateCargaDto } from './dto/create-carga.dto';
 import { UpdateCargaDto } from './dto/update-carga.dto';
@@ -688,7 +689,13 @@ export class CombustibleService {
         if (i > 0) {
           const anterior = lista[i - 1];
           const delta = actual.km - anterior.km;
-          if (delta > 0) kmPeriodo += delta;
+          // Delta implausible (> KM_DELTA_PLAUSIBLE_MAX) → no se suma. Suele pasar cuando
+          // el vecino "anterior" en esta cadena filtrada por sospechoso=false queda lejos
+          // en el tiempo (varias cargas intermedias excluidas): el km real recorrido en ese
+          // hueco no es atribuible de forma confiable a esta carga puntual, y sumarlo igual
+          // infla el denominador de costo/km sin que el gasto de esas cargas excluidas
+          // aparezca en el numerador.
+          if (delta > 0 && delta <= KM_DELTA_PLAUSIBLE_MAX) kmPeriodo += delta;
 
           const horas = (actual.fecha.getTime() - anterior.fecha.getTime()) / 3_600_000;
           if (horas < ANOMALIA_RECARGA_HORAS || delta < ANOMALIA_RECARGA_KM) {
@@ -934,7 +941,9 @@ export class CombustibleService {
         let kmDelta = 0;
         if (i > 0) {
           const delta = actual.km - lista[i - 1].km;
-          if (delta > 0) kmDelta = delta;
+          // Ver nota en buildAlertasYKmPeriodo: delta implausible → no se cuenta, en vez
+          // de inflar el km del bucket con un hueco de cargas excluidas.
+          if (delta > 0 && delta <= KM_DELTA_PLAUSIBLE_MAX) kmDelta = delta;
         }
         addToBucket(actual.fecha, kmDelta, actual.importe);
       }

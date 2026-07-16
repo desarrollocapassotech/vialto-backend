@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { decryptField } from '../../shared/util/arca-crypto';
 import {
   ArcaAmbiente,
   ArcaAutorizarRequest,
@@ -211,8 +212,25 @@ export class ArcaClientService {
 
     const sdkEnv = toSdkEnv(ambiente);
     const certKey: Record<string, string> = {};
-    if (certPem) certKey.cert = certPem;
-    if (keyPem) certKey.key = keyPem;
+
+    try {
+      if (certPem) {
+        const dec = decryptField(certPem);
+        if (dec) certKey.cert = dec;
+      }
+      if (keyPem) {
+        const dec = decryptField(keyPem);
+        if (dec) certKey.key = dec;
+      }
+    } catch (decErr) {
+      this.logger.error(`Error de descifrado de certificados para CUIT ${cuitNorm}: ${decErr.message}`);
+      throw new ArcaException(
+        ARCA_ERROR_CODES.GENERICO,
+        'Fallo de credenciales ARCA: Los certificados o llaves configurados no se pudieron descifrar correctamente. Por favor, vuelva a cargarlos en la configuración.',
+        undefined,
+        decErr
+      );
+    }
 
     try {
       const res = await fetch(`${AFIP_SDK_BASE}/afip/auth`, {
@@ -228,9 +246,8 @@ export class ArcaClientService {
       const body = await res.json() as ArcaTokenResponse & { error?: string; message?: string };
 
       if (!res.ok || !body.token) {
-        const bodyStr = JSON.stringify(body);
-        this.logger.error(`AFIP SDK auth HTTP ${res.status} | cuit=${cuitNorm} env=${sdkEnv} | body=${bodyStr}`);
-        const errDetail = body?.error ?? body?.message ?? bodyStr;
+        const errDetail = body?.error ?? body?.message ?? 'Respuesta inválida o vacía';
+        this.logger.error(`AFIP SDK auth HTTP ${res.status} | cuit=${cuitNorm} env=${sdkEnv} | error=${errDetail}`);
         throw this.mapError(errDetail, res.status);
       }
 

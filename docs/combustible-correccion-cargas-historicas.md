@@ -87,10 +87,50 @@ combustible, sin intentar reconstruir el valor.**
 > un contador de "X cargas excluidas de este período" junto a los promedios, para
 > que no parezca un número completo cuando en realidad excluye una porción
 > importante de los datos (especialmente en los meses recientes, donde la tasa de
-> sospechosas ronda el 70%). Falta definir esto antes de tocar las queries de
-> reportes/dashboard.
+> sospechosas ronda el 70%). La exclusión en sí ya está implementada (ver
+> "Estado actual" más abajo); lo que falta decidir es solo si se comunica visualmente.
 
 ---
+
+## Estado actual
+
+- **Script corrido en QA (2026-07-15).** Sobre 2049 cargas de Bressan procesadas:
+  **402 corregidas** (÷1000, con `litrosOriginal` guardado) y **732 marcadas
+  sospechosas** (96 `litros_extremo`, 132 `importe_invalido`, 504
+  `precio_litro_fuera_de_rango`). Verificado contra la base — coincide exacto con
+  el dry-run previo.
+- **Dashboard actualizado (`combustible.service.ts`)** para excluir
+  `sospechoso: true` de todos los cálculos agregados: totales del resumen,
+  distribución por estación/forma de pago, ranking por vehículo, ranking por
+  chofer, evolución de precio, evolución de costo por km, comparación vs. período
+  anterior, proyección del mes y `getStats`. Motivó este cambio un pico irreal en
+  el gráfico de costo/km causado por una carga con `importe` de $84 millones que
+  el script ya había marcado sospechosa pero el dashboard todavía no filtraba.
+  Se dejaron **sin filtrar a propósito** los listados crudos (`findAll`,
+  exportación a Excel, "últimas cargas" del dashboard) para que el operador
+  pueda seguir viendo y revisando el dato marcado, no solo los promedios.
+- Este cambio de `combustible.service.ts` está commiteado localmente pero
+  **todavía no pusheado/mergeado** — ver pendientes.
+
+---
+
+## Pendiente
+
+1. **Correr el script en producción.** Solo se ejecutó en QA hasta ahora
+   (`npm run fix:combustible:dry` y `fix:combustible` apuntando a la rama
+   `production` de Neon). Recomendado ensayar antes contra un branch temporal de
+   Neon clonado de producción.
+2. **Pushear/mergear los cambios pendientes de `combustible.service.ts`**
+   (exclusión de sospechosas en el dashboard) — commiteados en local, sin subir.
+3. **Definir el contador de "excluidas" en el dashboard** (ver nota de arriba) —
+   sin esto, un usuario puede ver un promedio calculado sobre una fracción chica
+   de las cargas del período (hasta ~70-80% excluido en meses recientes) sin
+   ninguna señal visual de que faltan datos.
+4. **La causa de origen (carga manual) sigue sin resolverse** y, según el
+   diagnóstico, empeorando mes a mes (68–79% de tasa de error en abr–jul 2026).
+   Cuanto más se posterga, más cargas nuevas van a necesitar este mismo
+   tratamiento — vale la pena revisarlo como prioridad aparte, no solo como
+   limpieza histórica.
 
 ## Campos agregados a `CargaCombustible` (Prisma)
 

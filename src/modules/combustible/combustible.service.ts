@@ -481,7 +481,7 @@ export class CombustibleService {
 
     const [todasCargas, ultimasCargas, tenant] = await Promise.all([
       this.prisma.cargaCombustible.findMany({
-        where,
+        where: { ...where, sospechoso: false },
         select: {
           id: true,
           litros: true,
@@ -519,7 +519,6 @@ export class CombustibleService {
     const litrosPorCarga = totalCargas > 0 ? totalLitros / totalCargas : 0;
 
     const costoTotalPeriodo = await this.buildCostoTotalPeriodo(tenantId, totalImporte, fromDate, toDate);
-    const proyeccionMesActual = await this.getProyeccionMesActual(tenantId);
 
     const distribucionEstaciones = this.buildDistribucion(todasCargas, (c) => c.estacion);
     const distribucionFormaPago = this.buildDistribucion(
@@ -543,7 +542,7 @@ export class CombustibleService {
         : Promise.resolve([]),
       vehiculoIds.length > 0
         ? this.prisma.cargaCombustible.findMany({
-            where: { tenantId, vehiculoId: { in: vehiculoIds } },
+            where: { tenantId, vehiculoId: { in: vehiculoIds }, sospechoso: false },
             orderBy: [{ vehiculoId: 'asc' }, { fecha: 'asc' }],
             select: { id: true, vehiculoId: true, km: true, fecha: true, litros: true, importe: true },
           })
@@ -562,7 +561,7 @@ export class CombustibleService {
       toDate,
     );
 
-    const { porVehiculo, semaforoResumen } = this.buildPorVehiculo(
+    const porVehiculo = this.buildPorVehiculo(
       todasCargas,
       vehiculoMap,
       kmPeriodoPorVehiculo,
@@ -588,7 +587,6 @@ export class CombustibleService {
       precioPorLitro,
       litrosPorCarga,
       costoTotalPeriodo,
-      proyeccionMesActual,
       distribucionEstaciones,
       distribucionFormaPago,
       porVehiculo,
@@ -599,7 +597,6 @@ export class CombustibleService {
         .slice(0, 50),
       evolucionPrecio,
       evolucionCostoPorKm,
-      semaforoResumen,
       viajesCruce,
       ultimasCargas,
     };
@@ -617,7 +614,7 @@ export class CombustibleService {
     const prevTo = fromDate;
     const prevFrom = new Date(fromDate.getTime() - spanMs);
     const prevAgg = await this.prisma.cargaCombustible.aggregate({
-      where: { tenantId, fecha: { gte: prevFrom, lt: prevTo } },
+      where: { tenantId, fecha: { gte: prevFrom, lt: prevTo }, sospechoso: false },
       _sum: { importe: true },
     });
     const previous = roundMoney(prevAgg._sum.importe ?? 0);
@@ -630,25 +627,6 @@ export class CombustibleService {
       previous,
       changePct: Math.round(((current - previous) / previous) * 1000) / 10,
     };
-  }
-
-  /** Proyección de gasto del mes calendario actual (independiente del período seleccionado en el dashboard). */
-  private async getProyeccionMesActual(tenantId: string) {
-    const now = new Date();
-    const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const finMes = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
-    const agg = await this.prisma.cargaCombustible.aggregate({
-      where: { tenantId, fecha: { gte: inicioMes, lt: finMes } },
-      _sum: { importe: true },
-    });
-    const gastoAcumulado = roundMoney(agg._sum.importe ?? 0);
-    const diasTranscurridos = Math.max(
-      1,
-      Math.floor((now.getTime() - inicioMes.getTime()) / 86_400_000) + 1,
-    );
-    const diasEnMes = Math.round((finMes.getTime() - inicioMes.getTime()) / 86_400_000);
-    const proyeccionTotal = roundMoney((gastoAcumulado / diasTranscurridos) * diasEnMes);
-    return { gastoAcumulado, diasTranscurridos, diasEnMes, proyeccionTotal };
   }
 
   /** Agrupa cargas por la clave dada, sumando litros/importe y contando cargas. Orden desc por monto. */
@@ -756,7 +734,7 @@ export class CombustibleService {
     vehiculoMap: Map<string, { patente: string; tipo: string }>,
     kmPeriodoPorVehiculo: Map<string, number>,
     alertas: Alerta[],
-  ): { porVehiculo: PorVehiculoRow[]; semaforoResumen: { verde: number; amarillo: number; rojo: number } } {
+  ): PorVehiculoRow[] {
     const agg = new Map<string, { litros: number; monto: number; cantidad: number }>();
     for (const c of todasCargas) {
       if (!c.vehiculoId) continue;
@@ -823,13 +801,7 @@ export class CombustibleService {
       })
       .sort((a, b) => b.monto - a.monto);
 
-    const semaforoResumen = {
-      verde: porVehiculo.filter((v) => v.semaforo === 'verde').length,
-      amarillo: porVehiculo.filter((v) => v.semaforo === 'amarillo').length,
-      rojo: porVehiculo.filter((v) => v.semaforo === 'rojo').length,
-    };
-
-    return { porVehiculo, semaforoResumen };
+    return porVehiculo;
   }
 
   /** Ranking por chofer (litros/monto/cantidad del período). Sin chofer asignado se agrupa aparte. */
@@ -1074,7 +1046,7 @@ export class CombustibleService {
   }
 
   async getStats(auth: CombustibleAuth, month?: string) {
-    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+    const where: Record<string, unknown> = { tenantId: auth.tenantId, sospechoso: false };
 
     if (month) {
       const [year, mon] = month.split('-').map(Number);

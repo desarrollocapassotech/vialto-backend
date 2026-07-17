@@ -272,6 +272,14 @@ export class LiquidacionesService {
     return this.findById(tenantId, id);
   }
 
+  /**
+   * Emite la liquidación CVLP Tipo 60 a ARCA (AFIP) y obtiene el CAE.
+   *
+   * Solo se puede emitir desde `borrador` o `error`. El estado pasa a `pendiente_cae`
+   * antes del request HTTP para evitar race conditions. Si AFIP no responde por
+   * problemas de red, queda en `pendiente_cae` (HTTP 200). Si rechaza la solicitud,
+   * pasa a `error` con el motivo guardado en `arcaError` (HTTP 422).
+   */
   async emitirLiquidacion(tenantId: string, liquidacionId: string) {
     const liquidacion = await this.db.liquidacion.findUnique({
       where: { id: liquidacionId },
@@ -281,6 +289,7 @@ export class LiquidacionesService {
     if (!liquidacion || liquidacion.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
+
     if (liquidacion.estado === 'autorizado') {
       throw new ConflictException('La liquidación ya tiene CAE autorizado');
     }
@@ -292,17 +301,35 @@ export class LiquidacionesService {
 
     // Idempotencia: si el payload no cambió y hay un hash previo, no re-emitir
     const payloadHash = this.buildPayloadHash(liquidacion.id, liquidacion.liquido, config.ambiente);
-    if (liquidacion.payloadHash === payloadHash && liquidacion.estado === 'pendiente_cae') {
+    if (liquidacion.estado === 'pendiente_cae' && liquidacion.payloadHash === payloadHash) {
       throw new ConflictException(
         'La liquidación ya tiene una solicitud de CAE en curso. Esperar la respuesta o usar reintento.',
       );
     }
 
     // Marcar como pendiente antes de llamar a AFIP SDK
-    await this.db.liquidacion.update({
-      where: { id: liquidacionId },
-      data: { estado: 'pendiente_cae', payloadHash, reintentos: { increment: 1 }, updatedAt: new Date() },
+    const { count: lockCount } = await this.db.liquidacion.updateMany({
+      where: {
+        id: liquidacionId,
+        tenantId,
+        estado: { in: ['borrador', 'error'] },
+      },
+      data: {
+        estado: 'pendiente_cae',
+        payloadHash,
+        reintentos: (liquidacion.reintentos ?? 0) + 1, // updateMany no soporta increment
+        updatedAt: new Date(),
+      },
     });
+
+    if (lockCount === 0) {
+      // El estado cambió concurrentemente; refrescamos desde BD para dar el mensaje preciso.
+      const current = await this.findById(tenantId, liquidacionId);
+      throw new ConflictException(
+        `La liquidación no puede emitirse porque su estado actual es "${current.estado}". ` +
+        'Solo se permite emitir desde "borrador" o "error".',
+      );
+    }
 
     try {
       const transportista = await (this.prisma as PrismaAny).transportista.findUnique({
@@ -325,7 +352,7 @@ export class LiquidacionesService {
       );
       const cbteNro = ultimoCbte + 1;
 
-      // Verificar que la numeración no tenga desfasaje en caso de reintentos
+      // Valida que el número local coincida con el esperado por AFIP (protege contra desfasajes).
       this.validarCorrelatividad(liquidacion.cbteNro, cbteNro, 'Liquidación');
 
       const fechaCbte = formatFechaCbte(new Date());
@@ -363,8 +390,9 @@ export class LiquidacionesService {
         config.keyPem,
       );
 
-      await this.db.liquidacion.update({
-        where: { id: liquidacionId },
+      // AFIP autorizó: guardar CAE, fecha de vencimiento y pasar a autorizado.
+      await this.db.liquidacion.updateMany({
+        where: { id: liquidacionId, tenantId },
         data: {
           estado: 'autorizado',
           cbteNro,
@@ -389,14 +417,23 @@ export class LiquidacionesService {
             ? err.message
             : String(err);
 
-      await this.db.liquidacion.update({
-        where: { id: liquidacionId },
+      // Persistir el nuevo estado antes de responder al caller.
+      // Conectividad (timeout/red) → pendiente_cae. Rechazo de AFIP → error.
+      await this.db.liquidacion.updateMany({
+        where: { id: liquidacionId, tenantId },
         data: {
           estado: isConectividad ? 'pendiente_cae' : 'error',
           arcaError: errMsg,
           updatedAt: new Date(),
         },
       });
+
+      if (isConectividad) {
+        // No lanzar excepción HTTP: el frontend recibe la entidad en pendiente_cae
+        // y puede mostrar un banner informativo en lugar de un error bloqueante.
+        this.logger.warn(`[emitirLiquidacion] ${liquidacionId} pendiente_cae por fallo de conectividad`);
+        return this.findById(tenantId, liquidacionId);
+      }
 
       this.logger.error(`Error al emitir liquidación ${liquidacionId}: ${errMsg}`);
       throw new UnprocessableEntityException(errMsg);

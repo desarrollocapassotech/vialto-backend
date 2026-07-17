@@ -513,6 +513,18 @@ export class LiquidacionesService {
     return this.arcaConfig.upsert(tenantId, dto);
   }
 
+  async uploadLogo(tenantId: string, file: Express.Multer.File) {
+    const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(file.originalname);
+    if (!isImage) {
+      throw new BadRequestException('El logo debe ser una imagen JPG, PNG o WEBP.');
+    }
+    return this.arcaConfig.uploadLogo(tenantId, file.buffer, file.originalname, file.mimetype);
+  }
+
+  async removeLogo(tenantId: string) {
+    return this.arcaConfig.removeLogo(tenantId);
+  }
+
   async deleteLiquidacion(tenantId: string, id: string) {
     const liq = await this.db.liquidacion.findUnique({
       where: { id },

@@ -144,13 +144,25 @@ export class LiquidacionPdfService {
       qrBuffer = await QRCode.toBuffer(qrUrl, { width: 72, margin: 1 }) as Buffer;
     }
 
-    return this.buildPdf(liq, config, qrBuffer);
+    // Logo del emisor, descargado una sola vez (se reutiliza en ORIGINAL y DUPLICADO)
+    let logoBuffer: Buffer | null = null;
+    if (config?.logoUrl) {
+      try {
+        const fetched = await fetch(config.logoUrl);
+        if (fetched.ok) logoBuffer = Buffer.from(await fetched.arrayBuffer());
+      } catch {
+        // Si el logo no se puede descargar, el PDF se genera igual sin él.
+      }
+    }
+
+    return this.buildPdf(liq, config, qrBuffer, logoBuffer);
   }
 
   private buildPdf(
     liq: PrismaAny,
     config: PrismaAny,
     qrBuffer: Buffer | null,
+    logoBuffer: Buffer | null,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
@@ -159,9 +171,9 @@ export class LiquidacionPdfService {
         doc.on('data', (c: Buffer) => chunks.push(c));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
-        this.draw(doc, liq, config, qrBuffer, 'ORIGINAL');
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL');
         doc.addPage();
-        this.draw(doc, liq, config, qrBuffer, 'DUPLICADO');
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO');
         doc.end();
       } catch (e) {
         reject(e);
@@ -174,6 +186,7 @@ export class LiquidacionPdfService {
     liq: PrismaAny,
     config: PrismaAny,
     qrBuffer: Buffer | null,
+    logoBuffer: Buffer | null,
     copia: 'ORIGINAL' | 'DUPLICADO',
   ) {
     const M = MARGIN;
@@ -199,17 +212,28 @@ export class LiquidacionPdfService {
     doc.moveTo(c1x, y).lineTo(c1x, y + hdrH).stroke('#aaa');
     doc.moveTo(c2x, y).lineTo(c2x, y + hdrH).stroke('#aaa');
 
-    // Col 1: emisor
+    // Col 1: logo (si existe) + emisor
+    const LOGO_SIZE = 34;
+    if (logoBuffer) {
+      try {
+        doc.image(logoBuffer, M + 6, y + 6, { fit: [LOGO_SIZE, LOGO_SIZE] });
+      } catch {
+        // Formato de imagen no soportado por pdfkit; el resto del comprobante se dibuja igual.
+      }
+    }
+    const emisorX = logoBuffer ? M + 6 + LOGO_SIZE + 6 : M + 6;
+    const emisorW = logoBuffer ? 148 - LOGO_SIZE - 6 : 148;
+
     const emisor = config?.razonSocial ?? 'NyM Logística';
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#000')
-      .text(emisor, M + 6, y + 8, { width: 148 });
+      .text(emisor, emisorX, y + 8, { width: emisorW });
     const condEmisorLabel = config?.condicionIvaEmisor
       ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ?? config.condicionIvaEmisor)
       : '';
     doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(config?.domicilioEmisor ?? '', M + 6, y + 22, { width: 148 });
+      .text(config?.domicilioEmisor ?? '', emisorX, y + 22, { width: emisorW });
     doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(condEmisorLabel, M + 6, y + 42, { width: 148 });
+      .text(condEmisorLabel, emisorX, y + 42, { width: emisorW });
     doc.fontSize(7).font('Helvetica').fillColor('#555')
       .text(`CUIT: ${config?.cuitEmisor ?? ''}`, M + 6, y + 54, { width: 148 })
       .text(`Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ''}`, M + 6, y + 64, { width: 148 })

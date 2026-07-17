@@ -828,6 +828,7 @@ model ArcaConfig {
   condicionIvaEmisor String? // Condición IVA del emisor (ej: RESP. INSCRIPTO)
   ingBrutos          String? // N° Ing. Brutos (suele coincidir con CUIT)
   inicActEmisor      String? // Fecha de inicio de actividades (ej: 01/03/2015)
+  logoUrl            String? // Logo del emisor (Cloudinary), embebido en los PDF de comprobantes
   // Puntos de venta y ambiente
   ptoVentaCvlp       Int // punto de venta para CVLP tipo 60
   ptoVentaFactura    Int // punto de venta para Facturas A/B

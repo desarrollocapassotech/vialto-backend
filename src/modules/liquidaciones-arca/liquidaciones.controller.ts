@@ -65,6 +65,31 @@ export class LiquidacionesController {
     return this.service.upsertConfig(auth.tenantId, dto);
   }
 
+  @ApiOperation({ summary: 'Subir logo del emisor (embebido en los PDF de comprobantes)' })
+  @Post('config/logo')
+  @RequireModule('integracion-arca')
+  @Roles('admin', 'superadmin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadLogo(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    return this.service.uploadLogo(auth.tenantId, file);
+  }
+
+  @ApiOperation({ summary: 'Quitar el logo del emisor' })
+  @Delete('config/logo')
+  @RequireModule('integracion-arca')
+  @Roles('admin', 'superadmin')
+  removeLogo(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.removeLogo(auth.tenantId);
+  }
+
   // ── Liquidaciones CRUD (facturacion OR integracion-arca) ─────────────────
 
   @ApiOperation({ summary: 'Listar liquidaciones del tenant' })

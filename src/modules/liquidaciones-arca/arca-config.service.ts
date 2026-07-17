@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
+import { encryptField, isEncrypted, decryptField, validateKeyConfigured } from '../../shared/util/arca-crypto';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -30,7 +31,9 @@ const CONFIG_SELECT = {
 
 @Injectable()
 export class ArcaConfigService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {
+    validateKeyConfigured();
+  }
 
   private get db(): PrismaAny {
     return this.prisma as PrismaAny;
@@ -64,8 +67,8 @@ export class ArcaConfigService {
       updatedAt: now,
     };
     // Solo sobreescribir cert/key si se envían con contenido
-    if (dto.certPem?.trim()) data.certPem = dto.certPem.trim();
-    if (dto.keyPem?.trim()) data.keyPem = dto.keyPem.trim();
+    if (dto.certPem?.trim()) data.certPem = encryptField(dto.certPem.trim());
+    if (dto.keyPem?.trim()) data.keyPem = encryptField(dto.keyPem.trim());
 
     await this.db.arcaConfig.upsert({
       where: { tenantId },
@@ -107,6 +110,60 @@ export class ArcaConfigService {
     if (!exists) {
       throw new NotFoundException(
         'El tenant no tiene configuración de ARCA. Completar la configuración antes de emitir.',
+      );
+    }
+  }
+
+  async migrateExistingConfigs(): Promise<void> {
+    const configs = await this.db.arcaConfig.findMany({
+      select: { tenantId: true, certPem: true, keyPem: true },
+    });
+    
+    let migratedCount = 0;
+    let failedCount = 0;
+
+    const ENCRYPTED_GCM_PATTERN = /^[0-9a-fA-F]{24}:[0-9a-fA-F]{32}:[0-9a-fA-F]+$/;
+    const isGcm = (text: string) => ENCRYPTED_GCM_PATTERN.test(text);
+
+    for (const config of configs) {
+      try {
+        let needsUpdate = false;
+        const data: PrismaAny = {};
+        
+        if (config.certPem && !isGcm(config.certPem)) {
+          const decrypted = decryptField(config.certPem);
+          data.certPem = encryptField(decrypted);
+          needsUpdate = true;
+        }
+        if (config.keyPem && !isGcm(config.keyPem)) {
+          const decrypted = decryptField(config.keyPem);
+          data.keyPem = encryptField(decrypted);
+          needsUpdate = true;
+        }
+        
+        if (needsUpdate) {
+          await this.db.arcaConfig.update({
+            where: { tenantId: config.tenantId },
+            data,
+          });
+          migratedCount++;
+        }
+      } catch (error) {
+        failedCount++;
+        console.error(
+          `[ArcaConfigService] Error al migrar certificados del tenant ${config.tenantId}: ${error.message}`
+        );
+      }
+    }
+    
+    if (migratedCount > 0) {
+      console.log(
+        `[ArcaConfigService] Migración a AES-256-GCM completada. Se cifraron/actualizaron ${migratedCount} configuraciones.`
+      );
+    }
+    if (failedCount > 0) {
+      console.warn(
+        `[ArcaConfigService] La migración falló en ${failedCount} configuraciones. Ver logs superiores.`
       );
     }
   }

@@ -52,6 +52,8 @@ model Tenant {
   arcaConfig              ArcaConfig?
   liquidaciones           Liquidacion[]
   arcaLogs                ArcaLog[]
+  tenantFieldConfigs      TenantFieldConfig[]
+  tenantFieldConfigAuditLogs TenantFieldConfigAuditLog[]
 
   @@map("tenants")
 }
@@ -644,11 +646,17 @@ model CargaCombustible {
   fotoTacometro String?
   fotoTicket    String?
 
+  sospechoso      Boolean @default(false)
+  motivoSospecha  String? // litros_extremo | importe_invalido | precio_litro_fuera_de_rango | km_delta_invalido
+  litrosOriginal  Float?  // valor previo a la corrección automática de litros (regla ÷1000), null si nunca se corrigió
+  kmOriginal      Int?    // valor previo a la corrección automática de km (÷10 | ÷100 | ÷1000 validado contra vecinos), null si nunca se corrigió
+
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
   @@index([tenantId, choferId])
   @@index([tenantId, fecha])
   @@index([tenantId, createdBy])
+  @@index([tenantId, sospechoso])
   @@map("cargas_combustible")
 }
 
@@ -766,6 +774,41 @@ model ImportLog {
   @@index([tenantId])
   @@index([tenantId, modulo])
   @@map("import_logs")
+}
+
+// Nota: en desarrollo por otro integrante del equipo — no modificar la forma de este modelo,
+// solo se declara acá para que coincida con las tablas ya existentes en la base de QA.
+model TenantFieldConfig {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  modulo      String
+  formulario  String
+  campos      Json
+  updatedAt   DateTime
+  updatedBy   String
+
+  @@unique([tenantId, modulo, formulario])
+  @@index([tenantId])
+  @@map("tenant_field_configs")
+}
+
+model TenantFieldConfigAuditLog {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  modulo         String
+  formulario     String
+  campo          String
+  configAnterior Json?
+  configNuevo    Json
+  changedBy      String
+  changedAt      DateTime @default(now())
+
+  @@index([changedAt(sort: Desc)])
+  @@index([tenantId])
+  @@index([tenantId, modulo, formulario])
+  @@map("tenant_field_config_audit_logs")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

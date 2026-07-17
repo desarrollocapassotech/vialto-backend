@@ -8,6 +8,12 @@ services:
     plan: free
     buildCommand: NPM_CONFIG_PRODUCTION=false npm install && npm run build
     startCommand: npm run start:prod
+    # Retry con backoff: Neon (plan free) suspende el compute tras inactividad.
+    # El primer intento de migrate deploy puede pisar el timeout de 10s del advisory
+    # lock (P1002) mientras el compute recién está despertando; los reintentos
+    # siguientes ya lo encuentran despierto.
+    preDeployCommand: >-
+      for i in 1 2 3 4 5; do npx prisma migrate deploy && exit 0; echo "Intento $i falló, reintentando en 10s..."; sleep 10; done; exit 1
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV

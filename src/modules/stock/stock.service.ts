@@ -673,13 +673,33 @@ export class StockService {
       fechaDesde?: string;
       fechaHasta?: string;
       createdBy?: string;
+      /** Filtro por lote (`__sin_lote__` = stock sin lote asignado). */
+      lote?: string;
     },
   ) {
-    const { depositoId, tipo, fechaDesde, fechaHasta, createdBy } = options ?? {};
+    const { depositoId, tipo, fechaDesde, fechaHasta, createdBy, lote } = options ?? {};
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
     const hasta = fechaHasta ? parseYyyyMmDdFinAr(fechaHasta) : null;
+
+    const loteTrim = lote?.trim();
+    const filtroLote =
+      loteTrim === undefined || loteTrim === ''
+        ? undefined
+        : loteTrim === '__sin_lote__'
+          ? null
+          : loteTrim;
+
+    const movimientoSome =
+      productoId || filtroLote !== undefined
+        ? {
+            some: {
+              ...(productoId ? { productoId } : {}),
+              ...(filtroLote !== undefined ? { lote: filtroLote } : {}),
+            },
+          }
+        : undefined;
 
     const where = {
       tenantId,
@@ -687,7 +707,7 @@ export class StockService {
       ...(depositoId ? { depositoId } : {}),
       ...(tipo ? { tipo } : {}),
       ...(createdBy ? { createdBy } : {}),
-      ...(productoId ? { movimientos: { some: { productoId } } } : {}),
+      ...(movimientoSome ? { movimientos: movimientoSome } : {}),
       ...(desde || hasta
         ? {
             fecha: {
@@ -1585,6 +1605,12 @@ export class StockService {
     });
   }
 
+  /**
+   * Reconstruye saldos por lote desde movimientos.
+   * - ingreso: suma bultos y sueltas
+   * - egreso: resta bultos y sueltas
+   * - división: dos movimientos (A consume bultos, B genera sueltas) → resta bultos y suma unidades
+   */
   private buildSaldosPorLote(
     rows: Array<{
       lote: string | null;
@@ -1601,16 +1627,20 @@ export class StockService {
     const vencimientoReciente = new Map<string, { fecha: Date; venc: Date }>();
 
     for (const row of rows) {
-      const sign = row.operacion.tipo === 'ingreso' ? 1 : -1;
+      const { deltaBultos, deltaSueltas } = this.deltasSaldoDesdeMovimiento(
+        row.operacion.tipo,
+        row.bultos,
+        row.unidades,
+      );
       if (!row.lote) {
-        sinBultos += sign * row.bultos;
-        sinSueltas += sign * row.unidades;
+        sinBultos += deltaBultos;
+        sinSueltas += deltaSueltas;
         continue;
       }
       const key = row.lote;
       const prev = lotes.get(key) ?? { bultos: 0, sueltas: 0, fechaVencimiento: null };
-      prev.bultos += sign * row.bultos;
-      prev.sueltas += sign * row.unidades;
+      prev.bultos += deltaBultos;
+      prev.sueltas += deltaSueltas;
       lotes.set(key, prev);
 
       if (row.operacion.tipo === 'ingreso' && row.fechaVencimiento) {
@@ -1627,6 +1657,24 @@ export class StockService {
     }
 
     return { lotes, sinLote: { bultos: sinBultos, sueltas: sinSueltas } };
+  }
+
+  /** Impacto neto de un movimiento sobre el saldo de bultos/sueltas. */
+  private deltasSaldoDesdeMovimiento(
+    tipo: string,
+    bultos: number,
+    unidades: number,
+  ): { deltaBultos: number; deltaSueltas: number } {
+    if (tipo === 'ingreso') {
+      return { deltaBultos: bultos, deltaSueltas: unidades };
+    }
+    if (tipo === 'division') {
+      // Mov A: bultos > 0, unidades = 0 → resta bultos.
+      // Mov B: bultos = 0, unidades > 0 → suma sueltas.
+      return { deltaBultos: -bultos, deltaSueltas: unidades };
+    }
+    // egreso (y cualquier otro consumo)
+    return { deltaBultos: -bultos, deltaSueltas: -unidades };
   }
 
   private async validarLineaEgresoConLote(

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '../../shared/prisma/prisma.module';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
@@ -12,4 +12,16 @@ import { LiquidacionPdfService } from './liquidacion-pdf.service';
   providers: [ArcaClientService, ArcaConfigService, LiquidacionesService, LiquidacionPdfService],
   exports: [ArcaConfigService, LiquidacionesService, LiquidacionPdfService],
 })
-export class IntegracionArcaModule {}
+export class IntegracionArcaModule implements OnModuleInit {
+  constructor(private readonly configService: ArcaConfigService) {}
+
+  async onModuleInit() {
+    try {
+      await this.configService.migrateExistingConfigs();
+    } catch (error) {
+      console.error(
+        `[IntegracionArcaModule] Error crítico no controlado durante la migración de certificados ARCA: ${error.message}`
+      );
+    }
+  }
+}

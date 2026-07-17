@@ -15,6 +15,7 @@ import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
 import { computeAfipGravadoIva, round2 } from './arca-iva.util';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
+import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 
@@ -195,6 +196,79 @@ export class LiquidacionesService {
     }
 
     return liquidacion;
+  }
+
+  async updateLiquidacion(
+    tenantId: string,
+    id: string,
+    dto: UpdateLiquidacionDto,
+  ) {
+    const liq = await this.db.liquidacion.findUnique({ where: { id } });
+    if (!liq || liq.tenantId !== tenantId) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+
+    const wantsDatos =
+      dto.periodoDesde !== undefined ||
+      dto.periodoHasta !== undefined ||
+      dto.comisionPct !== undefined ||
+      dto.ivaPct !== undefined;
+
+    const estadosEditables = new Set(['borrador', 'error', 'pendiente_cae']);
+    if (wantsDatos && !estadosEditables.has(liq.estado)) {
+      throw new BadRequestException(
+        'Solo se pueden modificar período/comisión en liquidaciones en borrador, error o pendiente de CAE.',
+      );
+    }
+
+    if (
+      dto.periodoDesde !== undefined &&
+      dto.periodoHasta !== undefined &&
+      new Date(dto.periodoHasta) < new Date(dto.periodoDesde)
+    ) {
+      throw new BadRequestException(
+        'La fecha hasta debe ser posterior o igual a la fecha desde.',
+      );
+    }
+
+    const data: Record<string, unknown> = { updatedAt: new Date() };
+
+    if (dto.periodoDesde !== undefined) {
+      data.periodoDesde = new Date(dto.periodoDesde);
+    }
+    if (dto.periodoHasta !== undefined) {
+      data.periodoHasta = new Date(dto.periodoHasta);
+    }
+    if (dto.comprobanteUrl !== undefined) {
+      data.comprobanteUrl = dto.comprobanteUrl || null;
+    }
+
+    if (dto.comisionPct !== undefined || dto.ivaPct !== undefined) {
+      const comisionPct =
+        dto.comisionPct !== undefined ? dto.comisionPct : liq.comisionPct;
+      const bruto = liq.bruto as number;
+      const comision = round2(bruto * comisionPct / 100);
+
+      let ivaPct = dto.ivaPct;
+      if (ivaPct === undefined) {
+        const netoPrev = round2(bruto - (liq.comision as number));
+        if (netoPrev > 0 && (liq.gastosAdminIva as number) > 0) {
+          ivaPct = round2(((liq.gastosAdminIva as number) / netoPrev) * 100);
+        } else {
+          const config = await this.arcaConfig.findPublic(tenantId);
+          ivaPct = config?.ivaGastosAdmin ?? 21;
+        }
+      }
+
+      const montos = computeAfipGravadoIva(bruto, comision, ivaPct);
+      data.comisionPct = comisionPct;
+      data.comision = comision;
+      data.gastosAdminIva = montos.impIva;
+      data.liquido = montos.liquido;
+    }
+
+    await this.db.liquidacion.update({ where: { id }, data });
+    return this.findById(tenantId, id);
   }
 
   async emitirLiquidacion(tenantId: string, liquidacionId: string) {

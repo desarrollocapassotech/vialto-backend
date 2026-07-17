@@ -14,12 +14,14 @@ const CONDICION_IVA_LABEL: Record<number, string> = {
   6: 'RESP. MONOTRIBUTO',
 };
 
-const TIPO_CBTE_LABEL: Record<number, string> = {
+// Letra mostrada en el recuadro grande del comprobante. CVLP (60/61) se factura
+// fiscalmente como A/B según el destinatario, por eso comparte letra con Factura A/B.
+const LETRA_POR_TIPO: Record<number, string> = {
   1: 'A',
   6: 'B',
   11: 'C',
-  60: 'COD. 060',
-  61: 'COD. 061',
+  60: 'A',
+  61: 'B',
 };
 
 // ── Helpers numéricos ─────────────────────────────────────────────────────────
@@ -42,8 +44,21 @@ function fmtDate(d: Date | string | null | undefined): string {
 
 const UNIDADES = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE',
   'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
+// El 20 se escribe como palabra única igual que el 11-19 ("veintiuno", no "veinte y uno").
+const VEINTES = ['VEINTE', 'VEINTIUNO', 'VEINTIDÓS', 'VEINTITRÉS', 'VEINTICUATRO', 'VEINTICINCO',
+  'VEINTISÉIS', 'VEINTISIETE', 'VEINTIOCHO', 'VEINTINUEVE'];
 const DECENAS = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
 const CENTENAS = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+
+function dosDigitos(n: number): string {
+  if (n === 0) return '';
+  if (n < 20) return UNIDADES[n];
+  const d = Math.floor(n / 10);
+  const u = n % 10;
+  if (d === 2) return VEINTES[u];
+  if (u === 0) return DECENAS[d];
+  return `${DECENAS[d]} Y ${UNIDADES[u]}`;
+}
 
 function tresDigitos(n: number): string {
   if (n === 0) return '';
@@ -51,18 +66,15 @@ function tresDigitos(n: number): string {
   const c = Math.floor(n / 100);
   const resto = n % 100;
   const centStr = c > 0 ? CENTENAS[c] : '';
-  if (resto === 0) return centStr;
-  if (resto < 20) return [centStr, UNIDADES[resto]].filter(Boolean).join(' ');
-  const d = Math.floor(resto / 10);
-  const u = resto % 10;
-  const decStr = u === 0 ? DECENAS[d] : `${DECENAS[d]} Y ${UNIDADES[u]}`;
-  return [centStr, decStr].filter(Boolean).join(' ');
+  return [centStr, dosDigitos(resto)].filter(Boolean).join(' ');
 }
 
 function numeroALetras(n: number): string {
   const entero = Math.floor(n);
   const centavos = Math.round((n - entero) * 100);
-  if (entero === 0) return `CERO CON ${centavos.toString().padStart(2, '0')}/100`;
+  const centavosStr = centavos === 0 ? 'CERO' : dosDigitos(centavos);
+
+  if (entero === 0) return `CERO CON ${centavosStr} CENTAVO(S)`;
 
   const millones = Math.floor(entero / 1_000_000);
   const miles = Math.floor((entero % 1_000_000) / 1000);
@@ -74,7 +86,7 @@ function numeroALetras(n: number): string {
   if (resto > 0) partes.push(tresDigitos(resto));
 
   const letras = partes.join(' ');
-  return `${letras} CON ${centavos.toString().padStart(2, '0')}/100 PESOS`;
+  return `${letras} CON ${centavosStr} CENTAVO(S)`;
 }
 
 // ── PDF builder ───────────────────────────────────────────────────────────────
@@ -108,6 +120,7 @@ export class LiquidacionPdfService {
               select: {
                 id: true, numero: true, fechaCarga: true, fechaDescarga: true,
                 origen: true, destino: true,
+                cliente: { select: { id: true, nombre: true, idFiscal: true, direccion: true } },
               },
             },
           },
@@ -193,17 +206,17 @@ export class LiquidacionPdfService {
     const CW = COL_W;
     let y = M;
 
-    // ── Barra superior ORIGINAL/DUPLICADO ───────────────────────────────────
-    doc.rect(M, y, CW, 18).fill('#1a1a1a');
+    // ── Barra superior ORIGINAL/DUPLICADO (caja con borde, sin relleno) ───────
+    doc.rect(M, y, CW, 18).stroke('#000');
     doc
       .fontSize(9)
       .font('Helvetica-Bold')
-      .fillColor('white')
-      .text(copia, M, y + 4, { width: CW, align: 'center' });
+      .fillColor('#000')
+      .text(copia, M, y + 5, { width: CW, align: 'center' });
     y += 22;
 
     // ── Sección 1: emisor | tipo | título ────────────────────────────────────
-    const hdrH = 100;
+    const hdrH = 108;
     doc.rect(M, y, CW, hdrH).stroke('#aaa');
 
     // Líneas divisoras verticales
@@ -212,113 +225,160 @@ export class LiquidacionPdfService {
     doc.moveTo(c1x, y).lineTo(c1x, y + hdrH).stroke('#aaa');
     doc.moveTo(c2x, y).lineTo(c2x, y + hdrH).stroke('#aaa');
 
-    // Col 1: logo (si existe) + emisor
-    const LOGO_SIZE = 34;
-    if (logoBuffer) {
-      try {
-        doc.image(logoBuffer, M + 6, y + 6, { fit: [LOGO_SIZE, LOGO_SIZE] });
-      } catch {
-        // Formato de imagen no soportado por pdfkit; el resto del comprobante se dibuja igual.
-      }
-    }
-    const emisorX = logoBuffer ? M + 6 + LOGO_SIZE + 6 : M + 6;
-    const emisorW = logoBuffer ? 148 - LOGO_SIZE - 6 : 148;
+    // Col 1: logo (si existe) + razón social + domicilio + condición IVA
+    {
+      const hasLogo = Boolean(logoBuffer);
+      const LOGO_SIZE = 40;
+      const colW = 150;
+      const colX = M + 5;
+      let cy = y + 6;
 
-    const emisor = config?.razonSocial ?? 'NyM Logística';
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#000')
-      .text(emisor, emisorX, y + 8, { width: emisorW });
-    const condEmisorLabel = config?.condicionIvaEmisor
-      ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ?? config.condicionIvaEmisor)
-      : '';
-    doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(config?.domicilioEmisor ?? '', emisorX, y + 22, { width: emisorW });
-    doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(condEmisorLabel, emisorX, y + 42, { width: emisorW });
-    doc.fontSize(7).font('Helvetica').fillColor('#555')
-      .text(`CUIT: ${config?.cuitEmisor ?? ''}`, M + 6, y + 54, { width: 148 })
-      .text(`Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ''}`, M + 6, y + 64, { width: 148 })
-      .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, M + 6, y + 74, { width: 148 });
+      if (hasLogo) {
+        try {
+          doc.image(logoBuffer as Buffer, M + (160 - LOGO_SIZE) / 2, cy, { fit: [LOGO_SIZE, LOGO_SIZE] });
+          cy += LOGO_SIZE + 4;
+          doc.fontSize(6).font('Helvetica-Oblique').fillColor('#555')
+            .text('de', colX, cy, { width: colW, align: 'center' });
+          cy += 9;
+        } catch {
+          // Formato de imagen no soportado por pdfkit; se sigue sin logo.
+        }
+      }
+
+      const align = hasLogo ? 'center' : 'left';
+      const emisor = config?.razonSocial ?? 'NyM Logística';
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#000')
+        .text(emisor, colX, cy, { width: colW, align });
+      cy += doc.heightOfString(emisor, { width: colW }) + 3;
+
+      const domicilioTxt = config?.domicilioEmisor ?? '';
+      doc.fontSize(6.5).font('Helvetica').fillColor('#333')
+        .text(domicilioTxt, colX, cy, { width: colW, align });
+      cy += doc.heightOfString(domicilioTxt, { width: colW }) + 3;
+
+      const condEmisorLabel = config?.condicionIvaEmisor
+        ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ?? config.condicionIvaEmisor)
+        : '';
+      doc.fontSize(6.5).font('Helvetica').fillColor('#333')
+        .text(condEmisorLabel, colX, cy, { width: colW, align });
+    }
 
     // Col 2: letra + tipo
-    const tipoStr = TIPO_CBTE_LABEL[liq.cbteTipo] ?? String(liq.cbteTipo);
-    const isLetter = liq.cbteTipo === 1 || liq.cbteTipo === 6 || liq.cbteTipo === 11;
-    if (isLetter) {
+    const letra = LETRA_POR_TIPO[liq.cbteTipo];
+    if (letra) {
       doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
       doc.fontSize(36).font('Helvetica-Bold').fillColor('#000')
-        .text(tipoStr, c1x + 4, y + 14, { width: 60, align: 'center' });
+        .text(letra, c1x + 4, y + 14, { width: 60, align: 'center' });
     }
     const codLabel = liq.cbteTipo === 60 ? 'COD. 060' : liq.cbteTipo === 61 ? 'COD. 061' : '';
     if (codLabel) {
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#000')
-        .text(codLabel, c1x + 4, y + 36, { width: 60, align: 'center' });
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#000')
+        .text(codLabel, c1x + 4, y + 70, { width: 60, align: 'center' });
     }
 
-    // Col 3: título + datos
-    const titleX = c2x + 6;
-    const titleW = CW - (c2x - M) - 6;
-    doc.fontSize(13).font('Helvetica-Bold').fillColor('#000')
-      .text('CUENTA DE VENTA Y LIQUIDO PRODUCTO', titleX, y + 6, { width: titleW });
+    // Col 3: título + datos del comprobante (Número/Fecha a la izq., CUIT/Ing.Brutos/Inic.Act a la der.)
+    {
+      const titleX = c2x + 6;
+      const titleW = CW - (c2x - M) - 6;
+      doc.fontSize(13).font('Helvetica-Bold').fillColor('#000')
+        .text('CUENTA DE VENTA Y LIQUIDO PRODUCTO', titleX, y + 6, { width: titleW });
 
-    const cbteNroStr = liq.cbteNro
-      ? `${String(liq.ptoVenta).padStart(4, '0')}-${String(liq.cbteNro).padStart(8, '0')}`
-      : 'BORRADOR';
-    doc.fontSize(8).font('Helvetica').fillColor('#000')
-      .text(`Número: ${cbteNroStr}`, titleX, y + 38, { width: titleW })
-      .text(`Fecha: ${fmtDate(liq.createdAt)}`, titleX, y + 49, { width: titleW })
-      .text(`CUIT: ${config?.cuitEmisor ?? ''}`, titleX, y + 60, { width: titleW })
-      .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, titleX, y + 71, { width: titleW });
+      const cbteNroStr = liq.cbteNro
+        ? `${String(liq.ptoVenta).padStart(4, '0')}-${String(liq.cbteNro).padStart(8, '0')}`
+        : 'BORRADOR';
+
+      const dataY = y + 42;
+      const subColW = titleW / 2 - 6;
+      const rColX = titleX + subColW + 10;
+
+      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
+        .text(`Número: ${cbteNroStr}`, titleX, dataY, { width: subColW })
+        .text(`Fecha: ${fmtDate(liq.createdAt)}`, titleX, dataY + 13, { width: subColW });
+
+      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
+        .text(`CUIT: ${config?.cuitEmisor ?? ''}`, rColX, dataY, { width: subColW })
+        .text(`Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ''}`, rColX, dataY + 13, { width: subColW })
+        .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, rColX, dataY + 26, { width: subColW });
+    }
 
     y += hdrH + 2;
 
     // ── Sección 2: receptor (transportista) ──────────────────────────────────
-    const t = liq.transportista;
-    const condLabel = t?.condicionIva ? (CONDICION_IVA_LABEL[t.condicionIva] ?? String(t.condicionIva)) : '';
-    const colW = CW / 2 - 8;
-    const nameText = `Sr.(es): ${t?.nombre ?? ''}`;
-    const domText = `Domicilio: ${t?.domicilio ?? ''}`;
+    {
+      const t = liq.transportista;
+      const condLabel = t?.condicionIva ? (CONDICION_IVA_LABEL[t.condicionIva] ?? String(t.condicionIva)) : '';
+      const colW = CW / 2 - 8;
+      const nameText = `Sr.(es): ${t?.nombre ?? ''}`;
+      const domText = `Domicilio: ${t?.domicilio ?? ''}`;
 
-    const nameH = doc.heightOfString(nameText, { width: colW });
-    const domH = doc.heightOfString(domText, { width: colW });
+      const nameH = doc.heightOfString(nameText, { width: colW });
+      const domH = doc.heightOfString(domText, { width: colW });
 
-    const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
-    const rcpH = Math.max(leftTotalH, 48);
+      const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
+      const rcpH = Math.max(leftTotalH, 48);
 
-    doc.rect(M, y, CW, rcpH).stroke('#aaa');
-    doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke('#aaa');
+      doc.rect(M, y, CW, rcpH).stroke('#aaa');
+      doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke('#aaa');
 
-    let ly = y + 5;
-    doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
-      .text(nameText, M + 4, ly, { width: colW });
-    ly += nameH + 2;
+      let ly = y + 5;
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
+        .text(nameText, M + 4, ly, { width: colW });
+      ly += nameH + 2;
 
-    doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-      .text(domText, M + 4, ly, { width: colW });
-    ly += domH + 2;
-
-    doc.text(`Cond. IVA: ${condLabel}`, M + 4, ly, { width: colW });
-    ly += 12;
-
-    doc.text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, M + 4, ly, { width: colW });
-
-    const rx2 = M + CW / 2 + 4;
-    doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-      .text('Condición de Venta: CTA CTE', rx2, y + 5, { width: colW })
-      .text('Moneda: Pesos', rx2, y + 17, { width: colW })
-      .text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, rx2, y + 28, { width: colW });
-
-    y += rcpH + 2;
-
-    // ── Sección 3: origen/destino (del primer viaje) ──────────────────────────
-    const firstViaje = liq.viajes?.[0]?.viaje;
-    if (firstViaje?.origen || firstViaje?.destino) {
-      const odH = 30;
-      doc.rect(M, y, CW, odH).stroke('#aaa');
-      doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + odH).stroke('#aaa');
       doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-        .text(`Origen: ${firstViaje.origen ?? ''}`, M + 4, y + 10, { width: CW / 2 - 8 });
+        .text(domText, M + 4, ly, { width: colW });
+      ly += domH + 2;
+
+      doc.text(`Cond. IVA: ${condLabel}`, M + 4, ly, { width: colW });
+      ly += 12;
+
+      doc.text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, M + 4, ly, { width: colW });
+
+      const rx = M + CW / 2 + 4;
       doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-        .text(`Destino: ${firstViaje.destino ?? ''}`, M + CW / 2 + 4, y + 10, { width: CW / 2 - 8 });
-      y += odH + 2;
+        .text('Condición de Venta: CTA CTE', rx, y + 5, { width: colW })
+        .text('Moneda: Pesos', rx, y + 17, { width: colW })
+        .text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, rx, y + 28, { width: colW });
+
+      y += rcpH + 2;
+    }
+
+    // ── Sección 3: receptor (cliente del viaje) + origen/destino ─────────────
+    {
+      const firstViaje = liq.viajes?.[0]?.viaje;
+      const cliente = firstViaje?.cliente;
+      if (cliente || firstViaje?.origen || firstViaje?.destino) {
+        const colW = CW / 2 - 8;
+        const clienteNameText = `Sr.(es): ${cliente?.nombre ?? ''}`;
+        const clienteDomText = `Domicilio: ${cliente?.direccion ?? ''}`;
+
+        const nameH = doc.heightOfString(clienteNameText, { width: colW });
+        const domH = doc.heightOfString(clienteDomText, { width: colW });
+
+        const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 5;
+        const odH = Math.max(leftTotalH, 40);
+
+        doc.rect(M, y, CW, odH).stroke('#aaa');
+        doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + odH).stroke('#aaa');
+
+        let ly = y + 5;
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
+          .text(clienteNameText, M + 4, ly, { width: colW });
+        ly += nameH + 2;
+
+        doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+          .text(clienteDomText, M + 4, ly, { width: colW });
+        ly += domH + 2;
+
+        doc.text(`C.U.I.T.: ${cliente?.idFiscal ?? ''}`, M + 4, ly, { width: colW });
+
+        const rx = M + CW / 2 + 4;
+        doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+          .text(`Origen: ${firstViaje?.origen ?? ''}`, rx, y + 5, { width: colW })
+          .text(`Destino: ${firstViaje?.destino ?? ''}`, rx, y + 17, { width: colW });
+
+        y += odH + 2;
+      }
     }
 
     // ── Tabla de ítems ────────────────────────────────────────────────────────
@@ -404,6 +464,43 @@ export class LiquidacionPdfService {
         doc.fontSize(7).font('Helvetica').fillColor('#000')
           .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.a as 'left' | 'right' });
       });
+      y += rowH;
+    }
+
+    // Fila seguro de carga (si > 0, IVA 0%) — placeholder: todavía no existe como
+    // dato de negocio en Liquidacion; queda lista para cuando se modele el campo real.
+    const seguroCarga = 0;
+    if (seguroCarga > 0) {
+      doc.rect(M, y, tableW, rowH).stroke('#ddd');
+      [
+        { v: 'SEGURO DE CARGA', a: 'left' },
+        { v: 'SEGURO DE CARGA', a: 'left' },
+        { v: '1,00', a: 'right' },
+        { v: fmtNum(-seguroCarga), a: 'right' },
+        { v: fmtNum(-seguroCarga), a: 'right' },
+        { v: '0.00', a: 'right' },
+        { v: fmtNum(-seguroCarga), a: 'right' },
+      ].forEach((cell, i) => {
+        doc.fontSize(7).font('Helvetica').fillColor('#000')
+          .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.a as 'left' | 'right' });
+      });
+      y += rowH;
+    }
+
+    // Líneas "combustible en ruta" / "efectivo en ruta" — placeholder: ídem, en $0
+    // hasta que existan como dato real; hoy no se dibujan porque siempre valen 0.
+    const combustibleEnRuta = 0;
+    const efectivoEnRuta = 0;
+    const extraLineas: [string, number][] = [
+      ['COMBUSTIBLE EN RUTA $', combustibleEnRuta],
+      ['EFECTIVO EN RUTA $', efectivoEnRuta],
+    ];
+    for (const [label, val] of extraLineas) {
+      if (val === 0) continue;
+      doc.rect(M, y, tableW, rowH).stroke('#ddd');
+      doc.fontSize(7).font('Helvetica').fillColor('#000')
+        .text(label, M + 4, y + 4, { width: tableW - 90 })
+        .text(fmtNum(val), M + tableW - 84, y + 4, { width: 80, align: 'right' });
       y += rowH;
     }
 

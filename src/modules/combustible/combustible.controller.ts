@@ -35,6 +35,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Listar cargas de combustible · Fase 4 — aún no activo' })
   @Get()
+  @Roles('admin', 'member', 'superadmin')
   findAll(
     @CurrentAuth() auth: AuthPayload,
     @Query('vehiculoId') vehiculoId?: string,
@@ -62,6 +63,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Estaciones distintas entre las cargas existentes, para el filtro del listado' })
   @Get('estaciones')
+  @Roles('admin', 'member', 'superadmin')
   getEstaciones(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getEstaciones(auth);
@@ -93,6 +95,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })
   @Get(':id')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth);
@@ -100,6 +103,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Registrar carga de combustible · Fase 4 — aún no activo' })
   @Post()
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateCargaDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(dto, auth);
@@ -107,6 +111,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Actualizar carga de combustible · Fase 4 — aún no activo' })
   @Patch(':id')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateCargaDto,
@@ -136,6 +141,7 @@ export class CombustibleController {
     },
   })
   @Post('fotos')
+  @Roles('admin', 'superadmin')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),

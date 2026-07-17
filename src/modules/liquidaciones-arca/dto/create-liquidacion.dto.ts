@@ -4,11 +4,13 @@ import {
   IsDateString,
   IsNumber,
   IsOptional,
+  IsIn,
   ArrayMinSize,
   Min,
   Max,
   MaxLength,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateLiquidacionDto {
   @IsString()
@@ -51,4 +53,13 @@ export class CreateLiquidacionDto {
   @IsString()
   @MaxLength(2048)
   comprobanteUrl?: string;
+
+  /**
+   * Tipo AFIP de CVLP: 60 (clase A) o 61 (clase B).
+   * Si se omite, se deriva de la condición IVA del transportista (RI → 60, resto → 61).
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn([60, 61])
+  cbteTipo?: 60 | 61;
 }

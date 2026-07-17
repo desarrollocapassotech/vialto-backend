@@ -1,6 +1,6 @@
 # Vialto Backend
 
-API NestJS + Prisma + PostgreSQL + Clerk para el SaaS de logística y transporte. La arquitectura de producto y dominio está descrita en [`ARCHITECTURE.md`](./ARCHITECTURE.md); este README es una **guía operativa** para instalar, configurar y volver a levantar todo desde cero.
+API NestJS + Prisma + PostgreSQL + Clerk para el SaaS de logística y transporte. La arquitectura de producto y dominio está descrita en [`CLAUDE.md`](./CLAUDE.md); este README es una **guía operativa** para instalar, configurar y volver a levantar todo desde cero.
 
 ---
 
@@ -50,7 +50,7 @@ Copiá `.env.example` a `.env` y completá valores reales.
 | `PORT` | Opcional. Por defecto el código usa `8080`. |
 | `FRONTEND_URL` | Invitaciones de usuarios (Clerk). URL del SPA en prod. |
 | `SENTRY_DSN` | Opcional. Si existe, se inicializa Sentry en `main.ts`. |
-| `FIREBASE_*`, `CLOUDINARY_*`, `STRIPE_*` | Opcionales; según `ARCHITECTURE.md`. |
+| `FIREBASE_*`, `CLOUDINARY_*`, `STRIPE_*` | Opcionales; según `CLAUDE.md`. |
 
 **Importante:** no subas `.env` al repositorio. En `.env.example` deberían ir **solo placeholders**, nunca claves ni URLs con contraseña.
 
@@ -150,7 +150,7 @@ Content-Type: application/json
 
 - **`clerkOrgId` (opcional):** si se envía, usa ese `org_...` de Clerk; si no se envía, el backend crea automáticamente la organización en Clerk.
 - **`modules`:** slugs exactos:  
-  `viajes`, `facturacion`, `cuenta-corriente`, `stock`, `combustible`, `mantenimiento`, `remitos`, `turnos`, `reportes`.
+  `viajes`, `facturacion`, `cuenta-corriente`, `stock`, `combustible`, `mantenimiento`, `remitos`, `integracion-arca` (carpeta del módulo: `liquidaciones-arca`), `turnos`, `reportes`.
 
 Sin fila en `tenants` para ese `clerkOrgId`, el **TenantGuard** bloquea el uso normal del producto.
 
@@ -225,13 +225,15 @@ Workflow: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) — `npm ci`,
 - `src/core/` — `tenants`, `users`, `billing`, `clientes`, `transportistas`, `choferes`, `vehiculos`.
 - `src/modules/` — módulos vendibles (viajes, facturación, stock, combustible, etc.).
 - `src/shared/` — `ModuleGuard`, `TenantGuard`, Prisma, servicios opcionales (Firebase/Cloudinary stubs).
-- `prisma/schema.prisma` — modelo de datos alineado a `ARCHITECTURE.md`.
+- `prisma/schema.prisma` — modelo de datos alineado a `CLAUDE.md`.
 
 ---
 
 ## 14. Documentación adicional
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — modelo multi-tenant, módulos, suscripción por módulos y roadmap.
+- [CLAUDE.md](./CLAUDE.md) — modelo multi-tenant, módulos, suscripción por módulos y roadmap.
+- [MIGRATIONS.md](./MIGRATIONS.md) — flujo de migraciones Prisma (QA vs. producción).
+- [BACKUPS.md](./BACKUPS.md) — backups de la base de datos.
 
 ---
 

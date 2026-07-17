@@ -114,15 +114,17 @@ model Tenant {
   id               String    @id @default(cuid())
   clerkOrgId       String    @unique
   name             String
-  cuit             String?   @unique
-  modules          String[]                        // módulos activos
+  idFiscal         String?   @unique          // CUIT u otro identificador fiscal (antes "cuit")
+  modules          String[]  @default([])     // módulos activos — ver VIALTO_MODULES en shared/types/modules.ts
   maxUsers         Int       @default(10)
-  billingStatus    String    @default("trial")     // trial | active | suspended
+  billingStatus    String    @default("trial") // trial | active | suspended | expired
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
   createdAt        DateTime  @default(now())
 }
 ```
+
+> El identificador de módulo persistido en `Tenant.modules` y usado por `RequireModule`/`ModuleGuard` es la **fuente de verdad única**: `shared/types/modules.ts` exporta `VIALTO_MODULES` con los slugs válidos exactos. Antes de usar un slug en código, docs o Postman, verificar ahí — no asumirlo por el nombre de la carpeta en `src/modules/`.
 
 ### Roles en Clerk
 
@@ -140,28 +142,39 @@ Estas entidades son compartidas por todos los módulos. Deben estar perfectas de
 ```prisma
 // Empresa cliente (a quien se factura)
 model Cliente {
-  id        String   @id @default(cuid())
-  tenantId  String
-  nombre    String
-  cuit      String?
-  email     String?
-  telefono  String?
-  direccion String?
-  createdAt DateTime @default(now())
+  id                  String   @id @default(cuid())
+  tenantId            String
+  nombre              String
+  idFiscal            String?                   // CUIT u otro identificador fiscal (antes "cuit")
+  email               String?
+  telefono            String?
+  direccion           String?
+  pais                String?
+  condicionIva        Int?     // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
+  condicionTributaria String?  // condición tributaria genérica (países no AR)
+  createdAt           DateTime @default(now())
 
   @@index([tenantId])
 }
 
-// Transportista externo o proveedor (a quien se paga)
+// Transportista externo (a quien se paga el flete; siempre tipo "externo")
 model Transportista {
-  id        String   @id @default(cuid())
-  tenantId  String
-  nombre    String
-  cuit      String?
-  email     String?
-  telefono  String?
-  tipo      String   @default("externo")  // externo | propio
-  createdAt DateTime @default(now())
+  id                      String    @id @default(cuid())
+  tenantId                String
+  nombre                  String
+  idFiscal                String?                     // CUIT u otro identificador fiscal
+  email                   String?
+  telefono                String?
+  tipo                    String    @default("externo")
+  paut                    String?                     // N° de PAUT
+  permisoInternacional    String?
+  fechaVencimientoPermiso DateTime?
+  pais                    String?                     // AR | UY | PY | CL | BR
+  domicilio               String?
+  condicionIva            Int?
+  condicionTributaria     String?
+  comisionPct             Float?                       // % comisión NyM; si null usa el default de ArcaConfig
+  createdAt               DateTime  @default(now())
 
   @@index([tenantId])
 }
@@ -172,32 +185,61 @@ model Chofer {
   tenantId        String
   nombre          String
   dni             String?
+  cuit            String?   // requerido para PAUT
   licencia        String?
   licenciaVence   DateTime?
   telefono        String?
   transportistaId String?   // null si es chofer propio
+  pin             String?   // hash salt:hash del PIN de login para la app vialto-combustible; nunca se expone en la API
   createdAt       DateTime  @default(now())
+
+  @@index([tenantId])
+}
+
+// Destinatario de la mercadería (catálogo simple, reutilizable entre viajes/stock)
+model Destinatario {
+  id        String   @id @default(cuid())
+  tenantId  String
+  nombre    String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+}
+
+// Dirección de entrega (catálogo simple, reutilizable entre viajes/stock)
+model DireccionEntrega {
+  id        String   @id @default(cuid())
+  tenantId  String
+  direccion String
+  createdAt DateTime @default(now())
 
   @@index([tenantId])
 }
 
 // Vehículo (tractor, semirremolque, camión, utilitario, etc.)
 model Vehiculo {
-  id              String   @id @default(cuid())
-  tenantId        String
-  patente         String
-  tipo            String   // tractor | semirremolque | camion | utilitario | otro
-  marca           String?
-  modelo          String?
-  año             Int?
-  kmActual        Int      @default(0)
-  transportistaId String?  // null si es flota propia
-  createdAt       DateTime @default(now())
+  id                String   @id @default(cuid())
+  tenantId          String
+  patente           String
+  tipo              String   // tractor | semirremolque | camion | utilitario | otro
+  marca             String?
+  modelo            String?
+  anio              Int?
+  kmActual          Int      @default(0)
+  nroChasis         String?
+  poliza            String?
+  vencimientoPoliza DateTime?
+  tara              Float?
+  precinto          String?
+  transportistaId   String?  // null si es flota propia
+  createdAt         DateTime @default(now())
 
   @@index([tenantId])
   @@unique([tenantId, patente])
 }
 ```
+
+> `Destinatario` y `DireccionEntrega` son catálogos de apoyo, no imprescindibles como Cliente/Transportista/Chofer/Vehículo, pero viven en `core/` porque los usan varios módulos (viajes, stock) y se exponen también vía `PlatformController` para superadmin.
 
 ---
 
@@ -208,38 +250,46 @@ model Vehiculo {
 ```
 src/
   core/
-    auth/                   ← ClerkAuthGuard, decoradores de rol
-    tenants/                ← CRUD de empresas, configuración
-    users/                  ← sync con Clerk
-    billing/                ← planes, módulos activos
-    clientes/               ← entidad compartida
-    transportistas/         ← entidad compartida
-    choferes/               ← entidad compartida
-    vehiculos/              ← entidad compartida
+    auth/                   ← ✅ ClerkAuthGuard, decoradores de rol
+    chofer-auth/            ← ✅ login DNI+PIN para choferes (JWT propio, no Clerk) — usado por la app vialto-combustible
+    tenants/                ← ✅ CRUD de empresas, configuración
+    users/                  ← ✅ sync con Clerk
+    billing/                ← ✅ planes, módulos activos
+    clientes/               ← ✅ entidad compartida
+    transportistas/         ← ✅ entidad compartida
+    choferes/               ← ✅ entidad compartida
+    vehiculos/              ← ✅ entidad compartida
+    destinatarios/          ← ✅ catálogo compartido (viajes, stock)
+    direcciones-entrega/    ← ✅ catálogo compartido (viajes, stock)
+    platform/               ← ✅ superadmin: CRUD cross-tenant sobre casi todas las entidades (viajes, clientes, choferes, vehículos, transportistas, destinatarios, direcciones, users, facturas/pagos, stock completo, config/liquidaciones/facturas/logs ARCA)
 
   modules/
-    viajes/                 ← ✅ Fase 1 — Fernández
-    facturacion/            ← ✅ Fase 5 — González (extiende viajes)
-    cuenta-corriente/       ← ✅ Fase 2 — Riedel, Melisa
-    stock/                  ← ✅ Fase 2 — Riedel (implementado: inventario, ingresos, egresos, divisiones, depósitos, presentaciones; pendiente: lote, datos de entrega, exportación)
-    combustible/            ← 🔲 Fase 4 — Wichi Toledo, Altamirano
-    mantenimiento/          ← 🔲 Fase 4 — Wichi Toledo
-    remitos/                ← 🔲 Fase 3 — Melisa
-    liquidaciones-arca/     ← 🔲 Fase NyM — NyM Logística (CVLP tipo 60 + facturas A/B vía AfipSDK)
-    turnos/                 ← 🔲 Fase 7 — Pereyra (módulo aislado)
-    reportes/               ← 🔲 Fase 8 — cross-módulo
+    viajes/                 ← ✅ implementado — multi-vehículo/destino/producto, moneda, MIC·CRT
+    facturacion/            ← ✅ implementado — extiende viajes, campos ARCA (CAE) en Factura
+    cuenta-corriente/       ← ✅ implementado
+    stock/                  ← ✅ implementado — operaciones (ingreso/egreso/división), lotes, presentaciones por producto, remito interno
+    combustible/            ← ✅ implementado — CRUD, detección de cargas sospechosas, dashboard, export Excel, fotos (Cloudinary), API paralela para choferes vía chofer-auth. El tag Swagger "[Próximamente]" quedó desactualizado: el módulo está activo.
+    mantenimiento/          ← ✅ implementado (parcial) — CRUD de `Intervencion` en Postgres; el checklist diario en Firestore que describe este documento NO está implementado todavía
+    remitos/                ← ✅ implementado — CRUD de `Remito` con firma (`firmaUrl`); el flujo PWA de firma desde el celular es responsabilidad del frontend, no confirmado acá
+    liquidaciones-arca/     ← ✅ implementado — OJO: el slug de módulo real (`RequireModule`, `Tenant.modules`) es `integracion-arca`, no `liquidaciones-arca` — ver nota de VIALTO_MODULES arriba
+    turnos/                 ← 🔲 stub real — solo un endpoint estático (`GET turnos/estado`), sin modelo Prisma ni service (Fase 7 — Pereyra, módulo aislado)
+    reportes/               ← ⚠️ parcial — 2 endpoints reales (`resumen`, `tablero-general`) con agregaciones cross-módulo; falta el resto de la visión (Fase 8: builder de reportes, exports)
+    dashboard/              ← ✅ implementado — KPIs y alertas del tenant (`GET dashboard/resumen`); no es un módulo vendible (no gateado por `RequireModule`, disponible para todo tenant)
+    importaciones/          ← ✅ implementado — motor de importación desde Excel (parser/validator/processors por módulo), preview/confirm, templates y logs; uso admin, no gateado como módulo vendible
 
   shared/
     guards/                 ← ClerkAuthGuard, TenantGuard, ModuleGuard
     decorators/             ← @CurrentTenant(), @RequireModule()
     prisma/                 ← PrismaService singleton
-    types/                  ← interfaces, enums compartidos
+    types/                  ← interfaces, enums compartidos (incluye `VIALTO_MODULES`, la lista canónica de slugs de módulo)
 
   app.module.ts
   main.ts
 ```
 
 > **Nota sobre `turnos`:** Módulo para sindicatos/cooperativas de choferes (Pereyra). No es para empresas de logística. Se desarrolla aislado y no se incluye en los planes standard de Vialto por ahora.
+>
+> Los ✅/⚠️/🔲 de arriba describen **estado del código**, no si el cliente ya lo tiene contratado/activo — eso está en la tabla de "Clientes actuales y estado" más abajo, que puede ir por detrás o por delante del código según el momento comercial.
 
 ### Patrón estándar de un módulo
 
@@ -256,63 +306,131 @@ export class ViajesController {
 
 ## Módulos vendibles — esquema de datos
 
+> Esta sección refleja `prisma/schema.prisma` real (resync jul 2026). Ante cualquier duda de un campo puntual, el schema es la fuente de verdad — esto es una copia que puede volver a desactualizarse.
+
 ### `viajes` — Gestión de viajes
-El módulo más demandado. Presente en 5 de 8 clientes potenciales.
+Soporta múltiples vehículos, destinos y productos por viaje (antes era 1:1), monto en ARS/USD, otros gastos y pagos a transportista en JSON, y datos aduaneros MIC·CRT independientes del monto operativo.
 
 ```prisma
 model Viaje {
-  id              String    @id @default(cuid())
-  tenantId        String
-  numero          String
-  estado          String    @default("pendiente") // pendiente | en_transito | despachado | cerrado
-  clienteId       String
-  transportistaId String?
-  choferId        String?
-  vehiculoId      String?
-  origen          String?
-  destino         String?
-  fechaSalida     DateTime?
-  fechaLlegada    DateTime?
-  detalleCarga    String?
-  kmRecorridos    Int?
-  litrosConsumidos Float?
-  precioCliente   Float?    // lo que cobra al cliente
-  precioTransportistaExterno Float? // lo que paga al transportista externo
-  gananciaBruta   Float?    // calculado: precioCliente - precioTransportistaExterno
-  observaciones   String?
-  createdAt       DateTime  @default(now())
-  createdBy       String
+  id                               String    @id @default(cuid())
+  tenantId                         String
+  numero                           String
+  estado                           String    @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
+  clienteId                        String
+  transportistaId                  String?   // transportista contratante
+  transportistaEfectivoId          String?   // quien realmente hace el flete, si difiere del contratante
+  choferId                         String?
+  vehiculosViaje                   ViajeVehiculo[]
+  origen                           String?
+  destino                          String?
+  destinosViaje                    ViajeDestino[]  // destinos múltiples ordenados
+  fechaCarga                       DateTime?
+  fechaDescarga                    DateTime?
+  productosViaje                   ViajeProducto[] // productos múltiples (cantidad, pesoKg)
+  detalleCarga                     String?
+  kmRecorridos                     Int?
+  litrosConsumidos                 Float?
+  monto                            Float?
+  monedaMonto                      String    @default("ARS") // ARS | USD
+  precioTransportistaExterno       Float?
+  monedaPrecioTransportistaExterno String    @default("ARS")
+  gananciaBrutaManual              Float?    // solo si monedaMonto ≠ monedaPrecioTransportistaExterno
+  monedaGananciaBrutaManual        String?
+  observaciones                    String?
+  otrosGastos                      Json      @default("[]")
+  pagosTransportista                Json     @default("[]")
+  documentoAduanero                Json      @default("{}") // MIC/CRT
+  fechaFinalizado                  DateTime?
+  createdAt                        DateTime  @default(now())
+  createdBy                        String
 
+  facturaId                  String?
+  nroFactura                 String?
+  movimientosCuentaCorriente MovimientoCuentaCorriente[]
+  liquidacionesViaje         LiquidacionViaje[]
+
+  @@unique([tenantId, numero])
   @@index([tenantId])
   @@index([tenantId, estado])
   @@index([tenantId, clienteId])
-  @@unique([tenantId, numero])
+  @@index([tenantId, transportistaId])
+  @@index([tenantId, fechaCarga])
+  @@index([tenantId, fechaDescarga])
+  @@index([tenantId, fechaFinalizado])
+}
+
+model ViajeVehiculo {
+  id         String @id @default(cuid())
+  tenantId   String
+  viajeId    String
+  vehiculoId String
+  orden      Int    @default(0)
+
+  @@unique([viajeId, vehiculoId])
+}
+
+model ViajeProducto {
+  id         String @id @default(cuid())
+  tenantId   String
+  viajeId    String
+  productoId String
+  orden      Int    @default(0)
+  cantidad   Float?
+  pesoKg     Float?
+
+  @@unique([viajeId, productoId])
+}
+
+model ViajeDestino {
+  id        String   @id @default(cuid())
+  tenantId  String
+  viajeId   String
+  orden     Int      @default(0)
+  etiqueta  String
+  createdAt DateTime @default(now())
+
+  @@unique([viajeId, orden])
 }
 ```
 
 ---
 
 ### `facturacion` — Facturación y cobranzas
-Se construye sobre `viajes`. Añade el cruce viaje ↔ factura y el control de cobros.
+Se construye sobre `viajes` (relación N:M, una factura puede cubrir varios viajes). Incluye moneda, IVA, comprobante adjunto y los campos de emisión ARCA (nulos si el tenant no tiene `integracion-arca`).
 
 ```prisma
 model Factura {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   tenantId         String
   numero           String
-  tipo             String    // cliente | transportista_externo
+  tipo             String         // cliente | transportista_externo
   clienteId        String?
-  viajeId          String?
+  transportistaId  String?
+  viajes           Viaje[]
   importe          Float
+  moneda           String         @default("ARS") // ARS | USD
   fechaEmision     DateTime
   fechaVencimiento DateTime?
-  estado           String    @default("pendiente") // pendiente | cobrada | vencida
+  estado           String         @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
-  createdAt        DateTime  @default(now())
+  ivaPct           Float?         @default(21)
+  comprobanteUrl   String?        // PDF/imagen en Cloudinary
+  // Campos ARCA — nulos para tenants sin módulo integracion-arca
+  cbteTipo         Int?           // 1=Factura A, 6=Factura B
+  cbteNro          Int?
+  ptoVenta         Int?
+  cae              String?
+  caeFechaVto      DateTime?
+  arcaEstado       String?        // pendiente_cae | autorizado | error
+  arcaError        String?
+  createdAt        DateTime       @default(now())
   pagos            Pago[]
 
+  @@unique([tenantId, numero])
   @@index([tenantId])
   @@index([tenantId, clienteId])
+  @@index([tenantId, transportistaId])
   @@index([tenantId, estado])
 }
 
@@ -324,32 +442,35 @@ model Pago {
   fecha     DateTime
   formaPago String?  // transferencia | cheque | efectivo
   createdAt DateTime @default(now())
-  factura   Factura  @relation(fields: [facturaId], references: [id])
 
   @@index([tenantId])
+  @@index([tenantId, facturaId])
 }
 ```
 
 ---
 
 ### `cuenta-corriente` — Cuenta corriente por cliente
-Puede usarse solo (Riedel) o integrado con `remitos` (Melisa) o `facturacion` (González).
+`origen` distingue movimientos manuales de los generados automáticamente al cerrar un viaje (uno por viaje, `@@unique([tenantId, viajeId])`). Ya no calcula/persiste `saldoPost` por movimiento.
 
 ```prisma
 model MovimientoCuentaCorriente {
   id         String   @id @default(cuid())
   tenantId   String
   clienteId  String
-  tipo       String   // cargo | pago | nota_credito
+  viajeId    String?
+  tipo       String   // cargo | pago
+  origen     String   @default("manual") // manual | viaje
   concepto   String
   importe    Float
-  saldoPost  Float    // saldo después del movimiento
   fecha      DateTime
-  referencia String?  // número de remito, factura, etc.
+  referencia String?
   createdAt  DateTime @default(now())
 
+  @@unique([tenantId, viajeId])
   @@index([tenantId])
   @@index([tenantId, clienteId])
+  @@index([tenantId, clienteId, tipo])
 }
 ```
 
@@ -357,51 +478,64 @@ model MovimientoCuentaCorriente {
 
 ### `stock` — Gestión de stock
 
-El módulo de stock es genérico y sirve para cualquier tipo de empresa. El stock se expresa como **dos contadores configurables por producto** (`cantidad1` y `cantidad2`), cuyos nombres son definidos por el tenant al configurar el producto (ej. "Pallets" / "Suelto", "Kg" / "Bolsas", etc.). Si un producto solo necesita una unidad, `cantidad2` siempre es 0 y `unidad2Nombre` es null.
+El modelo cambió de forma respecto a versiones anteriores de este documento: ya no hay un producto con "dos contadores configurables" (`cantidad1`/`cantidad2`) fijos. Ahora:
 
-Las unidades de medida se gestionan a través de un **catálogo global de Presentaciones** por tenant. Cada producto vincula `presentacion1Id` y opcionalmente `presentacion2Id` desde ese catálogo. Los nombres se desnormalizan en `unidad1Nombre` y `unidad2Nombre` en `Producto` para lectura eficiente.
+- **`Producto`** es el artículo en sí (nombre, código autogenerado `P-001…`, peso unitario opcional).
+- **`Presentacion`** es el catálogo de unidades de medida por tenant (ej. "Pallet", "Bolsa", "Kg").
+- **`ProductoPresentacion`** vincula un producto con una o más presentaciones, cada una con su propio `unidadesPorBulto` (ej. "Pallet" = 40 bolsas de este producto).
+- **`StockOperacion`** es el encabezado de una operación (ingreso/egreso/división): cliente, depósito, fecha, fotos, remito (interno y del proveedor), y los datos de entrega (`entregadoPor`, `destinatario`, `destinoFinal`, `numeroDocumentoExterno`) — estos campos que documentos anteriores marcaban como "pendientes" **ya están implementados**, y viven acá, no en `MovimientoStock`.
+- **`MovimientoStock`** es el detalle línea a línea dentro de una operación: producto + presentación + `bultos`/`unidades` + `lote` opcional (también ya implementado) + vencimiento opcional.
+- **`StockItem`** es el snapshot de disponible, ahora clave por `(productoId, presentacionId, clienteId, depositoId)`.
 
-El stock también está segmentado por **depósito físico** (`Deposito`). Un tenant puede tener múltiples depósitos.
-
-Los tipos de movimiento son: `ingreso`, `egreso` y `division` (convierte cantidad entre unidad1 y unidad2 dentro del mismo depósito).
-
-Los egresos generan un número de remito interno automático con formato configurable (`remitoPrefix-YYYY-NNNNN`), controlado por `StockEgresoRemitoConfig` y secuenciado anualmente por `StockRemitoSecuencia`.
-
-**Pendiente de implementar:** campos `lote`, `entregadoPor`, `destinatario` y `destinoFinal` en `MovimientoStock`.
+Los egresos generan un número de remito interno automático (`remitoPrefix-YYYY-NNNNN`), vía `StockEgresoRemitoConfig` + `StockRemitoSecuencia`, y pueden vincularse a un `Remito` del módulo `remitos` (`remitoId`).
 
 ```prisma
-// Catálogo global de unidades de medida por tenant
-model Presentacion {
+model Producto {
   id                String   @id @default(cuid())
   tenantId          String
-  nombre            String                           // ej. "Pallets", "Suelto", "Kg"
-  nombreNormalizado String                           // lower/trim para unicidad
+  nombre            String
+  nombreNormalizado String   // lower/trim, unicidad case-insensitive
+  codigo            String?  // P-001, P-002… generado por el sistema
+  descripcion       String?
+  pesoUnitarioKg    Float?
   activo            Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@unique([tenantId, nombreNormalizado])
-  @@map("presentaciones")
+  @@unique([tenantId, codigo])
 }
 
-model Producto {
-  id                String        @id @default(cuid())
+model Presentacion {
+  id                String   @id @default(cuid())
   tenantId          String
-  nombre            String
-  nombreNormalizado String                           // lower/trim para unicidad
-  codigo            String?                          // P-001, P-002… generado por el sistema
-  descripcion       String?
-  presentacion1Id   String?                          // unidad principal (obligatoria al operar)
-  presentacion2Id   String?                          // unidad secundaria (opcional)
-  unidad1Nombre     String        @default("Pallets") // denormalizado de presentacion1.nombre
-  unidad2Nombre     String?       @default("Unidad")  // denormalizado de presentacion2.nombre; null = una sola unidad
-  activo            Boolean       @default(true)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  nombre            String   // ej. "Pallet", "Bolsa", "Kg"
+  nombreNormalizado String
+  activo            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@unique([tenantId, nombreNormalizado])
-  @@unique([tenantId, codigo])
-  @@map("productos")
+}
+
+/** Vincula un producto a una presentación con cantidad de unidades por bulto. */
+model ProductoPresentacion {
+  id               String   @id @default(cuid())
+  tenantId         String
+  productoId       String
+  presentacionId   String
+  unidadesPorBulto Float
+  activo           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([productoId, presentacionId])
+}
+
+model ProductoSecuencia {
+  id        String @id @default(cuid())
+  tenantId  String @unique
+  lastValue Int    @default(0)
 }
 
 model Deposito {
@@ -412,66 +546,84 @@ model Deposito {
   activo      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
-  @@index([tenantId, activo])
-  @@map("depositos")
 }
 
-model MovimientoStock {
-  id                    String   @id @default(cuid())
-  tenantId              String
-  productoId            String
-  clienteId             String
-  depositoId            String
-  tipo                  String   // ingreso | egreso | division
-  cantidad1             Float    @default(0)
-  cantidad2             Float    @default(0)
-  numeroRemito          String?  // solo en egresos (ej. R-2026-00001)
-  remitoUrl             String?  // URL del remito escaneado (Cloudinary)
-  movimientoVinculadoId String?  // en divisiones: apunta al movimiento par (origen ↔ destino)
-  observaciones         String?
-  createdBy             String   @default("")
-  fecha                 DateTime
-  createdAt             DateTime @default(now())
-
-  // Pendiente: lote String?, entregadoPor String?, destinatario String?, destinoFinal String?
+/** Encabezado de una operación de stock (ingreso, egreso o división). */
+model StockOperacion {
+  id                     String   @id @default(cuid())
+  tenantId               String
+  clienteId              String
+  depositoId             String
+  tipo                   String   // ingreso | egreso | division
+  fecha                  DateTime
+  observaciones          String?
+  remitoUrl              String?  // remito interno PDF (Cloudinary), solo egresos
+  fotosUrls              String[] // fotos del producto en ingresos (hasta 2, Cloudinary)
+  numeroRemito           String?  // remito interno generado (ej. R-2026-00001)
+  numeroRemitoProveedor  String?  // informado manualmente en ingresos
+  remitoId               String?  // vínculo opcional a Remito (módulo remitos)
+  entregadoPor           String?
+  destinatario           String?
+  destinoFinal           String?
+  numeroDocumentoExterno String?  // pedido/nota de despacho externa; "No tiene" si no aplica
+  createdBy              String   @default("")
+  createdAt              DateTime @default(now())
 
   @@unique([tenantId, numeroRemito])
   @@index([tenantId])
-  @@index([tenantId, productoId])
   @@index([tenantId, clienteId])
   @@index([tenantId, depositoId])
+  @@index([tenantId, tipo])
   @@index([tenantId, fecha])
-  @@map("movimientos_stock")
+}
+
+model MovimientoStock {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  operacionId           String    // header StockOperacion
+  productoId            String
+  presentacionId         String?
+  fechaVencimiento      DateTime?
+  bultos                Float     @default(0)
+  unidades              Float     @default(0)
+  lote                  String?
+  observaciones         String?
+  movimientoVinculadoId String?   // en divisiones: apunta al movimiento par (origen ↔ destino)
+  remitoId              String?
+  createdBy             String    @default("")
+  fecha                 DateTime
+  createdAt             DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, operacionId])
+  @@index([tenantId, productoId])
+  @@index([tenantId, presentacionId])
+  @@index([tenantId, remitoId])
+  @@index([tenantId, fecha])
 }
 
 // Snapshot de stock disponible — se actualiza atómicamente con cada movimiento
 model StockItem {
-  id         String   @id @default(cuid())
-  tenantId   String
-  productoId String
-  clienteId  String
-  depositoId String
-  cantidad1  Float    @default(0)
-  cantidad2  Float    @default(0)
-  updatedAt  DateTime @updatedAt
+  id             String   @id @default(cuid())
+  tenantId       String
+  productoId     String
+  presentacionId String?
+  clienteId      String
+  depositoId     String
+  cantidad1      Float    @default(0)
+  cantidad2      Float    @default(0)
+  updatedAt      DateTime @updatedAt
 
-  @@unique([productoId, clienteId, depositoId])
-  @@index([tenantId])
-  @@map("stock_items")
+  @@unique([productoId, presentacionId, clienteId, depositoId])
 }
 
-// Configuración del formato de número de remito por tenant
 model StockEgresoRemitoConfig {
   tenantId      String   @id
   remitoPrefix  String   @default("R")
   remitoDigitos Int      @default(5)
   updatedAt     DateTime @updatedAt
-
-  @@map("stock_egreso_remito_configs")
 }
 
-// Contador anual de secuencia de remitos (reinicia cada año)
 model StockRemitoSecuencia {
   id        String @id @default(cuid())
   tenantId  String
@@ -479,42 +631,52 @@ model StockRemitoSecuencia {
   lastValue Int    @default(0)
 
   @@unique([tenantId, year])
-  @@map("stock_remito_secuencias")
 }
 ```
 
 ---
 
 ### `combustible` — Control de combustible
-Ya existe para Bressan en el stack viejo. Se reimplementa en el nuevo stack.
+Implementado en el stack nuevo (no solo planeado). Incluye detección heurística de cargas sospechosas (litros/importe/precio-por-litro fuera de rango, salto de km inválido) con auto-corrección de errores de tipeo comunes (litros ÷1000, km ÷10/÷100/÷1000 validado contra cargas vecinas) y registro del valor original. Fotos de tacómetro y ticket vía Cloudinary. Expone además una **API paralela para choferes** (`chofer-combustible.controller.ts`, autenticada con `chofer-auth`, no Clerk) para que la app `vialto-combustible`/futuros clientes carguen combustible desde el celular.
 
 ```prisma
 model CargaCombustible {
-  id         String   @id @default(cuid())
-  tenantId   String
-  vehiculoId String
-  choferId   String?
-  estacion   String
-  litros     Float
-  importe    Float
-  km         Int
-  formaPago  String?
-  fecha      DateTime
-  createdAt  DateTime @default(now())
-  createdBy  String
+  id             String    @id @default(cuid())
+  tenantId       String
+  vehiculoId     String?
+  choferId       String?
+  estacion       String
+  litros         Float
+  precioPorLitro Float     @default(0)
+  importe        Float
+  km             Int
+  formaPago      String?   // transferencia | cheque | efectivo
+  fecha          DateTime
+  createdAt      DateTime  @default(now())
+  createdBy      String
+  fotoTacometro  String?
+  fotoTicket     String?
+
+  sospechoso     Boolean   @default(false)
+  motivoSospecha String?   // litros_extremo | importe_invalido | precio_litro_fuera_de_rango | km_delta_invalido
+  litrosOriginal Float?    // valor previo a la corrección automática, null si nunca se corrigió
+  kmOriginal     Int?      // ídem para km
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
+  @@index([tenantId, choferId])
+  @@index([tenantId, fecha])
+  @@index([tenantId, sospechoso])
 }
 ```
 
 ---
 
 ### `mantenimiento` — Flota y mantenimiento (Wichi Toledo)
-Único módulo con componente de tiempo real relevante. El checklist diario se guarda en Firestore para visibilidad inmediata en el panel.
+**Solo está implementado el lado Postgres** (CRUD simple de `Intervencion`). El checklist diario en tiempo real vía Firestore que describe este documento es la visión original del módulo, todavía **no implementada** — no asumir que existe.
 
 ```prisma
-// PostgreSQL — intervenciones y alertas
+// PostgreSQL — intervenciones y alertas (implementado)
 model Intervencion {
   id          String   @id @default(cuid())
   tenantId    String
@@ -525,14 +687,16 @@ model Intervencion {
   proximoKm   Int?
   fecha       DateTime
   createdAt   DateTime @default(now())
+  createdBy   String
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
+  @@index([tenantId, fecha])
 }
 ```
 
 ```
-// Firestore — checklist diario en tiempo real
+// Firestore — checklist diario en tiempo real (NO IMPLEMENTADO, diseño original)
 /tenants/{tenantId}/checklist/{fecha}/{vehiculoId}
   → estado, novedades, incidentes, choferId, timestamp
 ```
@@ -540,11 +704,11 @@ model Intervencion {
 ---
 
 ### `remitos` — Remitos digitales (Melisa)
-Requiere PWA para que el chofer complete y el cliente firme desde el celular.
+CRUD del backend implementado, incluyendo `firmaUrl` para la firma del cliente. El flujo de PWA para que el chofer complete y el cliente firme desde el celular es responsabilidad del frontend — su estado no está confirmado en este documento (verificar en `vialto-frontend` antes de asumirlo). Un `Remito` puede vincularse a movimientos/operaciones de `stock` (relación inversa).
 
 ```prisma
 model Remito {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   tenantId    String
   numero      String
   clienteId   String
@@ -552,15 +716,182 @@ model Remito {
   vehiculoId  String?
   descripcion String
   fecha       DateTime
-  firmaUrl    String?  // URL en Cloudinary (firma digital del cliente)
-  estado      String   @default("emitido") // emitido | firmado | facturado
-  createdAt   DateTime @default(now())
+  firmaUrl    String?   // URL en Cloudinary (firma digital del cliente)
+  estado      String    @default("emitido") // emitido | firmado | facturado
+  createdAt   DateTime  @default(now())
 
+  @@unique([tenantId, numero])
   @@index([tenantId])
   @@index([tenantId, clienteId])
-  @@unique([tenantId, numero])
+  @@index([tenantId, estado])
+  @@index([tenantId, fecha])
 }
 ```
+
+---
+
+### `integracion-arca` — Liquidaciones CVLP + Facturas A/B vía AFIP SDK (carpeta `liquidaciones-arca/`)
+Implementado, no planeado. **El slug de gating real es `integracion-arca`** (ver nota sobre `VIALTO_MODULES` más arriba) aunque la carpeta del módulo, los nombres de archivo y varios comentarios del schema sigan diciendo `liquidaciones-arca` — inconsistencia de nombres conocida, no corregida a propósito por decisión del equipo (jul 2026). Para cualquier `Tenant.modules` o `@RequireModule(...)` nuevo, usar siempre `integracion-arca`.
+
+Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) + `arca-client.service.ts` (integración AFIP SDK, CAE) + `arca-config.service.ts` + `liquidacion-pdf.service.ts`, con auditoría completa de cada request/response a AFIP en `ArcaLog`.
+
+```prisma
+/** Configuración AFIP SDK por tenant. La API key viene de AFIP_SDK_API_KEY (env var). */
+model ArcaConfig {
+  tenantId           String   @id
+  cuitEmisor         String
+  razonSocial        String?
+  domicilioEmisor    String?
+  condicionIvaEmisor String?
+  ingBrutos          String?
+  inicActEmisor      String?
+  ptoVentaCvlp       Int      // punto de venta para CVLP tipo 60
+  ptoVentaFactura    Int      // punto de venta para Facturas A/B
+  ambiente           String   @default("homologacion") // homologacion | produccion
+  comisionPctDefault Float    @default(8)
+  comisionPctAlt     Float    @default(7)
+  ivaGastosAdmin     Float    @default(21)
+  certPem            String?  // nunca se expone en la API pública
+  keyPem             String?
+  updatedAt          DateTime @updatedAt
+}
+
+/** Liquidación CVLP tipo 60 — emitida al transportista (fletero). */
+model Liquidacion {
+  id              String        @id @default(cuid())
+  tenantId        String
+  transportistaId String
+
+  periodoDesde DateTime
+  periodoHasta DateTime
+
+  // Montos snapshot al crear la liquidación
+  cantViajes     Int
+  bruto          Float   // sum(tnDestino * tarifaTransportista)
+  comisionPct    Float
+  comision       Float
+  gastosAdmin    Float
+  gastosAdminIva Float
+  liquido        Float   // neto al transportista
+
+  cbteTipo    Int       @default(60)
+  cbteNro     Int?
+  ptoVenta    Int?
+  cae         String?
+  caeFechaVto DateTime?
+
+  estado     String  @default("borrador") // borrador | pendiente_cae | autorizado | error | anulado
+  arcaError  String?
+  reintentos Int     @default(0)
+
+  comprobanteUrl String?
+  payloadHash    String?  // idempotencia: evita duplicar en reintento
+
+  createdAt DateTime @default(now())
+  createdBy String
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, transportistaId])
+  @@index([tenantId, estado])
+}
+
+/** Viajes incluidos en una liquidación (snapshot de montos al liquidar). */
+model LiquidacionViaje {
+  id            String @id @default(cuid())
+  tenantId      String
+  liquidacionId String
+  viajeId       String
+
+  tnOrigen            Float?
+  tnDestino           Float?
+  tarifaTransportista Float?
+  subtotal            Float?
+  gastosAdmin         Float?
+
+  @@unique([liquidacionId, viajeId])
+}
+
+/** Log de auditoría de cada request/response a AFIP SDK. */
+model ArcaLog {
+  id            String   @id @default(cuid())
+  tenantId      String
+  liquidacionId String?
+  facturaId     String?  // referencial, sin FK formal
+
+  method       String  // afip/auth | FECompUltimoAutorizado | FECAESolicitar
+  ambiente     String  // homologacion | produccion
+  cuit         String
+  requestBody  Json     // sin la API key
+  responseBody Json?
+  httpStatus   Int?
+  durationMs   Int?
+  exitoso      Boolean @default(false)
+  error        String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, liquidacionId])
+  @@index([tenantId, facturaId])
+}
+```
+
+---
+
+### `dashboard` — KPIs del tenant (no es un módulo vendible)
+No está gateado por `RequireModule`; disponible para todos los tenants. `GET dashboard/resumen` agrega KPIs, últimos viajes y alertas desde las tablas de Viaje/Factura/MovimientoCuentaCorriente ya existentes (sin modelo Prisma propio), con soporte de rango de fechas/período. Es la base de datos que consume el dashboard real del frontend (`TenantOwnerDashboard.tsx`).
+
+---
+
+### `importaciones` — Carga masiva desde Excel (uso admin)
+Tampoco es un módulo vendible por tenant. Motor de importación con parser + validator + un `processor` por módulo destino (hoy: `clientes`, `viajes`), flujo de preview/confirm con sesión de staging temporal, y templates de columnas configurables por tenant/módulo.
+
+```prisma
+model ImportTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  modulo    String   // viajes | clientes | choferes | vehiculos | stock | etc.
+  nombre    String
+  config    Json     // sheet, headerRow, columns[]
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, modulo])
+}
+
+model ImportSession {
+  id            String   @id @default(cuid())
+  tenantId      String
+  templateId    String
+  nombreArchivo String
+  filasValidas  Json     // filas ya validadas, listas para insertar
+  errores       Json
+  totalFilas    Int
+  expiresAt     DateTime // sesión de staging temporal
+  createdAt     DateTime @default(now())
+}
+
+model ImportLog {
+  id            String   @id @default(cuid())
+  tenantId      String
+  templateId    String?
+  modulo        String
+  nombreArchivo String
+  estado        String   @default("completado") // completado | con_errores | fallido
+  totalFilas    Int
+  exitosas      Int      @default(0)
+  errores       Int      @default(0)
+  detalles      Json
+  createdAt     DateTime @default(now())
+  createdBy     String
+
+  @@index([tenantId, modulo])
+}
+```
+
+> **`TenantFieldConfig` / `TenantFieldConfigAuditLog`** también existen en el schema pero están **fuera del alcance de este documento**: el comentario en `prisma/schema.prisma` indica que otro integrante del equipo los está desarrollando y que no hay que modificar su forma — solo están declarados para que Prisma coincida con las tablas ya existentes en QA. No asumir comportamiento sobre ellos sin consultar.
 
 ---
 
@@ -572,7 +903,7 @@ model Remito {
 | Sebastián Fernández | ✅ Cerrado | viajes | 1 — construir ya |
 | Matías Riedel | ✅ Activo | stock, cuenta-corriente | 2 |
 | Melisa (Desagotes) | ⏳ Muy probable | remitos, cuenta-corriente | 3 |
-| Marcos Venturini (NyM Logística) | ⏳ Presupuesto enviado | liquidaciones-arca, viajes | 4 |
+| Marcos Venturini (NyM Logística) | ⏳ Presupuesto enviado | integracion-arca, viajes | 4 |
 | Wichi Toledo SRL | ⏳ Muy probable | mantenimiento, combustible | 5 |
 | Gabriel González e Hijo | 🔲 Interesado | facturacion (viajes + cobranzas) | 6 |
 | Javier Altamirano | 🔲 Pendiente | viajes, facturacion, combustible | 7 |
@@ -594,7 +925,7 @@ model Remito {
 | stock | — | ✓ | — | — | — | — | — | — | — |
 | remitos | — | — | ✓ | — | — | — | — | — | — |
 | turnos | — | — | — | — | — | — | — | ✓ | — |
-| liquidaciones-arca | — | — | — | — | — | — | — | — | ✓ |
+| integracion-arca | — | — | — | — | — | — | — | — | ✓ |
 
 ---
 
@@ -605,7 +936,7 @@ FASE 0 — Base (antes de cualquier módulo)
   → Proyecto NestJS + Prisma + Clerk configurado
   → Multi-tenant middleware funcionando
   → Entidades core: Cliente, Transportista, Chofer, Vehículo
-  → ARCHITECTURE.md en el repo
+  → CLAUDE.md en el repo
 
 FASE 1 — Fernández (primer cliente confirmado)
   → módulo: viajes
@@ -636,7 +967,7 @@ FASE 7 — Pereyra
   → Módulo aislado, no depende de los anteriores
 
 FASE NyM — Venturini (NyM Logística)
-  → módulo: liquidaciones-arca
+  → módulo: integracion-arca (carpeta src/modules/liquidaciones-arca/) — ✅ implementado
   → Campos de granel en metadata del viaje: ctg, cartaDePorte, grano, tnOrigen, tnDestino, tarifaPorTn
   → Feature flag: liquidaciones.habilitarGranel = true para este tenant
   → Motor de liquidación CVLP: agrupamiento por transportista, cálculo comisión, líquido producto, IVA
@@ -706,7 +1037,7 @@ CLOUDINARY_API_SECRET=
 PORT=8080
 NODE_ENV=production
 
-# Módulo liquidaciones-arca (NyM Logística) — fail-fast si falta en runtime
+# Módulo integracion-arca / carpeta liquidaciones-arca (NyM Logística) — fail-fast si falta en runtime
 ARCA_ENCRYPTION_KEY=              # clave AES-256 (hex 64 chars) para cifrar cert/key/credenciales AFIP en DB
 AFIP_SDK_API_KEY=                 # token de AfipSDK (afipsdk.com)
 
@@ -717,5 +1048,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: junio 2026*
+*Última actualización: julio 2026 (resync de estructura de módulos y esquema Prisma contra el código real)*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

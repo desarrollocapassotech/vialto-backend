@@ -166,13 +166,13 @@ export class LiquidacionesController {
   ) {
     assertTenantId(auth.tenantId);
     try {
-      const pdf = await this.pdfService.generate(auth.tenantId, id);
+      const { buffer, filename } = await this.pdfService.generate(auth.tenantId, id);
       res.set({
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="liquidacion-${id}.pdf"`,
-        'Content-Length': String(pdf.length),
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(buffer.length),
       });
-      res.end(pdf);
+      res.end(buffer);
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string; response?: unknown };
       if (e?.status === 404) {

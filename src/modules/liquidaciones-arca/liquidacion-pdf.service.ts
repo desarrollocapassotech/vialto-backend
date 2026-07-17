@@ -89,6 +89,22 @@ function numeroALetras(n: number): string {
   return `${letras} CON ${centavosStr} CENTAVO(S)`;
 }
 
+/** Nombre de archivo legible: quita acentos y caracteres no válidos para un filesystem. */
+function slugify(text: string): string {
+  const withoutDiacritics = text
+    .normalize('NFD')
+    .split('')
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code < 0x0300 || code > 0x036f;
+    })
+    .join('');
+  const clean = withoutDiacritics
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return clean.slice(0, 60) || 'liquidacion';
+}
+
 // ── PDF builder ───────────────────────────────────────────────────────────────
 
 const PAGE_W = 595.28;
@@ -107,7 +123,10 @@ export class LiquidacionPdfService {
     return this.prisma as PrismaAny;
   }
 
-  async generate(tenantId: string, liquidacionId: string): Promise<Buffer> {
+  async generate(
+    tenantId: string,
+    liquidacionId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const liq = await this.db.liquidacion.findUnique({
       where: { id: liquidacionId },
       include: {
@@ -168,7 +187,15 @@ export class LiquidacionPdfService {
       }
     }
 
-    return this.buildPdf(liq, config, qrBuffer, logoBuffer);
+    const buffer = await this.buildPdf(liq, config, qrBuffer, logoBuffer);
+
+    const cbteNroStr = liq.cbteNro
+      ? `${String(liq.ptoVenta).padStart(4, '0')}-${String(liq.cbteNro).padStart(8, '0')}`
+      : liquidacionId.slice(0, 8);
+    const transportistaSlug = slugify(liq.transportista?.nombre ?? '');
+    const filename = `CVLP_${cbteNroStr}_${transportistaSlug}.pdf`;
+
+    return { buffer, filename };
   }
 
   private buildPdf(

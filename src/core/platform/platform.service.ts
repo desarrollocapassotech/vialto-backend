@@ -1021,7 +1021,10 @@ export class PlatformService {
     return this.liquidacionesService.findLogs(id, liquidacionId, facturaId);
   }
 
-  getLiquidacionPdf(tenantId: string | undefined, liquidacionId: string): Promise<Buffer> {
+  getLiquidacionPdf(
+    tenantId: string | undefined,
+    liquidacionId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionPdfService.generate(id, liquidacionId);
   }

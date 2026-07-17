@@ -146,6 +146,13 @@ export class LiquidacionesService {
     const gastosAdmin = 0;
     const gastosAdminIva = montos.impIva;
     const liquido = montos.liquido;
+    // CVLP: RI → 60 (A), resto → 61 (B). Override opcional desde el DTO.
+    const cbteTipo =
+      dto.cbteTipo === 60 || dto.cbteTipo === 61
+        ? dto.cbteTipo
+        : transportista.condicionIva === 1
+          ? 60
+          : 61;
 
     let liquidacion;
     try {
@@ -163,7 +170,7 @@ export class LiquidacionesService {
           gastosAdminIva,
           liquido,
           estado: 'borrador',
-          cbteTipo: 60,
+          cbteTipo,
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
           createdBy: userId,
@@ -309,13 +316,20 @@ export class LiquidacionesService {
         select: { idFiscal: true, condicionIva: true },
       });
 
+      const cbteTipo =
+        liquidacion.cbteTipo === 61 || liquidacion.cbteTipo === 60
+          ? liquidacion.cbteTipo
+          : transportista?.condicionIva === 1
+            ? 60
+            : 61;
+
       // Obtener el próximo número de comprobante
       const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
         config.apiKey,
         config.cuitEmisor,
         config.ambiente as 'homologacion' | 'produccion',
         config.ptoVentaCvlp,
-        60,
+        cbteTipo,
         tenantId,
         liquidacionId,
         undefined,
@@ -340,7 +354,7 @@ export class LiquidacionesService {
           token: '',
           sign: '',
           ptoVenta: config.ptoVentaCvlp,
-          cbteTipo: 60,
+          cbteTipo,
           cbteNro,
           fechaCbte,
           concepto: 1,
@@ -419,13 +433,20 @@ export class LiquidacionesService {
       select: { idFiscal: true, condicionIva: true },
     });
 
+    const cbteTipo =
+      liquidacion.cbteTipo === 61 || liquidacion.cbteTipo === 60
+        ? liquidacion.cbteTipo
+        : transportista?.condicionIva === 1
+          ? 60
+          : 61;
+
     // Obtener próximo número para el comprobante negativo
     const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
       config.apiKey,
       config.cuitEmisor,
       config.ambiente as 'homologacion' | 'produccion',
       config.ptoVentaCvlp,
-      60,
+      cbteTipo,
       tenantId,
       liquidacionId,
       undefined,
@@ -447,7 +468,7 @@ export class LiquidacionesService {
         token: '',
         sign: '',
         ptoVenta: config.ptoVentaCvlp,
-        cbteTipo: 60,
+        cbteTipo,
         cbteNro,
         fechaCbte: formatFechaCbte(new Date()),
         concepto: 1,

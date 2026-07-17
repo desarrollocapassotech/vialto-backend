@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Param,
   Body,
@@ -26,6 +27,7 @@ import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { LiquidacionesService } from './liquidaciones.service';
 import { LiquidacionPdfService } from './liquidacion-pdf.service';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
+import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
 
@@ -82,6 +84,22 @@ export class LiquidacionesController {
     @Body() dto: CreateLiquidacionDto,
   ) {
     return this.service.createLiquidacion(auth.tenantId!, auth.userId, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Actualizar liquidación (comprobante diferido y datos editables)',
+    description:
+      'Permite adjuntar/actualizar comprobanteUrl en cualquier estado. ' +
+      'Período, comisión e IVA solo en borrador, error o pendiente_cae.',
+  })
+  @Patch('liquidaciones/:id')
+  @RequireModule('facturacion', 'integracion-arca')
+  updateLiquidacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateLiquidacionDto,
+  ) {
+    return this.service.updateLiquidacion(auth.tenantId!, id, dto);
   }
 
   @ApiOperation({ summary: 'Eliminar liquidación en borrador o con error' })

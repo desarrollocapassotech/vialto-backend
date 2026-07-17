@@ -18,6 +18,7 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
+import { parseNumeroFactura } from './arca.util';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
@@ -324,6 +325,9 @@ export class LiquidacionesService {
       );
       const cbteNro = ultimoCbte + 1;
 
+      // Verificar que la numeración no tenga desfasaje en caso de reintentos
+      this.validarCorrelatividad(liquidacion.cbteNro, cbteNro, 'Liquidación');
+
       const fechaCbte = formatFechaCbte(new Date());
       const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
@@ -613,6 +617,20 @@ export class LiquidacionesService {
       );
       const cbteNro = ultimoCbte + 1;
 
+      // Verificar que la numeración no tenga desfasaje
+      if (facturaExt.cbteNro != null) {
+        this.validarCorrelatividad(facturaExt.cbteNro, cbteNro, 'Factura');
+      } else {
+        const localCbteNro = parseNumeroFactura(factura.numero);
+        if (isNaN(localCbteNro)) {
+          throw new ArcaException(
+            ARCA_ERROR_CODES.GENERICO,
+            `El número de factura local "${factura.numero}" no es válido. Debe finalizar con el número correlativo del comprobante a autorizar (ej. "0001-00000045").`,
+          );
+        }
+        this.validarCorrelatividad(localCbteNro, cbteNro, 'Factura');
+      }
+
       // Calcular IVA 21% sobre el importe (ImpNeto = importe / 1.21 si ya es c/IVA,
       // o importe directamente si es neto). Aquí asumimos que factura.importe = neto.
       const montos = computeAfipGravadoIva(factura.importe, 0, 21);
@@ -741,6 +759,19 @@ export class LiquidacionesService {
     throw new ConflictException(
       'La acción no es válida. Ya existe una liquidación previa para este transportista en uno de los viajes seleccionados.',
     );
+  }
+
+  private validarCorrelatividad(
+    localCbteNro: number | null | undefined,
+    esperadoAfip: number,
+    tipoComprobante: 'Liquidación' | 'Factura',
+  ): void {
+    if (localCbteNro != null && localCbteNro !== esperadoAfip) {
+      throw new ArcaException(
+        ARCA_ERROR_CODES.FUERA_DE_RANGO,
+        `Desfasaje de numeración detectado. La ${tipoComprobante.toLowerCase()} local tiene asignado el número ${localCbteNro}, pero el próximo número correlativo esperado por AFIP es ${esperadoAfip}. Por favor, verifique y actualice la numeración antes de reintentar la emisión.`,
+      );
+    }
   }
 
   private buildPayloadHash(id: string, liquido: number, ambiente: string): string {

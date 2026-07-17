@@ -46,6 +46,7 @@ Copiá `.env.example` a `.env` y completá valores reales.
 |----------|-----|
 | `CLERK_SECRET_KEY` | Obligatorio. Backend valida JWTs con `verifyToken`. |
 | `DATABASE_URL` | Obligatorio. Cadena PostgreSQL (ej. `?sslmode=require`). |
+| `ARCA_ENCRYPTION_KEY` | Obligatorio. Clave secreta (32 bytes recomendados) para encriptar los certificados de ARCA en reposo. |
 | `PORT` | Opcional. Por defecto el código usa `8080`. |
 | `FRONTEND_URL` | Invitaciones de usuarios (Clerk). URL del SPA en prod. |
 | `SENTRY_DSN` | Opcional. Si existe, se inicializa Sentry en `main.ts`. |
@@ -189,7 +190,7 @@ En `src/main.ts`, `enableCors` lista orígenes permitidos y usa callback para de
 
 ## 10. Despliegue (ej. Render)
 
-- Mismas variables que en local (`DATABASE_URL`, `CLERK_SECRET_KEY`, `NODE_ENV=production`, `PORT`).
+- Mismas variables que en local (`DATABASE_URL`, `CLERK_SECRET_KEY`, `NODE_ENV=production`, `PORT`, `ARCA_ENCRYPTION_KEY`).
 - **Monorepo:** el blueprint que Render detecta por defecto está en **`render.yaml` en la raíz del repositorio** (no solo en `vialto-backend/render.yaml`). Ahí va `rootDir: vialto-backend` y el `buildCommand` sin migraciones. Si el servicio se creó a mano, abrí **Settings → Build & Deploy** y comprobá que el **Build Command** no tenga `prisma migrate deploy` ni `npm run build && …migrate` al final (eso imprime `Datasource "db"` y puede fallar con P1001 aunque Neon esté bien).
 - Build típico en Render: `NPM_CONFIG_PRODUCTION=false npm install && npm run build` (`npm run build` usa `npx @nestjs/cli build`; **no uses** `npx nest build` en el panel — en npm reciente suele dar *could not determine executable to run*). Si en los logs seguís viendo `npx nest build`, el **Build Command** del servicio en Render está desactualizado respecto al repo.
 - Migraciones: **`npm run start:prod`** ejecuta `prisma migrate deploy` antes de `node dist/main`.
@@ -213,6 +214,8 @@ Workflow: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) — `npm ci`,
 | `403` — *organización no registrada* | No existe fila en `tenants` con ese `clerkOrgId`. |
 | `403` — módulo no habilitado | `modules` del tenant no incluye el slug del módulo. |
 | `400` en `POST /api/tenants` | Body JSON vacío o sin `name` / `clerkOrgId`. Usar **Body → raw → JSON**. |
+| `FATAL: La variable de entorno ARCA_ENCRYPTION_KEY no está configurada.` | Error de arranque. Indica que no has provisto la clave de cifrado obligatoria en tu archivo `.env` local o en las variables de entorno de Render. |
+| `422` — *Fallo de credenciales ARCA* | Error en emisión. Indica que la clave `ARCA_ENCRYPTION_KEY` actual es distinta a la clave usada para encriptar los certificados previamente guardados, o los datos guardados en base de datos están corruptos. |
 
 ---
 
@@ -232,4 +235,4 @@ Workflow: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) — `npm ci`,
 
 ---
 
-*Última actualización del README: marzo 2026.*
+*Última actualización del README: julio 2026.*

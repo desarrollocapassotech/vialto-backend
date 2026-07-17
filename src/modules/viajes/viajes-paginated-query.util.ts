@@ -144,6 +144,17 @@ export function buildViajesPaginatedWhere(
   const tid = query.transportistaId?.trim();
   if (tid) where.transportistaId = tid;
 
+  if (query.sinLiquidacionActiva) {
+    where.liquidacionesViaje = {
+      none: {
+        liquidacion: {
+          ...(tid ? { transportistaId: tid } : {}),
+          estado: { not: 'anulado' },
+        },
+      },
+    };
+  }
+
   const tipoFecha = query.tipoFecha?.trim();
   const fDesde = query.fechaDesde?.trim();
   const fHasta = query.fechaHasta?.trim();

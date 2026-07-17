@@ -1,5 +1,15 @@
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 /** Express puede entregar `string | string[]` en query; nos quedamos con el primer valor. */
 function firstQueryString(val: unknown): string | undefined {
@@ -43,6 +53,21 @@ export class ViajesPaginatedQueryDto {
   @Transform(({ value }) => firstQueryString(value))
   @IsString()
   transportistaId?: string;
+
+  /**
+   * Si es true, excluye viajes que ya tienen una liquidación activa
+   * (estado ≠ anulado) para el transportista filtrado — o cualquier
+   * liquidación activa si no se envió `transportistaId`.
+   * Usado por liquidación múltiple manual.
+   */
+  @IsOptional()
+  @Transform(({ value }) => {
+    const s = firstQueryString(value);
+    if (s === undefined) return undefined;
+    return s === '1' || s.toLowerCase() === 'true';
+  })
+  @IsBoolean()
+  sinLiquidacionActiva?: boolean;
 
   /** Filtrar rango sobre `fechaCarga` o `fechaDescarga` (requiere al menos una fecha). */
   @IsOptional()

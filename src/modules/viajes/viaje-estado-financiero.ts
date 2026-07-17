@@ -18,7 +18,10 @@ export async function syncViajeEstadoTrasComprobante(
       estado: true,
       transportistaId: true,
       facturaId: true,
-      liquidacionesViaje: { select: { id: true } },
+      liquidacionesViaje: {
+        where: { liquidacion: { estado: { not: 'anulado' } } },
+        select: { id: true },
+      },
     },
   });
   if (!viaje) return;

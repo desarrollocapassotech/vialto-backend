@@ -97,12 +97,23 @@ export class ViajesController {
       queryParamFromRequest(req, 'sortBy') ?? query.sortBy,
       queryParamFromRequest(req, 'sortDir') ?? query.sortDir,
     );
+    const sinLiqRaw =
+      queryParamFromRequest(req, 'sinLiquidacionActiva') ??
+      (query.sinLiquidacionActiva != null
+        ? String(query.sinLiquidacionActiva)
+        : undefined);
+    const sinLiquidacionActiva =
+      sinLiqRaw === '1' ||
+      sinLiqRaw?.toLowerCase() === 'true' ||
+      query.sinLiquidacionActiva === true;
+
     return this.service.findAllPaginated(auth.tenantId, {
       page: query.page,
       pageSize: query.pageSize,
       estado: query.estado,
       clienteId,
       transportistaId,
+      sinLiquidacionActiva: sinLiquidacionActiva || undefined,
       tipoFecha,
       fechaDesde,
       fechaHasta,

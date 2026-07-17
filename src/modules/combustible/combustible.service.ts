@@ -20,11 +20,7 @@ interface CombustibleAuth {
   role: string | null;
 }
 
-/** Umbrales de detección de anomalías y semáforo — constantes ajustables a mano. */
-const ANOMALIA_PCT_SOBRE_PROMEDIO = 0.3; // +30% sobre el promedio histórico de la unidad
-const ANOMALIA_MIN_HISTORICO = 3; // mínimo de cargas previas para evaluar la unidad
-const ANOMALIA_RECARGA_HORAS = 6; // menos de N horas desde la carga anterior
-const ANOMALIA_RECARGA_KM = 50; // menos de N km desde la carga anterior
+/** Umbrales de outlier/semáforo — constantes ajustables a mano. */
 const OUTLIER_PCT_CATEGORIA = 0.3; // +30% de litros sobre el promedio de su categoría (tipo de vehículo)
 const SEMAFORO_AMARILLO_PCT = 0.15; // costo/km +15% sobre el promedio de su categoría
 const SEMAFORO_ROJO_PCT = 0.5; // costo/km +50% sobre el promedio de su categoría
@@ -37,6 +33,22 @@ function avg(arr: number[]): number {
   return arr.length > 0 ? arr.reduce((s, n) => s + n, 0) / arr.length : 0;
 }
 
+/**
+ * Medianoche local (hora del server) del día `YYYY-MM-DD` — límite inferior de un rango.
+ * OJO: `new Date("YYYY-MM-DD")` parsea como medianoche UTC, no local; construir a partir
+ * de los componentes año/mes/día evita el corrimiento cuando el server no corre en UTC.
+ */
+function startOfDayLocal(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+/** Fin del día local (23:59:59.999) del día `YYYY-MM-DD` — límite superior de un rango. */
+function endOfDayLocal(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999);
+}
+
 type CargaHistorica = {
   id: string;
   vehiculoId: string | null;
@@ -46,13 +58,17 @@ type CargaHistorica = {
   importe: number;
 };
 
+/** Una carga marcada `sospechoso` en el período — ver docs/combustible-correccion-cargas-historicas.md. */
 type Alerta = {
   cargaId: string;
-  vehiculoId: string;
+  vehiculoId: string | null;
   patente: string;
+  choferNombre: string | null;
   fecha: string;
-  tipo: "consumo_alto" | "recarga_rapida";
-  detalle: string;
+  motivoSospecha: string;
+  litros: number;
+  importe: number;
+  precioPorLitro: number;
 };
 
 type PorVehiculoRow = {
@@ -186,7 +202,8 @@ export class CombustibleService {
     auth: CombustibleAuth,
     vehiculoId?: string,
     choferId?: string,
-    month?: string,
+    from?: string,
+    to?: string,
     page = 1,
     limit = 10,
     estacion?: string,
@@ -207,12 +224,11 @@ export class CombustibleService {
       where["estacion"] = { contains: estacion, mode: "insensitive" };
     if (formaPago) where["formaPago"] = formaPago;
 
-    if (month) {
-      const [year, mon] = month.split("-").map(Number);
-      where["fecha"] = {
-        gte: new Date(year, mon - 1, 1),
-        lt: new Date(year, mon, 1),
-      };
+    if (from || to) {
+      const fechaWhere: Record<string, Date> = {};
+      if (from) fechaWhere.gte = startOfDayLocal(from);
+      if (to) fechaWhere.lte = endOfDayLocal(to);
+      where["fecha"] = fechaWhere;
     }
 
     const [total, cargas] = await Promise.all([
@@ -230,6 +246,21 @@ export class CombustibleService {
     ]);
 
     return { cargas, total, page: safePage, limit: safeLimit };
+  }
+
+  /** Estaciones distintas entre las cargas existentes, para poblar el filtro del listado. */
+  async getEstaciones(auth: CombustibleAuth): Promise<string[]> {
+    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+    if (auth.role === "member") {
+      where["createdBy"] = auth.userId;
+    }
+    const rows = await this.prisma.cargaCombustible.findMany({
+      where,
+      distinct: ["estacion"],
+      select: { estacion: true },
+      orderBy: { estacion: "asc" },
+    });
+    return rows.map((r) => r.estacion);
   }
 
   async findOne(id: string, auth: CombustibleAuth) {
@@ -261,7 +292,7 @@ export class CombustibleService {
       fechaCarga,
       dto.km,
     );
-    return this.prisma.cargaCombustible.create({
+    const carga = await this.prisma.cargaCombustible.create({
       data: {
         tenantId: auth.tenantId,
         vehiculoId: dto.vehiculoId,
@@ -277,6 +308,31 @@ export class CombustibleService {
         fotoTacometro: dto.fotoTacometro ?? null,
         fotoTicket: dto.fotoTicket ?? null,
       },
+    });
+    await this.syncVehiculoKmActual(auth.tenantId as string, dto.vehiculoId);
+    return carga;
+  }
+
+  /**
+   * Sincroniza `Vehiculo.kmActual` con el km de su carga de combustible más
+   * reciente (por fecha). La coherencia (km > carga anterior) ya se validó
+   * antes de guardar vía `assertKmNoRetroceso` — acá solo se refleja el dato.
+   * Si el vehículo no tiene cargas (ej. se eliminó la última), no se toca.
+   */
+  private async syncVehiculoKmActual(
+    tenantId: string,
+    vehiculoId: string | null | undefined,
+  ) {
+    if (!vehiculoId) return;
+    const ultima = await this.prisma.cargaCombustible.findFirst({
+      where: { tenantId, vehiculoId },
+      orderBy: { fecha: "desc" },
+      select: { km: true },
+    });
+    if (!ultima) return;
+    await this.prisma.vehiculo.update({
+      where: { id: vehiculoId },
+      data: { kmActual: ultima.km },
     });
   }
 
@@ -332,7 +388,7 @@ export class CombustibleService {
       );
     }
 
-    return this.prisma.cargaCombustible.update({
+    const actualizada = await this.prisma.cargaCombustible.update({
       where: { id },
       data: {
         vehiculoId: dto.vehiculoId,
@@ -353,11 +409,24 @@ export class CombustibleService {
         fotoTicket: dto.fotoTicket,
       },
     });
+
+    await this.syncVehiculoKmActual(auth.tenantId as string, nextVehiculo);
+    if (carga.vehiculoId && carga.vehiculoId !== nextVehiculo) {
+      // La carga se movió a otro vehículo: el anterior también puede haber
+      // perdido su carga más reciente.
+      await this.syncVehiculoKmActual(
+        auth.tenantId as string,
+        carga.vehiculoId,
+      );
+    }
+
+    return actualizada;
   }
 
   async remove(id: string, auth: CombustibleAuth) {
-    await this.findOne(id, auth);
+    const carga = await this.findOne(id, auth);
     await this.prisma.cargaCombustible.delete({ where: { id } });
+    await this.syncVehiculoKmActual(auth.tenantId as string, carga.vehiculoId);
     return { deleted: id };
   }
 
@@ -405,7 +474,7 @@ export class CombustibleService {
     const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
     await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km);
     this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
-    return this.prisma.cargaCombustible.create({
+    const carga = await this.prisma.cargaCombustible.create({
       data: {
         tenantId,
         vehiculoId: vehiculo.id,
@@ -426,6 +495,8 @@ export class CombustibleService {
         chofer: { select: { nombre: true, dni: true } },
       },
     });
+    await this.syncVehiculoKmActual(tenantId, vehiculo.id);
+    return carga;
   }
 
   async getUltimaCargaChofer(choferId: string, tenantId: string) {
@@ -541,7 +612,7 @@ export class CombustibleService {
       );
     }
 
-    return this.prisma.cargaCombustible.update({
+    const actualizada = await this.prisma.cargaCombustible.update({
       where: { id },
       data: {
         ...(vehiculoId !== undefined && { vehiculoId }),
@@ -564,6 +635,13 @@ export class CombustibleService {
         chofer: { select: { nombre: true, dni: true } },
       },
     });
+
+    await this.syncVehiculoKmActual(tenantId, efectivoVehiculoId);
+    if (carga.vehiculoId && carga.vehiculoId !== efectivoVehiculoId) {
+      await this.syncVehiculoKmActual(tenantId, carga.vehiculoId);
+    }
+
+    return actualizada;
   }
 
   async getDashboard(auth: CombustibleAuth, from?: string, to?: string) {
@@ -575,12 +653,11 @@ export class CombustibleService {
     if (from || to) {
       const fechaWhere: Record<string, Date> = {};
       if (from) {
-        fromDate = new Date(from);
+        fromDate = startOfDayLocal(from);
         fechaWhere.gte = fromDate;
       }
       if (to) {
-        toDate = new Date(to);
-        toDate.setHours(23, 59, 59, 999);
+        toDate = endOfDayLocal(to);
         fechaWhere.lte = toDate;
       }
       where["fecha"] = fechaWhere;
@@ -655,7 +732,7 @@ export class CombustibleService {
       ),
     );
 
-    const [vehiculos, historicas, choferes] = await Promise.all([
+    const [vehiculos, historicas, choferes, alertas] = await Promise.all([
       vehiculoIds.length > 0
         ? this.prisma.vehiculo.findMany({
             where: { id: { in: vehiculoIds } },
@@ -686,13 +763,14 @@ export class CombustibleService {
             select: { id: true, nombre: true },
           })
         : Promise.resolve([]),
+      this.buildAlertasSospechosas(where),
     ]);
 
     const vehiculoMap = new Map(vehiculos.map((v) => [v.id, v]));
+    const choferNombreMap = new Map(choferes.map((c) => [c.id, c.nombre]));
 
-    const { alertas, kmPeriodoPorVehiculo } = this.buildAlertasYKmPeriodo(
+    const kmPeriodoPorVehiculo = this.buildKmPeriodoPorVehiculo(
       historicas,
-      vehiculoMap,
       fromDate,
       toDate,
     );
@@ -704,7 +782,6 @@ export class CombustibleService {
       alertas,
     );
 
-    const choferNombreMap = new Map(choferes.map((c) => [c.id, c.nombre]));
     const porChofer = this.buildPorChofer(todasCargas, choferNombreMap);
 
     const evolucionPrecio = this.buildEvolucionPrecio(
@@ -818,17 +895,15 @@ export class CombustibleService {
   }
 
   /**
-   * Recorre el histórico completo (no solo el período) de cada vehículo, en orden cronológico, para:
-   * - acumular el km recorrido entre cargas consecutivas cuya carga posterior cae en el período;
-   * - detectar consumo anómalo (carga muy por encima del promedio histórico previo de la unidad);
-   * - detectar recargas sospechosas (muy seguidas en tiempo o en km respecto de la carga anterior).
+   * Recorre el histórico completo (no solo el período) de cada vehículo, en orden
+   * cronológico, para acumular el km recorrido entre cargas consecutivas cuya carga
+   * posterior cae en el período (usado para costo/km y L/100km en "Por vehículo").
    */
-  private buildAlertasYKmPeriodo(
+  private buildKmPeriodoPorVehiculo(
     historicas: CargaHistorica[],
-    vehiculoMap: Map<string, { patente: string; tipo: string }>,
     fromDate: Date | null,
     toDate: Date | null,
-  ): { alertas: Alerta[]; kmPeriodoPorVehiculo: Map<string, number> } {
+  ): Map<string, number> {
     function enPeriodo(fecha: Date): boolean {
       if (fromDate && fecha < fromDate) return false;
       if (toDate && fecha > toDate) return false;
@@ -836,70 +911,62 @@ export class CombustibleService {
     }
 
     const porVehiculo = this.groupHistoricasPorVehiculo(historicas);
-
-    const alertas: Alerta[] = [];
     const kmPeriodoPorVehiculo = new Map<string, number>();
 
     for (const [vehiculoId, lista] of porVehiculo) {
-      const patente = vehiculoMap.get(vehiculoId)?.patente ?? vehiculoId;
       let kmPeriodo = 0;
 
-      for (let i = 0; i < lista.length; i++) {
+      for (let i = 1; i < lista.length; i++) {
         const actual = lista[i];
         if (!enPeriodo(actual.fecha)) continue;
 
-        if (i > 0) {
-          const anterior = lista[i - 1];
-          const delta = actual.km - anterior.km;
-          // Delta implausible (> KM_DELTA_PLAUSIBLE_MAX) → no se suma. Suele pasar cuando
-          // el vecino "anterior" en esta cadena filtrada por sospechoso=false queda lejos
-          // en el tiempo (varias cargas intermedias excluidas): el km real recorrido en ese
-          // hueco no es atribuible de forma confiable a esta carga puntual, y sumarlo igual
-          // infla el denominador de costo/km sin que el gasto de esas cargas excluidas
-          // aparezca en el numerador.
-          if (delta > 0 && delta <= KM_DELTA_PLAUSIBLE_MAX) kmPeriodo += delta;
-
-          const horas =
-            (actual.fecha.getTime() - anterior.fecha.getTime()) / 3_600_000;
-          if (horas < ANOMALIA_RECARGA_HORAS || delta < ANOMALIA_RECARGA_KM) {
-            alertas.push({
-              cargaId: actual.id,
-              vehiculoId,
-              patente,
-              fecha: actual.fecha.toISOString(),
-              tipo: "recarga_rapida",
-              detalle: `Recarga a ${horas.toFixed(1)}hs y ${delta}km de la carga anterior`,
-            });
-          }
-        }
-
-        const previas = lista.slice(0, i);
-        if (previas.length >= ANOMALIA_MIN_HISTORICO) {
-          const avgLitros = avg(previas.map((p) => p.litros));
-          const avgImporte = avg(previas.map((p) => p.importe));
-          const superaLitros =
-            avgLitros > 0 &&
-            actual.litros > avgLitros * (1 + ANOMALIA_PCT_SOBRE_PROMEDIO);
-          const superaImporte =
-            avgImporte > 0 &&
-            actual.importe > avgImporte * (1 + ANOMALIA_PCT_SOBRE_PROMEDIO);
-          if (superaLitros || superaImporte) {
-            alertas.push({
-              cargaId: actual.id,
-              vehiculoId,
-              patente,
-              fecha: actual.fecha.toISOString(),
-              tipo: "consumo_alto",
-              detalle: `${Math.round(actual.litros)} L / $${Math.round(actual.importe)} — supera en +${Math.round(ANOMALIA_PCT_SOBRE_PROMEDIO * 100)}% el promedio histórico de la unidad`,
-            });
-          }
-        }
+        const anterior = lista[i - 1];
+        const delta = actual.km - anterior.km;
+        // Delta implausible (> KM_DELTA_PLAUSIBLE_MAX) → no se suma. Suele pasar cuando
+        // el vecino "anterior" en esta cadena filtrada por sospechoso=false queda lejos
+        // en el tiempo (varias cargas intermedias excluidas): el km real recorrido en ese
+        // hueco no es atribuible de forma confiable a esta carga puntual, y sumarlo igual
+        // infla el denominador de costo/km sin que el gasto de esas cargas excluidas
+        // aparezca en el numerador.
+        if (delta > 0 && delta <= KM_DELTA_PLAUSIBLE_MAX) kmPeriodo += delta;
       }
 
       kmPeriodoPorVehiculo.set(vehiculoId, kmPeriodo);
     }
 
-    return { alertas, kmPeriodoPorVehiculo };
+    return kmPeriodoPorVehiculo;
+  }
+
+  /** Cargas del período marcadas `sospechoso` — la fuente de "Alertas" en el dashboard. */
+  private async buildAlertasSospechosas(
+    where: Record<string, unknown>,
+  ): Promise<Alerta[]> {
+    const cargas = await this.prisma.cargaCombustible.findMany({
+      where: { ...where, sospechoso: true },
+      orderBy: { fecha: "desc" },
+      select: {
+        id: true,
+        vehiculoId: true,
+        fecha: true,
+        litros: true,
+        importe: true,
+        motivoSospecha: true,
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true } },
+      },
+    });
+
+    return cargas.map((c) => ({
+      cargaId: c.id,
+      vehiculoId: c.vehiculoId,
+      patente: c.vehiculo?.patente ?? c.vehiculoId ?? "—",
+      choferNombre: c.chofer?.nombre ?? null,
+      fecha: c.fecha.toISOString(),
+      motivoSospecha: c.motivoSospecha ?? "sin_especificar",
+      litros: c.litros,
+      importe: c.importe,
+      precioPorLitro: c.litros > 0 ? roundMoney(c.importe / c.litros) : 0,
+    }));
   }
 
   /** Ranking por vehículo (litros/monto/cantidad del período + eficiencia + outlier + semáforo). */
@@ -1288,12 +1355,8 @@ export class CombustibleService {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
     if (from || to) {
       const fechaWhere: Record<string, Date> = {};
-      if (from) fechaWhere.gte = new Date(from);
-      if (to) {
-        const toDate = new Date(to);
-        toDate.setHours(23, 59, 59, 999);
-        fechaWhere.lte = toDate;
-      }
+      if (from) fechaWhere.gte = startOfDayLocal(from);
+      if (to) fechaWhere.lte = endOfDayLocal(to);
       where["fecha"] = fechaWhere;
     }
 

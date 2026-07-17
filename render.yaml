@@ -26,3 +26,7 @@ services:
         sync: false
       - key: CLERK_SECRET_KEY
         sync: false
+      - key: ARCA_ENCRYPTION_KEY
+        sync: false
+      - key: AFIP_SDK_API_KEY
+        sync: false

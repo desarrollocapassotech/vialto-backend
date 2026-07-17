@@ -59,6 +59,11 @@ export type OwnerDashboardResponse = {
       montosPorMoneda: { ARS: number; USD: number };
       items: Array<{ id: string; numero: string }>;
     };
+    /** Cargas de combustible marcadas `sospechoso` (snapshot actual, no filtrado por período). */
+    cargasSospechosas?: {
+      cantidad: number;
+      montoTotal: number;
+    };
   } | null;
   viajes?: {
     enCurso: MetricCompare;
@@ -170,6 +175,7 @@ export class DashboardService {
     const hasViajes = mod.has('viajes');
     const hasFacturacion = mod.has('facturacion') || hasViajes;
     const hasStock = mod.has('stock');
+    const hasCombustible = mod.has('combustible');
 
     const resolved = resolveDashboardPeriod(periodKind, from, to);
     const meta = this.periodMeta(resolved);
@@ -183,7 +189,7 @@ export class DashboardService {
 
     const out: OwnerDashboardResponse = { period: meta };
 
-    const [financieroResult, viajesResult, stockResult] = await Promise.all([
+    const [financieroResult, viajesResult, stockResult, cargasSospechosasResult] = await Promise.all([
       hasFacturacion
         ? Promise.all([
             this.sumFacturadoClienteSnapshot(tenantId),                                 // 0
@@ -216,6 +222,9 @@ export class DashboardService {
           ])
         : null,
       hasStock ? this.getStockResumen(tenantId, resolved.start, resolved.end) : null,
+      hasCombustible
+        ? this.buildCargasSospechosasAlerta(tenantId, resolved.start, resolved.end)
+        : null,
     ]);
 
     if (financieroResult) {
@@ -270,6 +279,20 @@ export class DashboardService {
       };
       const hasAlertas = alertas.facturasVencidas.cantidad > 0 || alertas.viajesSinFactura.cantidad > 0;
       out.alertas = hasAlertas ? alertas : null;
+    }
+
+    if (cargasSospechosasResult && cargasSospechosasResult.cantidad > 0) {
+      const EMPTY_BLOQUE = {
+        cantidad: 0,
+        montoTotal: 0,
+        montosPorMoneda: { ARS: 0, USD: 0 },
+        items: [] as Array<{ id: string; numero: string }>,
+      };
+      out.alertas = {
+        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE,
+        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE,
+        cargasSospechosas: cargasSospechosasResult,
+      };
     }
 
     if (viajesResult) {
@@ -660,6 +683,31 @@ export class DashboardService {
         },
         items: itemsSinFactura,
       },
+    };
+  }
+
+  /**
+   * Cargas de combustible marcadas `sospechoso` con `fecha` dentro del período elegido
+   * en el dashboard. El límite superior nunca pasa de "ahora": el selector de período
+   * (ej. "mes") cubre el mes calendario completo, pero una carga con fecha futura (dato
+   * de prueba o error de tipeo) no es algo para "revisar ahora" — y así queda consistente
+   * con el filtro de la pestaña Alertas de Combustible, que tampoco mira más allá de hoy.
+   */
+  private async buildCargasSospechosasAlerta(
+    tenantId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ cantidad: number; montoTotal: number }> {
+    const now = new Date();
+    const cappedEnd = end > now ? now : end;
+    const agg = await this.prisma.cargaCombustible.aggregate({
+      where: { tenantId, sospechoso: true, fecha: { gte: start, lt: cappedEnd } },
+      _count: { _all: true },
+      _sum: { importe: true },
+    });
+    return {
+      cantidad: agg._count._all,
+      montoTotal: roundMoney(agg._sum.importe ?? 0),
     };
   }
 

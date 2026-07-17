@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import Afip = require('@afipsdk/afip.js');
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { decryptField } from '../../shared/util/arca-crypto';
 import {
   ArcaAmbiente,
   ArcaAutorizarRequest,
@@ -7,13 +9,10 @@ import {
   ArcaErrorCode,
   ArcaException,
   ArcaLastVoucherResponse,
-  ArcaTokenResponse,
   ARCA_ERROR_CODES,
 } from './types/arca.types';
 import { extractAfipRejectionMessage, formatAfipRejectionForUser } from './arca-error.util';
 import { round2 } from './arca-iva.util';
-
-const AFIP_SDK_BASE = 'https://app.afipsdk.com/api/v1';
 
 /** AFIP SDK usa "dev"/"prod", no "homologacion"/"produccion" */
 function toSdkEnv(ambiente: ArcaAmbiente): 'dev' | 'prod' {
@@ -25,26 +24,18 @@ function normalizeCuit(cuit: string): string {
   return cuit.replace(/[-\s]/g, '');
 }
 
-interface CachedToken {
-  token: string;
-  sign: string;
-  expiresAt: Date;
-}
-
 /**
- * Abstracción sobre la API REST de AFIP SDK (afipsdk.com).
+ * Abstracción sobre el SDK oficial de AFIP (afipsdk.com).
  * Si en el futuro se cambia de proveedor, solo hay que reescribir este servicio.
  * Todas las operaciones WSFEv1 pasan por aquí:
- *  - Obtención y caché del Access Ticket (TA)
+ *  - Autenticación WSAA delegada al SDK
+ *  - Generación, firma y obtención del token/sign delegada al SDK
  *  - Último número autorizado por punto de venta + tipo de comprobante
  *  - Autorización de comprobante (FECAESolicitar) → CAE
  */
 @Injectable()
 export class ArcaClientService {
   private readonly logger = new Logger(ArcaClientService.name);
-
-  // Caché en memoria: "<cuit>_<wsid>_<ambiente>" → token
-  private readonly tokenCache = new Map<string, CachedToken>();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -63,7 +54,7 @@ export class ArcaClientService {
     keyPem?: string | null,
   ): Promise<ArcaLastVoucherResponse> {
     const cuitNorm = normalizeCuit(cuit);
-    const { token, sign } = await this.getToken(apiKey, cuitNorm, ambiente, certPem, keyPem);
+    const { token, sign, afip } = await this.getAfipClientAndToken(apiKey, cuitNorm, ambiente, certPem, keyPem);
 
     const params = {
       Auth: { Token: token, Sign: sign, Cuit: cuitNorm },
@@ -72,8 +63,7 @@ export class ArcaClientService {
     };
 
     const response = await this.callAfipSdk(
-      apiKey,
-      ambiente,
+      afip,
       'wsfe',
       'FECompUltimoAutorizado',
       params,
@@ -81,6 +71,7 @@ export class ArcaClientService {
       tenantId,
       liquidacionId,
       facturaId,
+      ambiente,
     );
 
     const result = (response?.FECompUltimoAutorizadoResult ?? response) as Record<string, unknown>;
@@ -97,7 +88,7 @@ export class ArcaClientService {
     keyPem?: string | null,
   ): Promise<ArcaAutorizarResponse> {
     const cuitNorm = normalizeCuit(req.cuit);
-    const { token, sign } = await this.getToken(apiKey, cuitNorm, req.ambiente, certPem, keyPem);
+    const { token, sign, afip } = await this.getAfipClientAndToken(apiKey, cuitNorm, req.ambiente, certPem, keyPem);
 
     const params = {
       Auth: { Token: token, Sign: sign, Cuit: cuitNorm },
@@ -141,8 +132,7 @@ export class ArcaClientService {
     };
 
     const response = await this.callAfipSdk(
-      apiKey,
-      req.ambiente,
+      afip,
       'wsfe',
       'FECAESolicitar',
       params,
@@ -150,6 +140,7 @@ export class ArcaClientService {
       tenantId,
       liquidacionId,
       facturaId,
+      req.ambiente,
     );
 
     // AFIP SDK devuelve la respuesta anidada bajo FECAESolicitarResult
@@ -191,67 +182,57 @@ export class ArcaClientService {
 
   // ── Privado: token y request base ──────────────────────────────────────────
 
-  private async getToken(
+  private async getAfipClientAndToken(
     apiKey: string,
-    cuit: string,
+    cuitNorm: string,
     ambiente: ArcaAmbiente,
     certPem?: string | null,
     keyPem?: string | null,
-  ): Promise<{ token: string; sign: string }> {
-    const cuitNorm = normalizeCuit(cuit);
-    const cacheKey = `${cuitNorm}_wsfe_${ambiente}`;
-    const cached = this.tokenCache.get(cacheKey);
-
-    if (cached && cached.expiresAt > new Date()) {
-      return { token: cached.token, sign: cached.sign };
-    }
-
-    const start = Date.now();
-    let httpStatus: number | undefined;
-
-    const sdkEnv = toSdkEnv(ambiente);
+  ): Promise<{ token: string; sign: string; afip: Afip }> {
     const certKey: Record<string, string> = {};
-    if (certPem) certKey.cert = certPem;
-    if (keyPem) certKey.key = keyPem;
 
     try {
-      const res = await fetch(`${AFIP_SDK_BASE}/afip/auth`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({ environment: sdkEnv, tax_id: cuitNorm, wsid: 'wsfe', ...certKey }),
+      if (certPem) {
+        const dec = decryptField(certPem);
+        if (dec) certKey.cert = dec;
+      }
+      if (keyPem) {
+        const dec = decryptField(keyPem);
+        if (dec) certKey.key = dec;
+      }
+    } catch (decErr) {
+      this.logger.error(`Error de descifrado de certificados para CUIT ${cuitNorm}: ${decErr.message}`);
+      throw new ArcaException(
+        ARCA_ERROR_CODES.GENERICO,
+        'Fallo de credenciales ARCA: Los certificados o llaves configurados no se pudieron descifrar correctamente. Por favor, vuelva a cargarlos en la configuración.',
+        undefined,
+        decErr
+      );
+    }
+
+    try {
+      const afip = new Afip({
+        CUIT: cuitNorm,
+        access_token: apiKey,
+        production: ambiente === 'produccion',
+        ...certKey,
       });
 
-      httpStatus = res.status;
-      const body = await res.json() as ArcaTokenResponse & { error?: string; message?: string };
+      const ws = afip.WebService('wsfe');
+      const ta = await ws.getTokenAuthorization();
 
-      if (!res.ok || !body.token) {
-        const bodyStr = JSON.stringify(body);
-        this.logger.error(`AFIP SDK auth HTTP ${res.status} | cuit=${cuitNorm} env=${sdkEnv} | body=${bodyStr}`);
-        const errDetail = body?.error ?? body?.message ?? bodyStr;
-        throw this.mapError(errDetail, res.status);
-      }
-
-      const expiresAt = new Date(body.expiration);
-      // Resta 5 minutos para renovar antes del vencimiento real
-      expiresAt.setMinutes(expiresAt.getMinutes() - 5);
-
-      this.tokenCache.set(cacheKey, { token: body.token, sign: body.sign, expiresAt });
-      this.logger.debug(`Token AFIP SDK obtenido para CUIT ${cuit} [${ambiente}]`);
-
-      return { token: body.token, sign: body.sign };
+      this.logger.debug(`Token/Sign AFIP SDK obtenido exitosamente para CUIT ${cuitNorm} [${ambiente}]`);
+      return { token: ta.token, sign: ta.sign, afip };
     } catch (err) {
-      if (err instanceof ArcaException) throw err;
-      this.logger.error(`Error obteniendo token AFIP SDK: ${String(err)}`);
-      throw new ArcaException(ARCA_ERROR_CODES.CONECTIVIDAD, 'No se pudo conectar con AFIP SDK', httpStatus, err);
+      const errMsg = String(err?.message ?? err);
+      const httpStatus = (err as any)?.status || (err as any)?.statusCode;
+      this.logger.error(`Error obteniendo token AFIP SDK: ${errMsg}`);
+      throw this.mapError(err, httpStatus);
     }
   }
 
   private async callAfipSdk(
-    apiKey: string,
-    ambiente: ArcaAmbiente,
+    afip: Afip,
     wsid: string,
     method: string,
     params: Record<string, unknown>,
@@ -259,6 +240,7 @@ export class ArcaClientService {
     tenantId: string,
     liquidacionId?: string,
     facturaId?: string,
+    ambiente?: ArcaAmbiente,
   ): Promise<Record<string, unknown>> {
     const requestBody = { environment: toSdkEnv(ambiente), method, wsid, params };
     const start = Date.now();
@@ -268,33 +250,15 @@ export class ArcaClientService {
     let errorMsg: string | undefined;
 
     try {
-      const res = await fetch(`${AFIP_SDK_BASE}/afip/requests`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      httpStatus = res.status;
-      responseBody = await res.json();
-      const body = responseBody as Record<string, unknown>;
-
-      if (!res.ok) {
-        const errMsg = this.extractErrorMessage(body, res.status);
-        throw this.mapError(errMsg, res.status);
-      }
-
+      const ws = afip.WebService(wsid);
+      const body = await ws.executeRequest(method, params);
+      responseBody = body;
       exitoso = true;
       return body;
     } catch (err) {
-      if (!(err instanceof ArcaException)) {
-        errorMsg = String(err);
-        throw new ArcaException(ARCA_ERROR_CODES.CONECTIVIDAD, 'Sin respuesta de AFIP SDK', httpStatus, err);
-      }
-      errorMsg = err.message;
-      throw err;
+      errorMsg = String(err?.message ?? err);
+      httpStatus = (err as any)?.status || (err as any)?.statusCode;
+      throw this.mapError(err, httpStatus);
     } finally {
       // Log de auditoría — nunca se registra la apiKey
       const safeRequest = { ...requestBody, cuit: normalizeCuit(cuit) };
@@ -321,25 +285,53 @@ export class ArcaClientService {
     }
   }
 
-  private extractErrorMessage(body: Record<string, unknown>, status: number): string {
-    // AFIP SDK puede devolver data_errors con mensajes por campo
-    if (typeof body?.data_errors === 'object' && body.data_errors !== null) {
-      const msgs = Object.values(body.data_errors as Record<string, unknown>)
-        .filter((v): v is string => typeof v === 'string');
-      if (msgs.length > 0) return msgs.join('. ');
-    }
-    const candidates = [body?.details, body?.description, body?.message, body?.error];
-    for (const c of candidates) {
-      if (typeof c === 'string' && c && !c.match(/^HTTP \d+$/i)) return c;
-    }
-    for (const c of candidates) {
-      if (typeof c === 'string' && c) return c;
-    }
-    return `HTTP ${status}`;
-  }
+  private mapError(raw: any, httpStatus?: number): ArcaException {
+    let errCode: number | undefined;
+    let rawStr = '';
 
-  private mapError(raw: string, httpStatus?: number): ArcaException {
-    const lower = raw.toLowerCase();
+    if (typeof raw === 'object' && raw !== null) {
+      errCode = raw.code; // El SDK usa la propiedad 'code' en minúscula (instancia de AfipWebServiceError)
+      rawStr = raw.message || String(raw);
+    } else {
+      rawStr = String(raw);
+    }
+
+    if (errCode) {
+      const codeNum = Number(errCode);
+      switch (codeNum) {
+        // Códigos oficiales de AFIP / ARCA (Manual de desarrollador WSFEv1):
+        // 600: Error de validación de firma o token (WSAA/mismatch de CUIT).
+        case 600:
+          return new ArcaException(
+            ARCA_ERROR_CODES.CUIT_INVALIDO,
+            'Error de validación de token (Error 600): El CUIT informado no corresponde con el certificado o el token es inválido.',
+            httpStatus,
+            raw,
+          );
+        // 10007: Punto de venta inválido.
+        // 10008: Número de comprobante desde/hasta inválido.
+        // 10016: El número o fecha del comprobante no corresponde al próximo a autorizar.
+        case 10007:
+        case 10008:
+        case 10016:
+          return new ArcaException(
+            ARCA_ERROR_CODES.FUERA_DE_RANGO,
+            `El número o fecha de comprobante no corresponde al rango o al próximo a autorizar (Error ${codeNum}).`,
+            httpStatus,
+            raw,
+          );
+        // 10015: Comprobante ya registrado/autorizado anteriormente (duplicado).
+        case 10015:
+          return new ArcaException(
+            ARCA_ERROR_CODES.COMPROBANTE_DUPLICADO,
+            'El comprobante ya fue autorizado anteriormente en AFIP / ARCA (Error 10015).',
+            httpStatus,
+            raw,
+          );
+      }
+    }
+
+    const lower = rawStr.toLowerCase();
     if (lower.includes('cuit') && lower.includes('inváli')) {
       return new ArcaException(ARCA_ERROR_CODES.CUIT_INVALIDO, 'El CUIT informado es inválido.', httpStatus, raw);
     }
@@ -375,6 +367,6 @@ export class ArcaClientService {
         raw,
       );
     }
-    return new ArcaException(ARCA_ERROR_CODES.GENERICO, raw, httpStatus, raw);
+    return new ArcaException(ARCA_ERROR_CODES.GENERICO, rawStr, httpStatus, raw);
   }
 }

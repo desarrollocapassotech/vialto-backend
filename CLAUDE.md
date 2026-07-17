@@ -706,6 +706,10 @@ CLOUDINARY_API_SECRET=
 PORT=8080
 NODE_ENV=production
 
+# Módulo liquidaciones-arca (NyM Logística) — fail-fast si falta en runtime
+ARCA_ENCRYPTION_KEY=              # clave AES-256 (hex 64 chars) para cifrar cert/key/credenciales AFIP en DB
+AFIP_SDK_API_KEY=                 # token de AfipSDK (afipsdk.com)
+
 # Futuro — Stripe para billing
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=

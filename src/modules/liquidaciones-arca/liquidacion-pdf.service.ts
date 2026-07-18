@@ -18,8 +18,6 @@ const TIPO_CBTE_LABEL: Record<number, string> = {
   1: 'A',
   6: 'B',
   11: 'C',
-  60: 'COD. 060',
-  61: 'COD. 061',
 };
 
 // ── Helpers numéricos ─────────────────────────────────────────────────────────
@@ -207,8 +205,7 @@ export class LiquidacionPdfService {
       ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ?? config.condicionIvaEmisor)
       : '';
     doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(config?.domicilioEmisor ?? '', M + 6, y + 22, { width: 148 });
-    doc.fontSize(7).font('Helvetica').fillColor('#333')
+      .text(config?.domicilioEmisor ?? '', M + 6, y + 22, { width: 148 })
       .text(condEmisorLabel, M + 6, y + 42, { width: 148 });
     doc.fontSize(7).font('Helvetica').fillColor('#555')
       .text(`CUIT: ${config?.cuitEmisor ?? ''}`, M + 6, y + 54, { width: 148 })
@@ -216,17 +213,25 @@ export class LiquidacionPdfService {
       .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, M + 6, y + 74, { width: 148 });
 
     // Col 2: letra + tipo
-    const tipoStr = TIPO_CBTE_LABEL[liq.cbteTipo] ?? String(liq.cbteTipo);
     const isLetter = liq.cbteTipo === 1 || liq.cbteTipo === 6 || liq.cbteTipo === 11;
+    const isCvlp = liq.cbteTipo === 60 || liq.cbteTipo === 61;
+    
     if (isLetter) {
+      const tipoStr = TIPO_CBTE_LABEL[liq.cbteTipo] ?? String(liq.cbteTipo);
       doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
       doc.fontSize(36).font('Helvetica-Bold').fillColor('#000')
         .text(tipoStr, c1x + 4, y + 14, { width: 60, align: 'center' });
-    }
-    const codLabel = liq.cbteTipo === 60 ? 'COD. 060' : liq.cbteTipo === 61 ? 'COD. 061' : '';
-    if (codLabel) {
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#000')
-        .text(codLabel, c1x + 4, y + 36, { width: 60, align: 'center' });
+        
+      const codLabel = `COD. ${String(liq.cbteTipo).padStart(3, '0')}`;
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
+        .text(codLabel, c1x + 4, y + 72, { width: 60, align: 'center' });
+    } else if (isCvlp) {
+      // Diseño especial para CVLP: "COD." arriba y el número grande abajo adentro del recuadro
+      doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#000')
+        .text('COD.', c1x + 4, y + 16, { width: 60, align: 'center' });
+      doc.fontSize(28).font('Helvetica-Bold').fillColor('#000')
+        .text(String(liq.cbteTipo).padStart(3, '0'), c1x + 4, y + 32, { width: 60, align: 'center' });
     }
 
     // Col 3: título + datos

@@ -18,7 +18,7 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
-import { parseNumeroFactura } from './arca.util';
+import { getCbteTipoCvlp, parseNumeroFactura } from './arca.util';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
@@ -67,17 +67,13 @@ export class LiquidacionesService {
     const config = await this.arcaConfig.findPublic(tenantId);
 
     // Obtener el transportista y su comisionPct
-    const transportistaRaw = await this.prisma.transportista.findUnique({
-      where: { id: dto.transportistaId },
+    const transportista = await (this.prisma as PrismaAny).transportista.findFirst({
+      where: { id: dto.transportistaId, tenantId },
+      select: { id: true, condicionIva: true, comisionPct: true },
     });
-    if (!transportistaRaw || transportistaRaw.tenantId !== tenantId) {
+    if (!transportista) {
       throw new NotFoundException('Transportista no encontrado');
     }
-    // condicionIva y comisionPct son campos del schema pendientes de prisma generate
-    const transportista = transportistaRaw as typeof transportistaRaw & {
-      condicionIva: number | null;
-      comisionPct: number | null;
-    };
 
     // Determinar el % de comisión: dto > transportista > config default > 0
     const comisionPct = dto.comisionPct ?? transportista.comisionPct ?? config?.comisionPctDefault ?? 0;
@@ -150,7 +146,7 @@ export class LiquidacionesService {
 
     let liquidacion;
     try {
-      liquidacion = await this.db.liquidacion.create({
+      liquidacion = await this.prisma.liquidacion.create({
         data: {
           tenantId,
           transportistaId: dto.transportistaId,
@@ -164,7 +160,7 @@ export class LiquidacionesService {
           gastosAdminIva,
           liquido,
           estado: 'borrador',
-          cbteTipo: 60,
+          cbteTipo: getCbteTipoCvlp(transportista.condicionIva),
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
           createdBy: userId,
@@ -204,7 +200,7 @@ export class LiquidacionesService {
     id: string,
     dto: UpdateLiquidacionDto,
   ) {
-    const liq = await this.db.liquidacion.findUnique({ where: { id } });
+    const liq = await this.prisma.liquidacion.findUnique({ where: { id } });
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
@@ -268,7 +264,7 @@ export class LiquidacionesService {
       data.liquido = montos.liquido;
     }
 
-    await this.db.liquidacion.update({ where: { id }, data });
+    await this.prisma.liquidacion.update({ where: { id }, data });
     return this.findById(tenantId, id);
   }
 
@@ -281,9 +277,12 @@ export class LiquidacionesService {
    * pasa a `error` con el motivo guardado en `arcaError` (HTTP 422).
    */
   async emitirLiquidacion(tenantId: string, liquidacionId: string) {
-    const liquidacion = await this.db.liquidacion.findUnique({
+    const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
-      include: { viajes: { include: { viaje: true } } },
+      include: { 
+        viajes: { include: { viaje: true } },
+        transportista: { select: { idFiscal: true, condicionIva: true } }
+      },
     });
 
     if (!liquidacion || liquidacion.tenantId !== tenantId) {
@@ -299,6 +298,11 @@ export class LiquidacionesService {
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
 
+    // Re-evaluamos el cbteTipo dinámicamente para dar retrocompatibilidad a borradores
+    // históricos que hayan quedado con el default(60) siendo monotributistas.
+    // Lanza BadRequestException si falta el dato, logrando el fail-fast antes de tocar la BD.
+    const cbteTipoFinal = getCbteTipoCvlp(liquidacion.transportista?.condicionIva);
+
     // Idempotencia: si el payload no cambió y hay un hash previo, no re-emitir
     const payloadHash = this.buildPayloadHash(liquidacion.id, liquidacion.liquido, config.ambiente);
     if (liquidacion.estado === 'pendiente_cae' && liquidacion.payloadHash === payloadHash) {
@@ -308,7 +312,7 @@ export class LiquidacionesService {
     }
 
     // Marcar como pendiente antes de llamar a AFIP SDK
-    const { count: lockCount } = await this.db.liquidacion.updateMany({
+    const { count: lockCount } = await this.prisma.liquidacion.updateMany({
       where: {
         id: liquidacionId,
         tenantId,
@@ -332,18 +336,13 @@ export class LiquidacionesService {
     }
 
     try {
-      const transportista = await (this.prisma as PrismaAny).transportista.findUnique({
-        where: { id: liquidacion.transportistaId },
-        select: { idFiscal: true, condicionIva: true },
-      });
-
       // Obtener el próximo número de comprobante
       const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
         config.apiKey,
         config.cuitEmisor,
         config.ambiente as 'homologacion' | 'produccion',
         config.ptoVentaCvlp,
-        60,
+        cbteTipoFinal,
         tenantId,
         liquidacionId,
         undefined,
@@ -356,9 +355,9 @@ export class LiquidacionesService {
       this.validarCorrelatividad(liquidacion.cbteNro, cbteNro, 'Liquidación');
 
       const fechaCbte = formatFechaCbte(new Date());
-      const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
+      const docNro = liquidacion.transportista?.idFiscal ? Number(liquidacion.transportista.idFiscal.replace(/-/g, '')) : 0;
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
-      const condicionIvaReceptorId = transportista?.condicionIva ?? 1;
+      const condicionIvaReceptorId = liquidacion.transportista?.condicionIva ?? 1;
 
       // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
       const ivaPct = config?.ivaGastosAdmin ?? 21;
@@ -371,7 +370,7 @@ export class LiquidacionesService {
           token: '',
           sign: '',
           ptoVenta: config.ptoVentaCvlp,
-          cbteTipo: 60,
+          cbteTipo: cbteTipoFinal,
           cbteNro,
           fechaCbte,
           concepto: 1,
@@ -391,10 +390,11 @@ export class LiquidacionesService {
       );
 
       // AFIP autorizó: guardar CAE, fecha de vencimiento y pasar a autorizado.
-      await this.db.liquidacion.updateMany({
+      await this.prisma.liquidacion.updateMany({
         where: { id: liquidacionId, tenantId },
         data: {
           estado: 'autorizado',
+          cbteTipo: cbteTipoFinal, // Actualizamos por si era un borrador viejo
           cbteNro,
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
@@ -419,7 +419,7 @@ export class LiquidacionesService {
 
       // Persistir el nuevo estado antes de responder al caller.
       // Conectividad (timeout/red) → pendiente_cae. Rechazo de AFIP → error.
-      await this.db.liquidacion.updateMany({
+      await this.prisma.liquidacion.updateMany({
         where: { id: liquidacionId, tenantId },
         data: {
           estado: isConectividad ? 'pendiente_cae' : 'error',
@@ -441,7 +441,7 @@ export class LiquidacionesService {
   }
 
   async anularLiquidacion(tenantId: string, liquidacionId: string) {
-    const liquidacion = await this.db.liquidacion.findUnique({
+    const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
     });
     if (!liquidacion || liquidacion.tenantId !== tenantId) {
@@ -466,7 +466,7 @@ export class LiquidacionesService {
       config.cuitEmisor,
       config.ambiente as 'homologacion' | 'produccion',
       config.ptoVentaCvlp,
-      60,
+      liquidacion.cbteTipo,
       tenantId,
       liquidacionId,
       undefined,
@@ -488,7 +488,7 @@ export class LiquidacionesService {
         token: '',
         sign: '',
         ptoVenta: config.ptoVentaCvlp,
-        cbteTipo: 60,
+        cbteTipo: liquidacion.cbteTipo,
         cbteNro,
         fechaCbte: formatFechaCbte(new Date()),
         concepto: 1,
@@ -513,7 +513,7 @@ export class LiquidacionesService {
       config.keyPem,
     );
 
-    await this.db.liquidacion.update({
+    await this.prisma.liquidacion.update({
       where: { id: liquidacionId },
       data: { estado: 'anulado', updatedAt: new Date() },
     });
@@ -530,7 +530,7 @@ export class LiquidacionesService {
   }
 
   async deleteLiquidacion(tenantId: string, id: string) {
-    const liq = await this.db.liquidacion.findUnique({
+    const liq = await this.prisma.liquidacion.findUnique({
       where: { id },
       select: {
         tenantId: true,
@@ -547,15 +547,15 @@ export class LiquidacionesService {
       );
     }
     const viajeIds = liq.viajes.map((v) => v.viajeId);
-    await this.db.liquidacionViaje.deleteMany({ where: { liquidacionId: id } });
-    await this.db.liquidacion.delete({ where: { id } });
+    await this.prisma.liquidacionViaje.deleteMany({ where: { liquidacionId: id } });
+    await this.prisma.liquidacion.delete({ where: { id } });
     for (const viajeId of viajeIds) {
       await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
     }
   }
 
   async findAll(tenantId: string, estado?: string) {
-    return this.db.liquidacion.findMany({
+    return this.prisma.liquidacion.findMany({
       where: { tenantId, ...(estado ? { estado } : {}) },
       include: {
         transportista: { select: { id: true, nombre: true, idFiscal: true } },
@@ -566,7 +566,7 @@ export class LiquidacionesService {
   }
 
   async findById(tenantId: string, id: string) {
-    const liq = await this.db.liquidacion.findUnique({
+    const liq = await this.prisma.liquidacion.findUnique({
       where: { id },
       include: {
         transportista: {
@@ -763,7 +763,7 @@ export class LiquidacionesService {
     viajes: Array<{ id: string; numero: string | null }>,
   ): Promise<void> {
     const viajeIds = viajes.map((v) => v.id);
-    const existentes = await this.db.liquidacionViaje.findMany({
+    const existentes = await this.prisma.liquidacionViaje.findMany({
       where: {
         tenantId,
         viajeId: { in: viajeIds },

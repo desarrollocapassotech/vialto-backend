@@ -143,6 +143,13 @@ export class LiquidacionesService {
     const gastosAdmin = 0;
     const gastosAdminIva = montos.impIva;
     const liquido = montos.liquido;
+    // CVLP: RI → 60 (A), resto → 61 (B). Override opcional desde el DTO.
+    const cbteTipo =
+      dto.cbteTipo === 60 || dto.cbteTipo === 61
+        ? dto.cbteTipo
+        : transportista.condicionIva === 1
+          ? 60
+          : 61;
 
     let liquidacion;
     try {
@@ -336,6 +343,7 @@ export class LiquidacionesService {
     }
 
     try {
+
       // Obtener el próximo número de comprobante
       const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
         config.apiKey,
@@ -527,6 +535,18 @@ export class LiquidacionesService {
 
   async upsertConfig(tenantId: string, dto: import('./dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
     return this.arcaConfig.upsert(tenantId, dto);
+  }
+
+  async uploadLogo(tenantId: string, file: Express.Multer.File) {
+    const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(file.originalname);
+    if (!isImage) {
+      throw new BadRequestException('El logo debe ser una imagen JPG, PNG o WEBP.');
+    }
+    return this.arcaConfig.uploadLogo(tenantId, file.buffer, file.originalname, file.mimetype);
+  }
+
+  async removeLogo(tenantId: string) {
+    return this.arcaConfig.removeLogo(tenantId);
   }
 
   async deleteLiquidacion(tenantId: string, id: string) {

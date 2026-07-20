@@ -22,7 +22,7 @@ export interface ArcaAutorizarRequest {
   token: string;
   sign: string;
   ptoVenta: number;
-  cbteTipo: number;   // 1=Factura A, 6=Factura B, 60=CVLP
+  cbteTipo: number;   // 1=Factura A, 6=Factura B, 60=CVLP A, 61=CVLP B
   cbteNro: number;
   fechaCbte: string;  // yyyymmdd
   concepto: number;   // 1=Productos, 2=Servicios, 3=Ambos

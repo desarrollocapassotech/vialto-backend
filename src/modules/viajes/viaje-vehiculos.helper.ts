@@ -135,7 +135,7 @@ export function idsProductosDelViaje(v: {
 export const viajeConVehiculosViajeArgs =
   Prisma.validator<Prisma.ViajeDefaultArgs>()({
     include: {
-      cliente: { select: { id: true, nombre: true } },
+      cliente: { select: { id: true, nombre: true, condicionIva: true } },
       chofer: {
         select: {
           id: true,
@@ -146,7 +146,9 @@ export const viajeConVehiculosViajeArgs =
           transportistaId: true,
         },
       },
-      transportista: { select: { id: true, nombre: true } },
+      transportista: {
+        select: { id: true, nombre: true, condicionIva: true },
+      },
       transportistaEfectivo: { select: { id: true, nombre: true } },
       /** Número de factura en maestro (respaldo si `nroFactura` en viaje quedó vacío). */
       factura: { select: { id: true, numero: true } },

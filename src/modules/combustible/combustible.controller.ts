@@ -35,6 +35,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Listar cargas de combustible · Fase 4 — aún no activo' })
   @Get()
+  @Roles('admin', 'member', 'superadmin')
   findAll(
     @CurrentAuth() auth: AuthPayload,
     @Query('vehiculoId') vehiculoId?: string,
@@ -62,6 +63,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Estaciones distintas entre las cargas existentes, para el filtro del listado' })
   @Get('estaciones')
+  @Roles('admin', 'member', 'superadmin')
   getEstaciones(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getEstaciones(auth);
@@ -91,8 +93,33 @@ export class CombustibleController {
     return this.service.getCargasParaExport(auth, from, to);
   }
 
+  @ApiOperation({ summary: 'Obtener límites de kilometraje para validación en tiempo real en frontend' })
+  @Get('limites-km')
+  @Roles('admin', 'superadmin', 'member')
+  async getLimitesKm(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('vehiculoId') vehiculoId: string,
+    @Query('fecha') fecha: string,
+    @Query('excludeId') excludeId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    if (!vehiculoId || !fecha) {
+      throw new BadRequestException('vehiculoId y fecha son requeridos');
+    }
+    const d = new Date(fecha);
+    if (isNaN(d.getTime())) {
+      throw new BadRequestException('Fecha inválida');
+    }
+    const bounds = await this.service.getLimitesKm(auth.tenantId, vehiculoId, d, excludeId);
+    return {
+      prev: bounds.prev ? { km: bounds.prev.km, fecha: bounds.prev.fecha.toISOString() } : null,
+      next: bounds.next ? { km: bounds.next.km, fecha: bounds.next.fecha.toISOString() } : null,
+    };
+  }
+
   @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })
   @Get(':id')
+  @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findOne(id, auth);
@@ -100,6 +127,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Registrar carga de combustible · Fase 4 — aún no activo' })
   @Post()
+  @Roles('admin', 'superadmin')
   create(@Body() dto: CreateCargaDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(dto, auth);
@@ -107,6 +135,7 @@ export class CombustibleController {
 
   @ApiOperation({ summary: 'Actualizar carga de combustible · Fase 4 — aún no activo' })
   @Patch(':id')
+  @Roles('admin', 'superadmin')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateCargaDto,
@@ -136,6 +165,7 @@ export class CombustibleController {
     },
   })
   @Post('fotos')
+  @Roles('admin', 'superadmin')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),

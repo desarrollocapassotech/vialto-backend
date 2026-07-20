@@ -28,6 +28,14 @@ Sección en el frontend: **Superadmin → Configuración por empresa**
 en `tenant_field_configs` para un campo, ese campo está visible por
 default. Esto evita tener que seedear todos los campos para cada tenant.
 
+**Atajo en el panel de superadmin:** al togglear un campo, hay un
+checkbox "Aplicar cambios a todos los formularios del módulo (alta,
+edición y detalle)". Si está marcado *antes* de togglear, el cambio se
+replica de una sola vez a los 3 formularios del módulo (ej. ocultar
+"Otros gastos" en alta, edición y detalle al mismo tiempo). Si no está
+marcado, el toggle solo afecta al formulario que se esté viendo en ese
+momento.
+
 ---
 
 ## Cómo agregar un campo nuevo a un formulario existente
@@ -102,39 +110,36 @@ Ej: se suma configurabilidad al módulo Facturación.
 
 ## Cómo consumir la config en un formulario de negocio
 
-El frontend real (el que usa el usuario de Riedel/LSF, no el superadmin)
-consulta:
+El frontend real (usuario a nivel negocio, no el superadmin)
+usa el hook `useFieldConfig(modulo)` (`src/hooks/useFieldConfig.ts`). Este
+hook hace el fetch a:
 
 ```
 GET /api/field-config/:modulo
 ```
 
 (requiere estar logueado; el tenant se toma del JWT, no hace falta
-pasarlo). Devuelve algo como:
-
-```json
-{
-  "alta_viaje": {
-    "clienteId": true,
-    "otrosGastos": false,
-    "gananciaBrutaManual": false
-  }
-}
-```
-
-En el componente, se usa para condicionar el render:
+pasarlo) y expone una función `isVisible(formulario, campo)`:
 
 ```tsx
-{config?.alta_viaje?.otrosGastos !== false && (
+import { useFieldConfig } from "@/hooks/useFieldConfig";
+
+const { isVisible } = useFieldConfig("viajes");
+
+{isVisible("alta_viaje", "otrosGastos") && (
   <OtrosGastosFieldset ... />
 )}
 ```
 
-Importante: el backend de negocio (endpoints de `POST /viajes`, etc.)
-**sigue aceptando el campo aunque esté oculto** — no se agrega
-validación de "requerido" a nivel API por un campo oculto, solo se deja
-de pedir desde el frontend. Esto evita romper integraciones o
-importaciones que sigan mandando ese campo.
+`isVisible` devuelve `true` por default mientras la config todavía está
+cargando o si el campo no aparece en la respuesta — así el formulario
+nunca queda roto por un fetch lento o fallido; en el peor caso, se
+muestra un campo de más, nunca se rompe la pantalla.
+
+Los campos marcados `obligatorioSistema: true` en el catálogo **no se
+envuelven** con `isVisible` — siempre se muestran, sin excepción, ya que
+no se pueden ocultar desde el panel (hay validación en el backend que lo
+impide).
 
 ---
 

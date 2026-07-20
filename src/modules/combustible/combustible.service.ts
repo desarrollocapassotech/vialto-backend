@@ -125,11 +125,10 @@ export class CombustibleService {
     }
   }
 
-  private async assertKmNoRetroceso(
+  async getLimitesKm(
     tenantId: string,
     vehiculoId: string,
     fecha: Date,
-    km: number,
     excludeId?: string,
   ) {
     // 1. Validar límite inferior: Carga inmediatamente ANTERIOR a la fecha indicada
@@ -140,9 +139,33 @@ export class CombustibleService {
         fecha: { lte: fecha }, // 'lte' incluye cargas registradas en el mismo día exacto
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
       select: { km: true, fecha: true },
     });
+
+    // 2. Validar límite superior: Carga inmediatamente POSTERIOR a la fecha indicada (vital para cargas retroactivas)
+    const next = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        fecha: { gte: fecha },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ fecha: "asc" }, { createdAt: "asc" }],
+      select: { km: true, fecha: true },
+    });
+
+    return { prev, next };
+  }
+
+  private async assertKmNoRetroceso(
+    tenantId: string,
+    vehiculoId: string,
+    fecha: Date,
+    km: number,
+    excludeId?: string,
+  ) {
+    const { prev, next } = await this.getLimitesKm(tenantId, vehiculoId, fecha, excludeId);
 
     if (prev && km < prev.km) {
       const fechaFmt = new Intl.DateTimeFormat("es-AR", {
@@ -155,18 +178,6 @@ export class CombustibleService {
         `El kilometraje ingresado (${km} km) es inconsistente: no puede ser inferior al de la carga anterior registrada el ${fechaFmt} (${prev.km} km).`,
       );
     }
-
-    // 2. Validar límite superior: Carga inmediatamente POSTERIOR a la fecha indicada (vital para cargas retroactivas)
-    const next = await this.prisma.cargaCombustible.findFirst({
-      where: {
-        tenantId,
-        vehiculoId,
-        fecha: { gte: fecha },
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-      orderBy: { fecha: "asc" },
-      select: { km: true, fecha: true },
-    });
 
     if (next && km > next.km) {
       const fechaFmt = new Intl.DateTimeFormat("es-AR", {

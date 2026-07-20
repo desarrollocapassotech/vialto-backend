@@ -93,6 +93,30 @@ export class CombustibleController {
     return this.service.getCargasParaExport(auth, from, to);
   }
 
+  @ApiOperation({ summary: 'Obtener límites de kilometraje para validación en tiempo real en frontend' })
+  @Get('limites-km')
+  @Roles('admin', 'superadmin', 'member')
+  async getLimitesKm(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('vehiculoId') vehiculoId: string,
+    @Query('fecha') fecha: string,
+    @Query('excludeId') excludeId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    if (!vehiculoId || !fecha) {
+      throw new BadRequestException('vehiculoId y fecha son requeridos');
+    }
+    const d = new Date(fecha);
+    if (isNaN(d.getTime())) {
+      throw new BadRequestException('Fecha inválida');
+    }
+    const bounds = await this.service.getLimitesKm(auth.tenantId, vehiculoId, d, excludeId);
+    return {
+      prev: bounds.prev ? { km: bounds.prev.km, fecha: bounds.prev.fecha.toISOString() } : null,
+      next: bounds.next ? { km: bounds.next.km, fecha: bounds.next.fecha.toISOString() } : null,
+    };
+  }
+
   @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })
   @Get(':id')
   @Roles('admin', 'member', 'superadmin')

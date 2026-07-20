@@ -20,8 +20,6 @@ const LETRA_POR_TIPO: Record<number, string> = {
   1: 'A',
   6: 'B',
   11: 'C',
-  60: 'A',
-  61: 'B',
 };
 
 // ── Helpers numéricos ─────────────────────────────────────────────────────────
@@ -182,7 +180,7 @@ export class LiquidacionPdfService {
       try {
         const fetched = await fetch(config.logoUrl);
         if (fetched.ok) logoBuffer = Buffer.from(await fetched.arrayBuffer());
-      } catch {
+      } catch(e) { console.error("LOGO ERROR:", e);
         // Si el logo no se puede descargar, el PDF se genera igual sin él.
       }
     }
@@ -267,7 +265,7 @@ export class LiquidacionPdfService {
           doc.fontSize(6).font('Helvetica-Oblique').fillColor('#555')
             .text('de', colX, cy, { width: colW, align: 'center' });
           cy += 9;
-        } catch {
+        } catch(e) { console.error("LOGO ERROR:", e);
           // Formato de imagen no soportado por pdfkit; se sigue sin logo.
         }
       }
@@ -291,16 +289,25 @@ export class LiquidacionPdfService {
     }
 
     // Col 2: letra + tipo
-    const letra = LETRA_POR_TIPO[liq.cbteTipo];
-    if (letra) {
+    const isLetter = liq.cbteTipo === 1 || liq.cbteTipo === 6 || liq.cbteTipo === 11;
+    const isCvlp = liq.cbteTipo === 60 || liq.cbteTipo === 61;
+    
+    if (isLetter) {
+      const tipoStr = LETRA_POR_TIPO[liq.cbteTipo] ?? String(liq.cbteTipo);
       doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
       doc.fontSize(36).font('Helvetica-Bold').fillColor('#000')
-        .text(letra, c1x + 4, y + 14, { width: 60, align: 'center' });
-    }
-    const codLabel = liq.cbteTipo === 60 ? 'COD. 060' : liq.cbteTipo === 61 ? 'COD. 061' : '';
-    if (codLabel) {
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#000')
-        .text(codLabel, c1x + 4, y + 70, { width: 60, align: 'center' });
+        .text(tipoStr, c1x + 4, y + 14, { width: 60, align: 'center' });
+        
+      const codLabel = `COD. ${String(liq.cbteTipo).padStart(3, '0')}`;
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
+        .text(codLabel, c1x + 4, y + 72, { width: 60, align: 'center' });
+    } else if (isCvlp) {
+      // Diseño especial para CVLP: "COD." arriba y el número grande abajo adentro del recuadro
+      doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#000')
+        .text('COD.', c1x + 4, y + 16, { width: 60, align: 'center' });
+      doc.fontSize(28).font('Helvetica-Bold').fillColor('#000')
+        .text(String(liq.cbteTipo).padStart(3, '0'), c1x + 4, y + 32, { width: 60, align: 'center' });
     }
 
     // Col 3: título + datos del comprobante (Número/Fecha a la izq., CUIT/Ing.Brutos/Inic.Act a la der.)

@@ -137,10 +137,18 @@ export class LiquidacionesService {
 
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
-    // Los gastos extra del viaje (otrosGastos) no participan del cálculo del comprobante.
+    const gastosAdmin = round2(
+      viajesConMeta.reduce((total, v) => {
+        const gastos = (v as unknown as { otrosGastos?: Array<{ monto: number; moneda: string }> })
+          .otrosGastos ?? [];
+        const gastosARS = gastos
+          .filter((g) => g.moneda === 'ARS')
+          .reduce((sum, g) => sum + g.monto, 0);
+        return total + gastosARS;
+      }, 0),
+    );
     const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
-    const montos = computeAfipGravadoIva(bruto, comision, ivaPct);
-    const gastosAdmin = 0;
+    const montos = computeAfipGravadoIva(bruto, comision, gastosAdmin, ivaPct);
     const gastosAdminIva = montos.impIva;
     const liquido = montos.liquido;
     // CVLP: RI → 60 (A), resto → 61 (B). Override opcional desde el DTO.
@@ -264,7 +272,8 @@ export class LiquidacionesService {
         }
       }
 
-      const montos = computeAfipGravadoIva(bruto, comision, ivaPct);
+      const gastosAdmin = liq.gastosAdmin as number;
+      const montos = computeAfipGravadoIva(bruto, comision, gastosAdmin, ivaPct);
       data.comisionPct = comisionPct;
       data.comision = comision;
       data.gastosAdminIva = montos.impIva;
@@ -369,7 +378,7 @@ export class LiquidacionesService {
 
       // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
       const ivaPct = config?.ivaGastosAdmin ?? 21;
-      const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, ivaPct);
+      const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, liquidacion.gastosAdmin, ivaPct);
       const response = await this.arcaClient.autorizarComprobante(
         config.apiKey,
         {
@@ -487,7 +496,7 @@ export class LiquidacionesService {
     const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
 
     const ivaPct = config?.ivaGastosAdmin ?? 21;
-    const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, ivaPct);
+    const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, liquidacion.gastosAdmin, ivaPct);
     await this.arcaClient.autorizarComprobante(
       config.apiKey,
       {
@@ -690,7 +699,7 @@ export class LiquidacionesService {
 
       // Calcular IVA 21% sobre el importe (ImpNeto = importe / 1.21 si ya es c/IVA,
       // o importe directamente si es neto). Aquí asumimos que factura.importe = neto.
-      const montos = computeAfipGravadoIva(factura.importe, 0, 21);
+      const montos = computeAfipGravadoIva(factura.importe, 0, 0, 21);
       const impNeto = montos.impNeto;
       const impIva = montos.impIva;
       const impTotal = montos.liquido;

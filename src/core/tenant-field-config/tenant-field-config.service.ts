@@ -85,13 +85,14 @@ export class TenantFieldConfigService {
     await this.prisma.$transaction([
       this.prisma.tenantFieldConfig.upsert({
         where: { tenantId_modulo_formulario: { tenantId, modulo, formulario } },
-        update: { campos: camposNuevos, updatedBy: changedBy },
+        update: { campos: camposNuevos, updatedBy: changedBy, updatedAt: new Date() },
         create: {
           tenantId,
           modulo,
           formulario,
           campos: camposNuevos,
           updatedBy: changedBy,
+          updatedAt: new Date(),
         },
       }),
       this.prisma.tenantFieldConfigAuditLog.create({

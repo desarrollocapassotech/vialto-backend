@@ -14,6 +14,7 @@ export function round2(n: number): number {
 export function computeAfipGravadoIva(
   bruto: number,
   comision: number,
+  gastosAdmin: number,
   ivaPct: number,
 ): {
   netoGravado: number;
@@ -22,7 +23,7 @@ export function computeAfipGravadoIva(
   impNeto: number;
   alicuota: AlicIva;
 } {
-  const netoGravado = round2(bruto - comision);
+  const netoGravado = round2(bruto - comision - gastosAdmin);
   const impIva = round2(netoGravado * ivaPct / 100);
   const liquido = round2(netoGravado + impIva);
   return {

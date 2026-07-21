@@ -1,0 +1,897 @@
+// =============================================================================
+// Vialto — Diagrama ER (DBML) — FUENTE EDITABLE
+// Vista principal: abrir index.html en el navegador (sin cuenta ni tarjeta).
+//
+// [IMP-*]  = implementado (existe en schema.prisma)
+// [PLAN-*] = planificado (roadmap; NO en Prisma aún)
+//   PLAN-C2 Capa2 flags | PLAN-F7 turnos | PLAN-F8 reportes | PLAN-AFIP | PLAN-C3 metadata
+//
+// Flechas FK: ref: en columnas. Tras cambios grandes, regenerar index.html si aplica.
+// =============================================================================
+
+Project vialto_erd {
+  database_type: 'PostgreSQL'
+  Note: '''
+    Vialto SaaS multi-tenant (tenantId = Clerk organizationId = Tenant.clerkOrgId).
+    Storage: Neon PostgreSQL. Auth: Clerk (User no se duplica en PG hoy).
+    Diagrama visual: docs/db-diagram/index.html · Export PDF: Ctrl+P en el navegador.
+  '''
+}
+
+// ─── Notas globales ─────────────────────────────────────────────────────────
+
+Note architecture_layers {
+  '''
+  ARQUITECTURA DE 3 CAPAS (CLAUDE.md)
+  ─────────────────────────────────────
+  Capa 1 — Modelo base: campos tipados, FK, unique e índices (especialmente compuestos con tenantId).
+  Capa 2 — Feature flags: TenantConfig.flags JSON por tenant (tabla PLANIFICADA; hoy flags viven en lógica/código o configs parciales).
+  Capa 3 — Metadata por registro: Json para campos de un subset de tenants.
+    Ejemplos:
+      Fernández → MIC/CRT (hoy en Viaje.documentoAduanero Json)
+      Riedel    → despacho / contenedor
+      Venturini → ctg, cartaDePorte, grano, tnOrigen, tnDestino, tarifaPorTn (granel; liquidaciones)
+  '''
+}
+
+Note external_stores {
+  '''
+  FUERA DE POSTGRES
+  ─────────────────
+  • Firestore — checklist diario de mantenimiento:
+      /tenants/{tenantId}/checklist/{fecha}/{vehiculoId}
+  • Cloudinary — firmas de remitos (Remito.firmaUrl), fotos combustible,
+      remitos PDF stock (StockOperacion.remitoUrl), comprobantes ARCA/factura.
+  • Clerk — usuarios, orgs, roles. No hay tabla users en PG (ver users_clerk planificada).
+  '''
+}
+
+Note legend {
+  '''
+  LEYENDA — PREFIJOS EN NOMBRE (plan free)
+  ─────────────────────────────────────────
+  [IMP-*]  = implementado (schema.prisma)
+  [PLAN-*] = planificado / fase X (roadmap)
+  Flechas FK: líneas entre tablas (ref: en columnas)
+  Índices: bloque Indexes de cada Table
+  '''
+}
+
+// =============================================================================
+// CORE
+// =============================================================================
+
+Table tenants as "[IMP-CORE] tenants" [note: 'CORE — una fila por org Clerk. PK lógica de tenant en tablas hijas = clerkOrgId'] {
+  id String [pk, note: 'cuid']
+  clerkOrgId String [unique, not null, note: 'organizationId Clerk = tenantId en tablas hijas']
+  name String [not null]
+  idFiscal String [unique, note: 'CUIT/RUT opcional']
+  modules String[] [default: '[]', note: 'módulos vendibles activos']
+  maxUsers Int [default: 10]
+  billingStatus String [default: 'trial', note: 'trial|active|suspended|expired']
+  billingRenewsAt DateTime
+  whiteLabelDomain String
+  createdAt DateTime [default: `now()`]
+}
+
+Table clientes as "[IMP-CORE] clientes" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId, note: 'ON DELETE CASCADE']
+  nombre String [not null]
+  idFiscal String
+  email String
+  telefono String
+  direccion String
+  pais String
+  condicionIva Int [note: 'AFIP: 1 RI, 4 Exento, 5 CF, 6 Monotributo']
+  condicionTributaria String
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+  }
+}
+
+Table transportistas as "[IMP-CORE] transportistas" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  idFiscal String
+  email String
+  telefono String
+  tipo String [default: 'externo']
+  paut String
+  permisoInternacional String
+  fechaVencimientoPermiso DateTime
+  pais String
+  domicilio String
+  condicionIva Int
+  condicionTributaria String
+  comisionPct Float [note: 'NyM; null → default ArcaConfig']
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+  }
+}
+
+Table choferes as "[IMP-CORE] choferes" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  dni String
+  cuit String
+  licencia String
+  licenciaVence DateTime
+  telefono String
+  transportistaId String [ref: > transportistas.id, note: 'ON DELETE SET NULL']
+  pin String [note: 'hash PIN app combustible; no exponer en API']
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+  }
+}
+
+Table destinatarios as "[IMP-CORE] destinatarios" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+  }
+}
+
+Table direcciones_entrega as "[IMP-CORE] direcciones_entrega" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  direccion String [not null]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+  }
+}
+
+Table vehiculos as "[IMP-CORE] vehiculos" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  patente String [not null]
+  tipo String [not null, note: 'tractor|semirremolque|camion|utilitario|otro']
+  marca String
+  modelo String
+  anio Int
+  kmActual Int [default: 0]
+  nroChasis String
+  poliza String
+  vencimientoPoliza DateTime
+  tara Float
+  precinto String
+  transportistaId String [ref: > transportistas.id]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (tenantId, patente) [unique]
+    tenantId
+  }
+}
+
+Table tenant_field_configs as "[IMP-CORE] tenant_field_configs" [note: 'CORE auxiliar — config de campos por formulario (QA/prod). Relacionado a Capa 2/UX, no es TenantConfig.flags'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  modulo String [not null]
+  formulario String [not null]
+  campos Json [not null]
+  updatedAt DateTime [not null]
+  updatedBy String [not null]
+
+  Indexes {
+    (tenantId, modulo, formulario) [unique]
+    tenantId
+  }
+}
+
+Table tenant_field_config_audit_logs as "[IMP-CORE] tenant_field_config_audit_logs" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  modulo String [not null]
+  formulario String [not null]
+  campo String [not null]
+  configAnterior Json
+  configNuevo Json [not null]
+  changedBy String [not null]
+  changedAt DateTime [default: `now()`]
+
+  Indexes {
+    (changedAt)
+    tenantId
+    (tenantId, modulo, formulario)
+  }
+}
+
+// =============================================================================
+// MÓDULO: viajes (implementado)
+// =============================================================================
+
+Table viajes as "[IMP-VIAJES] viajes" [note: 'MÓDULO viajes — Capa 3: documentoAduanero / otrosGastos / pagosTransportista (Json)'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  numero String [not null]
+  estado String [default: 'pendiente']
+  clienteId String [not null, ref: > clientes.id]
+  transportistaId String [ref: > transportistas.id]
+  transportistaEfectivoId String [ref: > transportistas.id]
+  choferId String [ref: > choferes.id]
+  origen String
+  destino String
+  fechaCarga DateTime
+  fechaDescarga DateTime
+  detalleCarga String [note: 'texto libre; detalle tipado en viajes_productos']
+  kmRecorridos Int
+  litrosConsumidos Float
+  monto Float
+  monedaMonto String [default: 'ARS']
+  precioTransportistaExterno Float
+  monedaPrecioTransportistaExterno String [default: 'ARS']
+  gananciaBrutaManual Float
+  monedaGananciaBrutaManual String
+  observaciones String
+  otrosGastos Json [default: `'[]'`, note: 'Capa 3']
+  pagosTransportista Json [default: `'[]'`, note: 'Capa 3']
+  documentoAduanero Json [default: `'{}'`, note: 'Capa 3 — MIC/CRT y afines']
+  fechaFinalizado DateTime
+  createdAt DateTime [default: `now()`]
+  createdBy String [not null]
+  facturaId String [ref: > facturas.id]
+  nroFactura String
+
+  Indexes {
+    (tenantId, numero) [unique]
+    tenantId
+    (tenantId, estado)
+    (tenantId, clienteId)
+    (tenantId, transportistaId)
+    (tenantId, transportistaEfectivoId)
+    (tenantId, fechaCarga)
+    (tenantId, fechaDescarga)
+    (tenantId, fechaFinalizado)
+    (tenantId, createdAt)
+    (tenantId, estado, fechaDescarga)
+  }
+}
+
+Table viajes_vehiculos as "[IMP-VIAJES] viajes_vehiculos" {
+  id String [pk]
+  tenantId String [not null]
+  viajeId String [not null, ref: > viajes.id]
+  vehiculoId String [not null, ref: > vehiculos.id]
+  orden Int [default: 0]
+
+  Indexes {
+    (viajeId, vehiculoId) [unique]
+    tenantId
+    viajeId
+    vehiculoId
+  }
+}
+
+Table viajes_productos as "[IMP-VIAJES] viajes_productos" [note: 'Detalle de carga tipado por viaje (equivalente práctico a "Carga")'] {
+  id String [pk]
+  tenantId String [not null]
+  viajeId String [not null, ref: > viajes.id]
+  productoId String [not null, ref: > productos.id]
+  orden Int [default: 0]
+  cantidad Float
+  pesoKg Float
+
+  Indexes {
+    (viajeId, productoId) [unique]
+    tenantId
+    viajeId
+    productoId
+  }
+}
+
+Table viajes_destinos as "[IMP-VIAJES] viajes_destinos" {
+  id String [pk]
+  tenantId String [not null]
+  viajeId String [not null, ref: > viajes.id]
+  orden Int [default: 0]
+  etiqueta String [not null]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (viajeId, orden) [unique]
+    tenantId
+    viajeId
+  }
+}
+
+// =============================================================================
+// MÓDULO: facturacion (implementado)
+// =============================================================================
+
+Table facturas as "[IMP-FACT] facturas" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  numero String [not null]
+  tipo String [not null, note: 'cliente|transportista_externo']
+  clienteId String [ref: > clientes.id]
+  transportistaId String [ref: > transportistas.id]
+  importe Float [not null]
+  moneda String [default: 'ARS']
+  fechaEmision DateTime [not null]
+  fechaVencimiento DateTime
+  estado String [default: 'pendiente']
+  diferencia Float
+  ivaPct Float [default: 21]
+  comprobanteUrl String [note: 'Cloudinary']
+  cbteTipo Int [note: 'ARCA: 1=A, 6=B']
+  cbteNro Int
+  ptoVenta Int
+  cae String
+  caeFechaVto DateTime
+  arcaEstado String
+  arcaError String
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (tenantId, numero) [unique]
+    tenantId
+    (tenantId, clienteId)
+    (tenantId, transportistaId)
+    (tenantId, estado)
+    (tenantId, fechaEmision)
+  }
+}
+
+Table pagos as "[IMP-FACT] pagos" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  facturaId String [not null, ref: > facturas.id]
+  importe Float [not null]
+  fecha DateTime [not null]
+  formaPago String
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+    (tenantId, facturaId)
+  }
+}
+
+// =============================================================================
+// MÓDULO: cuenta-corriente (implementado)
+// =============================================================================
+
+Table movimientos_cuenta_corriente as "[IMP-CC] movimientos_cuenta_corriente" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  clienteId String [not null, ref: > clientes.id]
+  viajeId String [ref: > viajes.id]
+  tipo String [not null, note: 'cargo|pago']
+  origen String [default: 'manual', note: 'manual|viaje']
+  concepto String [not null]
+  importe Float [not null]
+  fecha DateTime [not null]
+  referencia String
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (tenantId, viajeId) [unique]
+    tenantId
+    (tenantId, clienteId)
+    (tenantId, clienteId, tipo)
+    (tenantId, fecha)
+    (tenantId, origen)
+    (tenantId, viajeId)
+  }
+}
+
+// =============================================================================
+// MÓDULO: stock (implementado)
+// =============================================================================
+
+Table productos as "[IMP-STOCK] productos" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  nombreNormalizado String [not null]
+  codigo String
+  descripcion String
+  pesoUnitarioKg Float
+  activo Boolean [default: true]
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  Indexes {
+    (tenantId, nombreNormalizado) [unique]
+    (tenantId, codigo) [unique]
+    tenantId
+    (tenantId, activo)
+  }
+}
+
+Table presentaciones as "[IMP-STOCK] presentaciones" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  nombreNormalizado String [not null]
+  activo Boolean [default: true]
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  Indexes {
+    (tenantId, nombreNormalizado) [unique]
+    tenantId
+    (tenantId, activo)
+  }
+}
+
+Table producto_presentaciones as "[IMP-STOCK] producto_presentaciones" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  productoId String [not null, ref: > productos.id]
+  presentacionId String [not null, ref: > presentaciones.id]
+  unidadesPorBulto Float [not null]
+  activo Boolean [default: true]
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  Indexes {
+    (productoId, presentacionId) [unique]
+    tenantId
+    (tenantId, productoId)
+  }
+}
+
+Table producto_secuencias as "[IMP-STOCK] producto_secuencias" {
+  id String [pk]
+  tenantId String [unique, not null]
+  lastValue Int [default: 0]
+}
+
+Table depositos as "[IMP-STOCK] depositos" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  descripcion String
+  activo Boolean [default: true]
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  Indexes {
+    tenantId
+    (tenantId, activo)
+  }
+}
+
+Table stock_operaciones as "[IMP-STOCK] stock_operaciones" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  clienteId String [not null, ref: > clientes.id]
+  depositoId String [not null, ref: > depositos.id]
+  tipo String [not null, note: 'ingreso|egreso|division']
+  fecha DateTime [not null]
+  observaciones String
+  remitoUrl String [note: 'Cloudinary PDF egreso']
+  fotosUrls String[] [note: 'Cloudinary']
+  numeroRemito String
+  numeroRemitoProveedor String
+  remitoId String [ref: > remitos.id]
+  entregadoPor String
+  destinatario String
+  destinoFinal String
+  numeroDocumentoExterno String
+  createdBy String [default: '']
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (tenantId, numeroRemito) [unique]
+    tenantId
+    (tenantId, clienteId)
+    (tenantId, depositoId)
+    (tenantId, tipo)
+    (tenantId, fecha)
+    (tenantId, createdAt)
+  }
+}
+
+Table movimientos_stock as "[IMP-STOCK] movimientos_stock" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  operacionId String [not null, ref: > stock_operaciones.id]
+  productoId String [not null, ref: > productos.id]
+  presentacionId String [ref: > producto_presentaciones.id]
+  fechaVencimiento DateTime
+  bultos Float [default: 0]
+  unidades Float [default: 0]
+  lote String
+  observaciones String
+  movimientoVinculadoId String [note: 'par en división']
+  remitoId String [ref: > remitos.id]
+  createdBy String [default: '']
+  fecha DateTime [not null]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+    (tenantId, operacionId)
+    (tenantId, productoId)
+    (tenantId, presentacionId)
+    (tenantId, remitoId)
+    (tenantId, fecha)
+    (tenantId, createdAt)
+  }
+}
+
+Table stock_items as "[IMP-STOCK] stock_items" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  productoId String [not null, ref: > productos.id]
+  presentacionId String [ref: > producto_presentaciones.id]
+  clienteId String [not null, ref: > clientes.id]
+  depositoId String [not null, ref: > depositos.id]
+  cantidad1 Float [default: 0]
+  cantidad2 Float [default: 0]
+  updatedAt DateTime
+
+  Indexes {
+    (productoId, presentacionId, clienteId, depositoId) [unique]
+    tenantId
+    (tenantId, clienteId)
+    (tenantId, productoId)
+    (tenantId, presentacionId)
+    (tenantId, depositoId)
+  }
+}
+
+Table stock_remito_secuencias as "[IMP-STOCK] stock_remito_secuencias" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  year Int [not null]
+  lastValue Int [default: 0]
+
+  Indexes {
+    (tenantId, year) [unique]
+  }
+}
+
+Table stock_egreso_remito_configs as "[IMP-STOCK] stock_egreso_remito_configs" {
+  tenantId String [pk, ref: > tenants.clerkOrgId]
+  remitoPrefix String [default: 'R']
+  remitoDigitos Int [default: 5]
+  updatedAt DateTime
+}
+
+// =============================================================================
+// MÓDULO: combustible (implementado)
+// =============================================================================
+
+Table cargas_combustible as "[IMP-COMB] cargas_combustible" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  vehiculoId String [ref: > vehiculos.id]
+  choferId String [ref: > choferes.id]
+  estacion String [not null]
+  litros Float [not null]
+  precioPorLitro Float [default: 0]
+  importe Float [not null]
+  km Int [not null]
+  formaPago String
+  fecha DateTime [not null]
+  createdAt DateTime [default: `now()`]
+  createdBy String [not null]
+  fotoTacometro String [note: 'Cloudinary']
+  fotoTicket String [note: 'Cloudinary']
+  sospechoso Boolean [default: false]
+  motivoSospecha String
+  litrosOriginal Float
+  kmOriginal Int
+
+  Indexes {
+    tenantId
+    (tenantId, vehiculoId)
+    (tenantId, choferId)
+    (tenantId, fecha)
+    (tenantId, createdBy)
+    (tenantId, sospechoso)
+  }
+}
+
+// =============================================================================
+// MÓDULO: mantenimiento (implementado en PG; checklist → Firestore)
+// =============================================================================
+
+Table intervenciones as "[IMP-MANT] intervenciones" [note: 'Checklist diario NO está aquí → Firestore (ver Note external_stores)'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  vehiculoId String [not null, ref: > vehiculos.id]
+  tipo String [not null, note: 'service|aceite|filtro|cubiertas|otro']
+  descripcion String
+  km Int
+  proximoKm Int
+  fecha DateTime [not null]
+  createdAt DateTime [default: `now()`]
+  createdBy String [not null]
+
+  Indexes {
+    tenantId
+    (tenantId, vehiculoId)
+    (tenantId, fecha)
+  }
+}
+
+// =============================================================================
+// MÓDULO: remitos (implementado)
+// =============================================================================
+
+Table remitos as "[IMP-REMITOS] remitos" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  numero String [not null]
+  clienteId String [not null, ref: > clientes.id]
+  choferId String [ref: > choferes.id]
+  vehiculoId String [ref: > vehiculos.id]
+  descripcion String [not null]
+  fecha DateTime [not null]
+  firmaUrl String [note: 'Cloudinary — firma digital']
+  estado String [default: 'emitido', note: 'emitido|firmado|facturado']
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (tenantId, numero) [unique]
+    tenantId
+    (tenantId, clienteId)
+    (tenantId, estado)
+    (tenantId, fecha)
+  }
+}
+
+// =============================================================================
+// MÓDULO: importaciones (implementado)
+// =============================================================================
+
+Table import_templates as "[IMP-IMPORT] import_templates" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  modulo String [not null]
+  nombre String [not null]
+  config Json [not null]
+  activo Boolean [default: true]
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  Indexes {
+    (tenantId, modulo) [unique]
+    tenantId
+  }
+}
+
+Table import_sessions as "[IMP-IMPORT] import_sessions" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  templateId String [not null, ref: > import_templates.id]
+  nombreArchivo String [not null]
+  filasValidas Json [not null]
+  errores Json [not null]
+  totalFilas Int [not null]
+  expiresAt DateTime [not null]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+  }
+}
+
+Table import_logs as "[IMP-IMPORT] import_logs" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  templateId String [ref: > import_templates.id]
+  modulo String [not null]
+  nombreArchivo String [not null]
+  estado String [default: 'completado']
+  totalFilas Int [not null]
+  exitosas Int [default: 0]
+  errores Int [default: 0]
+  detalles Json [not null]
+  createdAt DateTime [default: `now()`]
+  createdBy String [not null]
+
+  Indexes {
+    tenantId
+    (tenantId, modulo)
+  }
+}
+
+// =============================================================================
+// MÓDULO: integracion-arca / liquidaciones-arca (implementado — Fase NyM)
+// =============================================================================
+
+Table arca_configs as "[IMP-ARCA] arca_configs" {
+  tenantId String [pk, ref: > tenants.clerkOrgId]
+  cuitEmisor String [not null]
+  razonSocial String
+  domicilioEmisor String
+  condicionIvaEmisor String
+  ingBrutos String
+  inicActEmisor String
+  ptoVentaCvlp Int [not null]
+  ptoVentaFactura Int [not null]
+  ambiente String [default: 'homologacion']
+  comisionPctDefault Float [default: 8]
+  comisionPctAlt Float [default: 7]
+  ivaGastosAdmin Float [default: 21]
+  certPem String [note: 'nunca exponer en API pública']
+  keyPem String
+  updatedAt DateTime
+}
+
+Table liquidaciones as "[IMP-ARCA] liquidaciones" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  transportistaId String [not null, ref: > transportistas.id]
+  periodoDesde DateTime [not null]
+  periodoHasta DateTime [not null]
+  cantViajes Int [not null]
+  bruto Float [not null]
+  comisionPct Float [not null]
+  comision Float [not null]
+  gastosAdmin Float [not null]
+  gastosAdminIva Float [not null]
+  liquido Float [not null]
+  cbteTipo Int [default: 60, note: 'CVLP tipo 60']
+  cbteNro Int
+  ptoVenta Int
+  cae String
+  caeFechaVto DateTime
+  estado String [default: 'borrador']
+  arcaError String
+  reintentos Int [default: 0]
+  comprobanteUrl String [note: 'Cloudinary']
+  payloadHash String
+  createdAt DateTime [default: `now()`]
+  createdBy String [not null]
+  updatedAt DateTime
+
+  Indexes {
+    tenantId
+    (tenantId, transportistaId)
+    (tenantId, estado)
+    (tenantId, periodoDesde, periodoHasta)
+  }
+}
+
+Table liquidacion_viajes as "[IMP-ARCA] liquidacion_viajes" {
+  id String [pk]
+  tenantId String [not null]
+  liquidacionId String [not null, ref: > liquidaciones.id]
+  viajeId String [not null, ref: > viajes.id]
+  tnOrigen Float
+  tnDestino Float
+  tarifaTransportista Float
+  subtotal Float
+  gastosAdmin Float
+
+  Indexes {
+    (liquidacionId, viajeId) [unique]
+    tenantId
+    liquidacionId
+    viajeId
+  }
+}
+
+Table arca_logs as "[IMP-ARCA] arca_logs" {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  liquidacionId String [ref: > liquidaciones.id]
+  facturaId String [note: 'referencial, sin FK formal']
+  method String [not null]
+  ambiente String [not null]
+  cuit String [not null]
+  requestBody Json [not null]
+  responseBody Json
+  httpStatus Int
+  durationMs Int
+  exitoso Boolean [default: false]
+  error String
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+    (tenantId, liquidacionId)
+    (tenantId, facturaId)
+    (tenantId, createdAt)
+  }
+}
+
+// =============================================================================
+// PLANIFICADO — aún no en schema.prisma
+// =============================================================================
+
+Table tenant_configs as "[PLAN-C2] tenant_configs" [note: 'PLANIFICADO — Capa 2 feature flags (CLAUDE.md). Módulo: core'] {
+  id String [pk]
+  tenantId String [unique, not null, ref: > tenants.clerkOrgId]
+  flags Json [default: `'{}'`, note: 'ej. { viajes: {...}, liquidaciones: {...} }']
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  Indexes {
+    tenantId
+  }
+}
+
+Table users_clerk_sync as "[PLAN-CORE] users_clerk_sync" [note: 'PLANIFICADO / opcional — hoy User vive solo en Clerk. Sync local si se necesita reporting offline'] {
+  id String [pk, note: 'clerk userId']
+  tenantId String [ref: > tenants.clerkOrgId, note: 'org membership activa']
+  email String
+  firstName String
+  lastName String
+  role String [note: 'org:admin|org:member|platform']
+  lastSyncedAt DateTime
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+    email
+  }
+}
+
+Table viajes_metadata_note as "[PLAN-C3] viajes_metadata" [note: 'PLANIFICADO (conceptual) — si se unifica Capa 3: agregar Viaje.metadata Json. Hoy: documentoAduanero + Json sueltos. No crear tabla real.'] {
+  viajeId String [pk, ref: > viajes.id]
+  metadata Json [note: 'Fernández MIC/CRT; Riedel despacho; Venturini CTG/granel']
+}
+
+Table turnos as "[PLAN-F7] turnos" [note: 'PLANIFICADO — módulo turnos (Fase 7, Pereyra). Aislado. Código módulo: turnos'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  fecha DateTime [not null]
+  estado String [default: 'abierto']
+  choferId String [ref: > choferes.id]
+  orden Int
+  observaciones String
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (tenantId, fecha)
+    tenantId
+  }
+}
+
+Table reportes_snapshots as "[PLAN-F8] reportes_snapshots" [note: 'PLANIFICADO — Fase 8 reportes. Cross-módulo; puede ser vistas materializadas o snapshots cache'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  tipo String [not null, note: 'kpi|dashboard|export']
+  periodoDesde DateTime
+  periodoHasta DateTime
+  payload Json [not null]
+  createdAt DateTime [default: `now()`]
+  createdBy String
+
+  Indexes {
+    (tenantId, tipo)
+    tenantId
+  }
+}
+
+Table afip_comprobantes_generales as "[PLAN-AFIP] afip_comprobantes" [note: 'PLANIFICADO — integración AFIP/ARCA general (facturación electrónica más allá de NyM CVLP). Extiende o complementa Factura/ArcaLog'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  facturaId String [ref: > facturas.id]
+  cbteTipo Int [not null]
+  cbteNro Int
+  ptoVenta Int
+  cae String
+  caeFechaVto DateTime
+  requestBody Json
+  responseBody Json
+  estado String
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    tenantId
+    (tenantId, facturaId)
+  }
+}

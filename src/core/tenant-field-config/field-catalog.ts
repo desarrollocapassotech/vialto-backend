@@ -94,6 +94,50 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
       },
     },
   },
+  stock: {
+    label: "Stock",
+    formularios: {
+      alta_ingreso: {
+        label: "Alta de ingreso",
+        campos: [
+          { campo: "clienteId", label: "Cliente/Empresa", obligatorioSistema: true },
+          { campo: "depositoId", label: "Depósito", obligatorioSistema: true },
+          { campo: "fechaMov", label: "Fecha del movimiento", obligatorioSistema: true },
+          { campo: "observaciones", label: "Observaciones", obligatorioSistema: false },
+          { campo: "numeroRemitoProveedor", label: "Número de remito del proveedor", obligatorioSistema: false },
+          { campo: "fotoFiles", label: "Fotos del ingreso", obligatorioSistema: false },
+          { campo: "rows", label: "Líneas de productos", obligatorioSistema: true },
+        ],
+      },
+      alta_egreso: {
+        label: "Alta de egreso",
+        campos: [
+          { campo: "clienteId", label: "Cliente/Empresa", obligatorioSistema: true },
+          { campo: "depositoId", label: "Depósito", obligatorioSistema: true },
+          { campo: "fechaMov", label: "Fecha del movimiento", obligatorioSistema: true },
+          { campo: "choferId", label: "Chofer / entregado por", obligatorioSistema: false },
+          { campo: "destinatarioId", label: "Destinatario", obligatorioSistema: false },
+          { campo: "direccionEntregaId", label: "Dirección de entrega", obligatorioSistema: false },
+          { campo: "documentoExterno", label: "Documento externo (pedido/nota de despacho)", obligatorioSistema: true },
+          { campo: "observaciones", label: "Observaciones", obligatorioSistema: false },
+          { campo: "rows", label: "Líneas de productos", obligatorioSistema: true },
+        ],
+      },
+      division_bultos: {
+        label: "División de bultos",
+        campos: [
+          { campo: "clienteId", label: "Cliente/Empresa", obligatorioSistema: true },
+          { campo: "depositoId", label: "Depósito", obligatorioSistema: true },
+          { campo: "productoId", label: "Producto", obligatorioSistema: true },
+          { campo: "presentacionId", label: "Presentación", obligatorioSistema: true },
+          { campo: "lote", label: "Lote", obligatorioSistema: true },
+          { campo: "bultos", label: "Cantidad de bultos a dividir", obligatorioSistema: true },
+          { campo: "fechaMov", label: "Fecha del movimiento", obligatorioSistema: true },
+          { campo: "observaciones", label: "Observaciones", obligatorioSistema: false },
+        ],
+      },
+    },
+  },
 };
 
 export function getCatalogoFormulario(modulo: string, formulario: string): CampoCatalogo[] {

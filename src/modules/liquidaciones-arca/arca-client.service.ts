@@ -86,6 +86,7 @@ export class ArcaClientService {
     facturaId?: string,
     certPem?: string | null,
     keyPem?: string | null,
+    auditMetadata?: Record<string, unknown>,
   ): Promise<ArcaAutorizarResponse> {
     const cuitNorm = normalizeCuit(req.cuit);
     const { token, sign, afip } = await this.getAfipClientAndToken(apiKey, cuitNorm, req.ambiente, certPem, keyPem);
@@ -141,6 +142,7 @@ export class ArcaClientService {
       liquidacionId,
       facturaId,
       req.ambiente,
+      auditMetadata,
     );
 
     // AFIP SDK devuelve la respuesta anidada bajo FECAESolicitarResult
@@ -241,6 +243,7 @@ export class ArcaClientService {
     liquidacionId?: string,
     facturaId?: string,
     ambiente?: ArcaAmbiente,
+    auditMetadata?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const requestBody = { environment: toSdkEnv(ambiente), method, wsid, params };
     const start = Date.now();
@@ -261,9 +264,12 @@ export class ArcaClientService {
       throw this.mapError(err, httpStatus);
     } finally {
       // Log de auditoría — nunca se registra la apiKey
-      const safeRequest = { ...requestBody, cuit: normalizeCuit(cuit) };
+      const safeRequest: Record<string, unknown> = { ...requestBody, cuit: normalizeCuit(cuit) };
       if ((safeRequest.params as Record<string, unknown>)?.Auth) {
         (safeRequest.params as Record<string, unknown>).Auth = '***';
+      }
+      if (auditMetadata) {
+        safeRequest.auditMetadata = auditMetadata;
       }
 
       await (this.prisma as any).arcaLog.create({

@@ -50,6 +50,7 @@
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.13.9",
     "@types/pdfkit": "^0.17.6",
     "@types/qrcode": "^1.5.6",

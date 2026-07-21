@@ -18,7 +18,8 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
-import { getCbteTipoCvlp, parseNumeroFactura } from './arca.util';
+import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, parseNumeroFactura } from './arca.util';
+import { buildComprobanteCvlp, mapCvlpToArcaRequest, ConceptoFacturable } from './arca-cvlp.util';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
@@ -378,14 +379,15 @@ export class LiquidacionesService {
 
       // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
       const ivaPct = config?.ivaGastosAdmin ?? 21;
-      const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, liquidacion.gastosAdmin, ivaPct);
-      const response = await this.arcaClient.autorizarComprobante(
-        config.apiKey,
-        {
-          ambiente: config.ambiente as 'homologacion' | 'produccion',
+      
+      const conceptos: ConceptoFacturable[] = [
+        { descripcion: 'Fletes', importe: liquidacion.bruto },
+        { descripcion: 'Comisión', importe: -liquidacion.comision },
+        { descripcion: 'Gastos Administrativos', importe: -liquidacion.gastosAdmin },
+      ];
+      
+      const cabeceraBase = {
           cuit: config.cuitEmisor,
-          token: '',
-          sign: '',
           ptoVenta: config.ptoVentaCvlp,
           cbteTipo: cbteTipoFinal,
           cbteNro,
@@ -394,16 +396,20 @@ export class LiquidacionesService {
           docTipo,
           docNro,
           condicionIvaReceptorId,
-          impNeto: montos.impNeto,
-          impIva: montos.impIva,
-          impTotal: montos.liquido,
-          alicuotasIva: [montos.alicuota],
-        },
+      };
+
+      const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
+      const arcaRequest = mapCvlpToArcaRequest(cvlp, config.ambiente as 'homologacion' | 'produccion');
+
+      const response = await this.arcaClient.autorizarComprobante(
+        config.apiKey,
+        arcaRequest,
         tenantId,
         liquidacionId,
         undefined,
         config.certPem,
         config.keyPem,
+        cvlp as unknown as Record<string, unknown>, // auditMetadata
       );
 
       // AFIP autorizó: guardar CAE, fecha de vencimiento y pasar a autorizado.
@@ -417,8 +423,8 @@ export class LiquidacionesService {
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaError: null,
           gastosAdmin: 0,
-          gastosAdminIva: montos.impIva,
-          liquido: montos.liquido,
+          gastosAdminIva: cvlp.impIva,
+          liquido: cvlp.impTotal,
           updatedAt: new Date(),
         },
       });
@@ -715,8 +721,6 @@ export class LiquidacionesService {
         {
           ambiente: config.ambiente as 'homologacion' | 'produccion',
           cuit: config.cuitEmisor,
-          token: '',
-          sign: '',
           ptoVenta: config.ptoVentaFactura,
           cbteTipo: dto.cbteTipo,
           cbteNro,

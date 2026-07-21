@@ -8,6 +8,7 @@ import type { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { DashboardService } from './dashboard.service';
+import { DashboardFinancieroService } from './dashboard-financiero.service';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 @ApiTags('Sistema')
@@ -15,7 +16,10 @@ import { DashboardQueryDto } from './dto/dashboard-query.dto';
 @Controller('dashboard')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(
+    private readonly dashboardService: DashboardService,
+    private readonly dashboardFinancieroService: DashboardFinancieroService,
+  ) {}
 
   @ApiOperation({ summary: 'Resumen del dashboard del tenant (KPIs, últimos viajes, alertas)' })
   @Get('resumen')
@@ -28,5 +32,20 @@ export class DashboardController {
       query.from,
       query.to,
     );
+  }
+
+  @ApiOperation({
+    summary:
+      'Panel financiero cruzado (margen por viaje/cliente/transportista, liquidaciones, facturación y cashflow)',
+  })
+  @Get('financiero')
+  @Roles('admin', 'superadmin')
+  getFinanciero(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.dashboardFinancieroService.getFinancieroDashboard(auth.tenantId, from, to);
   }
 }

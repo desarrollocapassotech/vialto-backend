@@ -9,8 +9,19 @@ import {
   Min,
   Max,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class LiquidacionConceptoLineaDto {
+  @IsString()
+  conceptoLiquidacionId: string;
+
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0.01)
+  monto: number;
+}
 
 export class CreateLiquidacionDto {
   @IsString()
@@ -40,7 +51,7 @@ export class CreateLiquidacionDto {
   comisionPct?: number;
 
   /**
-   * Alícuota de IVA (%) a aplicar sobre el neto gravado.
+   * Alícuota de IVA (%) a aplicar sobre flete/comisión/gastos admin.
    * Si no se envía, se usa ivaGastosAdmin de ArcaConfig o 21% por defecto.
    */
   @IsOptional()
@@ -48,6 +59,16 @@ export class CreateLiquidacionDto {
   @Min(0)
   @Max(100)
   ivaPct?: number;
+
+  /**
+   * Líneas opcionales de conceptos configurables del tenant
+   * (monto manual, una vez por liquidación).
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LiquidacionConceptoLineaDto)
+  conceptosLineas?: LiquidacionConceptoLineaDto[];
 
   @IsOptional()
   @IsString()

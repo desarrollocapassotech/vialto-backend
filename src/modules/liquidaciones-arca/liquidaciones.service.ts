@@ -19,7 +19,14 @@ import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, parseNumeroFactura } from './arca.util';
-import { buildComprobanteCvlp, mapCvlpToArcaRequest, ConceptoFacturable } from './arca-cvlp.util';
+import { buildComprobanteCvlp, mapCvlpToArcaRequest } from './arca-cvlp.util';
+import {
+  buildCvlpConceptosList,
+  computeLiquidacionTotales,
+  type ConceptoLineaInput,
+} from './cvlp-conceptos.util';
+import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
+import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
@@ -39,11 +46,55 @@ export class LiquidacionesService {
     private readonly cloudinary: CloudinaryService,
     private readonly arcaClient: ArcaClientService,
     private readonly arcaConfig: ArcaConfigService,
+    private readonly conceptosLiquidacion: ConceptosLiquidacionService,
   ) {}
 
   /** Acceso a nuevos modelos Prisma pendientes de regenerar el cliente. */
   private get db(): PrismaAny {
     return this.prisma as PrismaAny;
+  }
+
+  /** Resuelve DTOs de líneas → snapshots listos para persistir / totales. */
+  private async resolveConceptoLineas(
+    tenantId: string,
+    dtos: LiquidacionConceptoLineaDto[] | undefined,
+  ): Promise<Array<ConceptoLineaInput & { conceptoLiquidacionId: string }>> {
+    if (!dtos?.length) return [];
+    const out: Array<ConceptoLineaInput & { conceptoLiquidacionId: string }> = [];
+    let orden = 0;
+    for (const dto of dtos) {
+      const c = await this.conceptosLiquidacion.findActivoOrThrow(
+        tenantId,
+        dto.conceptoLiquidacionId,
+      );
+      out.push({
+        conceptoLiquidacionId: c.id,
+        nombreSnapshot: c.nombre,
+        signo: c.signo,
+        ivaPct: c.ivaPct,
+        monto: round2(dto.monto),
+        orden: orden++,
+      });
+    }
+    return out;
+  }
+
+  private lineasFromStored(
+    rows: Array<{
+      nombreSnapshot: string;
+      signo: string;
+      ivaPct: number;
+      monto: number;
+      orden?: number;
+    }> | null | undefined,
+  ): ConceptoLineaInput[] {
+    return (rows ?? []).map((r) => ({
+      nombreSnapshot: r.nombreSnapshot,
+      signo: r.signo as 'favor' | 'contra',
+      ivaPct: r.ivaPct,
+      monto: r.monto,
+      orden: r.orden,
+    }));
   }
 
   async uploadComprobante(tenantId: string, file: Express.Multer.File): Promise<{ url: string }> {
@@ -149,7 +200,14 @@ export class LiquidacionesService {
       }, 0),
     );
     const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
-    const montos = computeAfipGravadoIva(bruto, comision, gastosAdmin, ivaPct);
+    const lineasResueltas = await this.resolveConceptoLineas(tenantId, dto.conceptosLineas);
+    const montos = computeLiquidacionTotales({
+      bruto,
+      comision,
+      gastosAdmin,
+      ivaPctDefault: ivaPct,
+      lineas: lineasResueltas,
+    });
     const gastosAdminIva = montos.impIva;
     const liquido = montos.liquido;
     // CVLP: RI → 60 (A), resto → 61 (B). Override opcional desde el DTO.
@@ -195,6 +253,21 @@ export class LiquidacionesService {
         },
         include: { viajes: true },
       });
+
+      if (lineasResueltas.length > 0) {
+        await this.db.liquidacionConceptoLinea.createMany({
+          data: lineasResueltas.map((l) => ({
+            tenantId,
+            liquidacionId: liquidacion.id,
+            conceptoLiquidacionId: l.conceptoLiquidacionId,
+            nombreSnapshot: l.nombreSnapshot,
+            signo: l.signo,
+            ivaPct: l.ivaPct,
+            monto: l.monto,
+            orden: l.orden ?? 0,
+          })),
+        });
+      }
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ConflictException(
@@ -208,7 +281,7 @@ export class LiquidacionesService {
       await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
     }
 
-    return liquidacion;
+    return this.findById(tenantId, liquidacion.id);
   }
 
   async updateLiquidacion(
@@ -225,12 +298,13 @@ export class LiquidacionesService {
       dto.periodoDesde !== undefined ||
       dto.periodoHasta !== undefined ||
       dto.comisionPct !== undefined ||
-      dto.ivaPct !== undefined;
+      dto.ivaPct !== undefined ||
+      dto.conceptosLineas !== undefined;
 
     const estadosEditables = new Set(['borrador', 'error', 'pendiente_cae']);
     if (wantsDatos && !estadosEditables.has(liq.estado)) {
       throw new BadRequestException(
-        'Solo se pueden modificar período/comisión en liquidaciones en borrador, error o pendiente de CAE.',
+        'Solo se pueden modificar período/comisión/conceptos en liquidaciones en borrador, error o pendiente de CAE.',
       );
     }
 
@@ -256,7 +330,12 @@ export class LiquidacionesService {
       data.comprobanteUrl = dto.comprobanteUrl || null;
     }
 
-    if (dto.comisionPct !== undefined || dto.ivaPct !== undefined) {
+    const needsRecalc =
+      dto.comisionPct !== undefined ||
+      dto.ivaPct !== undefined ||
+      dto.conceptosLineas !== undefined;
+
+    if (needsRecalc) {
       const comisionPct =
         dto.comisionPct !== undefined ? dto.comisionPct : liq.comisionPct;
       const bruto = liq.bruto as number;
@@ -264,21 +343,55 @@ export class LiquidacionesService {
 
       let ivaPct = dto.ivaPct;
       if (ivaPct === undefined) {
-        const netoPrev = round2(bruto - (liq.comision as number));
-        if (netoPrev > 0 && (liq.gastosAdminIva as number) > 0) {
-          ivaPct = round2(((liq.gastosAdminIva as number) / netoPrev) * 100);
-        } else {
-          const config = await this.arcaConfig.findPublic(tenantId);
-          ivaPct = config?.ivaGastosAdmin ?? 21;
-        }
+        const config = await this.arcaConfig.findPublic(tenantId);
+        ivaPct = config?.ivaGastosAdmin ?? 21;
       }
 
       const gastosAdmin = liq.gastosAdmin as number;
-      const montos = computeAfipGravadoIva(bruto, comision, gastosAdmin, ivaPct);
+      const lineasResueltas =
+        dto.conceptosLineas !== undefined
+          ? await this.resolveConceptoLineas(tenantId, dto.conceptosLineas)
+          : this.lineasFromStored(
+              await this.db.liquidacionConceptoLinea.findMany({
+                where: { liquidacionId: id },
+                orderBy: { orden: 'asc' },
+              }),
+            );
+
+      const montos = computeLiquidacionTotales({
+        bruto,
+        comision,
+        gastosAdmin,
+        ivaPctDefault: ivaPct,
+        lineas: lineasResueltas,
+      });
       data.comisionPct = comisionPct;
       data.comision = comision;
       data.gastosAdminIva = montos.impIva;
       data.liquido = montos.liquido;
+
+      if (dto.conceptosLineas !== undefined) {
+        await this.db.liquidacionConceptoLinea.deleteMany({
+          where: { liquidacionId: id },
+        });
+        if (lineasResueltas.length > 0) {
+          await this.db.liquidacionConceptoLinea.createMany({
+            data: lineasResueltas.map((l) => ({
+              tenantId,
+              liquidacionId: id,
+              conceptoLiquidacionId:
+                'conceptoLiquidacionId' in l
+                  ? (l as { conceptoLiquidacionId: string }).conceptoLiquidacionId
+                  : null,
+              nombreSnapshot: l.nombreSnapshot,
+              signo: l.signo,
+              ivaPct: l.ivaPct,
+              monto: l.monto,
+              orden: l.orden ?? 0,
+            })),
+          });
+        }
+      }
     }
 
     await this.prisma.liquidacion.update({ where: { id }, data });
@@ -377,14 +490,19 @@ export class LiquidacionesService {
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
       const condicionIvaReceptorId = liquidacion.transportista?.condicionIva ?? 1;
 
-      // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
+      // impNeto/IVA/total: flete + comisión + gastos admin + conceptos configurables.
       const ivaPct = config?.ivaGastosAdmin ?? 21;
-      
-      const conceptos: ConceptoFacturable[] = [
-        { descripcion: 'Fletes', importe: liquidacion.bruto },
-        { descripcion: 'Comisión', importe: -liquidacion.comision },
-        { descripcion: 'Gastos Administrativos', importe: -liquidacion.gastosAdmin },
-      ];
+      const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
+        where: { liquidacionId },
+        orderBy: { orden: 'asc' },
+      });
+      const conceptos = buildCvlpConceptosList({
+        bruto: liquidacion.bruto,
+        comision: liquidacion.comision,
+        gastosAdmin: liquidacion.gastosAdmin,
+        ivaPctDefault: ivaPct,
+        lineas: this.lineasFromStored(lineasDb),
+      });
       
       const cabeceraBase = {
         cuit: config.cuitEmisor,
@@ -508,11 +626,17 @@ export class LiquidacionesService {
 
       // Para anular/ajustar se deben enviar los importes en positivo. AFIP sabe que restan
       // gracias al tipo de comprobante (Liquidacion Ajuste A/B).
-      const conceptos: ConceptoFacturable[] = [
-        { descripcion: 'Fletes', importe: Number(liquidacion.bruto || 0) },
-        { descripcion: 'Comisión', importe: -Number(liquidacion.comision || 0) },
-        { descripcion: 'Gastos Administrativos', importe: -Number(liquidacion.gastosAdmin || 0) },
-      ];
+      const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
+        where: { liquidacionId },
+        orderBy: { orden: 'asc' },
+      });
+      const conceptos = buildCvlpConceptosList({
+        bruto: Number(liquidacion.bruto || 0),
+        comision: Number(liquidacion.comision || 0),
+        gastosAdmin: Number(liquidacion.gastosAdmin || 0),
+        ivaPctDefault: ivaPct,
+        lineas: this.lineasFromStored(lineasDb),
+      });
 
       const cabeceraBase = {
         cuit: config.cuitEmisor,
@@ -635,7 +759,11 @@ export class LiquidacionesService {
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    return liq;
+    const conceptosLineas = await this.db.liquidacionConceptoLinea.findMany({
+      where: { liquidacionId: id },
+      orderBy: { orden: 'asc' },
+    });
+    return { ...liq, conceptosLineas };
   }
 
   // ── Facturas A/B via ARCA ──────────────────────────────────────────────────

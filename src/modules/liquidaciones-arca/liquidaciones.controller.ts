@@ -34,6 +34,11 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
+import {
+  CreateConceptoLiquidacionDto,
+  UpdateConceptoLiquidacionDto,
+} from './dto/concepto-liquidacion.dto';
+import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
 
 @ApiTags('Integración ARCA')
 @ApiBearerAuth('clerk-jwt')
@@ -43,6 +48,7 @@ export class LiquidacionesController {
   constructor(
     private readonly service: LiquidacionesService,
     private readonly pdfService: LiquidacionPdfService,
+    private readonly conceptosService: ConceptosLiquidacionService,
   ) {}
 
   // ── Config (requiere integracion-arca) ────────────────────────────────────
@@ -102,6 +108,47 @@ export class LiquidacionesController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.findAll(auth.tenantId, estado);
+  }
+
+  // ── Conceptos de liquidación (catálogo tenant) ─────────────────────────────
+
+  @ApiOperation({ summary: 'Listar conceptos de liquidación del tenant' })
+  @Get('conceptos-liquidacion')
+  @RequireModule('integracion-arca', 'facturacion')
+  @Roles('admin', 'member', 'superadmin')
+  listConceptos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('soloActivos') soloActivos?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.conceptosService.list(auth.tenantId, {
+      soloActivos: soloActivos === '1' || soloActivos === 'true',
+    });
+  }
+
+  @ApiOperation({ summary: 'Crear concepto de liquidación (catálogo o alta rápida)' })
+  @Post('conceptos-liquidacion')
+  @RequireModule('integracion-arca', 'facturacion')
+  @Roles('admin', 'superadmin')
+  createConcepto(
+    @CurrentAuth() auth: AuthPayload,
+    @Body() dto: CreateConceptoLiquidacionDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.conceptosService.create(auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Editar / desactivar concepto de liquidación' })
+  @Patch('conceptos-liquidacion/:id')
+  @RequireModule('integracion-arca', 'facturacion')
+  @Roles('admin', 'superadmin')
+  updateConcepto(
+    @CurrentAuth() auth: AuthPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateConceptoLiquidacionDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.conceptosService.update(auth.tenantId, id, dto);
   }
 
   @ApiOperation({ summary: 'Obtener liquidación por ID' })

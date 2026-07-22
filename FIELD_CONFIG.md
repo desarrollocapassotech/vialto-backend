@@ -17,7 +17,7 @@ Sección en el frontend: **Superadmin → Configuración por empresa**
 
 | Pieza | Ubicación | Qué guarda |
 |---|---|---|
-| Catálogo | `src/core/tenant-field-config/field-catalog.ts` | La lista fija de qué campos existen en cada formulario del sistema, y cuáles son obligatorios. Vive en código. |
+| Catálogo | `src/core/tenant-field-config/field-catalog.ts` | La lista fija de qué campos existen en cada formulario del sistema, y cuáles son obligatorios — incluyendo obligatoriedad condicional (ver "Antes de marcar un campo como false"). Vive en código. |
 | Configuración por tenant | Tabla `tenant_field_configs` (Prisma) | Las excepciones: qué campos oculta cada empresa. Si un campo no aparece acá, se asume visible (default del catálogo). |
 | Auditoría | Tabla `tenant_field_config_audit_logs` | Quién cambió qué campo, cuándo, y el valor anterior/nuevo. Append-only. |
 | Service | `tenant-field-config.service.ts` | Combina catálogo + overrides para dar el resultado final (qué está visible u oculto) de un formulario o módulo. |
@@ -72,6 +72,20 @@ Ej: se agrega un campo `numeroContenedor` al alta de viaje.
 `obligatorioSistema: true` para campos que el negocio necesita sí o sí
 (no se pueden ocultar desde el panel, hay validación en el backend que
 lo impide).
+
+### Antes de marcar un campo como false
+
+**Regla:** si el campo se vuelve obligatorio en algún escenario del
+formulario (un modo, un tipo de operación, otro campo elegido), va como
+`obligatorioSistema: true` — aunque a simple vista "parezca" opcional.
+
+Revisá bien las validaciones del formulario (`handleSubmit`, `onContinuar`,
+etc.) para chequear si ese campo es obligatorio o no, o si puede llegar a
+romper algo en el flujo de carga del formulario.
+
+**Por qué:** Si lo marcás `false` y un superadmin lo oculta, el sistema va a
+seguir exigiendo ese dato por detrás — y el usuario queda trabado,
+sin poder ver el campo que necesita completar.
 
 ---
 

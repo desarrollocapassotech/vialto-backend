@@ -3,6 +3,8 @@ import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
+import { buildComprobanteCvlp, ConceptoFacturable } from './arca-cvlp.util';
+import { ArcaComprobanteCvlp } from './types/arca.types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -185,7 +187,48 @@ export class LiquidacionPdfService {
       }
     }
 
-    const buffer = await this.buildPdf(liq, config, qrBuffer, logoBuffer);
+    let cvlp: ArcaComprobanteCvlp;
+    if (liq.cae) {
+      // Si está autorizada, buscar el comprobante exacto en auditoría
+      const log = await this.db.arcaLog.findFirst({
+        where: { liquidacionId, exitoso: true, method: 'FECAESolicitar' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (log && (log.requestBody as any)?.auditMetadata) {
+        const metadata = (log.requestBody as any).auditMetadata;
+        if (metadata && Array.isArray(metadata.items)) {
+          cvlp = metadata;
+        }
+      }
+    }
+    
+    // Si no está autorizada o no se encontró el log, se reconstruye al vuelo para el borrador
+    if (!cvlp) {
+      const conceptos: ConceptoFacturable[] = [
+        { descripcion: 'Fletes', importe: liq.bruto },
+        { descripcion: 'Comisión', importe: -liq.comision },
+        { descripcion: 'Gastos Administrativos', importe: -liq.gastosAdmin },
+      ];
+      
+      const docNro = liq.transportista?.idFiscal ? Number(liq.transportista.idFiscal.replace(/-/g, '')) : 0;
+      const docTipo = docNro ? 80 : 99;
+
+      const baseCabecera = {
+        cuit: config?.cuitEmisor ?? '',
+        ptoVenta: liq.ptoVenta ?? config?.ptoVentaCvlp ?? 0,
+        cbteTipo: liq.cbteTipo,
+        cbteNro: liq.cbteNro ?? 0,
+        fechaCbte: liq.createdAt.toISOString().slice(0, 10).replace(/-/g, ''),
+        concepto: 1,
+        docTipo,
+        docNro,
+        condicionIvaReceptorId: liq.transportista?.condicionIva ?? 1,
+      };
+      
+      cvlp = buildComprobanteCvlp(baseCabecera, conceptos, config?.ivaGastosAdmin ?? 21);
+    }
+
+    const buffer = await this.buildPdf(liq, config, qrBuffer, logoBuffer, cvlp);
 
     const cbteNroStr = liq.cbteNro
       ? `${String(liq.ptoVenta).padStart(4, '0')}-${String(liq.cbteNro).padStart(8, '0')}`
@@ -201,6 +244,7 @@ export class LiquidacionPdfService {
     config: PrismaAny,
     qrBuffer: Buffer | null,
     logoBuffer: Buffer | null,
+    cvlp: ArcaComprobanteCvlp,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
@@ -209,9 +253,9 @@ export class LiquidacionPdfService {
         doc.on('data', (c: Buffer) => chunks.push(c));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL');
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL', cvlp);
         doc.addPage();
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO');
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO', cvlp);
         doc.end();
       } catch (e) {
         reject(e);
@@ -226,6 +270,7 @@ export class LiquidacionPdfService {
     qrBuffer: Buffer | null,
     logoBuffer: Buffer | null,
     copia: 'ORIGINAL' | 'DUPLICADO',
+    cvlp: ArcaComprobanteCvlp,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -432,71 +477,21 @@ export class LiquidacionPdfService {
     });
     y += rowH;
 
-    // Rows de viajes
-    for (const lv of liq.viajes ?? []) {
-      const v = lv.viaje;
-      const meta = (v?.metadata as Record<string, unknown>) ?? {};
-      const cp = String(meta.cartaDePorte ?? '');
-      const ctg = String(meta.ctg ?? '');
-      const grano = String(meta.grano ?? '');
-      const desc = ['SERV. DE TRANSPORTE', cp ? `CP:${cp}` : '', ctg ? `CTG:${ctg}` : '', grano]
-        .filter(Boolean).join(' ');
-      const tn = lv.tnDestino ?? 0;
-      const tarifa = lv.tarifaTransportista ?? 0;
-      const sub = lv.subtotal ?? 0;
-      const subIva = sub * 1.21;
-
+    // Rows dinámicas desde el dominio
+    for (const item of cvlp.items) {
       doc.rect(M, y, tableW, rowH).stroke('#ddd');
       const cells = [
-        { v: 'SERVICIOS LOGISTICOS', align: 'left' },
-        { v: desc, align: 'left' },
-        { v: fmtNum(tn), align: 'right' },
-        { v: fmtNum(tarifa), align: 'right' },
-        { v: fmtNum(sub), align: 'right' },
-        { v: '21.00', align: 'right' },
-        { v: fmtNum(subIva), align: 'right' },
+        { v: item.descripcion.toUpperCase(), align: 'left' },
+        { v: item.descripcion.toUpperCase(), align: 'left' },
+        { v: '1,00', align: 'right' },
+        { v: fmtNum(item.importeBase), align: 'right' },
+        { v: fmtNum(item.importeBase), align: 'right' },
+        { v: fmtNum(item.ivaPct), align: 'right' },
+        { v: fmtNum(item.subtotal), align: 'right' },
       ];
       cells.forEach((cell, i) => {
         doc.fontSize(7).font('Helvetica').fillColor('#000')
           .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.align as 'left' | 'right' });
-      });
-      y += rowH;
-    }
-
-    // Fila comisión (negativa)
-    {
-      const comDesc = `COMISION TRANSPORTE ${fmtNum(liq.comisionPct, 1)}%`;
-      const comIva = -liq.comision * 1.21;
-      doc.rect(M, y, tableW, rowH).stroke('#ddd');
-      [
-        { v: 'COMISION TRANSPORTE', a: 'left' },
-        { v: comDesc, a: 'left' },
-        { v: '1,00', a: 'right' },
-        { v: fmtNum(-liq.comision), a: 'right' },
-        { v: fmtNum(-liq.comision), a: 'right' },
-        { v: '21.00', a: 'right' },
-        { v: fmtNum(comIva), a: 'right' },
-      ].forEach((cell, i) => {
-        doc.fontSize(7).font('Helvetica').fillColor('#000')
-          .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.a as 'left' | 'right' });
-      });
-      y += rowH;
-    }
-
-    // Fila gastos admin (si > 0, IVA 0%)
-    if (liq.gastosAdmin > 0) {
-      doc.rect(M, y, tableW, rowH).stroke('#ddd');
-      [
-        { v: 'GASTOS ADMINISTRATIVO', a: 'left' },
-        { v: 'GASTOS ADMINISTRATIVO', a: 'left' },
-        { v: '1,00', a: 'right' },
-        { v: fmtNum(-liq.gastosAdmin), a: 'right' },
-        { v: fmtNum(-liq.gastosAdmin), a: 'right' },
-        { v: '0.00', a: 'right' },
-        { v: fmtNum(-liq.gastosAdmin), a: 'right' },
-      ].forEach((cell, i) => {
-        doc.fontSize(7).font('Helvetica').fillColor('#000')
-          .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.a as 'left' | 'right' });
       });
       y += rowH;
     }
@@ -565,17 +560,15 @@ export class LiquidacionPdfService {
       .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 150 });
 
     // Totales (derecha)
-    const impNeto = liq.bruto - liq.comision;
-    const iva = liq.gastosAdminIva;
     const totX = M + CW - 200;
     const labelW = 120;
     const valW = 70;
     doc.fontSize(7.5).font('Helvetica').fillColor('#000');
     const totRows: [string, string][] = [
-      ['Importe Neto Gravado: $', fmtNum(impNeto)],
+      ['Importe Neto Gravado: $', fmtNum(cvlp.impNeto)],
       ['Importe Otros Tributos: $', '0,00'],
-      ['IVA: $', fmtNum(iva)],
-      ['Importe Total: $', fmtNum(impTotal)],
+      ['IVA: $', fmtNum(cvlp.impIva)],
+      ['Importe Total: $', fmtNum(cvlp.impTotal)],
     ];
 
     let currentY = footerBoxY + 6;

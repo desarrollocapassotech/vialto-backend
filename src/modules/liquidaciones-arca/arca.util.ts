@@ -43,3 +43,17 @@ export function getCbteTipoCvlp(condicionIva?: number | null): number {
   }
   return condicionIva === 1 ? 60 : 61;
 }
+
+/**
+ * Determina el tipo de comprobante para ANULAR un CVLP (Ajuste o Nota de Crédito)
+ * - 63: Liquidacion Ajuste Cuenta de Venta y Liquido Producto A
+ * - 64: Liquidacion Ajuste Cuenta de Venta y Liquido Producto B
+ */
+export function getCbteTipoAnulacionCvlp(condicionIva?: number | null): number {
+  if (condicionIva == null) {
+    throw new BadRequestException(
+      'El transportista no tiene configurada su condición frente al IVA.',
+    );
+  }
+  return condicionIva === 1 ? 63 : 64;
+}

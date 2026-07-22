@@ -3,6 +3,12 @@ import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
+import {
+  cvlpPdfPieFinanciero,
+  formatAlicuotaIva,
+  resolveIvaPct,
+  subtotalConIva,
+} from './arca-iva.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -432,6 +438,10 @@ export class LiquidacionPdfService {
     });
     y += rowH;
 
+    // Misma alícuota que se usa al autorizar contra ARCA (config del emisor).
+    const ivaPct = resolveIvaPct(config?.ivaGastosAdmin);
+    const ivaPctLabel = formatAlicuotaIva(ivaPct);
+
     // Rows de viajes
     for (const lv of liq.viajes ?? []) {
       const v = lv.viaje;
@@ -444,7 +454,7 @@ export class LiquidacionPdfService {
       const tn = lv.tnDestino ?? 0;
       const tarifa = lv.tarifaTransportista ?? 0;
       const sub = lv.subtotal ?? 0;
-      const subIva = sub * 1.21;
+      const subIva = subtotalConIva(sub, ivaPct);
 
       doc.rect(M, y, tableW, rowH).stroke('#ddd');
       const cells = [
@@ -453,7 +463,7 @@ export class LiquidacionPdfService {
         { v: fmtNum(tn), align: 'right' },
         { v: fmtNum(tarifa), align: 'right' },
         { v: fmtNum(sub), align: 'right' },
-        { v: '21.00', align: 'right' },
+        { v: ivaPctLabel, align: 'right' },
         { v: fmtNum(subIva), align: 'right' },
       ];
       cells.forEach((cell, i) => {
@@ -466,7 +476,7 @@ export class LiquidacionPdfService {
     // Fila comisión (negativa)
     {
       const comDesc = `COMISION TRANSPORTE ${fmtNum(liq.comisionPct, 1)}%`;
-      const comIva = -liq.comision * 1.21;
+      const comIva = subtotalConIva(-liq.comision, ivaPct);
       doc.rect(M, y, tableW, rowH).stroke('#ddd');
       [
         { v: 'COMISION TRANSPORTE', a: 'left' },
@@ -474,7 +484,7 @@ export class LiquidacionPdfService {
         { v: '1,00', a: 'right' },
         { v: fmtNum(-liq.comision), a: 'right' },
         { v: fmtNum(-liq.comision), a: 'right' },
-        { v: '21.00', a: 'right' },
+        { v: ivaPctLabel, a: 'right' },
         { v: fmtNum(comIva), a: 'right' },
       ].forEach((cell, i) => {
         doc.fontSize(7).font('Helvetica').fillColor('#000')
@@ -543,8 +553,9 @@ export class LiquidacionPdfService {
     // Línea divisora
     doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke('#aaa');
 
-    // "Son:"
-    const impTotal = liq.liquido;
+    // Pie: montos persistidos (= autorizados por CAE). Neto + Otros + IVA = Total.
+    const pie = cvlpPdfPieFinanciero(liq);
+    const impTotal = pie.total;
     doc.fontSize(7).font('Helvetica').fillColor('#333')
       .text(`Son: ${numeroALetras(impTotal).toLowerCase()}`, M, footerY, { width: CW });
 
@@ -565,16 +576,14 @@ export class LiquidacionPdfService {
       .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 150 });
 
     // Totales (derecha)
-    const impNeto = liq.bruto - liq.comision;
-    const iva = liq.gastosAdminIva;
     const totX = M + CW - 200;
     const labelW = 120;
     const valW = 70;
     doc.fontSize(7.5).font('Helvetica').fillColor('#000');
     const totRows: [string, string][] = [
-      ['Importe Neto Gravado: $', fmtNum(impNeto)],
-      ['Importe Otros Tributos: $', '0,00'],
-      ['IVA: $', fmtNum(iva)],
+      ['Importe Neto Gravado: $', fmtNum(pie.netoGravado)],
+      ['Importe Otros Tributos: $', fmtNum(pie.otrosTributos)],
+      ['IVA: $', fmtNum(pie.iva)],
       ['Importe Total: $', fmtNum(impTotal)],
     ];
 

@@ -18,7 +18,8 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
-import { getCbteTipoCvlp, parseNumeroFactura } from './arca.util';
+import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, parseNumeroFactura } from './arca.util';
+import { buildComprobanteCvlp, mapCvlpToArcaRequest, ConceptoFacturable } from './arca-cvlp.util';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
@@ -378,32 +379,37 @@ export class LiquidacionesService {
 
       // impNeto = bruto - comisión; IVA sobre esa base (sin deducir gastos extra del viaje).
       const ivaPct = config?.ivaGastosAdmin ?? 21;
-      const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, liquidacion.gastosAdmin, ivaPct);
+      
+      const conceptos: ConceptoFacturable[] = [
+        { descripcion: 'Fletes', importe: liquidacion.bruto },
+        { descripcion: 'Comisión', importe: -liquidacion.comision },
+        { descripcion: 'Gastos Administrativos', importe: -liquidacion.gastosAdmin },
+      ];
+      
+      const cabeceraBase = {
+        cuit: config.cuitEmisor,
+        ptoVenta: config.ptoVentaCvlp,
+        cbteTipo: cbteTipoFinal,
+        cbteNro,
+        fechaCbte,
+        concepto: 1,
+        docTipo,
+        docNro,
+        condicionIvaReceptorId,
+      };
+
+      const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
+      const arcaRequest = mapCvlpToArcaRequest(cvlp, config.ambiente as 'homologacion' | 'produccion');
+
       const response = await this.arcaClient.autorizarComprobante(
         config.apiKey,
-        {
-          ambiente: config.ambiente as 'homologacion' | 'produccion',
-          cuit: config.cuitEmisor,
-          token: '',
-          sign: '',
-          ptoVenta: config.ptoVentaCvlp,
-          cbteTipo: cbteTipoFinal,
-          cbteNro,
-          fechaCbte,
-          concepto: 1,
-          docTipo,
-          docNro,
-          condicionIvaReceptorId,
-          impNeto: montos.impNeto,
-          impIva: montos.impIva,
-          impTotal: montos.liquido,
-          alicuotasIva: [montos.alicuota],
-        },
+        arcaRequest,
         tenantId,
         liquidacionId,
         undefined,
         config.certPem,
         config.keyPem,
+        cvlp as unknown as Record<string, unknown>, // auditMetadata
       );
 
       // AFIP autorizó: guardar CAE, fecha de vencimiento y pasar a autorizado.
@@ -417,8 +423,8 @@ export class LiquidacionesService {
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaError: null,
           gastosAdmin: 0,
-          gastosAdminIva: montos.impIva,
-          liquido: montos.liquido,
+          gastosAdminIva: cvlp.impIva,
+          liquido: cvlp.impTotal,
           updatedAt: new Date(),
         },
       });
@@ -477,65 +483,74 @@ export class LiquidacionesService {
       select: { idFiscal: true, condicionIva: true },
     });
 
-    // Obtener próximo número para el comprobante negativo
-    const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-      config.apiKey,
-      config.cuitEmisor,
-      config.ambiente as 'homologacion' | 'produccion',
-      config.ptoVentaCvlp,
-      liquidacion.cbteTipo,
-      tenantId,
-      liquidacionId,
-      undefined,
-      config.certPem,
-      config.keyPem,
-    );
-    const cbteNro = ultimoCbte + 1;
+    const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(transportista?.condicionIva);
 
-    const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
-    const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+    try {
+      // Obtener próximo número para el comprobante de ajuste
+      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+        config.apiKey,
+        config.cuitEmisor,
+        config.ambiente as 'homologacion' | 'produccion',
+        config.ptoVentaCvlp,
+        cbteTipoAnulacion,
+        tenantId,
+        liquidacionId,
+        undefined,
+        config.certPem,
+        config.keyPem,
+      );
+      const cbteNro = ultimoCbte + 1;
 
-    const ivaPct = config?.ivaGastosAdmin ?? 21;
-    const montos = computeAfipGravadoIva(liquidacion.bruto, liquidacion.comision, liquidacion.gastosAdmin, ivaPct);
-    await this.arcaClient.autorizarComprobante(
-      config.apiKey,
-      {
-        ambiente: config.ambiente as 'homologacion' | 'produccion',
+      const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
+      const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+
+      const ivaPct = config?.ivaGastosAdmin ?? 21;
+
+      // Para anular/ajustar se deben enviar los importes en positivo. AFIP sabe que restan
+      // gracias al tipo de comprobante (Liquidacion Ajuste A/B).
+      const conceptos: ConceptoFacturable[] = [
+        { descripcion: 'Fletes', importe: Number(liquidacion.bruto || 0) },
+        { descripcion: 'Comisión', importe: -Number(liquidacion.comision || 0) },
+        { descripcion: 'Gastos Administrativos', importe: -Number(liquidacion.gastosAdmin || 0) },
+      ];
+
+      const cabeceraBase = {
         cuit: config.cuitEmisor,
-        token: '',
-        sign: '',
         ptoVenta: config.ptoVentaCvlp,
-        cbteTipo: liquidacion.cbteTipo,
+        cbteTipo: cbteTipoAnulacion,
         cbteNro,
         fechaCbte: formatFechaCbte(new Date()),
         concepto: 1,
         docTipo,
         docNro,
         condicionIvaReceptorId: transportista?.condicionIva ?? 1,
-        impNeto: -montos.impNeto,
-        impIva: -montos.impIva,
-        impTotal: -montos.liquido,
-        alicuotasIva: [
-          {
-            Id: montos.alicuota.Id,
-            BaseImp: -montos.alicuota.BaseImp,
-            Importe: -montos.alicuota.Importe,
-          },
-        ],
-      },
-      tenantId,
-      liquidacionId,
-      undefined,
-      config.certPem,
-      config.keyPem,
-    );
+      };
 
-    await this.prisma.liquidacion.update({
-      where: { id: liquidacionId },
-      data: { estado: 'anulado', updatedAt: new Date() },
-    });
+      const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
+      const arcaRequest = mapCvlpToArcaRequest(cvlp, config.ambiente as 'homologacion' | 'produccion');
 
-    return this.findById(tenantId, liquidacionId);
+      await this.arcaClient.autorizarComprobante(
+        config.apiKey,
+        arcaRequest,
+        tenantId,
+        liquidacionId,
+        undefined,
+        config.certPem,
+        config.keyPem,
+        cvlp as unknown as Record<string, unknown>, // auditMetadata
+      );
+
+      await this.prisma.liquidacion.update({
+        where: { id: liquidacionId },
+        data: { estado: 'anulado', updatedAt: new Date() },
+      });
+
+      return this.findById(tenantId, liquidacionId);
+    } catch (err) {
+      const errMsg = err instanceof ArcaException ? err.message : err instanceof Error ? err.message : String(err);
+      this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
+      throw new UnprocessableEntityException(errMsg);
+    }
   }
 
   async getConfig(tenantId: string) {
@@ -715,8 +730,6 @@ export class LiquidacionesService {
         {
           ambiente: config.ambiente as 'homologacion' | 'produccion',
           cuit: config.cuitEmisor,
-          token: '',
-          sign: '',
           ptoVenta: config.ptoVentaFactura,
           cbteTipo: dto.cbteTipo,
           cbteNro,

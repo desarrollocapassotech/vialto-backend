@@ -9,6 +9,7 @@ import { ViajesModule } from '../../modules/viajes/viajes.module';
 import { StockModule } from '../../modules/stock/stock.module';
 import { FacturacionModule } from '../../modules/facturacion/facturacion.module';
 import { IntegracionArcaModule } from '../../modules/liquidaciones-arca/liquidaciones-arca.module';
+import { TenantFieldConfigModule } from '../tenant-field-config/tenant-field-config.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { IntegracionArcaModule } from '../../modules/liquidaciones-arca/liquidac
     StockModule,
     FacturacionModule,
     IntegracionArcaModule,
+    TenantFieldConfigModule,
   ],
   controllers: [PlatformController],
   providers: [PlatformService],

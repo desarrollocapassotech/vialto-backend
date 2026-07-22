@@ -27,6 +27,7 @@ import {
 } from './cvlp-conceptos.util';
 import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
 import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
+import { assertCvlpEmitDatosCompletos } from './cvlp-emit-validation.util';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
@@ -409,9 +410,22 @@ export class LiquidacionesService {
   async emitirLiquidacion(tenantId: string, liquidacionId: string) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
-      include: { 
-        viajes: { include: { viaje: true } },
-        transportista: { select: { idFiscal: true, condicionIva: true } }
+      include: {
+        viajes: {
+          include: {
+            viaje: {
+              select: {
+                id: true,
+                cliente: {
+                  select: { nombre: true, idFiscal: true, direccion: true },
+                },
+              },
+            },
+          },
+        },
+        transportista: {
+          select: { idFiscal: true, condicionIva: true, domicilio: true },
+        },
       },
     });
 
@@ -427,6 +441,13 @@ export class LiquidacionesService {
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
+
+    // Fail-fast: PDF CVLP no debe emitirse con secciones vacías (emisor / transportista / cliente).
+    assertCvlpEmitDatosCompletos({
+      emisor: config,
+      transportista: liquidacion.transportista,
+      cliente: liquidacion.viajes?.[0]?.viaje?.cliente,
+    });
 
     // Re-evaluamos el cbteTipo dinámicamente para dar retrocompatibilidad a borradores
     // históricos que hayan quedado con el default(60) siendo monotributistas.
@@ -750,6 +771,9 @@ export class LiquidacionesService {
                 fechaDescarga: true,
                 origen: true,
                 destino: true,
+                cliente: {
+                  select: { id: true, nombre: true, idFiscal: true, direccion: true },
+                },
               },
             },
           },

@@ -4,6 +4,7 @@ import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
 import { buildComprobanteCvlp } from './arca-cvlp.util';
+import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
 import { buildCvlpConceptosList } from './cvlp-conceptos.util';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 
@@ -209,7 +210,7 @@ export class LiquidacionPdfService {
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
       });
-      const ivaDefault = config?.ivaGastosAdmin ?? 21;
+      const ivaDefault = resolveIvaPct(config?.ivaGastosAdmin);
       const conceptos = buildCvlpConceptosList({
         bruto: liq.bruto,
         comision: liq.comision,
@@ -497,7 +498,7 @@ export class LiquidacionPdfService {
     });
     y += rowH;
 
-    // Rows dinámicas desde el dominio
+    // Rows dinámicas desde el dominio (alícuota = config del emisor vía buildComprobanteCvlp)
     for (const item of cvlp.items) {
       doc.rect(M, y, tableW, rowH).stroke('#ddd');
       const cells = [
@@ -521,8 +522,9 @@ export class LiquidacionPdfService {
     // Línea divisora
     doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke('#aaa');
 
-    // "Son:"
-    const impTotal = liq.liquido;
+    // Pie: montos persistidos (= autorizados por CAE). Neto + Otros + IVA = Total.
+    const pie = cvlpPdfPieFinanciero(liq);
+    const impTotal = pie.total;
     doc.fontSize(7).font('Helvetica').fillColor('#333')
       .text(`Son: ${numeroALetras(impTotal).toLowerCase()}`, M, footerY, { width: CW });
 
@@ -548,10 +550,10 @@ export class LiquidacionPdfService {
     const valW = 70;
     doc.fontSize(7.5).font('Helvetica').fillColor('#000');
     const totRows: [string, string][] = [
-      ['Importe Neto Gravado: $', fmtNum(cvlp.impNeto)],
-      ['Importe Otros Tributos: $', '0,00'],
-      ['IVA: $', fmtNum(cvlp.impIva)],
-      ['Importe Total: $', fmtNum(cvlp.impTotal)],
+      ['Importe Neto Gravado: $', fmtNum(pie.netoGravado)],
+      ['Importe Otros Tributos: $', fmtNum(pie.otrosTributos)],
+      ['IVA: $', fmtNum(pie.iva)],
+      ['Importe Total: $', fmtNum(impTotal)],
     ];
 
     let currentY = footerBoxY + 6;

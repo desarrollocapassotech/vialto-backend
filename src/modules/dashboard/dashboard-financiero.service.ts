@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
-import { buildGananciaBrutaResumen } from '../viajes/viaje-ganancia-bruta.util';
+import {
+  buildGananciaBrutaResumen,
+  UMBRAL_MARGEN_BAJO_PCT,
+} from '../viajes/viaje-ganancia-bruta.util';
 import { VIAJE_ESTADOS_FINALES } from '../viajes/viaje-estados';
 import { importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
 
@@ -51,6 +54,11 @@ export type FinancieroDashboardResponse = {
   };
   viajesFunnel?: {
     porEstado: Array<{ estado: string; cantidad: number }>;
+    /** Viajes finalizados con transportista y costo cargado, ya pagados por completo. */
+    liquidados: {
+      cantidad: number;
+      montoTotal: Money;
+    };
     sinLiquidar: {
       cantidad: number;
       montoPendiente: Money;
@@ -144,8 +152,6 @@ function endOfDayLocal(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1, 23, 59, 59, 999);
 }
-
-const UMBRAL_MARGEN_BAJO_PCT = 10;
 
 type ViajeMargenRow = {
   id: string;
@@ -473,6 +479,8 @@ export class DashboardFinancieroService {
     );
     const sinLiquidarItems: Array<{ id: string; numero: string; transportistaNombre: string | null }> = [];
     const montoPendiente = emptyMoney();
+    const montoLiquidado = emptyMoney();
+    let cantidadLiquidados = 0;
     const transportistaIds = new Set<string>();
     for (const v of sinLiquidarCandidatos) {
       const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
@@ -483,7 +491,11 @@ export class DashboardFinancieroService {
       const pagado = pagos
         .filter((p) => (p.moneda === 'USD' ? 'USD' : 'ARS') === moneda)
         .reduce((s, p) => s + (typeof p.monto === 'number' ? p.monto : 0), 0);
-      if (pagado >= acordado - 1e-6) continue;
+      if (pagado >= acordado - 1e-6) {
+        cantidadLiquidados += 1;
+        addMoney(montoLiquidado, moneda, roundMoney(pagado));
+        continue;
+      }
       addMoney(montoPendiente, moneda, roundMoney(acordado - pagado));
       if (v.transportistaId) transportistaIds.add(v.transportistaId);
       sinLiquidarItems.push({ id: v.id, numero: v.numero ?? '', transportistaNombre: null });
@@ -523,6 +535,10 @@ export class DashboardFinancieroService {
 
     return {
       porEstado: [...porEstadoMap.entries()].map(([estado, cantidad]) => ({ estado, cantidad })),
+      liquidados: {
+        cantidad: cantidadLiquidados,
+        montoTotal: montoLiquidado,
+      },
       sinLiquidar: {
         cantidad: sinLiquidarItems.length,
         montoPendiente,

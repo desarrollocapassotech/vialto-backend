@@ -199,7 +199,14 @@ export class LiquidacionPdfService {
       if (log && (log.requestBody as any)?.auditMetadata) {
         const metadata = (log.requestBody as any).auditMetadata;
         if (metadata && Array.isArray(metadata.items)) {
-          cvlp = metadata;
+          // No mostrar "Gastos Administrativos" en el PDF (concepto deprecado).
+          cvlp = {
+            ...metadata,
+            items: metadata.items.filter(
+              (it: { descripcion?: string }) =>
+                it?.descripcion !== 'Gastos Administrativos',
+            ),
+          };
         }
       }
     }
@@ -214,7 +221,6 @@ export class LiquidacionPdfService {
       const conceptos = buildCvlpConceptosList({
         bruto: liq.bruto,
         comision: liq.comision,
-        gastosAdmin: liq.gastosAdmin,
         ivaPctDefault: ivaDefault,
         lineas: (lineasDb ?? []).map((r: {
           nombreSnapshot: string;

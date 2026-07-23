@@ -190,22 +190,13 @@ export class LiquidacionesService {
 
     bruto = round2(bruto);
     const comision = round2(bruto * comisionPct / 100);
-    const gastosAdmin = round2(
-      viajesConMeta.reduce((total, v) => {
-        const gastos = (v as unknown as { otrosGastos?: Array<{ monto: number; moneda: string }> })
-          .otrosGastos ?? [];
-        const gastosARS = gastos
-          .filter((g) => g.moneda === 'ARS')
-          .reduce((sum, g) => sum + g.monto, 0);
-        return total + gastosARS;
-      }, 0),
-    );
+    // Los gastos del viaje viven en `otrosGastos` y no forman parte de la liquidación/CVLP.
+    const gastosAdmin = 0;
     const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
     const lineasResueltas = await this.resolveConceptoLineas(tenantId, dto.conceptosLineas);
     const montos = computeLiquidacionTotales({
       bruto,
       comision,
-      gastosAdmin,
       ivaPctDefault: ivaPct,
       lineas: lineasResueltas,
     });
@@ -348,7 +339,6 @@ export class LiquidacionesService {
         ivaPct = config?.ivaGastosAdmin ?? 21;
       }
 
-      const gastosAdmin = liq.gastosAdmin as number;
       const lineasResueltas =
         dto.conceptosLineas !== undefined
           ? await this.resolveConceptoLineas(tenantId, dto.conceptosLineas)
@@ -359,15 +349,16 @@ export class LiquidacionesService {
               }),
             );
 
+      // No incluir gastos administrativos en el cálculo (siempre 0).
       const montos = computeLiquidacionTotales({
         bruto,
         comision,
-        gastosAdmin,
         ivaPctDefault: ivaPct,
         lineas: lineasResueltas,
       });
       data.comisionPct = comisionPct;
       data.comision = comision;
+      data.gastosAdmin = 0;
       data.gastosAdminIva = montos.impIva;
       data.liquido = montos.liquido;
 
@@ -511,7 +502,7 @@ export class LiquidacionesService {
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
       const condicionIvaReceptorId = liquidacion.transportista?.condicionIva ?? 1;
 
-      // impNeto/IVA/total: flete + comisión + gastos admin + conceptos configurables.
+      // impNeto/IVA/total: flete + comisión + conceptos configurables.
       const ivaPct = config?.ivaGastosAdmin ?? 21;
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
         where: { liquidacionId },
@@ -520,7 +511,6 @@ export class LiquidacionesService {
       const conceptos = buildCvlpConceptosList({
         bruto: liquidacion.bruto,
         comision: liquidacion.comision,
-        gastosAdmin: liquidacion.gastosAdmin,
         ivaPctDefault: ivaPct,
         lineas: this.lineasFromStored(lineasDb),
       });
@@ -654,7 +644,6 @@ export class LiquidacionesService {
       const conceptos = buildCvlpConceptosList({
         bruto: Number(liquidacion.bruto || 0),
         comision: Number(liquidacion.comision || 0),
-        gastosAdmin: Number(liquidacion.gastosAdmin || 0),
         ivaPctDefault: ivaPct,
         lineas: this.lineasFromStored(lineasDb),
       });

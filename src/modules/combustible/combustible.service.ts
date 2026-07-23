@@ -222,7 +222,12 @@ export class CombustibleService {
     if (choferId) where["choferId"] = choferId;
     if (estacion)
       where["estacion"] = { contains: estacion, mode: "insensitive" };
-    if (formaPago) where["formaPago"] = formaPago;
+    if (formaPago) {
+      where["formaPago"] = {
+        contains: formaPago,
+        mode: "insensitive",
+      };
+    }
 
     if (from || to) {
       const fechaWhere: Record<string, Date> = {};

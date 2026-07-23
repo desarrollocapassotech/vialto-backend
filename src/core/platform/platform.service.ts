@@ -52,6 +52,8 @@ const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 import { toClerkOrganizationRole, toVialtoRole } from '../auth/clerk-organization-roles';
+import { TenantFieldConfigService } from '../tenant-field-config/tenant-field-config.service';
+import { ToggleFieldConfigDto } from '../tenant-field-config/dto/toggle-field-config.dto';
 
 function splitFullName(fullName: string) {
   const normalized = fullName.trim().replace(/\s+/g, ' ');
@@ -98,6 +100,7 @@ export class PlatformService {
     private readonly arcaConfigService: ArcaConfigService,
     private readonly liquidacionesService: LiquidacionesService,
     private readonly liquidacionPdfService: LiquidacionPdfService,
+    private readonly fieldConfigService: TenantFieldConfigService,
   ) {}
 
   private requiredTenantId(tenantId?: string) {
@@ -1021,8 +1024,27 @@ export class PlatformService {
     return this.liquidacionesService.findLogs(id, liquidacionId, facturaId);
   }
 
-  getLiquidacionPdf(tenantId: string | undefined, liquidacionId: string): Promise<Buffer> {
+  getLiquidacionPdf(
+    tenantId: string | undefined,
+    liquidacionId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionPdfService.generate(id, liquidacionId);
+  }
+
+  // ── Configuración de campos por empresa (superadmin) ──────────────────────
+
+  getFieldConfig(tenantId: string | undefined, modulo: string, formulario: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.fieldConfigService.getConfigEfectiva(id, modulo, formulario);
+  }
+
+  toggleFieldConfig(tenantId: string | undefined, dto: ToggleFieldConfigDto, changedBy: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.fieldConfigService.toggleCampo(id, dto, changedBy);
+  }
+
+  getFieldConfigCatalogo() {
+    return this.fieldConfigService.getCatalogoCompleto();
   }
 }

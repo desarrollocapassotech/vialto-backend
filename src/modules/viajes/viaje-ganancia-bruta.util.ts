@@ -1,5 +1,8 @@
 export type MonedaViaje = 'ARS' | 'USD';
 
+/** % de margen debajo del cual un viaje se considera "margen bajo" en dashboards. */
+export const UMBRAL_MARGEN_BAJO_PCT = 10;
+
 export type OtroGastoLike = { monto?: number; moneda?: string };
 
 export type GananciaBrutaLinea = {

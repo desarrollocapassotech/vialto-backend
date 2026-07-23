@@ -58,6 +58,8 @@ import { queryParamFromRequest } from '../../shared/util/express-query-string';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
+import { GetFieldConfigDto } from '../tenant-field-config/dto/get-field-config.dto';
+import { ToggleFieldConfigDto } from '../tenant-field-config/dto/toggle-field-config.dto';
 
 /**
  * Datos por tenant (query `tenantId` = clerkOrgId) — solo superadmin.
@@ -910,13 +912,13 @@ export class PlatformController {
     @Res() res: Response,
   ) {
     try {
-      const pdf = await this.service.getLiquidacionPdf(tenantId, id);
+      const { buffer, filename } = await this.service.getLiquidacionPdf(tenantId, id);
       res.set({
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="liquidacion-${id}.pdf"`,
-        'Content-Length': String(pdf.length),
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(buffer.length),
       });
-      res.end(pdf);
+      res.end(buffer);
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string; response?: unknown };
       if (e?.status === 400 || e?.status === 404) {
@@ -945,5 +947,32 @@ export class PlatformController {
     @Query('facturaId') facturaId?: string,
   ) {
     return this.service.getArcaLogs(tenantId, liquidacionId, facturaId);
+  }
+
+  // ── Configuración de campos por empresa (superadmin) ──────────────────────
+
+  @ApiOperation({ summary: 'Catálogo completo de módulos/formularios/campos configurables' })
+  @Get('field-config/catalogo')
+  getFieldConfigCatalogo() {
+    return this.service.getFieldConfigCatalogo();
+  }
+  
+  @ApiOperation({ summary: 'Obtiene la configuración de campos de un formulario para un tenant' })
+  @Get('field-config/:tenantId')
+  getFieldConfig(
+    @Param('tenantId') tenantId: string,
+    @Query() query: GetFieldConfigDto,
+  ) {
+    return this.service.getFieldConfig(tenantId, query.modulo, query.formulario);
+  }
+
+  @ApiOperation({ summary: 'Actualiza la visibilidad de un campo para un tenant' })
+  @Post('field-config/:tenantId/toggle')
+  toggleFieldConfig(
+    @Param('tenantId') tenantId: string,
+    @Body() dto: ToggleFieldConfigDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.toggleFieldConfig(tenantId, dto, auth.userId);
   }
 }

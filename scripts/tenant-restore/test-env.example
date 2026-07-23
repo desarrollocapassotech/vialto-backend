@@ -1,0 +1,8 @@
+# Copiá a .test-env.local y completá (no commitear).
+# cp test-env.example .test-env.local
+#
+# IMPORTANTE: las URLs van ENTRE COMILLAS si tienen & (ej. channel_binding=require).
+
+SOURCE_DATABASE_URL="postgresql://USER:PASS@ep-small-recipe-HOST-DIRECT.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
+TARGET_DATABASE_URL="postgresql://USER:PASS@ep-orange-flower-HOST-DIRECT.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
+TENANT_CLERK_ORG_ID=org_3DzdRQzKt6oJgxpV1b0CncaVWA2

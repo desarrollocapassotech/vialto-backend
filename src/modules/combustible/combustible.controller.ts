@@ -1,54 +1,72 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException,
-} from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
-import { CombustibleService } from './combustible.service';
-import { CreateCargaDto } from './dto/create-carga.dto';
-import { UpdateCargaDto } from './dto/update-carga.dto';
-import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
-import { RolesGuard } from '../../core/auth/roles.guard';
-import { ModuleGuard } from '../../shared/guards/module.guard';
-import { RequireModule } from '../../shared/decorators/require-module.decorator';
-import { Roles } from '../../core/auth/roles.decorator';
-import { CurrentAuth } from '../../core/auth/current-auth.decorator';
-import { AuthPayload } from '../../core/auth/clerk-auth.guard';
-import { TenantGuard } from '../../shared/guards/tenant.guard';
-import { assertTenantId } from '../../shared/util/assert-tenant';
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
+import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
+import { ClerkAuthGuard, AuthPayload } from "../../core/auth/clerk-auth.guard";
+import { RolesGuard } from "../../core/auth/roles.guard";
+import { Roles } from "../../core/auth/roles.decorator";
+import { CurrentAuth } from "../../core/auth/current-auth.decorator";
+import { CombustibleService } from "../../modules/combustible/combustible.service";
+import { CreateCargaDto } from "../../modules/combustible/dto/create-carga.dto";
 
-@ApiTags('[Próximamente] Combustible')
-@ApiBearerAuth('clerk-jwt')
-@Controller('combustible')
-@UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
-@RequireModule('combustible')
+@ApiTags("Admin — Platform")
+@ApiBearerAuth("clerk-jwt")
+@Controller("platform/combustible")
+@UseGuards(ClerkAuthGuard, RolesGuard)
+@Roles("superadmin")
 export class CombustibleController {
   constructor(private readonly service: CombustibleService) {}
 
-  @ApiOperation({ summary: 'Estadísticas de consumo de combustible · Fase 4 — aún no activo' })
-  @Get('stats')
-  @Roles('admin', 'superadmin')
-  getStats(@CurrentAuth() auth: AuthPayload, @Query('month') month?: string) {
-    assertTenantId(auth.tenantId);
-    return this.service.getStats(auth, month);
+  private requiredTenantId(tenantId?: string): string {
+    const id = tenantId?.trim();
+    if (!id) throw new BadRequestException("tenantId es requerido");
+    return id;
   }
 
-  @ApiOperation({ summary: 'Listar cargas de combustible · Fase 4 — aún no activo' })
+  /** auth sintético: el superadmin opera "como admin" del tenant elegido. */
+  private scopedAuth(tenantId: string, current: AuthPayload) {
+    return { tenantId, userId: current.userId, role: "admin" };
+  }
+
+  @ApiOperation({
+    summary: "Estaciones distintas del tenant, para el filtro (superadmin)",
+  })
+  @Get("estaciones")
+  getEstaciones(
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    return this.service.getEstaciones(this.scopedAuth(id, current));
+  }
+
+  @ApiOperation({
+    summary: "Listar cargas de combustible de un tenant (superadmin)",
+  })
   @Get()
   findAll(
-    @CurrentAuth() auth: AuthPayload,
-    @Query('vehiculoId') vehiculoId?: string,
-    @Query('choferId') choferId?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('estacion') estacion?: string,
-    @Query('formaPago') formaPago?: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
+    @Query("vehiculoId") vehiculoId?: string,
+    @Query("choferId") choferId?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+    @Query("estacion") estacion?: string,
+    @Query("formaPago") formaPago?: string,
   ) {
-    assertTenantId(auth.tenantId);
+    const id = this.requiredTenantId(tenantId);
     return this.service.findAll(
-      auth,
+      this.scopedAuth(id, current),
       vehiculoId,
       choferId,
       from,
@@ -60,98 +78,44 @@ export class CombustibleController {
     );
   }
 
-  @ApiOperation({ summary: 'Estaciones distintas entre las cargas existentes, para el filtro del listado' })
-  @Get('estaciones')
-  getEstaciones(@CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.getEstaciones(auth);
-  }
-
-  @ApiOperation({ summary: 'Dashboard de combustible — métricas y últimas cargas del período' })
-  @Get('dashboard')
-  @Roles('admin', 'superadmin')
-  getDashboard(
-    @CurrentAuth() auth: AuthPayload,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
-    assertTenantId(auth.tenantId);
-    return this.service.getDashboard(auth, from, to);
-  }
-
-  @ApiOperation({ summary: 'Exportar cargas de combustible del período (Excel)' })
-  @Get('export')
-  @Roles('admin', 'superadmin')
-  getExport(
-    @CurrentAuth() auth: AuthPayload,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
-    assertTenantId(auth.tenantId);
-    return this.service.getCargasParaExport(auth, from, to);
-  }
-
-  @ApiOperation({ summary: 'Obtener carga de combustible por ID · Fase 4 — aún no activo' })
-  @Get(':id')
-  findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.findOne(id, auth);
-  }
-
-  @ApiOperation({ summary: 'Registrar carga de combustible · Fase 4 — aún no activo' })
-  @Post()
-  create(@Body() dto: CreateCargaDto, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.create(dto, auth);
-  }
-
-  @ApiOperation({ summary: 'Actualizar carga de combustible · Fase 4 — aún no activo' })
-  @Patch(':id')
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateCargaDto,
-    @CurrentAuth() auth: AuthPayload,
-  ) {
-    assertTenantId(auth.tenantId);
-    return this.service.update(id, dto, auth);
-  }
-
-  @ApiOperation({ summary: 'Eliminar carga de combustible · Fase 4 — aún no activo' })
-  @Delete(':id')
-  @Roles('admin', 'superadmin')
-  remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.remove(id, auth);
-  }
-
-  @ApiOperation({ summary: 'Subir foto para carga de combustible' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        file: { type: 'string', format: 'binary' },
-        tipo: { type: 'string', enum: ['tacometro', 'ticket'] },
-      },
-    },
+  @ApiOperation({
+    summary: "Obtener una carga por ID dentro del tenant (superadmin)",
   })
-  @Post('fotos')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
-    }),
-  )
-  async uploadFoto(
-    @UploadedFile() file: Express.Multer.File,
-    @Body('tipo') tipo: 'tacometro' | 'ticket',
-    @CurrentAuth() auth: AuthPayload,
+  @Get(":id")
+  findOne(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
   ) {
-    assertTenantId(auth.tenantId);
-    if (!file) throw new BadRequestException('Se requiere una imagen.');
-    if (!tipo || !['tacometro', 'ticket'].includes(tipo)) {
-      throw new BadRequestException('Tipo inválido o no especificado.');
-    }
-    return this.service.uploadFoto(auth.tenantId, file, tipo);
+    const tid = this.requiredTenantId(tenantId);
+    return this.service.findOne(id, this.scopedAuth(tid, current));
+  }
+
+  @ApiOperation({
+    summary: "Registrar carga de combustible en un tenant (superadmin)",
+  })
+  @Post()
+  create(
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: CreateCargaDto,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    // El service valida que vehiculo/chofer pertenezcan a este tenantId
+    // (assertVehiculoChofer) y aplica assertKmNoRetroceso sobre las cargas del tenant.
+    return this.service.create(dto, this.scopedAuth(id, current));
+  }
+
+  @ApiOperation({
+    summary: "Eliminar carga de combustible de un tenant (superadmin)",
+  })
+  @Delete(":id")
+  remove(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    return this.service.remove(id, this.scopedAuth(tid, current));
   }
 }

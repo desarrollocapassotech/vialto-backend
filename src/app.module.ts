@@ -28,6 +28,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { IntegracionArcaModule } from './modules/liquidaciones-arca/liquidaciones-arca.module';
 import { HealthController } from './health.controller';
 import { PlatformModule } from './core/platform/platform.module';
+import { TenantFieldConfigModule } from './core/tenant-field-config/tenant-field-config.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { PlatformModule } from './core/platform/platform.module';
     DashboardModule,
     IntegracionArcaModule,
     PlatformModule,
+    TenantFieldConfigModule,
   ],
   controllers: [HealthController],
 })

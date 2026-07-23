@@ -16,6 +16,10 @@ import {
   computeEstadoFacturaLectura,
   importeOperativoFactura,
 } from '../../shared/util/factura-estado-lectura';
+import {
+  buildGananciaBrutaResumen,
+  UMBRAL_MARGEN_BAJO_PCT,
+} from '../viajes/viaje-ganancia-bruta.util';
 
 export type MetricCompare = {
   current: number;
@@ -61,6 +65,15 @@ export type OwnerDashboardResponse = {
     };
     /** Cargas de combustible marcadas `sospechoso` (snapshot actual, no filtrado por período). */
     cargasSospechosas?: {
+      cantidad: number;
+      montoTotal: number;
+    };
+    /**
+     * Viajes del período con margen bajo o negativo (ver `viaje-ganancia-bruta.util`).
+     * `montoTotal` solo suma el margen negativo en ARS — el detalle completo (incl. USD)
+     * vive en GET /dashboard/financiero.
+     */
+    margenBajo?: {
       cantidad: number;
       montoTotal: number;
     };
@@ -189,7 +202,7 @@ export class DashboardService {
 
     const out: OwnerDashboardResponse = { period: meta };
 
-    const [financieroResult, viajesResult, stockResult, cargasSospechosasResult] = await Promise.all([
+    const [financieroResult, viajesResult, stockResult, cargasSospechosasResult, margenBajoResult] = await Promise.all([
       hasFacturacion
         ? Promise.all([
             this.sumFacturadoClienteSnapshot(tenantId),                                 // 0
@@ -225,6 +238,7 @@ export class DashboardService {
       hasCombustible
         ? this.buildCargasSospechosasAlerta(tenantId, resolved.start, resolved.end)
         : null,
+      hasViajes ? this.buildMargenBajoAlerta(tenantId, resolved.start, resolved.end) : null,
     ]);
 
     if (financieroResult) {
@@ -292,6 +306,22 @@ export class DashboardService {
         facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE,
         viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE,
         cargasSospechosas: cargasSospechosasResult,
+        margenBajo: out.alertas?.margenBajo,
+      };
+    }
+
+    if (margenBajoResult && margenBajoResult.cantidad > 0) {
+      const EMPTY_BLOQUE = {
+        cantidad: 0,
+        montoTotal: 0,
+        montosPorMoneda: { ARS: 0, USD: 0 },
+        items: [] as Array<{ id: string; numero: string }>,
+      };
+      out.alertas = {
+        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE,
+        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE,
+        cargasSospechosas: out.alertas?.cargasSospechosas,
+        margenBajo: margenBajoResult,
       };
     }
 
@@ -709,6 +739,68 @@ export class DashboardService {
       cantidad: agg._count._all,
       montoTotal: roundMoney(agg._sum.importe ?? 0),
     };
+  }
+
+  /**
+   * Viajes del período con margen bajo (< {@link UMBRAL_MARGEN_BAJO_PCT}%) o negativo.
+   * Teaser para la campanita global: el detalle completo (por cliente/transportista/ruta,
+   * separado por moneda) vive en GET /dashboard/financiero. `montoTotal` solo suma el
+   * margen negativo en ARS para no mezclar monedas en un único número.
+   */
+  private async buildMargenBajoAlerta(
+    tenantId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ cantidad: number; montoTotal: number }> {
+    const viajes = await this.prisma.viaje.findMany({
+      where: {
+        tenantId,
+        estado: { not: 'cancelado' },
+        OR: [
+          { fechaCarga: { gte: start, lte: end } },
+          { fechaCarga: null, fechaFinalizado: { gte: start, lte: end } },
+          { fechaCarga: null, fechaFinalizado: null, createdAt: { gte: start, lte: end } },
+        ],
+      },
+      select: {
+        monto: true,
+        monedaMonto: true,
+        precioTransportistaExterno: true,
+        monedaPrecioTransportistaExterno: true,
+        otrosGastos: true,
+        gananciaBrutaManual: true,
+        monedaGananciaBrutaManual: true,
+      },
+    });
+
+    let cantidad = 0;
+    let montoNegativoArs = 0;
+    for (const v of viajes) {
+      const monto = v.monto ?? 0;
+      if (monto <= 0) continue;
+      const g = buildGananciaBrutaResumen(v);
+      let margenValor: number | null = null;
+      let margenMoneda: 'ARS' | 'USD' = 'ARS';
+      let margenPct: number | null = null;
+
+      if (g.gananciaCalculada != null) {
+        margenValor = g.gananciaCalculada;
+        margenMoneda = g.monedaGananciaCalculada ?? 'ARS';
+        margenPct = roundMoney((margenValor / monto) * 100);
+      } else if (g.gananciaBrutaManual != null) {
+        margenValor = g.gananciaBrutaManual;
+        margenMoneda = g.monedaGananciaBrutaManual ?? 'ARS';
+      } else {
+        continue;
+      }
+
+      const esAlerta = margenValor < 0 || (margenPct != null && margenPct < UMBRAL_MARGEN_BAJO_PCT);
+      if (!esAlerta) continue;
+      cantidad += 1;
+      if (margenValor < 0 && margenMoneda === 'ARS') montoNegativoArs += -margenValor;
+    }
+
+    return { cantidad, montoTotal: roundMoney(montoNegativoArs) };
   }
 
   /**

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
 import { encryptField, isEncrypted, decryptField, validateKeyConfigured } from '../../shared/util/arca-crypto';
 
@@ -17,6 +18,7 @@ const CONFIG_SELECT = {
   condicionIvaEmisor: true,
   ingBrutos: true,
   inicActEmisor: true,
+  logoUrl: true,
   ptoVentaCvlp: true,
   ptoVentaFactura: true,
   ambiente: true,
@@ -31,7 +33,10 @@ const CONFIG_SELECT = {
 
 @Injectable()
 export class ArcaConfigService {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {
     validateKeyConfigured();
   }
 
@@ -78,6 +83,40 @@ export class ArcaConfigService {
     return this.findPublic(tenantId);
   }
 
+  async uploadLogo(
+    tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ) {
+    await this.assertConfigExists(tenantId, 'Guardá primero el CUIT del emisor en "Datos del emisor" antes de subir el logo.');
+    const url = await this.cloudinary.uploadArcaLogo(tenantId, buffer, originalName, mimeType);
+    await this.db.arcaConfig.update({
+      where: { tenantId },
+      data: { logoUrl: url, updatedAt: new Date() },
+    });
+    return this.findPublic(tenantId);
+  }
+
+  async removeLogo(tenantId: string) {
+    await this.assertConfigExists(tenantId, 'No hay configuración de ARCA para este tenant.');
+    await this.db.arcaConfig.update({
+      where: { tenantId },
+      data: { logoUrl: null, updatedAt: new Date() },
+    });
+    return this.findPublic(tenantId);
+  }
+
+  private async assertConfigExists(tenantId: string, message: string): Promise<void> {
+    const exists = await this.db.arcaConfig.findUnique({
+      where: { tenantId },
+      select: { tenantId: true },
+    });
+    if (!exists) {
+      throw new NotFoundException(message);
+    }
+  }
+
   async findPublic(tenantId: string) {
     const config = await this.db.arcaConfig.findUnique({
       where: { tenantId },
@@ -103,15 +142,10 @@ export class ArcaConfigService {
   }
 
   async validateConfigExists(tenantId: string): Promise<void> {
-    const exists = await this.db.arcaConfig.findUnique({
-      where: { tenantId },
-      select: { tenantId: true },
-    });
-    if (!exists) {
-      throw new NotFoundException(
-        'El tenant no tiene configuración de ARCA. Completar la configuración antes de emitir.',
-      );
-    }
+    await this.assertConfigExists(
+      tenantId,
+      'El tenant no tiene configuración de ARCA. Completar la configuración antes de emitir.',
+    );
   }
 
   async migrateExistingConfigs(): Promise<void> {

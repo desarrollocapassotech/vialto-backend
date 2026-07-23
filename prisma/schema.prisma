@@ -52,6 +52,7 @@ model Tenant {
   arcaConfig              ArcaConfig?
   liquidaciones           Liquidacion[]
   arcaLogs                ArcaLog[]
+  conceptosLiquidacion    ConceptoLiquidacion[]
   tenantFieldConfigs      TenantFieldConfig[]
   tenantFieldConfigAuditLogs TenantFieldConfigAuditLog[]
 
@@ -828,6 +829,7 @@ model ArcaConfig {
   condicionIvaEmisor String? // Condición IVA del emisor (ej: RESP. INSCRIPTO)
   ingBrutos          String? // N° Ing. Brutos (suele coincidir con CUIT)
   inicActEmisor      String? // Fecha de inicio de actividades (ej: 01/03/2015)
+  logoUrl            String? // Logo del emisor (Cloudinary), embebido en los PDF de comprobantes
   // Puntos de venta y ambiente
   ptoVentaCvlp       Int // punto de venta para CVLP tipo 60
   ptoVentaFactura    Int // punto de venta para Facturas A/B
@@ -889,14 +891,61 @@ model Liquidacion {
   createdBy String
   updatedAt DateTime @updatedAt
 
-  viajes   LiquidacionViaje[]
-  arcaLogs ArcaLog[]
+  viajes          LiquidacionViaje[]
+  conceptosLineas LiquidacionConceptoLinea[]
+  arcaLogs        ArcaLog[]
 
   @@index([tenantId])
   @@index([tenantId, transportistaId])
   @@index([tenantId, estado])
   @@index([tenantId, periodoDesde, periodoHasta])
   @@map("liquidaciones")
+}
+
+/**
+ * Catálogo de conceptos extras de liquidación CVLP (por tenant).
+ * Arranca vacío: cada cuenta define los que necesita (seguro, combustible, etc.).
+ */
+model ConceptoLiquidacion {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre    String
+  /// favor = suma al líquido del transportista; contra = descuenta
+  signo     String
+  ivaPct    Float    @default(21)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lineas LiquidacionConceptoLinea[]
+
+  @@index([tenantId, activo])
+  @@map("conceptos_liquidacion")
+}
+
+/**
+ * Línea de concepto aplicada a una liquidación (monto manual, una vez por liquidación).
+ * Snapshot del nombre/signo/IVA para que el PDF no dependa del catálogo vivo.
+ */
+model LiquidacionConceptoLinea {
+  id                    String               @id @default(cuid())
+  tenantId              String
+  liquidacionId         String
+  liquidacion           Liquidacion          @relation(fields: [liquidacionId], references: [id], onDelete: Cascade)
+  conceptoLiquidacionId String?
+  concepto              ConceptoLiquidacion? @relation(fields: [conceptoLiquidacionId], references: [id], onDelete: SetNull)
+  nombreSnapshot        String
+  signo                 String
+  ivaPct                Float
+  /// Monto absoluto (> 0). El signo determina si suma o resta.
+  monto                 Float
+  orden                 Int                  @default(0)
+  createdAt             DateTime             @default(now())
+
+  @@index([liquidacionId])
+  @@index([tenantId])
+  @@map("liquidacion_concepto_lineas")
 }
 
 /**

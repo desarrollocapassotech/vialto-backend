@@ -169,6 +169,60 @@ export class CloudinaryService {
     }
   }
 
+  async uploadArcaLogo(
+    tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ): Promise<string> {
+    if (!this.configured) {
+      throw new ServiceUnavailableException(
+        'El almacenamiento de imágenes no está configurado. Contactá al administrador.',
+      );
+    }
+    const MAX_LOGO_BYTES = 5 * 1024 * 1024;
+    if (buffer.length > MAX_LOGO_BYTES) {
+      throw new ServiceUnavailableException('El logo no puede superar 5 MB.');
+    }
+
+    const isImage =
+      mimeType.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(originalName ?? '');
+    if (!isImage) {
+      throw new ServiceUnavailableException('El logo debe ser una imagen JPG, PNG o WEBP.');
+    }
+
+    const publicId = `logo-${Date.now()}`;
+
+    try {
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `vialto/arca-config/${tenantId}`,
+            resource_type: 'image',
+            public_id: publicId,
+            access_mode: 'public',
+            type: 'upload',
+            quality: 'auto',
+          },
+          (error, uploadResult) => {
+            if (error || !uploadResult) {
+              reject(error ?? new Error('Cloudinary no devolvió resultado'));
+              return;
+            }
+            resolve(uploadResult);
+          },
+        );
+        stream.end(buffer);
+      });
+
+      return result.secure_url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al subir el logo';
+      this.logger.error(`Cloudinary ARCA logo upload failed: ${message}`);
+      throw new BadGatewayException('No se pudo subir el logo. Intentá de nuevo más tarde.');
+    }
+  }
+
   async uploadRemitoInternoPdf(tenantId: string, buffer: Buffer, originalName: string): Promise<string> {
     return this.uploadRemitoArchivo(tenantId, buffer, originalName, 'application/pdf', 'remitos-internos');
   }

@@ -19,10 +19,8 @@ export interface AlicIva {
 export interface ArcaAutorizarRequest {
   ambiente: ArcaAmbiente;
   cuit: string;
-  token: string;
-  sign: string;
   ptoVenta: number;
-  cbteTipo: number;   // 1=Factura A, 6=Factura B, 60=CVLP
+  cbteTipo: number;   // 1=Factura A, 6=Factura B, 60=CVLP A, 61=CVLP B
   cbteNro: number;
   fechaCbte: string;  // yyyymmdd
   concepto: number;   // 1=Productos, 2=Servicios, 3=Ambos
@@ -40,6 +38,42 @@ export interface ArcaAutorizarRequest {
 export interface ArcaAutorizarResponse {
   CAE: string;
   CAEFchVto: string; // yyyymmdd
+}
+
+/**
+ * Representa una línea de detalle dentro del comprobante interno de la aplicación.
+ * Este objeto se utiliza exclusivamente para presentación y auditoría,
+ * ya que WSFEv1 no soporta detalle de líneas.
+ */
+export interface ArcaComprobanteItem {
+  descripcion: string;
+  importeBase: number;
+  ivaPct: number;
+  importeIva: number;
+  subtotal: number;
+}
+
+/**
+ * Modelo de dominio interno que representa el comprobante CVLP íntegro.
+ * Totalmente desacoplado de las estructuras del SDK de AFIP.
+ */
+export interface ArcaComprobanteCvlp {
+  cuit: string;
+  ptoVenta: number;
+  cbteTipo: number;
+  cbteNro: number;
+  fechaCbte: string;
+  concepto: number;
+  docTipo: number;
+  docNro: number;
+  condicionIvaReceptorId: number;
+  
+  impNeto: number;
+  impIva: number;
+  impTotal: number;
+  alicuotasIva: AlicIva[];
+  
+  items: ArcaComprobanteItem[];
 }
 
 export interface ArcaErrorTyped {

@@ -50,6 +50,8 @@ async function bootstrap() {
     credentials: true,
     /** Sin lista fija: el preflight puede pedir cabeceras extra (p. ej. Sentry, Clerk). El paquete `cors` replica `Access-Control-Request-Headers`. */
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    /** Para que el frontend pueda leer el nombre de archivo sugerido en descargas (PDFs). */
+    exposedHeaders: ['Content-Disposition'],
   });
 
   app.useGlobalPipes(

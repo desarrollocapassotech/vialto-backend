@@ -59,6 +59,15 @@ import {
 /** Transacciones con varios writes + Neon pueden superar el default de 5s de Prisma. */
 const VIAJE_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 
+/**
+ * Añadimos las liquidaciones al include base para que el frontend
+ * y las validaciones cuenten siempre con el monto real de los comprobantes.
+ */
+const VIAJE_INCLUDE_FULL = {
+  ...VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+  liquidacionesViaje: { include: { liquidacion: true } },
+};
+
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
 type PagoTransportistaInput = { monto?: unknown; moneda?: unknown };
 type DestinoItem = { etiqueta: string };
@@ -165,6 +174,43 @@ export class ViajesService {
     return n as ViajeEstado;
   }
 
+  /**
+   * Obtiene el monto real acordado sumando las liquidaciones emitidas,
+   * o haciendo un fallback al monto estimado original.
+   */
+  private calcularAcordado(v: {
+    precioTransportistaExterno?: number | null;
+    liquidacionesViaje?: any[];
+  }): number {
+    let acordado = v.precioTransportistaExterno ?? 0;
+
+    if (v.liquidacionesViaje && v.liquidacionesViaje.length > 0) {
+      let montoReal = 0;
+      let tieneMontoReal = false;
+
+      for (const lv of v.liquidacionesViaje) {
+        const liq = lv.liquidacion;
+        // Ignoramos anuladas o fallidas
+        if (liq && (liq.estado === "anulado" || liq.estado === "error"))
+          continue;
+
+        if (lv.monto != null) {
+          montoReal += Number(lv.monto);
+          tieneMontoReal = true;
+        } else if (liq?.liquido != null) {
+          montoReal += Number(liq.liquido);
+          tieneMontoReal = true;
+        }
+      }
+
+      if (tieneMontoReal) {
+        acordado = montoReal;
+      }
+    }
+
+    return acordado;
+  }
+
   private applyGananciaBrutaFields(
     viaje: {
       monto?: number | null;
@@ -239,6 +285,7 @@ export class ViajesService {
     precioTransportistaExterno?: number | null;
     monedaPrecioTransportistaExterno?: string | null;
     pagosTransportista?: unknown;
+    liquidacionesViaje?: any[];
   }): void {
     const pagos = Array.isArray(params.pagosTransportista)
       ? (params.pagosTransportista as PagoTransportistaInput[])
@@ -253,7 +300,10 @@ export class ViajesService {
 
     const monedaAcordada =
       params.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
-    const totalAcordado = params.precioTransportistaExterno ?? 0;
+
+    // Calculamos el saldo incluyendo el monto de liquidaciones, si existen
+    const totalAcordado = this.calcularAcordado(params);
+
     const totalPagado = pagos
       .filter((p) => (p.moneda === "USD" ? "USD" : "ARS") === monedaAcordada)
       .reduce((acc, p) => {
@@ -264,7 +314,7 @@ export class ViajesService {
 
     if (totalPagado > totalAcordado + 1e-6) {
       throw new BadRequestException(
-        "El monto del pago no puede superar el saldo pendiente del viaje",
+        "El monto del pago no puede superar el saldo pendiente del viaje (calculado contra la liquidación o la tarifa estimada).",
       );
     }
   }
@@ -370,6 +420,7 @@ export class ViajesService {
         transportistaEfectivo: { select: { id: true, nombre: true } },
         factura: { select: { id: true, numero: true } },
         destinosViaje: viajeDestinosViajeInclude,
+        liquidacionesViaje: { include: { liquidacion: true } },
       } as any,
     });
   }
@@ -433,6 +484,7 @@ export class ViajesService {
           precioTransportistaExterno: true,
           monedaPrecioTransportistaExterno: true,
           pagosTransportista: true,
+          liquidacionesViaje: { include: { liquidacion: true } },
         },
       }),
     ]);
@@ -442,7 +494,7 @@ export class ViajesService {
     for (const v of saldoViajes) {
       const moneda =
         v.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
-      const acordado = v.precioTransportistaExterno ?? 0;
+      const acordado = this.calcularAcordado(v);
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
         : [];
@@ -520,7 +572,7 @@ export class ViajesService {
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+        include: VIAJE_INCLUDE_FULL,
       }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -661,7 +713,7 @@ export class ViajesService {
         ? []
         : await this.prisma.viaje.findMany({
             where: { id: { in: pageIds } },
-            include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+            include: VIAJE_INCLUDE_FULL,
           });
     const byId = new Map(itemsUnsorted.map((item) => [item.id, item]));
     const items = pageIds
@@ -685,7 +737,7 @@ export class ViajesService {
   async findOne(id: string, tenantId: string): Promise<ViajeConVehiculosViaje> {
     const row = await this.prisma.viaje.findFirst({
       where: { id, tenantId },
-      include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+      include: VIAJE_INCLUDE_FULL,
     });
     if (!row) throw new NotFoundException("Viaje no encontrado");
     return enrichViajeConGananciaBruta(
@@ -801,6 +853,7 @@ export class ViajesService {
       precioTransportistaExterno,
       monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
       pagosTransportista: dto.pagosTransportista,
+      liquidacionesViaje: [], // Al crearse, obviamente no tiene liquidaciones.
     });
     const destinosNorm = resolveDestinosParaCreate(dto);
     const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
@@ -848,7 +901,7 @@ export class ViajesService {
       await reemplazarDestinosDelViaje(tx, viaje.id, destinosNorm, tenantId);
       const out = await tx.viaje.findFirstOrThrow({
         where: { id: viaje.id, tenantId },
-        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+        include: VIAJE_INCLUDE_FULL,
       });
       return enrichViajeConGananciaBruta(
         out as unknown as ViajeConVehiculosViaje,
@@ -1050,6 +1103,7 @@ export class ViajesService {
         monedaPrecioTransportistaExterno:
           monedaPrecioTransportistaExternoResolved,
         pagosTransportista: pagosTransportistaResolved,
+        liquidacionesViaje: (current as any).liquidacionesViaje,
       });
     }
 
@@ -1077,7 +1131,7 @@ export class ViajesService {
       }
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
-        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+        include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
       if (esEstadoViajeFinal(full.estado)) {
         await this.upsertCargoFinalizacion(tx, full);
@@ -1125,7 +1179,7 @@ export class ViajesService {
 
       const full = (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
-        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+        include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
 
       if (esEstadoViajeFinal(full.estado)) {
@@ -1171,11 +1225,13 @@ export class ViajesService {
     if (dto.comprobante?.trim()) nuevoPago.comprobante = dto.comprobante.trim();
 
     const pagosActualizados = [...pagosActuales, nuevoPago];
+
     this.assertPagosTransportistaNoSuperanSaldo({
       transportistaId: viaje.transportistaId,
       precioTransportistaExterno: viaje.precioTransportistaExterno,
       monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
       pagosTransportista: pagosActualizados,
+      liquidacionesViaje: (viaje as any).liquidacionesViaje,
     });
 
     return this.prisma.$transaction(async (tx) => {
@@ -1188,7 +1244,7 @@ export class ViajesService {
       });
       return (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
-        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+        include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
@@ -1232,7 +1288,7 @@ export class ViajesService {
       });
       return (await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
-        include: VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+        include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
@@ -1249,13 +1305,16 @@ export class ViajesService {
         cliente: { select: { id: true, nombre: true } },
         transportista: { select: { id: true, nombre: true } },
         factura: { select: { id: true, numero: true } },
+        liquidacionesViaje: { include: { liquidacion: true } },
       },
     });
 
     return viajes.filter((v) => {
       const moneda =
         v.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
-      const acordado = v.precioTransportistaExterno ?? 0;
+
+      const acordado = this.calcularAcordado(v);
+
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
         : [];

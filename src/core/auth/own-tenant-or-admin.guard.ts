@@ -3,8 +3,8 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
-} from '@nestjs/common';
-import type { AuthPayload } from './clerk-auth.guard';
+} from "@nestjs/common";
+import type { AuthPayload } from "./clerk-auth.guard";
 
 /**
  * Verifica que el usuario solo pueda acceder al recurso de su propio tenant
@@ -19,10 +19,10 @@ export class OwnTenantOrAdminGuard implements CanActivate {
     const auth: AuthPayload = request.auth;
     const orgId: string = request.params.orgId;
 
-    if (auth?.role === 'superadmin' || auth?.tenantId === orgId) {
+    if (auth?.role === "superadmin" || auth?.tenantId === orgId) {
       return true;
     }
 
-    throw new ForbiddenException('Solo podés acceder a tu propio tenant');
+    throw new ForbiddenException("Solo podés acceder a tu propio tenant");
   }
 }

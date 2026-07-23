@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsDateString,
   IsNumber,
   IsOptional,
@@ -7,8 +8,10 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { LiquidacionConceptoLineaDto } from './create-liquidacion.dto';
 
 export class UpdateLiquidacionDto {
   @IsOptional()
@@ -27,7 +30,7 @@ export class UpdateLiquidacionDto {
   comisionPct?: number;
 
   /**
-   * Alícuota de IVA (%) sobre el neto gravado.
+   * Alícuota de IVA (%) sobre flete/comisión/gastos admin.
    * Si se omite al recalcular comisión, se conserva la alícuota implícita
    * de la liquidación o el default de configuración.
    */
@@ -37,6 +40,13 @@ export class UpdateLiquidacionDto {
   @Min(0)
   @Max(100)
   ivaPct?: number;
+
+  /** Reemplaza por completo las líneas de conceptos configurables. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LiquidacionConceptoLineaDto)
+  conceptosLineas?: LiquidacionConceptoLineaDto[];
 
   /** URL Cloudinary del comprobante; `null` limpia el adjunto. */
   @IsOptional()

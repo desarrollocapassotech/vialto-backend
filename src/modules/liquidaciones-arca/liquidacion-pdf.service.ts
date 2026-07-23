@@ -3,8 +3,9 @@ import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
-import { buildComprobanteCvlp, ConceptoFacturable } from './arca-cvlp.util';
+import { buildComprobanteCvlp } from './arca-cvlp.util';
 import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
+import { buildCvlpConceptosList } from './cvlp-conceptos.util';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -205,11 +206,30 @@ export class LiquidacionPdfService {
     
     // Si no está autorizada o no se encontró el log, se reconstruye al vuelo para el borrador
     if (!cvlp) {
-      const conceptos: ConceptoFacturable[] = [
-        { descripcion: 'Fletes', importe: liq.bruto },
-        { descripcion: 'Comisión', importe: -liq.comision },
-        { descripcion: 'Gastos Administrativos', importe: -liq.gastosAdmin },
-      ];
+      const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
+        where: { liquidacionId },
+        orderBy: { orden: 'asc' },
+      });
+      const ivaDefault = resolveIvaPct(config?.ivaGastosAdmin);
+      const conceptos = buildCvlpConceptosList({
+        bruto: liq.bruto,
+        comision: liq.comision,
+        gastosAdmin: liq.gastosAdmin,
+        ivaPctDefault: ivaDefault,
+        lineas: (lineasDb ?? []).map((r: {
+          nombreSnapshot: string;
+          signo: string;
+          ivaPct: number;
+          monto: number;
+          orden?: number;
+        }) => ({
+          nombreSnapshot: r.nombreSnapshot,
+          signo: r.signo as 'favor' | 'contra',
+          ivaPct: r.ivaPct,
+          monto: r.monto,
+          orden: r.orden,
+        })),
+      });
       
       const docNro = liq.transportista?.idFiscal ? Number(liq.transportista.idFiscal.replace(/-/g, '')) : 0;
       const docTipo = docNro ? 80 : 99;
@@ -226,7 +246,7 @@ export class LiquidacionPdfService {
         condicionIvaReceptorId: liq.transportista?.condicionIva ?? 1,
       };
       
-      cvlp = buildComprobanteCvlp(baseCabecera, conceptos, resolveIvaPct(config?.ivaGastosAdmin));
+      cvlp = buildComprobanteCvlp(baseCabecera, conceptos, ivaDefault);
     }
 
     const buffer = await this.buildPdf(liq, config, qrBuffer, logoBuffer, cvlp);
@@ -494,43 +514,6 @@ export class LiquidacionPdfService {
         doc.fontSize(7).font('Helvetica').fillColor('#000')
           .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.align as 'left' | 'right' });
       });
-      y += rowH;
-    }
-
-    // Fila seguro de carga (si > 0, IVA 0%) — placeholder: todavía no existe como
-    // dato de negocio en Liquidacion; queda lista para cuando se modele el campo real.
-    const seguroCarga = 0;
-    if (seguroCarga > 0) {
-      doc.rect(M, y, tableW, rowH).stroke('#ddd');
-      [
-        { v: 'SEGURO DE CARGA', a: 'left' },
-        { v: 'SEGURO DE CARGA', a: 'left' },
-        { v: '1,00', a: 'right' },
-        { v: fmtNum(-seguroCarga), a: 'right' },
-        { v: fmtNum(-seguroCarga), a: 'right' },
-        { v: '0.00', a: 'right' },
-        { v: fmtNum(-seguroCarga), a: 'right' },
-      ].forEach((cell, i) => {
-        doc.fontSize(7).font('Helvetica').fillColor('#000')
-          .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.a as 'left' | 'right' });
-      });
-      y += rowH;
-    }
-
-    // Líneas "combustible en ruta" / "efectivo en ruta" — placeholder: ídem, en $0
-    // hasta que existan como dato real; hoy no se dibujan porque siempre valen 0.
-    const combustibleEnRuta = 0;
-    const efectivoEnRuta = 0;
-    const extraLineas: [string, number][] = [
-      ['COMBUSTIBLE EN RUTA $', combustibleEnRuta],
-      ['EFECTIVO EN RUTA $', efectivoEnRuta],
-    ];
-    for (const [label, val] of extraLineas) {
-      if (val === 0) continue;
-      doc.rect(M, y, tableW, rowH).stroke('#ddd');
-      doc.fontSize(7).font('Helvetica').fillColor('#000')
-        .text(label, M + 4, y + 4, { width: tableW - 90 })
-        .text(fmtNum(val), M + tableW - 84, y + 4, { width: 80, align: 'right' });
       y += rowH;
     }
 

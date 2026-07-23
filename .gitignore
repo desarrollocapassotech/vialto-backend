@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.*
+scripts/tenant-restore/.test-env.local
 env.*
 env.production
 env.qa

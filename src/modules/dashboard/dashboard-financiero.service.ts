@@ -119,15 +119,6 @@ export type FinancieroDashboardResponse = {
       pendienteCobro: Money;
     };
   };
-  cashflow?: {
-    aCobrarProyeccion: Array<{ bucket: string; monto: Money }>;
-    aPagarPendienteTotal: Money;
-    diferenciaTiming: {
-      promedioDiasCobro: number | null;
-      promedioDiasPago: number | null;
-      alerta: boolean;
-    };
-  };
 };
 
 function roundMoney(n: number): number {
@@ -204,21 +195,19 @@ export class DashboardFinancieroService {
       ],
     });
 
-    const [margen, viajesFunnel, liquidaciones, facturacion, cashflow] = await Promise.all([
+    const [margen, viajesFunnel, liquidaciones, facturacion] = await Promise.all([
       hasViajes ? this.buildMargen(tenantId, start, end, whereViajeAtribuido) : null,
       hasViajes ? this.buildViajesFunnel(tenantId, start, end, whereViajeAtribuido) : null,
       hasViajes && hasIntegracionArca
         ? this.buildLiquidaciones(tenantId, start, end, whereViajeAtribuido)
         : null,
       hasFacturacion ? this.buildFacturacion(tenantId, start, end) : null,
-      hasViajes && hasFacturacion ? this.buildCashflow(tenantId) : null,
     ]);
 
     if (margen) out.margen = margen;
     if (viajesFunnel) out.viajesFunnel = viajesFunnel;
     if (liquidaciones) out.liquidaciones = liquidaciones;
     if (facturacion) out.facturacion = facturacion;
-    if (cashflow) out.cashflow = cashflow;
 
     return out;
   }
@@ -818,107 +807,4 @@ export class DashboardFinancieroService {
     };
   }
 
-  // ── Cashflow cruzado ─────────────────────────────────────────────────────
-
-  private async buildCashflow(tenantId: string): Promise<NonNullable<FinancieroDashboardResponse['cashflow']>> {
-    const hoy = new Date();
-    const facturasPendientes = await this.prisma.factura.findMany({
-      where: { tenantId, tipo: 'cliente' },
-      select: {
-        importe: true,
-        moneda: true,
-        fechaVencimiento: true,
-        fechaEmision: true,
-        pagos: { select: { importe: true, fecha: true } },
-        viajes: { select: { estado: true, monto: true } },
-      },
-    });
-
-    const buckets: Array<{ bucket: string; monto: Money }> = [
-      { bucket: 'Vencido', monto: emptyMoney() },
-      { bucket: '0-7 días', monto: emptyMoney() },
-      { bucket: '8-15 días', monto: emptyMoney() },
-      { bucket: '16-30 días', monto: emptyMoney() },
-      { bucket: '31+ días', monto: emptyMoney() },
-      { bucket: 'Sin vencimiento', monto: emptyMoney() },
-    ];
-    let sumaDiasCobro = 0;
-    let cantDiasCobro = 0;
-
-    for (const f of facturasPendientes) {
-      const importeOp = importeOperativoFactura(f.importe, f.viajes);
-      const pagado = f.pagos.reduce((s, p) => s + p.importe, 0);
-      const pend = roundMoney(importeOp - pagado);
-      const moneda = f.moneda === 'USD' ? 'USD' : 'ARS';
-
-      if (pend > 0.005) {
-        if (!f.fechaVencimiento) {
-          addMoney(buckets[5].monto, moneda, pend);
-        } else {
-          const dias = Math.floor((f.fechaVencimiento.getTime() - hoy.getTime()) / 86400000);
-          if (dias < 0) addMoney(buckets[0].monto, moneda, pend);
-          else if (dias <= 7) addMoney(buckets[1].monto, moneda, pend);
-          else if (dias <= 15) addMoney(buckets[2].monto, moneda, pend);
-          else if (dias <= 30) addMoney(buckets[3].monto, moneda, pend);
-          else addMoney(buckets[4].monto, moneda, pend);
-        }
-      }
-
-      for (const p of f.pagos) {
-        const dias = Math.floor((p.fecha.getTime() - f.fechaEmision.getTime()) / 86400000);
-        if (Number.isFinite(dias) && dias >= 0) {
-          sumaDiasCobro += dias;
-          cantDiasCobro += 1;
-        }
-      }
-    }
-
-    const viajesConPagos = await this.prisma.viaje.findMany({
-      where: { tenantId, transportistaId: { not: null }, precioTransportistaExterno: { gt: 0 } },
-      select: {
-        precioTransportistaExterno: true,
-        monedaPrecioTransportistaExterno: true,
-        pagosTransportista: true,
-        fechaFinalizado: true,
-      },
-    });
-
-    const aPagarPendienteTotal = emptyMoney();
-    let sumaDiasPago = 0;
-    let cantDiasPago = 0;
-    for (const v of viajesConPagos) {
-      const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
-      const acordado = v.precioTransportistaExterno ?? 0;
-      const pagos = Array.isArray(v.pagosTransportista)
-        ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string; fecha?: string }>)
-        : [];
-      const pagosEnMoneda = pagos.filter((p) => (p.moneda === 'USD' ? 'USD' : 'ARS') === moneda);
-      const pagado = pagosEnMoneda.reduce((s, p) => s + (typeof p.monto === 'number' ? p.monto : 0), 0);
-      const pend = roundMoney(acordado - pagado);
-      if (pend > 0.005) addMoney(aPagarPendienteTotal, moneda, pend);
-
-      if (v.fechaFinalizado) {
-        for (const p of pagosEnMoneda) {
-          if (!p.fecha) continue;
-          const fechaPago = new Date(p.fecha);
-          const dias = Math.floor((fechaPago.getTime() - v.fechaFinalizado.getTime()) / 86400000);
-          if (Number.isFinite(dias) && dias >= 0) {
-            sumaDiasPago += dias;
-            cantDiasPago += 1;
-          }
-        }
-      }
-    }
-
-    const promedioDiasCobro = cantDiasCobro > 0 ? Math.round(sumaDiasCobro / cantDiasCobro) : null;
-    const promedioDiasPago = cantDiasPago > 0 ? Math.round(sumaDiasPago / cantDiasPago) : null;
-    const alerta =
-      promedioDiasCobro != null && promedioDiasPago != null && promedioDiasPago < promedioDiasCobro;
-
-    return {
-      aCobrarProyeccion: buckets,
-      aPagarPendienteTotal,
-      diferenciaTiming: { promedioDiasCobro, promedioDiasPago, alerta },
-    };
-  }
 }

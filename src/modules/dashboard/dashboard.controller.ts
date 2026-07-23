@@ -36,7 +36,7 @@ export class DashboardController {
 
   @ApiOperation({
     summary:
-      'Panel financiero cruzado (margen por viaje/cliente/transportista, liquidaciones, facturación y cashflow)',
+      'Panel financiero cruzado (margen por viaje/cliente/transportista, liquidaciones y facturación)',
   })
   @Get('financiero')
   @Roles('admin', 'superadmin')

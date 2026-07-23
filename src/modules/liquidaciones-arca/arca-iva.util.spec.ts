@@ -87,4 +87,12 @@ test('caso 21% sigue funcionando', () => {
   assert.equal(formatAlicuotaIva(21), '21,00');
 });
 
+test('computeAfipGravadoIva ignora gastosAdmin (deprecado)', () => {
+  const sinGastos = computeAfipGravadoIva(1000, 100, 0, 21);
+  const conGastosLegacy = computeAfipGravadoIva(1000, 100, 50, 21);
+  assert.equal(conGastosLegacy.netoGravado, sinGastos.netoGravado);
+  assert.equal(conGastosLegacy.impIva, sinGastos.impIva);
+  assert.equal(conGastosLegacy.liquido, sinGastos.liquido);
+});
+
 console.log('arca-iva.util.spec.ts: OK');

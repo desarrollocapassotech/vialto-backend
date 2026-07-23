@@ -61,7 +61,14 @@ export type OwnerDashboardResponse = {
       cantidad: number;
       montoTotal: number;
       montosPorMoneda: { ARS: number; USD: number };
-      items: Array<{ id: string; numero: string }>;
+      items: Array<{
+        id: string;
+        numero: string;
+        clienteNombre: string;
+        fecha: string | null;
+        origen: string | null;
+        destino: string | null;
+      }>;
     };
     /** Cargas de combustible marcadas `sospechoso` (snapshot actual, no filtrado por período). */
     cargasSospechosas?: {
@@ -296,30 +303,56 @@ export class DashboardService {
     }
 
     if (cargasSospechosasResult && cargasSospechosasResult.cantidad > 0) {
-      const EMPTY_BLOQUE = {
+      const EMPTY_BLOQUE_FACTURAS = {
         cantidad: 0,
         montoTotal: 0,
         montosPorMoneda: { ARS: 0, USD: 0 },
         items: [] as Array<{ id: string; numero: string }>,
       };
+      const EMPTY_BLOQUE_VIAJES = {
+        cantidad: 0,
+        montoTotal: 0,
+        montosPorMoneda: { ARS: 0, USD: 0 },
+        items: [] as Array<{
+          id: string;
+          numero: string;
+          clienteNombre: string;
+          fecha: string | null;
+          origen: string | null;
+          destino: string | null;
+        }>,
+      };
       out.alertas = {
-        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE,
-        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE,
+        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE_FACTURAS,
+        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE_VIAJES,
         cargasSospechosas: cargasSospechosasResult,
         margenBajo: out.alertas?.margenBajo,
       };
     }
 
     if (margenBajoResult && margenBajoResult.cantidad > 0) {
-      const EMPTY_BLOQUE = {
+      const EMPTY_BLOQUE_FACTURAS = {
         cantidad: 0,
         montoTotal: 0,
         montosPorMoneda: { ARS: 0, USD: 0 },
         items: [] as Array<{ id: string; numero: string }>,
       };
+      const EMPTY_BLOQUE_VIAJES = {
+        cantidad: 0,
+        montoTotal: 0,
+        montosPorMoneda: { ARS: 0, USD: 0 },
+        items: [] as Array<{
+          id: string;
+          numero: string;
+          clienteNombre: string;
+          fecha: string | null;
+          origen: string | null;
+          destino: string | null;
+        }>,
+      };
       out.alertas = {
-        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE,
-        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE,
+        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE_FACTURAS,
+        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE_VIAJES,
         cargasSospechosas: out.alertas?.cargasSospechosas,
         margenBajo: margenBajoResult,
       };
@@ -676,7 +709,17 @@ export class DashboardService {
         tenantId,
         estado: 'finalizado_sin_facturar',
       },
-      select: { id: true, numero: true, monto: true, monedaMonto: true },
+      select: {
+        id: true,
+        numero: true,
+        monto: true,
+        monedaMonto: true,
+        clienteId: true,
+        origen: true,
+        destino: true,
+        fechaCarga: true,
+        fechaDescarga: true,
+      },
     });
     let montoSinFacturaARS = 0;
     let montoSinFacturaUSD = 0;
@@ -689,9 +732,22 @@ export class DashboardService {
     montoSinFacturaUSD = roundMoney(montoSinFacturaUSD);
     const montoSinFactura = roundMoney(montoSinFacturaARS + montoSinFacturaUSD);
 
+    const clienteIdsSinFactura = [...new Set(sinFactura.map((v) => v.clienteId))];
+    const clientesSinFactura = clienteIdsSinFactura.length
+      ? await this.prisma.cliente.findMany({
+          where: { id: { in: clienteIdsSinFactura }, tenantId },
+          select: { id: true, nombre: true },
+        })
+      : [];
+    const nombreClienteSinFactura = new Map(clientesSinFactura.map((c) => [c.id, c.nombre]));
+
     const itemsSinFactura = sinFactura.map((v) => ({
       id: v.id,
       numero: v.numero ?? '',
+      clienteNombre: nombreClienteSinFactura.get(v.clienteId) ?? 'Cliente',
+      fecha: (v.fechaCarga ?? v.fechaDescarga)?.toISOString() ?? null,
+      origen: v.origen,
+      destino: v.destino,
     }));
 
     return {
@@ -752,14 +808,21 @@ export class DashboardService {
     start: Date,
     end: Date,
   ): Promise<{ cantidad: number; montoTotal: number }> {
+    // El límite superior nunca pasa de "ahora": el selector de período (ej. "mes") cubre
+    // el mes calendario completo, pero la pestaña Alertas de GET /dashboard/financiero
+    // (igual que Combustible) tampoco mira más allá de hoy — mismo criterio que
+    // `buildCargasSospechosasAlerta`, para que el conteo de la campanita coincida con
+    // el de la pestaña.
+    const now = new Date();
+    const cappedEnd = end > now ? now : end;
     const viajes = await this.prisma.viaje.findMany({
       where: {
         tenantId,
         estado: { not: 'cancelado' },
         OR: [
-          { fechaCarga: { gte: start, lte: end } },
-          { fechaCarga: null, fechaFinalizado: { gte: start, lte: end } },
-          { fechaCarga: null, fechaFinalizado: null, createdAt: { gte: start, lte: end } },
+          { fechaCarga: { gte: start, lte: cappedEnd } },
+          { fechaCarga: null, fechaFinalizado: { gte: start, lte: cappedEnd } },
+          { fechaCarga: null, fechaFinalizado: null, createdAt: { gte: start, lte: cappedEnd } },
         ],
       },
       select: {

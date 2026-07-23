@@ -1,0 +1,10 @@
+---
+description: Reglas de aislamiento multi-tenant para toda consulta a la base de datos
+alwaysApply: true
+---
+
+Antes de escribir cualquier consulta a la base de datos (Prisma), seguí las reglas de
+aislamiento multi-tenant. **No dupliques las reglas acá**: la fuente de verdad es un solo
+archivo. Leelo y aplicalo siempre:
+
+@docs/reglas-multitenant.md

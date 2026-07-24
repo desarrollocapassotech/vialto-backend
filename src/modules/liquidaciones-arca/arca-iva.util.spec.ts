@@ -87,4 +87,20 @@ test('caso 21% sigue funcionando', () => {
   assert.equal(formatAlicuotaIva(21), '21,00');
 });
 
+test('PDF pie usa montos del cvlp (incluye conceptos)', () => {
+  const liq = {
+    bruto: 1000,
+    comision: 100,
+    gastosAdmin: 0,
+    gastosAdminIva: 189, // desfasado a propósito (sin conceptos)
+    liquido: 1089,
+  };
+  const cvlp = { impNeto: 950, impIva: 199.5, impTotal: 1149.5 };
+  const pie = cvlpPdfPieFinanciero(liq, cvlp);
+  assert.equal(pie.netoGravado, 950);
+  assert.equal(pie.iva, 199.5);
+  assert.equal(pie.total, 1149.5);
+  assert.equal(pie.balances, true);
+});
+
 console.log('arca-iva.util.spec.ts: OK');

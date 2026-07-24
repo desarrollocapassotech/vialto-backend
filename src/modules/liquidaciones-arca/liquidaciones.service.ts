@@ -517,14 +517,35 @@ export class LiquidacionesService {
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
       });
+      const lineas = this.lineasFromStored(lineasDb);
       const conceptos = buildCvlpConceptosList({
         bruto: liquidacion.bruto,
         comision: liquidacion.comision,
         gastosAdmin: liquidacion.gastosAdmin,
         ivaPctDefault: ivaPct,
-        lineas: this.lineasFromStored(lineasDb),
+        lineas,
       });
-      
+      // Autocuración: si se editaron conceptos y el líquido quedó desfasado, alinear antes de AFIP.
+      const montos = computeLiquidacionTotales({
+        bruto: liquidacion.bruto,
+        comision: liquidacion.comision,
+        gastosAdmin: liquidacion.gastosAdmin,
+        ivaPctDefault: ivaPct,
+        lineas,
+      });
+      if (
+        montos.liquido !== liquidacion.liquido ||
+        montos.impIva !== liquidacion.gastosAdminIva
+      ) {
+        await this.prisma.liquidacion.updateMany({
+          where: { id: liquidacionId, tenantId },
+          data: {
+            gastosAdminIva: montos.impIva,
+            liquido: montos.liquido,
+            updatedAt: new Date(),
+          },
+        });
+      }
       const cabeceraBase = {
         cuit: config.cuitEmisor,
         ptoVenta: config.ptoVentaCvlp,

@@ -18,15 +18,17 @@ export function ivaIdFromPct(pct: number): number {
 export function groupAlicuotasIva(
   items: Array<{ importeBase: number; ivaPct: number; importeIva: number }>,
 ): AlicIva[] {
+  // AFIP exige un único AlicIva por Id; agrupar por Id (no por %).
   const map = new Map<number, { base: number; iva: number }>();
   for (const it of items) {
-    const cur = map.get(it.ivaPct) ?? { base: 0, iva: 0 };
+    const id = ivaIdFromPct(it.ivaPct);
+    const cur = map.get(id) ?? { base: 0, iva: 0 };
     cur.base = round2(cur.base + it.importeBase);
     cur.iva = round2(cur.iva + it.importeIva);
-    map.set(it.ivaPct, cur);
+    map.set(id, cur);
   }
-  return [...map.entries()].map(([pct, v]) => ({
-    Id: ivaIdFromPct(pct),
+  return [...map.entries()].map(([id, v]) => ({
+    Id: id,
     BaseImp: v.base,
     Importe: v.iva,
   }));
@@ -53,22 +55,39 @@ export function formatAlicuotaIva(ivaPct: number): string {
 }
 
 /**
- * Pie financiero del PDF CVLP a partir de montos persistidos (los enviados/autorizados por ARCA).
- * Garantiza Neto Gravado + Otros Tributos + IVA = Importe Total.
+ * Pie financiero del PDF CVLP.
+ * Preferir montos del comprobante armado (`cvlp`) cuando existen: incluyen conceptos
+ * configurables. El fallback desde `liq` solo aplica bruto−comisión−gastosAdmin.
  */
-export function cvlpPdfPieFinanciero(liq: {
-  bruto: number;
-  comision: number;
-  gastosAdmin?: number;
-  gastosAdminIva: number;
-  liquido: number;
-}): {
+export function cvlpPdfPieFinanciero(
+  liq: {
+    bruto: number;
+    comision: number;
+    gastosAdmin?: number;
+    gastosAdminIva: number;
+    liquido: number;
+  },
+  cvlp?: { impNeto: number; impIva: number; impTotal: number } | null,
+): {
   netoGravado: number;
   otrosTributos: number;
   iva: number;
   total: number;
   balances: boolean;
 } {
+  if (cvlp) {
+    const netoGravado = round2(cvlp.impNeto);
+    const otrosTributos = 0;
+    const iva = round2(cvlp.impIva);
+    const total = round2(cvlp.impTotal);
+    return {
+      netoGravado,
+      otrosTributos,
+      iva,
+      total,
+      balances: round2(netoGravado + otrosTributos + iva) === total,
+    };
+  }
   const gastosAdmin = liq.gastosAdmin ?? 0;
   const netoGravado = round2(liq.bruto - liq.comision - gastosAdmin);
   const otrosTributos = 0;

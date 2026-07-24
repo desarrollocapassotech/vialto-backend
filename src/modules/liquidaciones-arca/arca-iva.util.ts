@@ -118,6 +118,7 @@ export function formatAlicuotaIva(ivaPct: number): string {
 /**
  * Pie financiero del PDF CVLP a partir de montos persistidos (los enviados/autorizados por ARCA).
  * Garantiza Neto Gravado + Otros Tributos + IVA = Importe Total.
+ * `gastosAdmin` está deprecado (siempre 0): no forma parte del CVLP.
  */
 export function cvlpPdfPieFinanciero(liq: {
   bruto: number;
@@ -132,8 +133,7 @@ export function cvlpPdfPieFinanciero(liq: {
   total: number;
   balances: boolean;
 } {
-  const gastosAdmin = liq.gastosAdmin ?? 0;
-  const netoGravado = round2(liq.bruto - liq.comision - gastosAdmin);
+  const netoGravado = round2(liq.bruto - liq.comision);
   const otrosTributos = 0;
   const iva = round2(liq.gastosAdminIva);
   const total = round2(liq.liquido);
@@ -144,11 +144,12 @@ export function cvlpPdfPieFinanciero(liq: {
 /**
  * Montos de liquidación / comprobante con IVA gravado al `ivaPct` indicado.
  * Garantiza BaseImp × tasa = Importe en AlicIva e ImpNeto + ImpIVA = ImpTotal.
+ * El parámetro `gastosAdmin` está deprecado y se ignora (siempre se trata como 0).
  */
 export function computeAfipGravadoIva(
   bruto: number,
   comision: number,
-  gastosAdmin: number,
+  _gastosAdmin: number,
   ivaPct: number,
 ): {
   netoGravado: number;
@@ -157,7 +158,7 @@ export function computeAfipGravadoIva(
   impNeto: number;
   alicuota: AlicIva;
 } {
-  const netoGravado = round2(bruto - comision - gastosAdmin);
+  const netoGravado = round2(bruto - comision);
   const impIva = round2((netoGravado * ivaPct) / 100);
   const liquido = round2(netoGravado + impIva);
   return {

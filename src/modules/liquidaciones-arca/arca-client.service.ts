@@ -116,17 +116,16 @@ export class ArcaClientService {
             MonId: req.monId ?? 'PES',
             MonCotiz: req.monCotiz ?? 1,
             CondicionIVAReceptorId: req.condicionIvaReceptorId,
-            ...(req.alicuotasIva?.length
-              ? {
-                  Iva: {
-                    AlicIva: req.alicuotasIva.map((a) => ({
-                      Id: a.Id,
-                      BaseImp: round2(a.BaseImp),
-                      Importe: round2(a.Importe),
-                    })),
-                  },
-                }
-              : {}),
+            ...(() => {
+              const alic = (req.alicuotasIva ?? [])
+                .filter((a) => a.BaseImp > 0)
+                .map((a) => ({
+                  Id: a.Id,
+                  BaseImp: round2(a.BaseImp),
+                  Importe: round2(a.Importe),
+                }));
+              return alic.length ? { Iva: { AlicIva: alic } } : {};
+            })(),
           },
         },
       },

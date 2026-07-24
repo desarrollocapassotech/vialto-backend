@@ -14,94 +14,130 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
-} from '@nestjs/common';
-import type { Request, Response } from 'express';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
-import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.decorator';
-import { PlatformService } from './platform.service';
-import { CreateClienteDto } from '../clientes/dto/create-cliente.dto';
-import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
-import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
-import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
-import { CreateDestinatarioDto } from '../destinatarios/dto/create-destinatario.dto';
-import { UpdateDestinatarioDto } from '../destinatarios/dto/update-destinatario.dto';
-import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
-import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
-import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
-import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
-import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
-import { UpdateTransportistaDto } from '../transportistas/dto/update-transportista.dto';
-import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
-import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
-import { MicCrtExportDto } from '../../modules/viajes/dto/mic-crt-export.dto';
-import { ProductosPaginatedQueryDto } from '../../modules/stock/dto/productos-paginated-query.dto';
-import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
-import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
-import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
-import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
-import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
-import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
-import { CreateDivisionDto } from '../../modules/stock/dto/create-division.dto';
-import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
-import { ViajesPaginatedQueryDto } from '../../modules/viajes/dto/viajes-paginated-query.dto';
-import { parseViajesSortParams, parseFechaFiltroQuery, parseTipoFechaQuery } from '../../modules/viajes/viajes-paginated-query.util';
-import { AddGastoDto } from '../../modules/viajes/dto/add-gasto.dto';
-import { AddPagoTransportistaDto } from '../../modules/viajes/dto/add-pago-transportista.dto';
-import { CreateFacturaDto } from '../../modules/facturacion/dto/create-factura.dto';
-import { UpdateFacturaDto } from '../../modules/facturacion/dto/update-factura.dto';
-import { CreatePagoDto } from '../../modules/facturacion/dto/create-pago.dto';
-import { queryParamFromRequest } from '../../shared/util/express-query-string';
-import { CurrentAuth } from '../auth/current-auth.decorator';
-import { AuthPayload } from '../auth/clerk-auth.guard';
-import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
-import { GetFieldConfigDto } from '../tenant-field-config/dto/get-field-config.dto';
-import { ToggleFieldConfigDto } from '../tenant-field-config/dto/toggle-field-config.dto';
+} from "@nestjs/common";
+import type { Request, Response } from "express";
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiConsumes,
+  ApiBody,
+} from "@nestjs/swagger";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
+import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
+import { RolesGuard } from "../auth/roles.guard";
+import { Roles } from "../auth/roles.decorator";
+import { PlatformService } from "./platform.service";
+import { CreateClienteDto } from "../clientes/dto/create-cliente.dto";
+import { UpdateClienteDto } from "../clientes/dto/update-cliente.dto";
+import { CreateChoferDto } from "../choferes/dto/create-chofer.dto";
+import { UpdateChoferDto } from "../choferes/dto/update-chofer.dto";
+import { CreateDestinatarioDto } from "../destinatarios/dto/create-destinatario.dto";
+import { UpdateDestinatarioDto } from "../destinatarios/dto/update-destinatario.dto";
+import { CreateDireccionEntregaDto } from "../direcciones-entrega/dto/create-direccion-entrega.dto";
+import { UpdateDireccionEntregaDto } from "../direcciones-entrega/dto/update-direccion-entrega.dto";
+import { CreateVehiculoDto } from "../vehiculos/dto/create-vehiculo.dto";
+import { UpdateVehiculoDto } from "../vehiculos/dto/update-vehiculo.dto";
+import { CreateTransportistaDto } from "../transportistas/dto/create-transportista.dto";
+import { UpdateTransportistaDto } from "../transportistas/dto/update-transportista.dto";
+import { CreateViajeDto } from "../../modules/viajes/dto/create-viaje.dto";
+import { UpdateViajeDto } from "../../modules/viajes/dto/update-viaje.dto";
+import { MicCrtExportDto } from "../../modules/viajes/dto/mic-crt-export.dto";
+import { ProductosPaginatedQueryDto } from "../../modules/stock/dto/productos-paginated-query.dto";
+import { CreateProductoDto } from "../../modules/stock/dto/create-producto.dto";
+import { UpdateProductoDto } from "../../modules/stock/dto/update-producto.dto";
+import { CreatePresentacionDto } from "../../modules/stock/dto/create-presentacion.dto";
+import { UpdatePresentacionDto } from "../../modules/stock/dto/update-presentacion.dto";
+import { CreateIngresoDto } from "../../modules/stock/dto/create-ingreso.dto";
+import { CreateEgresoDto } from "../../modules/stock/dto/create-egreso.dto";
+import { CreateDivisionDto } from "../../modules/stock/dto/create-division.dto";
+import { UpdateStockEgresoRemitoConfigDto } from "../../modules/stock/dto/update-stock-egreso-remito-config.dto";
+import { ViajesPaginatedQueryDto } from "../../modules/viajes/dto/viajes-paginated-query.dto";
+import {
+  parseViajesSortParams,
+  parseFechaFiltroQuery,
+  parseTipoFechaQuery,
+} from "../../modules/viajes/viajes-paginated-query.util";
+import { AddGastoDto } from "../../modules/viajes/dto/add-gasto.dto";
+import { AddPagoTransportistaDto } from "../../modules/viajes/dto/add-pago-transportista.dto";
+import { CreateFacturaDto } from "../../modules/facturacion/dto/create-factura.dto";
+import { UpdateFacturaDto } from "../../modules/facturacion/dto/update-factura.dto";
+import { CreatePagoDto } from "../../modules/facturacion/dto/create-pago.dto";
+import { queryParamFromRequest } from "../../shared/util/express-query-string";
+import { CurrentAuth } from "../auth/current-auth.decorator";
+import { AuthPayload } from "../auth/clerk-auth.guard";
+import { PaginationQueryDto } from "shared/dto/pagination-query.dto";
+import { GetFieldConfigDto } from "../tenant-field-config/dto/get-field-config.dto";
+import { ToggleFieldConfigDto } from "../tenant-field-config/dto/toggle-field-config.dto";
 
 /**
  * Datos por tenant (query `tenantId` = clerkOrgId) — solo superadmin.
  * Sin `tenantId` la respuesta es lista vacía.
  */
-@ApiTags('Admin — Platform')
-@ApiBearerAuth('clerk-jwt')
-@Controller('platform')
+@ApiTags("Admin — Platform")
+@ApiBearerAuth("clerk-jwt")
+@Controller("platform")
 @UseGuards(ClerkAuthGuard, RolesGuard)
-@Roles('superadmin')
+@Roles("superadmin", "org:admin", "admin", "org:member", "member")
 export class PlatformController {
   constructor(private readonly service: PlatformService) {}
 
-  @Get('viajes/paginated')
+  private validateTenantAccess(
+    tenantId: string | undefined,
+    auth: AuthPayload,
+  ): string | undefined {
+    // Si no manda tenantId, lo dejamos pasar (el servicio devolverá lista vacía según tu lógica)
+    if (!tenantId) return undefined;
+
+    // REGLA DE SEGURIDAD (IDOR):
+    // Si el usuario no es superadmin, solo puede acceder a la info de su propia empresa
+    if (auth.role !== "superadmin" && auth.tenantId !== tenantId) {
+      throw new BadRequestException(
+        "No tenés permisos para acceder a los datos de esta empresa",
+      );
+    }
+
+    return tenantId;
+  }
+
+  @Get("viajes/paginated")
   viajesPaginated(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: ViajesPaginatedQueryDto,
     @Req() req: Request,
   ) {
-    const clienteId = queryParamFromRequest(req, 'clienteId') ?? query.clienteId;
-    const transportistaId = queryParamFromRequest(req, 'transportistaId') ?? query.transportistaId;
-    const tipoUbicacionRaw = queryParamFromRequest(req, 'tipoUbicacion') ?? query.tipoUbicacion;
+    const clienteId =
+      queryParamFromRequest(req, "clienteId") ?? query.clienteId;
+    const transportistaId =
+      queryParamFromRequest(req, "transportistaId") ?? query.transportistaId;
+    const tipoUbicacionRaw =
+      queryParamFromRequest(req, "tipoUbicacion") ?? query.tipoUbicacion;
     const tipoUbicacion =
-      tipoUbicacionRaw === 'origen' || tipoUbicacionRaw === 'destino' ? tipoUbicacionRaw : undefined;
-    const ubicacion = queryParamFromRequest(req, 'ubicacion') ?? query.ubicacion;
+      tipoUbicacionRaw === "origen" || tipoUbicacionRaw === "destino"
+        ? tipoUbicacionRaw
+        : undefined;
+    const ubicacion =
+      queryParamFromRequest(req, "ubicacion") ?? query.ubicacion;
     const tipoFecha = parseTipoFechaQuery(
-      queryParamFromRequest(req, 'tipoFecha') ?? query.tipoFecha,
+      queryParamFromRequest(req, "tipoFecha") ?? query.tipoFecha,
     );
     const fechaDesde = parseFechaFiltroQuery(
-      queryParamFromRequest(req, 'fechaDesde') ?? query.fechaDesde,
+      queryParamFromRequest(req, "fechaDesde") ?? query.fechaDesde,
     );
     const fechaHasta = parseFechaFiltroQuery(
-      queryParamFromRequest(req, 'fechaHasta') ?? query.fechaHasta,
+      queryParamFromRequest(req, "fechaHasta") ?? query.fechaHasta,
     );
-    const periodoRaw = queryParamFromRequest(req, 'periodo') ?? query.periodo;
-    const periodo: 'todos' | 'desde_hoy' | 'anteriores' | undefined =
-      periodoRaw === 'todos' || periodoRaw === 'desde_hoy' || periodoRaw === 'anteriores'
+    const periodoRaw = queryParamFromRequest(req, "periodo") ?? query.periodo;
+    const periodo: "todos" | "desde_hoy" | "anteriores" | undefined =
+      periodoRaw === "todos" ||
+      periodoRaw === "desde_hoy" ||
+      periodoRaw === "anteriores"
         ? periodoRaw
         : undefined;
     const sort = parseViajesSortParams(
-      queryParamFromRequest(req, 'sortBy') ?? query.sortBy,
-      queryParamFromRequest(req, 'sortDir') ?? query.sortDir,
+      queryParamFromRequest(req, "sortBy") ?? query.sortBy,
+      queryParamFromRequest(req, "sortDir") ?? query.sortDir,
     );
     return this.service.viajesPaginated(tenantId, {
       page: query.page,
@@ -120,674 +156,793 @@ export class PlatformController {
     });
   }
 
-  @Get('viajes')
-  viajes(@Query('tenantId') tenantId?: string) {
+  @Get("viajes")
+  viajes(@Query("tenantId") tenantId?: string) {
     return this.service.listViajes(tenantId);
   }
 
-  @Get('viajes/:id/documento-aduanero')
+  @Get("viajes/:id/documento-aduanero")
   viajeDocumentoAduanero(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
   ) {
     return this.service.micCrtPrefill(tenantId, id);
   }
 
-  @Post('viajes/:id/mic-crt')
+  @Post("viajes/:id/mic-crt")
   async viajeMicCrt(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: MicCrtExportDto,
     @Res() res: Response,
   ) {
     try {
       const pdf = await this.service.micCrtPdf(tenantId, id, dto);
       res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="MIC-CRT-${id}.pdf"`,
-        'Content-Length': String(pdf.length),
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="MIC-CRT-${id}.pdf"`,
+        "Content-Length": String(pdf.length),
       });
       res.end(pdf);
     } catch (err: unknown) {
-      const e = err as { status?: number; message?: string; response?: unknown };
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
       if (e?.status === 400 || e?.status === 404) {
         res.status(e.status).json(e.response ?? { message: e.message });
       } else {
-        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
       }
     }
   }
 
-  @Get('viajes/:id/exportaciones')
+  @Get("viajes/:id/exportaciones")
   viajeExportaciones(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
   ) {
     return this.service.viajeExportaciones(tenantId, id);
   }
 
-  @Get('viajes/:id/paut')
+  @Get("viajes/:id/paut")
   async viajePaut(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Res() res: Response,
   ) {
     try {
       const pdf = await this.service.pautPdf(tenantId, id);
       res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="PAUT-${id}.pdf"`,
-        'Content-Length': String(pdf.length),
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="PAUT-${id}.pdf"`,
+        "Content-Length": String(pdf.length),
       });
       res.end(pdf);
     } catch (err: unknown) {
-      const e = err as { status?: number; message?: string; response?: unknown };
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
       if (e?.status === 400 || e?.status === 404) {
         res.status(e.status).json(e.response ?? { message: e.message });
       } else {
-        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
       }
     }
   }
 
-  @Get('viajes/:id')
-  viajeById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Get("viajes/:id")
+  viajeById(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.getViajeById(tenantId, id);
   }
 
-  @Post('viajes')
+  @Post("viajes")
   createViaje(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateViajeDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     return this.service.createViaje(tenantId, dto, auth.userId);
   }
 
-  @Patch('viajes/:id')
+  @Patch("viajes/:id")
   updateViaje(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateViajeDto,
   ) {
     return this.service.updateViaje(tenantId, id, dto);
   }
 
-  @Delete('viajes/:id')
-  removeViaje(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("viajes/:id")
+  removeViaje(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.removeViaje(tenantId, id);
   }
 
-  @Post('viajes/:id/gastos')
+  @Post("viajes/:id/gastos")
   addViajeGasto(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: AddGastoDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     return this.service.addViajeGasto(tenantId, id, auth.userId, dto);
   }
 
-  @Post('viajes/:id/pagos-transportista')
+  @Post("viajes/:id/pagos-transportista")
   addViajePagoTransportista(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: AddPagoTransportistaDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
-    return this.service.addViajePagoTransportista(tenantId, id, auth.userId, dto);
+    return this.service.addViajePagoTransportista(
+      tenantId,
+      id,
+      auth.userId,
+      dto,
+    );
   }
 
-  @Delete('viajes/:id/pagos-transportista/:index')
+  @Delete("viajes/:id/pagos-transportista/:index")
   deleteViajePagoTransportista(
-    @Param('id') id: string,
-    @Param('index', ParseIntPipe) index: number,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Param("index", ParseIntPipe) index: number,
+    @Query("tenantId") tenantId: string | undefined,
     @CurrentAuth() auth: AuthPayload,
   ) {
-    return this.service.deleteViajePagoTransportista(tenantId, id, auth.userId, index);
+    return this.service.deleteViajePagoTransportista(
+      tenantId,
+      id,
+      auth.userId,
+      index,
+    );
   }
 
-  @Get('clientes')
-  clientes(@Query('tenantId') tenantId?: string) {
+  @Get("clientes")
+  clientes(@Query("tenantId") tenantId?: string) {
     return this.service.listClientes(tenantId);
   }
 
-  @Get('clientes/:id')
-  clienteById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Get("clientes/:id")
+  clienteById(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.getClienteById(tenantId, id);
   }
 
-  @Post('clientes')
+  @Post("clientes")
   createCliente(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateClienteDto,
   ) {
     return this.service.createCliente(tenantId, dto);
   }
 
-  @Patch('clientes/:id')
+  @Patch("clientes/:id")
   updateCliente(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateClienteDto,
   ) {
     return this.service.updateCliente(tenantId, id, dto);
   }
 
-  @Delete('clientes/:id')
-  removeCliente(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("clientes/:id")
+  removeCliente(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.removeCliente(tenantId, id);
   }
 
-  @Get('choferes')
-  choferes(@Query('tenantId') tenantId?: string) {
-    return this.service.listChoferes(tenantId);
+  @Get("choferes")
+  choferes(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    const validTenantId = this.validateTenantAccess(tenantId, auth);
+    return this.service.listChoferes(validTenantId);
   }
 
-  @Get('choferes/:id')
-  choferById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Get("choferes/:id")
+  choferById(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.getChoferById(tenantId, id);
   }
 
-  @Post('choferes')
+  @Post("choferes")
   createChofer(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateChoferDto,
   ) {
     return this.service.createChofer(tenantId, dto);
   }
 
-  @Patch('choferes/:id')
+  @Patch("choferes/:id")
   updateChofer(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateChoferDto,
   ) {
     return this.service.updateChofer(tenantId, id, dto);
   }
 
-  @Delete('choferes/:id')
-  removeChofer(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("choferes/:id")
+  removeChofer(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.removeChofer(tenantId, id);
   }
 
-  @Get('destinatarios')
-  destinatarios(@Query('tenantId') tenantId?: string) {
+  @Get("destinatarios")
+  destinatarios(@Query("tenantId") tenantId?: string) {
     return this.service.listDestinatarios(tenantId);
   }
 
-  @Get('destinatarios/:id')
-  destinatarioById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Get("destinatarios/:id")
+  destinatarioById(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.getDestinatarioById(tenantId, id);
   }
 
-  @Post('destinatarios')
+  @Post("destinatarios")
   createDestinatario(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateDestinatarioDto,
   ) {
     return this.service.createDestinatario(tenantId, dto);
   }
 
-  @Patch('destinatarios/:id')
+  @Patch("destinatarios/:id")
   updateDestinatario(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateDestinatarioDto,
   ) {
     return this.service.updateDestinatario(tenantId, id, dto);
   }
 
-  @Delete('destinatarios/:id')
-  removeDestinatario(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("destinatarios/:id")
+  removeDestinatario(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.removeDestinatario(tenantId, id);
   }
 
-  @Get('direcciones-entrega')
-  direccionesEntrega(@Query('tenantId') tenantId?: string) {
+  @Get("direcciones-entrega")
+  direccionesEntrega(@Query("tenantId") tenantId?: string) {
     return this.service.listDireccionesEntrega(tenantId);
   }
 
-  @Get('direcciones-entrega/:id')
+  @Get("direcciones-entrega/:id")
   direccionEntregaById(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId?: string,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
   ) {
     return this.service.getDireccionEntregaById(tenantId, id);
   }
 
-  @Post('direcciones-entrega')
+  @Post("direcciones-entrega")
   createDireccionEntrega(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateDireccionEntregaDto,
   ) {
     return this.service.createDireccionEntrega(tenantId, dto);
   }
 
-  @Patch('direcciones-entrega/:id')
+  @Patch("direcciones-entrega/:id")
   updateDireccionEntrega(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateDireccionEntregaDto,
   ) {
     return this.service.updateDireccionEntrega(tenantId, id, dto);
   }
 
-  @Delete('direcciones-entrega/:id')
+  @Delete("direcciones-entrega/:id")
   removeDireccionEntrega(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId?: string,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
   ) {
     return this.service.removeDireccionEntrega(tenantId, id);
   }
 
-  @Get('vehiculos')
-  vehiculos(@Query('tenantId') tenantId?: string) {
-    return this.service.listVehiculos(tenantId);
+  @Get("vehiculos")
+  vehiculos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    const validTenantId = this.validateTenantAccess(tenantId, auth);
+    return this.service.listVehiculos(validTenantId);
   }
 
-  @Get('transportistas')
-  transportistas(@Query('tenantId') tenantId?: string) {
+  @Get("transportistas")
+  transportistas(@Query("tenantId") tenantId?: string) {
     return this.service.listTransportistas(tenantId);
   }
 
-  @Get('transportistas/:id')
-  transportistaById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Get("transportistas/:id")
+  transportistaById(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.getTransportistaById(tenantId, id);
   }
 
-  @Post('transportistas')
+  @Post("transportistas")
   createTransportista(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateTransportistaDto,
   ) {
     return this.service.createTransportista(tenantId, dto);
   }
 
-  @Patch('transportistas/:id')
+  @Patch("transportistas/:id")
   updateTransportista(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateTransportistaDto,
   ) {
     return this.service.updateTransportista(tenantId, id, dto);
   }
 
-  @Delete('transportistas/:id')
-  removeTransportista(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("transportistas/:id")
+  removeTransportista(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.removeTransportista(tenantId, id);
   }
 
-  @Get('users')
-  users(@Query('tenantId') tenantId?: string) {
+  @Get("users")
+  users(@Query("tenantId") tenantId?: string) {
     return this.service.listUsers(tenantId);
   }
 
-  @Get('users/:userId')
-  userById(@Param('userId') userId: string, @Query('tenantId') tenantId?: string) {
+  @Get("users/:userId")
+  userById(
+    @Param("userId") userId: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.getUserById(tenantId, userId);
   }
 
-  @Post('users/invite')
+  @Post("users/invite")
   inviteUser(
-    @Query('tenantId') tenantId: string | undefined,
-    @Body('name') name: string,
-    @Body('email') email: string,
-    @Body('password') password: string,
-    @Body('role') role: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Body("name") name: string,
+    @Body("email") email: string,
+    @Body("password") password: string,
+    @Body("role") role: string,
   ) {
     return this.service.inviteUser(tenantId, name, email, password, role);
   }
 
-  @Patch('users/:userId/role')
+  @Patch("users/:userId/role")
   updateUserRole(
-    @Param('userId') userId: string,
-    @Query('tenantId') tenantId: string | undefined,
-    @Body('role') role: string,
+    @Param("userId") userId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Body("role") role: string,
   ) {
     return this.service.updateUserRole(tenantId, userId, role);
   }
 
-  @Delete('users/:userId')
-  removeUser(@Param('userId') userId: string, @Query('tenantId') tenantId?: string) {
+  @Delete("users/:userId")
+  removeUser(
+    @Param("userId") userId: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.removeUser(tenantId, userId);
   }
 
-  @Get('vehiculos/:id')
-  vehiculoById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Get("vehiculos/:id")
+  vehiculoById(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.getVehiculoById(tenantId, id);
   }
 
-  @Post('vehiculos')
+  @Post("vehiculos")
   createVehiculo(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateVehiculoDto,
   ) {
     return this.service.createVehiculo(tenantId, dto);
   }
 
-  @Patch('vehiculos/:id')
+  @Patch("vehiculos/:id")
   updateVehiculo(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateVehiculoDto,
   ) {
     return this.service.updateVehiculo(tenantId, id, dto);
   }
 
-  @Delete('vehiculos/:id')
-  removeVehiculo(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("vehiculos/:id")
+  removeVehiculo(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.removeVehiculo(tenantId, id);
   }
 
   // ── Facturación ────────────────────────────────────────────────────────────
 
-  @Get('facturas')
-  facturas(@Query('tenantId') tenantId?: string, @Query('clienteId') clienteId?: string) {
+  @Get("facturas")
+  facturas(
+    @Query("tenantId") tenantId?: string,
+    @Query("clienteId") clienteId?: string,
+  ) {
     return this.service.listFacturas(tenantId, clienteId);
   }
 
-  @Post('facturas')
+  @Post("facturas")
   createFactura(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateFacturaDto,
   ) {
-    return this.service.createFactura(tenantId ?? '', dto);
+    return this.service.createFactura(tenantId ?? "", dto);
   }
 
-  @Delete('facturas/:id')
-  removeFactura(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("facturas/:id")
+  removeFactura(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.removeFactura(tenantId, id);
   }
 
-  @Patch('facturas/:id')
+  @Patch("facturas/:id")
   updateFactura(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateFacturaDto,
   ) {
     return this.service.updateFactura(tenantId, id, dto);
   }
 
-  @Post('pagos')
-  createPago(@Query('tenantId') tenantId: string | undefined, @Body() dto: CreatePagoDto) {
+  @Post("pagos")
+  createPago(
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: CreatePagoDto,
+  ) {
     return this.service.createPago(tenantId, dto);
   }
 
-  @Delete('pagos/:id')
-  deletePago(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @Delete("pagos/:id")
+  deletePago(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.deletePago(tenantId, id);
   }
 
   // ─── Productos (módulo stock) ────────────────────────────────────────────────
 
-  @ApiOperation({ summary: 'Listar productos paginado (superadmin)' })
-  @Get('stock/productos/paginated')
+  @ApiOperation({ summary: "Listar productos paginado (superadmin)" })
+  @Get("stock/productos/paginated")
   productosPaginated(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: ProductosPaginatedQueryDto,
   ) {
     return this.service.listProductosPaginated(tenantId, query);
   }
 
-  @ApiOperation({ summary: 'Obtener producto por ID (superadmin)' })
-  @Get('stock/productos/:id')
-  productoById(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @ApiOperation({ summary: "Obtener producto por ID (superadmin)" })
+  @Get("stock/productos/:id")
+  productoById(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.getProducto(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Crear producto (superadmin)' })
-  @Post('stock/productos')
+  @ApiOperation({ summary: "Crear producto (superadmin)" })
+  @Post("stock/productos")
   createProducto(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateProductoDto,
   ) {
     return this.service.createProducto(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar producto (superadmin)' })
-  @Patch('stock/productos/:id')
+  @ApiOperation({ summary: "Actualizar producto (superadmin)" })
+  @Patch("stock/productos/:id")
   updateProducto(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateProductoDto,
   ) {
     return this.service.updateProducto(tenantId, id, dto);
   }
 
-  @ApiOperation({ summary: 'Listar presentaciones del catálogo (superadmin)' })
-  @Get('stock/presentaciones')
+  @ApiOperation({ summary: "Listar presentaciones del catálogo (superadmin)" })
+  @Get("stock/presentaciones")
   listPresentaciones(
-    @Query('tenantId') tenantId?: string,
-    @Query('activo') activo?: string,
+    @Query("tenantId") tenantId?: string,
+    @Query("activo") activo?: string,
   ) {
     return this.service.listPresentaciones(
       tenantId,
-      activo === '0' ? false : activo === '1' ? true : undefined,
+      activo === "0" ? false : activo === "1" ? true : undefined,
     );
   }
 
-  @ApiOperation({ summary: 'Crear presentación en el catálogo (superadmin)' })
-  @Post('stock/presentaciones')
+  @ApiOperation({ summary: "Crear presentación en el catálogo (superadmin)" })
+  @Post("stock/presentaciones")
   createPresentacion(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreatePresentacionDto,
   ) {
     return this.service.createPresentacion(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar presentación del catálogo (superadmin)' })
-  @Patch('stock/presentaciones/:id')
+  @ApiOperation({
+    summary: "Actualizar presentación del catálogo (superadmin)",
+  })
+  @Patch("stock/presentaciones/:id")
   updatePresentacion(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdatePresentacionDto,
   ) {
     return this.service.updatePresentacion(tenantId, id, dto);
   }
 
-  @ApiOperation({ summary: 'Eliminar presentación del catálogo (superadmin)' })
-  @Delete('stock/presentaciones/:id')
+  @ApiOperation({ summary: "Eliminar presentación del catálogo (superadmin)" })
+  @Delete("stock/presentaciones/:id")
   removePresentacion(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId?: string,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
   ) {
     return this.service.removePresentacion(tenantId, id);
   }
 
-  @Get('stock/depositos')
+  @Get("stock/depositos")
   listDepositos(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: PaginationQueryDto,
-    @Query('activo') activo?: string,
+    @Query("activo") activo?: string,
   ) {
     return this.service.listDepositos(
       tenantId,
       query,
-      activo === '0' ? false : activo === '1' ? true : undefined,
+      activo === "0" ? false : activo === "1" ? true : undefined,
     );
   }
 
-  @ApiOperation({ summary: 'Subir foto del producto para ingreso (superadmin)' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
-  @Post('stock/upload-foto-ingreso')
+  @ApiOperation({
+    summary: "Subir foto del producto para ingreso (superadmin)",
+  })
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: { file: { type: "string", format: "binary" } },
+    },
+  })
+  @Post("stock/upload-foto-ingreso")
   @UseInterceptors(
-    FileInterceptor('file', {
+    FileInterceptor("file", {
       storage: memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
   )
   uploadFotoIngresoStock(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    if (!file) throw new BadRequestException("Se requiere una imagen.");
     return this.service.uploadIngresoFoto(tenantId, file);
   }
 
-  @ApiOperation({ summary: 'Subir foto del producto (alias legacy, superadmin)' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
-  @Post('stock/upload-remito')
+  @ApiOperation({
+    summary: "Subir foto del producto (alias legacy, superadmin)",
+  })
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: { file: { type: "string", format: "binary" } },
+    },
+  })
+  @Post("stock/upload-remito")
   @UseInterceptors(
-    FileInterceptor('file', {
+    FileInterceptor("file", {
       storage: memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
   )
   uploadRemitoStock(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('Se requiere una imagen.');
+    if (!file) throw new BadRequestException("Se requiere una imagen.");
     return this.service.uploadIngresoFoto(tenantId, file);
   }
 
-  @ApiOperation({ summary: 'Registrar ingreso al depósito (superadmin)' })
-  @Post('stock/ingresos')
+  @ApiOperation({ summary: "Registrar ingreso al depósito (superadmin)" })
+  @Post("stock/ingresos")
   createIngreso(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateIngresoDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     return this.service.createIngreso(tenantId, dto, auth.userId);
   }
 
-  @ApiOperation({ summary: 'Listar ingresos al depósito (superadmin)' })
-  @Get('stock/ingresos')
+  @ApiOperation({ summary: "Listar ingresos al depósito (superadmin)" })
+  @Get("stock/ingresos")
   listIngresos(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: PaginationQueryDto,
-    @Query('clienteId') clienteId?: string,
-    @Query('productoId') productoId?: string,
-    @Query('depositoId') depositoId?: string,
-    @Query('fechaDesde') fechaDesde?: string,
-    @Query('fechaHasta') fechaHasta?: string,
+    @Query("clienteId") clienteId?: string,
+    @Query("productoId") productoId?: string,
+    @Query("depositoId") depositoId?: string,
+    @Query("fechaDesde") fechaDesde?: string,
+    @Query("fechaHasta") fechaHasta?: string,
   ) {
-    return this.service.listIngresos(tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listIngresos(
+      tenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
-  @ApiOperation({ summary: 'Lotes históricos ingresados - autocompletado (superadmin)' })
-  @Get('stock/lotes/historico')
+  @ApiOperation({
+    summary: "Lotes históricos ingresados - autocompletado (superadmin)",
+  })
+  @Get("stock/lotes/historico")
   getLotesHistorico(
-    @Query('tenantId') tenantId: string | undefined,
-    @Query('productoId') productoId: string,
-    @Query('clienteId') clienteId: string,
-    @Query('depositoId') depositoId: string,
-    @Query('presentacionId') presentacionId?: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Query("productoId") productoId: string,
+    @Query("clienteId") clienteId: string,
+    @Query("depositoId") depositoId: string,
+    @Query("presentacionId") presentacionId?: string,
   ) {
-    return this.service.getLotesHistorico(tenantId!, productoId, clienteId, depositoId, presentacionId);
+    return this.service.getLotesHistorico(
+      tenantId!,
+      productoId,
+      clienteId,
+      depositoId,
+      presentacionId,
+    );
   }
 
-  @ApiOperation({ summary: 'Lotes disponibles para un producto/cliente/depósito (superadmin)' })
-  @Get('stock/lotes')
+  @ApiOperation({
+    summary: "Lotes disponibles para un producto/cliente/depósito (superadmin)",
+  })
+  @Get("stock/lotes")
   getLotes(
-    @Query('tenantId') tenantId: string | undefined,
-    @Query('productoId') productoId: string,
-    @Query('clienteId') clienteId: string,
-    @Query('depositoId') depositoId: string,
-    @Query('presentacionId') presentacionId?: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Query("productoId") productoId: string,
+    @Query("clienteId") clienteId: string,
+    @Query("depositoId") depositoId: string,
+    @Query("presentacionId") presentacionId?: string,
   ) {
-    return this.service.getLotesDisponibles(tenantId!, productoId, clienteId, depositoId, presentacionId);
+    return this.service.getLotesDisponibles(
+      tenantId!,
+      productoId,
+      clienteId,
+      depositoId,
+      presentacionId,
+    );
   }
 
-  @ApiOperation({ summary: 'Stock disponible (superadmin)' })
-  @Get('stock/disponible')
+  @ApiOperation({ summary: "Stock disponible (superadmin)" })
+  @Get("stock/disponible")
   listStockDisponible(
-    @Query('tenantId') tenantId: string | undefined,
-    @Query('clienteId') clienteId?: string,
-    @Query('productoId') productoId?: string,
-    @Query('depositoId') depositoId?: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Query("clienteId") clienteId?: string,
+    @Query("productoId") productoId?: string,
+    @Query("depositoId") depositoId?: string,
   ) {
-    return this.service.listStockDisponible(tenantId, clienteId, productoId, depositoId);
+    return this.service.listStockDisponible(
+      tenantId,
+      clienteId,
+      productoId,
+      depositoId,
+    );
   }
 
-  @ApiOperation({ summary: 'Formato número de remito egresos (superadmin)' })
-  @Get('stock/egresos/remito-config')
-  getEgresoRemitoConfig(@Query('tenantId') tenantId?: string) {
+  @ApiOperation({ summary: "Formato número de remito egresos (superadmin)" })
+  @Get("stock/egresos/remito-config")
+  getEgresoRemitoConfig(@Query("tenantId") tenantId?: string) {
     return this.service.getEgresoRemitoConfig(tenantId);
   }
 
-  @ApiOperation({ summary: 'Actualizar formato número de remito egresos (superadmin)' })
-  @Patch('stock/egresos/remito-config')
+  @ApiOperation({
+    summary: "Actualizar formato número de remito egresos (superadmin)",
+  })
+  @Patch("stock/egresos/remito-config")
   patchEgresoRemitoConfig(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateStockEgresoRemitoConfigDto,
   ) {
     return this.service.upsertEgresoRemitoConfig(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Registrar egreso (superadmin)' })
-  @Post('stock/egresos')
+  @ApiOperation({ summary: "Registrar egreso (superadmin)" })
+  @Post("stock/egresos")
   createEgreso(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateEgresoDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     return this.service.createEgreso(tenantId, dto, auth.userId);
   }
 
-  @ApiOperation({ summary: 'Listar egresos (superadmin)' })
-  @Get('stock/egresos')
+  @ApiOperation({ summary: "Listar egresos (superadmin)" })
+  @Get("stock/egresos")
   listEgresos(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: PaginationQueryDto,
-    @Query('clienteId') clienteId?: string,
-    @Query('productoId') productoId?: string,
-    @Query('depositoId') depositoId?: string,
-    @Query('fechaDesde') fechaDesde?: string,
-    @Query('fechaHasta') fechaHasta?: string,
+    @Query("clienteId") clienteId?: string,
+    @Query("productoId") productoId?: string,
+    @Query("depositoId") depositoId?: string,
+    @Query("fechaDesde") fechaDesde?: string,
+    @Query("fechaHasta") fechaHasta?: string,
   ) {
-    return this.service.listEgresos(tenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.service.listEgresos(
+      tenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
-  @ApiOperation({ summary: 'Obtener egreso por ID (superadmin)' })
-  @Get('stock/egresos/:id')
-  getEgreso(@Query('tenantId') tenantId: string | undefined, @Param('id') id: string) {
+  @ApiOperation({ summary: "Obtener egreso por ID (superadmin)" })
+  @Get("stock/egresos/:id")
+  getEgreso(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+  ) {
     return this.service.findEgreso(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Visualizar remito interno PDF inline (superadmin)' })
-  @Get('stock/egresos/:id/remito-interno/view')
+  @ApiOperation({
+    summary: "Visualizar remito interno PDF inline (superadmin)",
+  })
+  @Get("stock/egresos/:id/remito-interno/view")
   async viewRemitoInterno(
-    @Query('tenantId') tenantId: string | undefined,
-    @Param('id') id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
     @Res() res: Response,
   ) {
     await this.service.streamRemitoInternoView(tenantId, id, res);
   }
 
-  @ApiOperation({ summary: 'Generar (si falta) remito interno PDF (superadmin)' })
-  @Post('stock/egresos/:id/remito-interno')
+  @ApiOperation({
+    summary: "Generar (si falta) remito interno PDF (superadmin)",
+  })
+  @Post("stock/egresos/:id/remito-interno")
   ensureRemitoInterno(
-    @Query('tenantId') tenantId: string | undefined,
-    @Param('id') id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
   ) {
     return this.service.ensureRemitoInternoPdf(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Registrar división de bultos (superadmin)' })
-  @Post('stock/divisiones')
+  @ApiOperation({ summary: "Registrar división de bultos (superadmin)" })
+  @Post("stock/divisiones")
   createDivision(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateDivisionDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     return this.service.createDivision(tenantId, dto, auth.userId);
   }
 
-  @ApiOperation({ summary: 'Listar divisiones (superadmin)' })
-  @Get('stock/divisiones')
+  @ApiOperation({ summary: "Listar divisiones (superadmin)" })
+  @Get("stock/divisiones")
   listDivisiones(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: PaginationQueryDto,
-    @Query('clienteId') clienteId?: string,
-    @Query('productoId') productoId?: string,
-    @Query('depositoId') depositoId?: string,
-    @Query('fechaDesde') fechaDesde?: string,
-    @Query('fechaHasta') fechaHasta?: string,
+    @Query("clienteId") clienteId?: string,
+    @Query("productoId") productoId?: string,
+    @Query("depositoId") depositoId?: string,
+    @Query("fechaDesde") fechaDesde?: string,
+    @Query("fechaHasta") fechaHasta?: string,
   ) {
     return this.service.listDivisiones(
       tenantId,
@@ -800,19 +955,21 @@ export class PlatformController {
     );
   }
 
-  @ApiOperation({ summary: 'Listar operaciones de stock paginadas (superadmin)' })
-  @Get('stock/operaciones/paginated')
+  @ApiOperation({
+    summary: "Listar operaciones de stock paginadas (superadmin)",
+  })
+  @Get("stock/operaciones/paginated")
   listOperacionesStockPaginated(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: PaginationQueryDto,
-    @Query('productoId') productoId?: string,
-    @Query('clienteId') clienteId?: string,
-    @Query('depositoId') depositoId?: string,
-    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
-    @Query('fechaDesde') fechaDesde?: string,
-    @Query('fechaHasta') fechaHasta?: string,
-    @Query('createdBy') createdBy?: string,
-    @Query('lote') lote?: string,
+    @Query("productoId") productoId?: string,
+    @Query("clienteId") clienteId?: string,
+    @Query("depositoId") depositoId?: string,
+    @Query("tipo") tipo?: "ingreso" | "egreso" | "division",
+    @Query("fechaDesde") fechaDesde?: string,
+    @Query("fechaHasta") fechaHasta?: string,
+    @Query("createdBy") createdBy?: string,
+    @Query("lote") lote?: string,
   ) {
     return this.service.listOperacionesStockPaginated(
       tenantId,
@@ -828,39 +985,57 @@ export class PlatformController {
     );
   }
 
-  @ApiOperation({ summary: 'Obtener operación de stock por ID (superadmin)' })
-  @Get('stock/operaciones/:id')
-  getOperacionStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @ApiOperation({ summary: "Obtener operación de stock por ID (superadmin)" })
+  @Get("stock/operaciones/:id")
+  getOperacionStock(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.getOperacionStock(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Listar movimientos de stock (superadmin)' })
-  @Get('stock/movimientos')
+  @ApiOperation({ summary: "Listar movimientos de stock (superadmin)" })
+  @Get("stock/movimientos")
   listMovimientosStock(
-    @Query('tenantId') tenantId: string | undefined,
+    @Query("tenantId") tenantId: string | undefined,
     @Query() query: PaginationQueryDto,
-    @Query('productoId') productoId?: string,
-    @Query('clienteId') clienteId?: string,
-    @Query('depositoId') depositoId?: string,
-    @Query('tipo') tipo?: 'ingreso' | 'egreso' | 'division',
-    @Query('fechaDesde') fechaDesde?: string,
-    @Query('fechaHasta') fechaHasta?: string,
-    @Query('createdBy') createdBy?: string,
+    @Query("productoId") productoId?: string,
+    @Query("clienteId") clienteId?: string,
+    @Query("depositoId") depositoId?: string,
+    @Query("tipo") tipo?: "ingreso" | "egreso" | "division",
+    @Query("fechaDesde") fechaDesde?: string,
+    @Query("fechaHasta") fechaHasta?: string,
+    @Query("createdBy") createdBy?: string,
   ) {
-    return this.service.listMovimientosStock(tenantId, query, productoId, clienteId, depositoId, tipo, fechaDesde, fechaHasta, createdBy);
+    return this.service.listMovimientosStock(
+      tenantId,
+      query,
+      productoId,
+      clienteId,
+      depositoId,
+      tipo,
+      fechaDesde,
+      fechaHasta,
+      createdBy,
+    );
   }
 
-  @ApiOperation({ summary: 'Obtener movimiento de stock por ID (superadmin)' })
-  @Get('stock/movimientos/:id')
-  getMovimientoStock(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @ApiOperation({ summary: "Obtener movimiento de stock por ID (superadmin)" })
+  @Get("stock/movimientos/:id")
+  getMovimientoStock(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.getMovimientoStock(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Descargar / previsualizar remito escaneado (superadmin)' })
-  @Get('stock/movimientos/:id/remito-adjunto')
+  @ApiOperation({
+    summary: "Descargar / previsualizar remito escaneado (superadmin)",
+  })
+  @Get("stock/movimientos/:id/remito-adjunto")
   async getRemitoAdjuntoStock(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Res() res: Response,
   ) {
     await this.service.streamRemitoAdjunto(tenantId, id, res);
@@ -868,108 +1043,140 @@ export class PlatformController {
 
   // ── ARCA (superadmin) ─────────────────────────────────────────────────────
 
-  @ApiOperation({ summary: 'Obtener config ARCA del tenant (superadmin)' })
-  @Get('arca/config')
-  getArcaConfig(@Query('tenantId') tenantId?: string) {
+  @ApiOperation({ summary: "Obtener config ARCA del tenant (superadmin)" })
+  @Get("arca/config")
+  getArcaConfig(@Query("tenantId") tenantId?: string) {
     return this.service.getArcaConfig(tenantId);
   }
 
-  @ApiOperation({ summary: 'Crear / actualizar config ARCA del tenant (superadmin)' })
-  @Post('arca/config')
+  @ApiOperation({
+    summary: "Crear / actualizar config ARCA del tenant (superadmin)",
+  })
+  @Post("arca/config")
   upsertArcaConfig(
-    @Query('tenantId') tenantId: string | undefined,
-    @Body() dto: import('../../modules/liquidaciones-arca/dto/upsert-arca-config.dto').UpsertArcaConfigDto,
+    @Query("tenantId") tenantId: string | undefined,
+    @Body()
+    dto: import("../../modules/liquidaciones-arca/dto/upsert-arca-config.dto").UpsertArcaConfigDto,
   ) {
     return this.service.upsertArcaConfig(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Listar liquidaciones CVLP de un tenant (superadmin)' })
-  @Get('arca/liquidaciones')
+  @ApiOperation({
+    summary: "Listar liquidaciones CVLP de un tenant (superadmin)",
+  })
+  @Get("arca/liquidaciones")
   listLiquidaciones(
-    @Query('tenantId') tenantId?: string,
-    @Query('estado') estado?: string,
+    @Query("tenantId") tenantId?: string,
+    @Query("estado") estado?: string,
   ) {
     return this.service.listLiquidaciones(tenantId, estado);
   }
 
-  @ApiOperation({ summary: 'Obtener liquidación por ID (superadmin)' })
-  @Get('arca/liquidaciones/:id')
-  getLiquidacion(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @ApiOperation({ summary: "Obtener liquidación por ID (superadmin)" })
+  @Get("arca/liquidaciones/:id")
+  getLiquidacion(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.getLiquidacion(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Emitir liquidación a ARCA (superadmin)' })
-  @Post('arca/liquidaciones/:id/emitir')
-  emitirLiquidacion(@Param('id') id: string, @Query('tenantId') tenantId?: string) {
+  @ApiOperation({ summary: "Emitir liquidación a ARCA (superadmin)" })
+  @Post("arca/liquidaciones/:id/emitir")
+  emitirLiquidacion(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
     return this.service.emitirLiquidacion(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Descargar PDF de liquidación (superadmin)' })
-  @Get('arca/liquidaciones/:id/pdf')
+  @ApiOperation({ summary: "Descargar PDF de liquidación (superadmin)" })
+  @Get("arca/liquidaciones/:id/pdf")
   async getLiquidacionPdf(
-    @Param('id') id: string,
-    @Query('tenantId') tenantId: string | undefined,
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
     @Res() res: Response,
   ) {
     try {
-      const { buffer, filename } = await this.service.getLiquidacionPdf(tenantId, id);
+      const { buffer, filename } = await this.service.getLiquidacionPdf(
+        tenantId,
+        id,
+      );
       res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': String(buffer.length),
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
       });
       res.end(buffer);
     } catch (err: unknown) {
-      const e = err as { status?: number; message?: string; response?: unknown };
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
       if (e?.status === 400 || e?.status === 404) {
         res.status(e.status).json(e.response ?? { message: e.message });
       } else {
-        res.status(500).json({ message: e?.message ?? 'Error interno al generar el PDF' });
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
       }
     }
   }
 
-  @ApiOperation({ summary: 'Emitir factura a ARCA (superadmin)' })
-  @Post('arca/facturas/:facturaId/emitir')
+  @ApiOperation({ summary: "Emitir factura a ARCA (superadmin)" })
+  @Post("arca/facturas/:facturaId/emitir")
   emitirFacturaArca(
-    @Param('facturaId') facturaId: string,
-    @Query('tenantId') tenantId: string | undefined,
-    @Body() dto: import('../../modules/liquidaciones-arca/dto/emitir-factura-arca.dto').EmitirFacturaArcaDto,
+    @Param("facturaId") facturaId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Body()
+    dto: import("../../modules/liquidaciones-arca/dto/emitir-factura-arca.dto").EmitirFacturaArcaDto,
   ) {
     return this.service.emitirFacturaArca(tenantId, facturaId, dto);
   }
 
-  @ApiOperation({ summary: 'Logs de auditoría de AFIP SDK (superadmin)' })
-  @Get('arca/logs')
+  @ApiOperation({ summary: "Logs de auditoría de AFIP SDK (superadmin)" })
+  @Get("arca/logs")
   getArcaLogs(
-    @Query('tenantId') tenantId?: string,
-    @Query('liquidacionId') liquidacionId?: string,
-    @Query('facturaId') facturaId?: string,
+    @Query("tenantId") tenantId?: string,
+    @Query("liquidacionId") liquidacionId?: string,
+    @Query("facturaId") facturaId?: string,
   ) {
     return this.service.getArcaLogs(tenantId, liquidacionId, facturaId);
   }
 
   // ── Configuración de campos por empresa (superadmin) ──────────────────────
 
-  @ApiOperation({ summary: 'Catálogo completo de módulos/formularios/campos configurables' })
-  @Get('field-config/catalogo')
+  @ApiOperation({
+    summary: "Catálogo completo de módulos/formularios/campos configurables",
+  })
+  @Get("field-config/catalogo")
   getFieldConfigCatalogo() {
     return this.service.getFieldConfigCatalogo();
   }
-  
-  @ApiOperation({ summary: 'Obtiene la configuración de campos de un formulario para un tenant' })
-  @Get('field-config/:tenantId')
+
+  @ApiOperation({
+    summary:
+      "Obtiene la configuración de campos de un formulario para un tenant",
+  })
+  @Get("field-config/:tenantId")
   getFieldConfig(
-    @Param('tenantId') tenantId: string,
+    @Param("tenantId") tenantId: string,
     @Query() query: GetFieldConfigDto,
   ) {
-    return this.service.getFieldConfig(tenantId, query.modulo, query.formulario);
+    return this.service.getFieldConfig(
+      tenantId,
+      query.modulo,
+      query.formulario,
+    );
   }
 
-  @ApiOperation({ summary: 'Actualiza la visibilidad de un campo para un tenant' })
-  @Post('field-config/:tenantId/toggle')
+  @ApiOperation({
+    summary: "Actualiza la visibilidad de un campo para un tenant",
+  })
+  @Post("field-config/:tenantId/toggle")
   toggleFieldConfig(
-    @Param('tenantId') tenantId: string,
+    @Param("tenantId") tenantId: string,
     @Body() dto: ToggleFieldConfigDto,
     @CurrentAuth() auth: AuthPayload,
   ) {

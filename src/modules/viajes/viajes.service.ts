@@ -60,13 +60,90 @@ import {
 const VIAJE_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 
 /**
- * Añadimos las liquidaciones al include base para que el frontend
+ * Añadimos las liquidaciones y facturas al include base para que el frontend
  * y las validaciones cuenten siempre con el monto real de los comprobantes.
  */
 const VIAJE_INCLUDE_FULL = {
   ...VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+  factura: {
+    select: {
+      id: true,
+      numero: true,
+      importe: true,
+      moneda: true,
+      estado: true,
+      arcaEstado: true,
+      viajes: { select: { id: true, monto: true } },
+    },
+  },
   liquidacionesViaje: { include: { liquidacion: true } },
 };
+
+/**
+ * Calcula el monto prorrateado que le corresponde a un viaje a partir
+ * de las facturas/liquidaciones emitidas.
+ */
+function calcularMontosReales<
+  T extends {
+    monto?: number | null;
+    precioTransportistaExterno?: number | null;
+    factura?: any;
+    liquidacionesViaje?: any;
+  },
+>(viaje: T) {
+  let montoFacturadoReal = null;
+  let monedaMontoFacturadoReal = null;
+  let costoLiquidadoReal = null;
+  let monedaCostoLiquidadoReal = null;
+
+  // Prorrateo de Factura al cliente (aplica si no está anulada ni con error ARCA)
+  if (
+    viaje.factura &&
+    typeof viaje.factura.importe === "number" &&
+    viaje.factura.estado !== "anulada" &&
+    viaje.factura.arcaEstado !== "error"
+  ) {
+    const totalEstimado =
+      viaje.factura.viajes?.reduce(
+        (acc: number, v: any) =>
+          acc + (typeof v.monto === "number" ? v.monto : 0),
+        0,
+      ) || 0;
+
+    if (totalEstimado > 0 && typeof viaje.monto === "number") {
+      montoFacturadoReal =
+        viaje.factura.importe * (viaje.monto / totalEstimado);
+    } else {
+      const cant = viaje.factura.viajes?.length || 1;
+      montoFacturadoReal = viaje.factura.importe / cant;
+    }
+    monedaMontoFacturadoReal = viaje.factura.moneda;
+  }
+
+  // Prorrateo de Liquidación CVLP
+  const liqViaje = viaje.liquidacionesViaje?.find(
+    (lv: any) =>
+      lv.liquidacion?.estado !== "anulado" &&
+      lv.liquidacion?.estado !== "error",
+  );
+  if (liqViaje?.liquidacion) {
+    const liq = liqViaje.liquidacion;
+    if (liq.bruto > 0 && typeof liqViaje.subtotal === "number") {
+      costoLiquidadoReal = liq.liquido * (liqViaje.subtotal / liq.bruto);
+    } else {
+      costoLiquidadoReal = liq.liquido / (liq.cantViajes || 1);
+    }
+    monedaCostoLiquidadoReal = "ARS";
+  }
+
+  return {
+    ...viaje,
+    montoFacturadoReal,
+    monedaMontoFacturadoReal,
+    costoLiquidadoReal,
+    monedaCostoLiquidadoReal,
+  };
+}
 
 type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
 type PagoTransportistaInput = { monto?: unknown; moneda?: unknown };
@@ -410,7 +487,7 @@ export class ViajesService {
   }
 
   async findAll(tenantId: string, estado?: string) {
-    return this.prisma.viaje.findMany({
+    const rows = await this.prisma.viaje.findMany({
       where: { tenantId, ...(estado ? { estado: estado } : {}) },
       orderBy: { createdAt: "desc" },
       take: 200,
@@ -418,11 +495,11 @@ export class ViajesService {
         cliente: { select: { id: true, nombre: true } },
         transportista: { select: { id: true, nombre: true } },
         transportistaEfectivo: { select: { id: true, nombre: true } },
-        factura: { select: { id: true, numero: true } },
         destinosViaje: viajeDestinosViajeInclude,
-        liquidacionesViaje: { include: { liquidacion: true } },
+        ...VIAJE_INCLUDE_FULL,
       } as any,
     });
+    return rows.map((r) => calcularMontosReales(r));
   }
 
   async getStats(tenantId: string) {
@@ -577,7 +654,9 @@ export class ViajesService {
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
-      items: items.map((item) => enrichViajeConExportaciones(item)),
+      items: items.map((item) =>
+        enrichViajeConExportaciones(calcularMontosReales(item)),
+      ),
       meta: {
         page,
         pageSize,
@@ -637,12 +716,21 @@ export class ViajesService {
       this.prisma.viaje.count({ where }),
       this.prisma.viaje.findMany({
         where,
-        select: { id: true, monto: true },
+        select: {
+          id: true,
+          monto: true,
+          monedaMonto: true,
+          factura: VIAJE_INCLUDE_FULL.factura,
+        },
       }),
     ]);
 
     const sortedIds = rows
-      .map((row) => ({ id: row.id, valor: row.monto }))
+      .map((row) => {
+        const conReales = calcularMontosReales(row);
+        const valorMonto = conReales.montoFacturadoReal ?? row.monto;
+        return { id: row.id, valor: valorMonto };
+      })
       .sort((a, b) =>
         compareViajesOrdenNullable(a.valor, b.valor, sortDir, () =>
           a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
@@ -678,12 +766,30 @@ export class ViajesService {
           otrosGastos: true,
           gananciaBrutaManual: true,
           monedaGananciaBrutaManual: true,
+          factura: VIAJE_INCLUDE_FULL.factura,
+          liquidacionesViaje: VIAJE_INCLUDE_FULL.liquidacionesViaje,
         },
       }),
     ]);
 
     const sortedIds = rows
-      .map((row) => ({ id: row.id, valor: gananciaBrutaValorOrdenable(row) }))
+      .map((row) => {
+        const conReales = calcularMontosReales(row);
+        const viaParaOrden = {
+          ...row,
+          monto: conReales.montoFacturadoReal ?? row.monto,
+          monedaMonto: conReales.monedaMontoFacturadoReal ?? row.monedaMonto,
+          precioTransportistaExterno:
+            conReales.costoLiquidadoReal ?? row.precioTransportistaExterno,
+          monedaPrecioTransportistaExterno:
+            conReales.monedaCostoLiquidadoReal ??
+            row.monedaPrecioTransportistaExterno,
+        };
+        return {
+          id: row.id,
+          valor: gananciaBrutaValorOrdenable(viaParaOrden as any),
+        };
+      })
       .sort((a, b) =>
         compareViajesOrdenNullable(a.valor, b.valor, sortDir, () =>
           a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
@@ -722,7 +828,9 @@ export class ViajesService {
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
-      items: items.map((item) => enrichViajeConExportaciones(item)),
+      items: items.map((item) =>
+        enrichViajeConExportaciones(calcularMontosReales(item)),
+      ),
       meta: {
         page,
         pageSize,
@@ -741,7 +849,9 @@ export class ViajesService {
     });
     if (!row) throw new NotFoundException("Viaje no encontrado");
     return enrichViajeConGananciaBruta(
-      enrichViajeConExportaciones(row as unknown as ViajeConVehiculosViaje),
+      enrichViajeConExportaciones(
+        calcularMontosReales(row) as unknown as ViajeConVehiculosViaje,
+      ),
     ) as ViajeConVehiculosViaje;
   }
 
@@ -756,10 +866,24 @@ export class ViajesService {
         otrosGastos: true,
         gananciaBrutaManual: true,
         monedaGananciaBrutaManual: true,
+        factura: VIAJE_INCLUDE_FULL.factura,
+        liquidacionesViaje: VIAJE_INCLUDE_FULL.liquidacionesViaje,
       },
     });
     if (!row) throw new NotFoundException("Viaje no encontrado");
-    return buildGananciaBrutaResumen(row);
+
+    const conReales = calcularMontosReales(row);
+    const viaParaResumen = {
+      ...row,
+      monto: conReales.montoFacturadoReal ?? row.monto,
+      monedaMonto: conReales.monedaMontoFacturadoReal ?? row.monedaMonto,
+      precioTransportistaExterno:
+        conReales.costoLiquidadoReal ?? row.precioTransportistaExterno,
+      monedaPrecioTransportistaExterno:
+        conReales.monedaCostoLiquidadoReal ??
+        row.monedaPrecioTransportistaExterno,
+    };
+    return buildGananciaBrutaResumen(viaParaResumen as any);
   }
 
   async getExportaciones(id: string, tenantId: string) {
@@ -904,7 +1028,7 @@ export class ViajesService {
         include: VIAJE_INCLUDE_FULL,
       });
       return enrichViajeConGananciaBruta(
-        out as unknown as ViajeConVehiculosViaje,
+        calcularMontosReales(out) as unknown as ViajeConVehiculosViaje,
       ) as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
@@ -1136,7 +1260,9 @@ export class ViajesService {
       if (esEstadoViajeFinal(full.estado)) {
         await this.upsertCargoFinalizacion(tx, full);
       }
-      return enrichViajeConGananciaBruta(full) as ViajeConVehiculosViaje;
+      return enrichViajeConGananciaBruta(
+        calcularMontosReales(full) as any,
+      ) as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
 
@@ -1186,7 +1312,7 @@ export class ViajesService {
         await this.upsertCargoFinalizacion(tx, full);
       }
 
-      return full;
+      return calcularMontosReales(full);
     }, VIAJE_INTERACTIVE_TX);
   }
 
@@ -1242,10 +1368,11 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
-      return (await tx.viaje.findFirstOrThrow({
+      const out = await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
         include: VIAJE_INCLUDE_FULL,
-      })) as unknown as ViajeConVehiculosViaje;
+      });
+      return calcularMontosReales(out) as unknown as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
 
@@ -1286,10 +1413,11 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
-      return (await tx.viaje.findFirstOrThrow({
+      const out = await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
         include: VIAJE_INCLUDE_FULL,
-      })) as unknown as ViajeConVehiculosViaje;
+      });
+      return calcularMontosReales(out) as unknown as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
 

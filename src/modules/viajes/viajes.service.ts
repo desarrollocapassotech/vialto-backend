@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -1035,6 +1036,27 @@ export class ViajesService {
 
   async update(id: string, tenantId: string, dto: UpdateViajeDto) {
     const current = await this.findOne(id, tenantId);
+
+    const bloqueadoPorFactura = Boolean((current as any).factura);
+    const ESTADOS_LIQUIDACION_BLOQUEAN = ["pendiente_cae", "autorizado", "error"];
+
+    const bloqueadoPorLiquidacion =
+      (current as any).liquidacionesViaje?.some((lv: any) =>
+        ESTADOS_LIQUIDACION_BLOQUEAN.includes(lv.liquidacion.estado),
+      ) ?? false;
+
+    if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {
+      const motivo =
+        bloqueadoPorFactura && bloqueadoPorLiquidacion
+          ? "facturado y liquidado"
+          : bloqueadoPorFactura
+            ? "facturado"
+            : "liquidado";
+      throw new ConflictException(
+        `No se puede editar: el viaje ya fue ${motivo}.`,
+      );
+    }
+
     const currentIds = current.vehiculosViaje.map((x) => x.vehiculoId);
     const op = mergeViajeOperacionIds(
       {

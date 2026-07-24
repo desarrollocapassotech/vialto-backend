@@ -183,4 +183,26 @@ describe("arca-cvlp.util", () => {
     expect(req.ambiente).toBe("homologacion");
     expect(req.cuit).toBe("20111111112");
   });
+
+  it("no debe repetir AlicIva.Id y ImpIVA debe cuadrar con BaseImp × %", () => {
+    const conceptos: ConceptoFacturable[] = [
+      { descripcion: "Fletes", importe: 200.06, ivaPct: 21 },
+      { descripcion: "Comisión", importe: -100.03, ivaPct: 21 },
+      { descripcion: "Descuento", importe: -50, ivaPct: 21.0000001 },
+    ];
+
+    const cvlp = buildComprobanteCvlp(baseCabecera, conceptos, 21);
+    const ids = cvlp.alicuotasIva.map((a) => a.Id);
+
+    expect(ids.length).toBe(1);
+    expect(ids[0]).toBe(5);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const alic = cvlp.alicuotasIva[0];
+    expect(alic.BaseImp).toBe(50.03); // 200.06 - 100.03 - 50
+    expect(alic.Importe).toBe(Math.round((50.03 * 21) / 100 * 100) / 100);
+    expect(cvlp.impNeto).toBe(alic.BaseImp);
+    expect(cvlp.impIva).toBe(alic.Importe);
+    expect(cvlp.impTotal).toBe(Math.round((alic.BaseImp + alic.Importe) * 100) / 100);
+  });
 });

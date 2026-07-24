@@ -20,8 +20,6 @@ export function buildComprobanteCvlp(
   const conceptosFiltrados = conceptos.filter((c) => c.importe !== 0);
 
   const items: ArcaComprobanteItem[] = [];
-  let impNeto = 0;
-  let impIva = 0;
 
   for (const c of conceptosFiltrados) {
     const pct = c.ivaPct ?? ivaPctDefault;
@@ -34,8 +32,19 @@ export function buildComprobanteCvlp(
       importeIva: montos.impIva,
       subtotal: montos.liquido,
     });
-    impNeto = round2(impNeto + montos.impNeto);
-    impIva = round2(impIva + montos.impIva);
+  }
+
+  // Totales AFIP desde AlicIva (BaseImp > 0 y BaseImp × % por Id).
+  const alicuotasIva = groupAlicuotasIva(items, { fallbackIvaPct: ivaPctDefault });
+  let impNeto: number;
+  let impIva: number;
+  if (alicuotasIva.length > 0) {
+    impNeto = round2(alicuotasIva.reduce((s, a) => s + a.BaseImp, 0));
+    impIva = round2(alicuotasIva.reduce((s, a) => s + a.Importe, 0));
+  } else {
+    // Neto ≤ 0 (p. ej. anulación): sin AlicIva; totales desde líneas.
+    impNeto = round2(items.reduce((s, i) => s + i.importeBase, 0));
+    impIva = round2(items.reduce((s, i) => s + i.importeIva, 0));
   }
 
   return {
@@ -43,7 +52,7 @@ export function buildComprobanteCvlp(
     impNeto,
     impIva,
     impTotal: round2(impNeto + impIva),
-    alicuotasIva: groupAlicuotasIva(items),
+    alicuotasIva,
     items,
   };
 }

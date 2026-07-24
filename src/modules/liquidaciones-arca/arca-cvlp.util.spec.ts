@@ -70,21 +70,20 @@ describe("arca-cvlp.util", () => {
     // Suma de IVAs de items = 210 + (-21) = 189 (No requiere ajuste)
   });
 
-  it("debería calcular flete + comisión + gastos (IVA 10.5%)", () => {
+  it("debería calcular flete + comisión (IVA 10.5%)", () => {
     const conceptos: ConceptoFacturable[] = [
       { descripcion: "Fletes", importe: 2000 },
       { descripcion: "Comisión", importe: -200 },
-      { descripcion: "Gastos Administrativos", importe: -50 },
     ];
 
     const cvlp = buildComprobanteCvlp(baseCabecera, conceptos, 10.5);
 
-    // Totales: 2000 - 200 - 50 = 1750
-    expect(cvlp.impNeto).toBe(1750);
-    expect(cvlp.impIva).toBe(183.75); // 1750 * 0.105
-    expect(cvlp.impTotal).toBe(1933.75);
+    // Totales: 2000 - 200 = 1800
+    expect(cvlp.impNeto).toBe(1800);
+    expect(cvlp.impIva).toBe(189); // 1800 * 0.105
+    expect(cvlp.impTotal).toBe(1989);
 
-    expect(cvlp.items).toHaveLength(3);
+    expect(cvlp.items).toHaveLength(2);
 
     // IVA flete = 2000 * 0.105 = 210
     expect(cvlp.items[0].importeIva).toBe(210);
@@ -92,10 +91,7 @@ describe("arca-cvlp.util", () => {
     // IVA comisión = -200 * 0.105 = -21
     expect(cvlp.items[1].importeIva).toBe(-21);
 
-    // IVA gastos = -50 * 0.105 = -5.25
-    expect(cvlp.items[2].importeIva).toBe(-5.25);
-
-    // 210 - 21 - 5.25 = 183.75 (Cuadra exacto)
+    // 210 - 21 = 189 (Cuadra exacto)
   });
 
   it("debería inyectar la diferencia de centavos de IVA en la línea mayor (flete)", () => {
@@ -140,7 +136,6 @@ describe("arca-cvlp.util", () => {
     const conceptos: ConceptoFacturable[] = [
       { descripcion: "Fletes", importe: 0 },
       { descripcion: "Comisión", importe: 0 },
-      { descripcion: "Gastos Administrativos", importe: 0 },
     ];
 
     const cvlp = buildComprobanteCvlp(baseCabecera, conceptos, 21);
@@ -153,11 +148,10 @@ describe("arca-cvlp.util", () => {
     expect(cvlp.items).toHaveLength(0);
   });
 
-  it("debería calcular correctamente con comisión explícita en 0 y gastos en 0", () => {
+  it("debería calcular correctamente con comisión explícita en 0", () => {
     const conceptos: ConceptoFacturable[] = [
       { descripcion: "Fletes", importe: 1000 },
       { descripcion: "Comisión", importe: 0 },
-      { descripcion: "Gastos Administrativos", importe: 0 },
     ];
 
     const cvlp = buildComprobanteCvlp(baseCabecera, conceptos, 21);
@@ -182,5 +176,27 @@ describe("arca-cvlp.util", () => {
     expect(req.impTotal).toBe(1210);
     expect(req.ambiente).toBe("homologacion");
     expect(req.cuit).toBe("20111111112");
+  });
+
+  it("no debe repetir AlicIva.Id y ImpIVA debe cuadrar con BaseImp × %", () => {
+    const conceptos: ConceptoFacturable[] = [
+      { descripcion: "Fletes", importe: 200.06, ivaPct: 21 },
+      { descripcion: "Comisión", importe: -100.03, ivaPct: 21 },
+      { descripcion: "Descuento", importe: -50, ivaPct: 21.0000001 },
+    ];
+
+    const cvlp = buildComprobanteCvlp(baseCabecera, conceptos, 21);
+    const ids = cvlp.alicuotasIva.map((a) => a.Id);
+
+    expect(ids.length).toBe(1);
+    expect(ids[0]).toBe(5);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const alic = cvlp.alicuotasIva[0];
+    expect(alic.BaseImp).toBe(50.03); // 200.06 - 100.03 - 50
+    expect(alic.Importe).toBe(Math.round((50.03 * 21) / 100 * 100) / 100);
+    expect(cvlp.impNeto).toBe(alic.BaseImp);
+    expect(cvlp.impIva).toBe(alic.Importe);
+    expect(cvlp.impTotal).toBe(Math.round((alic.BaseImp + alic.Importe) * 100) / 100);
   });
 });

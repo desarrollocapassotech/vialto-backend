@@ -106,6 +106,14 @@ test('PDF pie usa montos del cvlp (incluye conceptos)', () => {
   assert.equal(pie.balances, true);
 });
 
+test('computeAfipGravadoIva ignora gastosAdmin (deprecado)', () => {
+  const sinGastos = computeAfipGravadoIva(1000, 100, 0, 21);
+  const conGastosLegacy = computeAfipGravadoIva(1000, 100, 50, 21);
+  assert.equal(conGastosLegacy.netoGravado, sinGastos.netoGravado);
+  assert.equal(conGastosLegacy.impIva, sinGastos.impIva);
+  assert.equal(conGastosLegacy.liquido, sinGastos.liquido);
+});
+
 test('ivaIdFromPct mapea tasas AFIP conocidas', () => {
   assert.equal(ivaIdFromPct(0), 3);
   assert.equal(ivaIdFromPct(2.5), 9);

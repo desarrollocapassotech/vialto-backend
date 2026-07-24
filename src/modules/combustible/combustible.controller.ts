@@ -108,6 +108,20 @@ export class CombustibleController {
     return this.service.findOne(id, this.scopedAuth(tid, current));
   }
 
+  // --- ACÁ ESTÁ EL MÉTODO QUE HABÍA DESAPARECIDO ---
+  @ApiOperation({
+    summary: "Registrar carga de combustible en un tenant (superadmin/admin)",
+  })
+  @Post()
+  create(
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: CreateCargaDto,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId, current);
+    return this.service.create(dto, this.scopedAuth(id, current));
+  }
+
   @ApiOperation({
     summary: "Actualizar carga de combustible en un tenant (superadmin/admin)",
   })

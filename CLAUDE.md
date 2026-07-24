@@ -1,3 +1,12 @@
+## Aislamiento multi-tenant (obligatorio antes de tocar la base)
+
+Antes de escribir cualquier consulta a la base de datos, seguí las reglas de aislamiento
+multi-tenant. **No las dupliques acá**: la fuente de verdad es un solo archivo.
+
+@docs/reglas-multitenant.md
+
+---
+
 ## Arquitectura del proyecto
 
 A continuación se incluye el contenido completo del documento de arquitectura

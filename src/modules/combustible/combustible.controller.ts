@@ -6,6 +6,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -108,16 +109,17 @@ export class CombustibleController {
   }
 
   @ApiOperation({
-    summary: "Registrar carga de combustible en un tenant (superadmin/admin)",
+    summary: "Actualizar carga de combustible en un tenant (superadmin/admin)",
   })
-  @Post()
-  create(
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
     @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateCargaDto,
     @CurrentAuth() current: AuthPayload,
   ) {
-    const id = this.requiredTenantId(tenantId, current);
-    return this.service.create(dto, this.scopedAuth(id, current));
+    const tid = this.requiredTenantId(tenantId, current);
+    return this.service.update(id, dto, this.scopedAuth(tid, current));
   }
 
   @ApiOperation({

@@ -12,6 +12,7 @@ import { CreateCargaDto } from "./dto/create-carga.dto";
 import { UpdateCargaDto } from "./dto/update-carga.dto";
 import { CreateCargaChoferDto } from "./dto/create-carga-chofer.dto";
 import { UpdateCargaChoferDto } from "./dto/update-carga-chofer.dto";
+import { LogSyncErrorDto } from "./dto/log-sync-error.dto";
 
 /** Datos mínimos de contexto de autenticación que el servicio necesita. */
 interface CombustibleAuth {
@@ -268,6 +269,26 @@ export class CombustibleService {
     return rows.map((r) => r.estacion);
   }
 
+  /**
+   * Errores de sincronización offline reportados por los choferes del
+   * tenant (COMB-07-T4), más recientes primero. Sin paginado por cursor:
+   * el volumen esperado es bajo y un límite fijo alcanza para revisión.
+   */
+  async getSyncErrors(auth: CombustibleAuth, choferId?: string) {
+    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+    if (choferId) where["choferId"] = choferId;
+
+    return this.prisma.combustibleSyncErrorLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        chofer: { select: { nombre: true, dni: true } },
+        vehiculo: { select: { patente: true } },
+      },
+    });
+  }
+
   async findOne(id: string, auth: CombustibleAuth) {
     const where: Record<string, any> = { id };
     if (auth.role !== "superadmin") {
@@ -502,6 +523,39 @@ export class CombustibleService {
     });
     await this.syncVehiculoKmActual(tenantId, vehiculo.id);
     return carga;
+  }
+
+  /**
+   * Registra que una carga guardada offline por el chofer no se pudo
+   * sincronizar (COMB-07-T4). No falla si la patente del payload no
+   * resuelve a un vehículo: ese puede ser justamente el motivo del error, y
+   * el log tiene que poder guardarse igual.
+   */
+  async logSyncError(
+    dto: LogSyncErrorDto,
+    choferId: string,
+    tenantId: string,
+  ) {
+    const patente =
+      typeof dto.payload["patente"] === "string"
+        ? (dto.payload["patente"] as string).replace(/\s+/g, "").toUpperCase()
+        : undefined;
+    const vehiculo = patente
+      ? await this.prisma.vehiculo.findFirst({
+          where: { tenantId, patente: { equals: patente, mode: "insensitive" } },
+          select: { id: true },
+        })
+      : null;
+
+    return this.prisma.combustibleSyncErrorLog.create({
+      data: {
+        tenantId,
+        choferId,
+        vehiculoId: vehiculo?.id ?? null,
+        mensaje: dto.mensaje,
+        payload: dto.payload as object,
+      },
+    });
   }
 
   async getUltimaCargaChofer(choferId: string, tenantId: string) {

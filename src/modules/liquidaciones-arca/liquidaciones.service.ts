@@ -612,6 +612,13 @@ export class LiquidacionesService {
     }
   }
 
+  /**
+   * Anula una liquidación autorizada emitiendo vía AFIP una Liquidación de Ajuste
+   * (tipo 63/64) con los mismos importes en positivo y el siguiente correlativo
+   * de ese tipo. AFIP rechaza ImpNeto/ImpIVA/ImpTotal &lt; 0 en CVLP 60/61; el
+   * “comprobante inverso” es el ajuste, no montos negativos.
+   * Tras éxito, estado → `anulado` permanente; CAE/PDF originales se conservan.
+   */
   async anularLiquidacion(tenantId: string, liquidacionId: string) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
@@ -635,7 +642,6 @@ export class LiquidacionesService {
     const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(transportista?.condicionIva);
 
     try {
-      // Obtener próximo número para el comprobante de ajuste
       const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
         config.apiKey,
         config.cuitEmisor,
@@ -650,17 +656,17 @@ export class LiquidacionesService {
       );
       const cbteNro = ultimoCbte + 1;
 
-      const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
+      const docNro = transportista?.idFiscal
+        ? Number(transportista.idFiscal.replace(/-/g, ''))
+        : 0;
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
-
       const ivaPct = config?.ivaGastosAdmin ?? 21;
 
-      // Para anular/ajustar se deben enviar los importes en positivo. AFIP sabe que restan
-      // gracias al tipo de comprobante (Liquidacion Ajuste A/B).
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
       });
+      // Importes en positivo: el tipo 63/64 es el que invierte el efecto fiscal.
       const conceptos = buildCvlpConceptosList({
         bruto: Number(liquidacion.bruto || 0),
         comision: Number(liquidacion.comision || 0),
@@ -681,7 +687,10 @@ export class LiquidacionesService {
       };
 
       const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
-      const arcaRequest = mapCvlpToArcaRequest(cvlp, config.ambiente as 'homologacion' | 'produccion');
+      const arcaRequest = mapCvlpToArcaRequest(
+        cvlp,
+        config.ambiente as 'homologacion' | 'produccion',
+      );
 
       await this.arcaClient.autorizarComprobante(
         config.apiKey,
@@ -691,9 +700,10 @@ export class LiquidacionesService {
         undefined,
         config.certPem,
         config.keyPem,
-        cvlp as unknown as Record<string, unknown>, // auditMetadata
+        cvlp as unknown as Record<string, unknown>,
       );
 
+      // No se borra CAE / cbteNro / PDF: el comprobante original sigue disponible.
       await this.prisma.liquidacion.update({
         where: { id: liquidacionId },
         data: { estado: 'anulado', updatedAt: new Date() },
@@ -701,7 +711,12 @@ export class LiquidacionesService {
 
       return this.findById(tenantId, liquidacionId);
     } catch (err) {
-      const errMsg = err instanceof ArcaException ? err.message : err instanceof Error ? err.message : String(err);
+      const errMsg =
+        err instanceof ArcaException
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
       this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
       throw new UnprocessableEntityException(errMsg);
     }

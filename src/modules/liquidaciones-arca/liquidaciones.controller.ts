@@ -264,7 +264,8 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
-    summary: "Anular liquidación — emite comprobante negativo a ARCA",
+    summary:
+      "Anular liquidación autorizada — emite Liquidación de Ajuste (63/64) vía AFIP",
   })
   @Post("liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)

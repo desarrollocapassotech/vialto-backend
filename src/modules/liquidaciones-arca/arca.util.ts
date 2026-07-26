@@ -45,9 +45,11 @@ export function getCbteTipoCvlp(condicionIva?: number | null): number {
 }
 
 /**
- * Determina el tipo de comprobante para ANULAR un CVLP (Ajuste o Nota de Crédito)
- * - 63: Liquidacion Ajuste Cuenta de Venta y Liquido Producto A
- * - 64: Liquidacion Ajuste Cuenta de Venta y Liquido Producto B
+ * Tipo de comprobante para anular un CVLP.
+ * AFIP no admite ImpNeto/ImpIVA/ImpTotal &lt; 0 en tipos 60/61; la anulación
+ * se hace con Liquidación de Ajuste (importes en positivo; el tipo invierte el efecto):
+ * - 63: Ajuste Cuenta de Venta y Líquido Producto A (anula 60)
+ * - 64: Ajuste Cuenta de Venta y Líquido Producto B (anula 61)
  */
 export function getCbteTipoAnulacionCvlp(condicionIva?: number | null): number {
   if (condicionIva == null) {
@@ -57,3 +59,4 @@ export function getCbteTipoAnulacionCvlp(condicionIva?: number | null): number {
   }
   return condicionIva === 1 ? 63 : 64;
 }
+

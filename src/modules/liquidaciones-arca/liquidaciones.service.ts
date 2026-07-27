@@ -17,6 +17,7 @@ import { computeAfipGravadoIva, round2 } from './arca-iva.util';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
+import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, parseNumeroFactura } from './arca.util';
 import { buildComprobanteCvlp, mapCvlpToArcaRequest } from './arca-cvlp.util';
@@ -28,6 +29,7 @@ import {
 import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
 import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
 import { assertCvlpEmitDatosCompletos } from './cvlp-emit-validation.util';
+import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 const DOC_TIPO_CUIT = 80;
@@ -48,6 +50,7 @@ export class LiquidacionesService {
     private readonly arcaClient: ArcaClientService,
     private readonly arcaConfig: ArcaConfigService,
     private readonly conceptosLiquidacion: ConceptosLiquidacionService,
+    private readonly clerkUsers: ClerkVialtoRoleService,
   ) {}
 
   /** Acceso a nuevos modelos Prisma pendientes de regenerar el cliente. */
@@ -612,9 +615,20 @@ export class LiquidacionesService {
     }
   }
 
-  async anularLiquidacion(tenantId: string, liquidacionId: string) {
+  async anularLiquidacion(
+    tenantId: string,
+    liquidacionId: string,
+    userId: string,
+    dto: AnularLiquidacionDto,
+  ) {
+    const motivo = String(dto?.motivo ?? '').trim();
+    if (!motivo) {
+      throw new BadRequestException('El motivo de anulación es obligatorio.');
+    }
+
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
+      include: { viajes: { select: { viajeId: true } } },
     });
     if (!liquidacion || liquidacion.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
@@ -633,6 +647,7 @@ export class LiquidacionesService {
     });
 
     const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(transportista?.condicionIva);
+    const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
 
     try {
       // Obtener próximo número para el comprobante de ajuste
@@ -694,12 +709,29 @@ export class LiquidacionesService {
         cvlp as unknown as Record<string, unknown>, // auditMetadata
       );
 
-      await this.prisma.liquidacion.update({
+      const anuladoAt = new Date();
+      const anuladoPorLabel =
+        (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || userId;
+      await (this.prisma as PrismaAny).liquidacion.update({
         where: { id: liquidacionId },
-        data: { estado: 'anulado', updatedAt: new Date() },
+        data: {
+          estado: 'anulado',
+          motivoAnulacion: motivo,
+          anuladoPor: userId,
+          anuladoAt,
+          updatedAt: anuladoAt,
+        },
       });
 
-      return this.findById(tenantId, liquidacionId);
+      // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada,
+      // assertViajesSinLiquidacionActiva y syncViajeEstado liberan los viajes.
+      for (const viajeId of viajeIds) {
+        await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
+      }
+
+      const updated = await this.findById(tenantId, liquidacionId);
+      // Asegura nombre en la respuesta inmediata (findById también lo resuelve).
+      return { ...updated, anuladoPorNombre: anuladoPorLabel };
     } catch (err) {
       const errMsg = err instanceof ArcaException ? err.message : err instanceof Error ? err.message : String(err);
       this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
@@ -753,7 +785,7 @@ export class LiquidacionesService {
   }
 
   async findAll(tenantId: string, estado?: string) {
-    return this.prisma.liquidacion.findMany({
+    const rows = await this.prisma.liquidacion.findMany({
       where: { tenantId, ...(estado ? { estado } : {}) },
       include: {
         transportista: { select: { id: true, nombre: true, idFiscal: true } },
@@ -761,6 +793,7 @@ export class LiquidacionesService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    return this.attachAnuladoPorNombres(rows);
   }
 
   async findById(tenantId: string, id: string) {
@@ -796,7 +829,37 @@ export class LiquidacionesService {
       where: { liquidacionId: id },
       orderBy: { orden: 'asc' },
     });
-    return { ...liq, conceptosLineas };
+    const [withNombre] = await this.attachAnuladoPorNombres([{ ...liq, conceptosLineas }]);
+    return withNombre;
+  }
+
+  /** Resuelve Clerk userId → nombre legible para UI (campo virtual `anuladoPorNombre`). */
+  private async attachAnuladoPorNombres<T extends { anuladoPor?: string | null }>(
+    rows: T[],
+  ): Promise<Array<T & { anuladoPorNombre: string | null }>> {
+    const ids = [
+      ...new Set(
+        rows
+          .map((r) => r.anuladoPor?.trim())
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const labels = new Map<string, string | null>();
+    await Promise.all(
+      ids.map(async (id) => {
+        if (id.startsWith('user_')) {
+          labels.set(id, await this.clerkUsers.getUserDisplayLabel(id));
+        } else {
+          // Ya era un label persistido o valor no-Clerk
+          labels.set(id, id);
+        }
+      }),
+    );
+    return rows.map((r) => {
+      const id = r.anuladoPor?.trim() || null;
+      const nombre = id ? labels.get(id) || id : null;
+      return { ...r, anuladoPorNombre: nombre };
+    });
   }
 
   // ── Facturas A/B via ARCA ──────────────────────────────────────────────────

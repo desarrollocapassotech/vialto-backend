@@ -32,6 +32,7 @@ import { LiquidacionesService } from "./liquidaciones.service";
 import { LiquidacionPdfService } from "./liquidacion-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
+import { AnularLiquidacionDto } from "./dto/anular-liquidacion.dto";
 import { EmitirFacturaArcaDto } from "./dto/emitir-factura-arca.dto";
 import { UpsertArcaConfigDto } from "./dto/upsert-arca-config.dto";
 import {
@@ -266,15 +267,19 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
-    summary: "Anular liquidación — emite comprobante negativo a ARCA",
+    summary: "Anular liquidación — emite comprobante de ajuste a ARCA",
   })
   @Post("liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
   @RequireModule("integracion-arca")
   @Roles("admin", "superadmin")
-  anularLiquidacion(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
+  anularLiquidacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Body() dto: AnularLiquidacionDto,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.anularLiquidacion(auth.tenantId, id);
+    return this.service.anularLiquidacion(auth.tenantId, id, auth.userId, dto);
   }
 
   @ApiOperation({
@@ -450,8 +455,10 @@ export class LiquidacionesPlatformController {
   anularLiquidacion(
     @Query("tenantId") tenantId: string | undefined,
     @Param("id") id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Body() dto: AnularLiquidacionDto,
   ) {
     const tid = this.requiredTenantId(tenantId);
-    return this.service.anularLiquidacion(tid, id);
+    return this.service.anularLiquidacion(tid, id, auth.userId, dto);
   }
 }

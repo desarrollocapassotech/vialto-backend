@@ -884,6 +884,11 @@ model Liquidacion {
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
 
+  // Auditoría de anulación (solo cuando estado = anulado)
+  motivoAnulacion String?
+  anuladoPor      String? // Clerk userId
+  anuladoAt       DateTime?
+
   // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
   payloadHash String?
 

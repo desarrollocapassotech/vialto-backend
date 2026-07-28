@@ -222,6 +222,7 @@ export class LiquidacionesService {
           bruto,
           comisionPct,
           comision,
+          ivaPct,
           gastosAdmin,
           gastosAdminIva,
           liquido,
@@ -296,7 +297,7 @@ export class LiquidacionesService {
     const estadosEditables = new Set(['borrador', 'error', 'pendiente_cae']);
     if (wantsDatos && !estadosEditables.has(liq.estado)) {
       throw new BadRequestException(
-        'Solo se pueden modificar período/comisión/conceptos en liquidaciones en borrador, error o pendiente de CAE.',
+        'Solo se pueden modificar período/comisión/IVA/conceptos en liquidaciones en borrador, error o pendiente de CAE.',
       );
     }
 
@@ -335,8 +336,14 @@ export class LiquidacionesService {
 
       let ivaPct = dto.ivaPct;
       if (ivaPct === undefined) {
-        const config = await this.arcaConfig.findPublic(tenantId);
-        ivaPct = config?.ivaGastosAdmin ?? 21;
+        // Conservar el snapshot de la liquidación; solo cae a config si es legado sin ivaPct.
+        const stored = (liq as { ivaPct?: number | null }).ivaPct;
+        if (stored != null) {
+          ivaPct = stored;
+        } else {
+          const config = await this.arcaConfig.findPublic(tenantId);
+          ivaPct = config?.ivaGastosAdmin ?? 21;
+        }
       }
 
       const lineasResueltas =
@@ -358,6 +365,7 @@ export class LiquidacionesService {
       });
       data.comisionPct = comisionPct;
       data.comision = comision;
+      data.ivaPct = ivaPct;
       data.gastosAdmin = 0;
       data.gastosAdminIva = montos.impIva;
       data.liquido = montos.liquido;
@@ -503,7 +511,11 @@ export class LiquidacionesService {
       const condicionIvaReceptorId = liquidacion.transportista?.condicionIva ?? 1;
 
       // impNeto/IVA/total: flete + comisión + conceptos configurables.
-      const ivaPct = config?.ivaGastosAdmin ?? 21;
+      // Preferir el snapshot de la liquidación para no pisar un override puntual.
+      const ivaPct =
+        (liquidacion as { ivaPct?: number | null }).ivaPct ??
+        config?.ivaGastosAdmin ??
+        21;
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
@@ -653,7 +665,10 @@ export class LiquidacionesService {
       const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
 
-      const ivaPct = config?.ivaGastosAdmin ?? 21;
+      const ivaPct =
+        (liquidacion as { ivaPct?: number | null }).ivaPct ??
+        config?.ivaGastosAdmin ??
+        21;
 
       // Para anular/ajustar se deben enviar los importes en positivo. AFIP sabe que restan
       // gracias al tipo de comprobante (Liquidacion Ajuste A/B).

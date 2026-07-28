@@ -865,9 +865,10 @@ model Liquidacion {
   bruto          Float // sum(tnDestino * tarifaTransportista) por todos los viajes
   comisionPct    Float // % de comisión aplicado
   comision       Float // bruto * comisionPct / 100
+  ivaPct         Float @default(21) // alícuota IVA aplicada (snapshot; default tenant o override)
   gastosAdmin    Float // cantViajes * gastosAdminPorViaje (sin IVA)
-  gastosAdminIva Float // IVA sobre gastosAdmin
-  liquido        Float // bruto - comision - gastosAdmin - gastosAdminIva (neto al transportista)
+  gastosAdminIva Float // IVA total del comprobante (impIva)
+  liquido        Float // neto + IVA (total al transportista)
 
   // Campos del comprobante AFIP (cbteTipo siempre 60 para CVLP)
   cbteTipo    Int       @default(60)

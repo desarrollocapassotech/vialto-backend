@@ -6,6 +6,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -107,6 +108,7 @@ export class CombustibleController {
     return this.service.findOne(id, this.scopedAuth(tid, current));
   }
 
+  // --- ACÁ ESTÁ EL MÉTODO QUE HABÍA DESAPARECIDO ---
   @ApiOperation({
     summary: "Registrar carga de combustible en un tenant (superadmin/admin)",
   })
@@ -118,6 +120,20 @@ export class CombustibleController {
   ) {
     const id = this.requiredTenantId(tenantId, current);
     return this.service.create(dto, this.scopedAuth(id, current));
+  }
+
+  @ApiOperation({
+    summary: "Actualizar carga de combustible en un tenant (superadmin/admin)",
+  })
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: CreateCargaDto,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const tid = this.requiredTenantId(tenantId, current);
+    return this.service.update(id, dto, this.scopedAuth(tid, current));
   }
 
   @ApiOperation({

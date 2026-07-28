@@ -17,12 +17,12 @@ export function signedImporte(signo: ConceptoSigno, monto: number): number {
 }
 
 /**
- * Conceptos base (Fletes / Comisión / Gastos admin) + líneas configurables del tenant.
+ * Conceptos base (Fletes / Comisión) + líneas configurables del tenant.
+ * Los gastos del viaje viven en `otrosGastos` y no forman parte del CVLP.
  */
 export function buildCvlpConceptosList(args: {
   bruto: number;
   comision: number;
-  gastosAdmin: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
 }): ConceptoFacturable[] {
@@ -30,13 +30,6 @@ export function buildCvlpConceptosList(args: {
     { descripcion: 'Fletes', importe: args.bruto, ivaPct: args.ivaPctDefault },
     { descripcion: 'Comisión', importe: -args.comision, ivaPct: args.ivaPctDefault },
   ];
-  if (args.gastosAdmin !== 0) {
-    conceptos.push({
-      descripcion: 'Gastos Administrativos',
-      importe: -args.gastosAdmin,
-      ivaPct: args.ivaPctDefault,
-    });
-  }
   for (const l of args.lineas ?? []) {
     if (!l.monto || l.monto === 0) continue;
     conceptos.push({
@@ -52,7 +45,6 @@ export function buildCvlpConceptosList(args: {
 export function computeLiquidacionTotales(args: {
   bruto: number;
   comision: number;
-  gastosAdmin: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
 }): { impNeto: number; impIva: number; liquido: number } {

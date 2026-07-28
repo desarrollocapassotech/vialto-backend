@@ -199,7 +199,14 @@ export class LiquidacionPdfService {
       if (log && (log.requestBody as any)?.auditMetadata) {
         const metadata = (log.requestBody as any).auditMetadata;
         if (metadata && Array.isArray(metadata.items)) {
-          cvlp = metadata;
+          // No mostrar "Gastos Administrativos" en el PDF (concepto deprecado).
+          cvlp = {
+            ...metadata,
+            items: metadata.items.filter(
+              (it: { descripcion?: string }) =>
+                it?.descripcion !== 'Gastos Administrativos',
+            ),
+          };
         }
       }
     }
@@ -214,7 +221,6 @@ export class LiquidacionPdfService {
       const conceptos = buildCvlpConceptosList({
         bruto: liq.bruto,
         comision: liq.comision,
-        gastosAdmin: liq.gastosAdmin,
         ivaPctDefault: ivaDefault,
         lineas: (lineasDb ?? []).map((r: {
           nombreSnapshot: string;
@@ -522,8 +528,8 @@ export class LiquidacionPdfService {
     // Línea divisora
     doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke('#aaa');
 
-    // Pie: montos persistidos (= autorizados por CAE). Neto + Otros + IVA = Total.
-    const pie = cvlpPdfPieFinanciero(liq);
+    // Pie: totales del comprobante armado (incluye conceptos configurables).
+    const pie = cvlpPdfPieFinanciero(liq, cvlp);
     const impTotal = pie.total;
     doc.fontSize(7).font('Helvetica').fillColor('#333')
       .text(`Son: ${numeroALetras(impTotal).toLowerCase()}`, M, footerY, { width: CW });

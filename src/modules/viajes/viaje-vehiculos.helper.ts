@@ -202,6 +202,8 @@ export const VIAJE_INCLUDE_VEHICULOS = viajeConVehiculosViajeArgs.include!;
 export const VIAJE_INCLUDE_VEHICULOS_INCLUDE = {
   ...VIAJE_INCLUDE_VEHICULOS,
   destinosViaje: viajeDestinosViajeInclude,
+  factura: true,
+  liquidacionesViaje: { include: { liquidacion: true } },
 } as any;
 
 /** IDs de vehículo en orden del viaje (helper para no depender de la expansión de `ViajeGetPayload` en otros archivos). */

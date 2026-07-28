@@ -116,24 +116,42 @@ export function formatAlicuotaIva(ivaPct: number): string {
 }
 
 /**
- * Pie financiero del PDF CVLP a partir de montos persistidos (los enviados/autorizados por ARCA).
+ * Pie financiero del PDF CVLP.
+ * Preferir montos del comprobante armado (`cvlp`) cuando existen: incluyen conceptos
+ * configurables. El fallback usa montos persistidos (autorizados por ARCA).
  * Garantiza Neto Gravado + Otros Tributos + IVA = Importe Total.
+ * `gastosAdmin` está deprecado (siempre 0): no forma parte del CVLP.
  */
-export function cvlpPdfPieFinanciero(liq: {
-  bruto: number;
-  comision: number;
-  gastosAdmin?: number;
-  gastosAdminIva: number;
-  liquido: number;
-}): {
+export function cvlpPdfPieFinanciero(
+  liq: {
+    bruto: number;
+    comision: number;
+    gastosAdmin?: number;
+    gastosAdminIva: number;
+    liquido: number;
+  },
+  cvlp?: { impNeto: number; impIva: number; impTotal: number } | null,
+): {
   netoGravado: number;
   otrosTributos: number;
   iva: number;
   total: number;
   balances: boolean;
 } {
-  const gastosAdmin = liq.gastosAdmin ?? 0;
-  const netoGravado = round2(liq.bruto - liq.comision - gastosAdmin);
+  if (cvlp) {
+    const netoGravado = round2(cvlp.impNeto);
+    const otrosTributos = 0;
+    const iva = round2(cvlp.impIva);
+    const total = round2(cvlp.impTotal);
+    return {
+      netoGravado,
+      otrosTributos,
+      iva,
+      total,
+      balances: round2(netoGravado + otrosTributos + iva) === total,
+    };
+  }
+  const netoGravado = round2(liq.bruto - liq.comision);
   const otrosTributos = 0;
   const iva = round2(liq.gastosAdminIva);
   const total = round2(liq.liquido);
@@ -144,11 +162,12 @@ export function cvlpPdfPieFinanciero(liq: {
 /**
  * Montos de liquidación / comprobante con IVA gravado al `ivaPct` indicado.
  * Garantiza BaseImp × tasa = Importe en AlicIva e ImpNeto + ImpIVA = ImpTotal.
+ * El parámetro `gastosAdmin` está deprecado y se ignora (siempre se trata como 0).
  */
 export function computeAfipGravadoIva(
   bruto: number,
   comision: number,
-  gastosAdmin: number,
+  _gastosAdmin: number,
   ivaPct: number,
 ): {
   netoGravado: number;
@@ -157,7 +176,7 @@ export function computeAfipGravadoIva(
   impNeto: number;
   alicuota: AlicIva;
 } {
-  const netoGravado = round2(bruto - comision - gastosAdmin);
+  const netoGravado = round2(bruto - comision);
   const impIva = round2((netoGravado * ivaPct) / 100);
   const liquido = round2(netoGravado + impIva);
   return {

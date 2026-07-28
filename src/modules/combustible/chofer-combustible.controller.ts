@@ -4,6 +4,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CreateCargaChoferDto } from './dto/create-carga-chofer.dto';
 import { UpdateCargaChoferDto } from './dto/update-carga-chofer.dto';
+import { LogSyncErrorDto } from './dto/log-sync-error.dto';
 import {
   ChoferAuthGuard,
   ChoferAuthRequest,
@@ -79,6 +80,19 @@ export class ChoferCombustibleController {
   ) {
     const { sub: choferId, tenantId } = req.choferAuth;
     return this.service.updateByChofer(id, dto, choferId, tenantId);
+  }
+
+  @ApiOperation({
+    summary:
+      'Reportar que una carga guardada offline no se pudo sincronizar (COMB-07-T4)',
+  })
+  @Post('errores-sincronizacion')
+  logSyncError(
+    @Req() req: ChoferAuthRequest,
+    @Body() dto: LogSyncErrorDto,
+  ) {
+    const { sub: choferId, tenantId } = req.choferAuth;
+    return this.service.logSyncError(dto, choferId, tenantId);
   }
 
   @ApiOperation({ summary: 'Subir foto para carga de combustible (chofer)' })

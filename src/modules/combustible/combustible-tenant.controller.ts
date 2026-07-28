@@ -30,4 +30,18 @@ export class CombustibleTenantController {
     assertTenantId(auth.tenantId);
     return this.service.getDashboard(auth, from, to);
   }
+
+  @ApiOperation({
+    summary:
+      "Errores de sincronización offline reportados por choferes (COMB-07-T4)",
+  })
+  @Get("errores-sincronizacion")
+  @Roles("admin", "member", "superadmin")
+  getSyncErrors(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("choferId") choferId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getSyncErrors(auth, choferId);
+  }
 }

@@ -40,6 +40,8 @@ import {
 } from "./dto/concepto-liquidacion.dto";
 import { ConceptosLiquidacionService } from "./conceptos-liquidacion.service";
 
+//comentario para hacer nuevo PR
+
 // ── RUTAS REGULARES (USUARIOS) ──────────────────────────────────────────────
 
 @ApiTags("Integración ARCA")

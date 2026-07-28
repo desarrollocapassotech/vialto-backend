@@ -133,15 +133,20 @@ export class CombustibleService {
     km: number,
     excludeId?: string,
   ) {
-    // 1. Validar límite inferior: Carga inmediatamente ANTERIOR a la fecha indicada
+    const finDelDia = new Date(fecha.getTime());
+    finDelDia.setUTCHours(23, 59, 59, 999);
+
+    const inicioDelDia = new Date(fecha.getTime());
+    inicioDelDia.setUTCHours(0, 0, 0, 0);
+
     const prev = await this.prisma.cargaCombustible.findFirst({
       where: {
         tenantId,
         vehiculoId,
-        fecha: { lte: fecha }, // 'lte' incluye cargas registradas en el mismo día exacto
+        fecha: { lte: finDelDia },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { km: "desc" }],
       select: { km: true, fecha: true },
     });
 
@@ -157,15 +162,14 @@ export class CombustibleService {
       );
     }
 
-    // 2. Validar límite superior: Carga inmediatamente POSTERIOR a la fecha indicada (vital para cargas retroactivas)
     const next = await this.prisma.cargaCombustible.findFirst({
       where: {
         tenantId,
         vehiculoId,
-        fecha: { gte: fecha },
+        fecha: { gte: inicioDelDia },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
-      orderBy: { fecha: "asc" },
+      orderBy: [{ fecha: "asc" }, { km: "asc" }],
       select: { km: true, fecha: true },
     });
 

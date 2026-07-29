@@ -726,8 +726,12 @@ export class LiquidacionesService {
     return this.arcaConfig.findPublic(tenantId);
   }
 
-  async upsertConfig(tenantId: string, dto: import('./dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
-    return this.arcaConfig.upsert(tenantId, dto);
+  async upsertConfig(
+    tenantId: string,
+    dto: import('./dto/upsert-arca-config.dto').UpsertArcaConfigDto,
+    opts?: { allowAmbienteChange?: boolean },
+  ) {
+    return this.arcaConfig.upsert(tenantId, dto, opts);
   }
 
   async uploadLogo(tenantId: string, file: Express.Multer.File) {

@@ -57,3 +57,16 @@ export function getCbteTipoAnulacionCvlp(condicionIva?: number | null): number {
   }
   return condicionIva === 1 ? 63 : 64;
 }
+
+/** Normaliza el ambiente ARCA guardado en DB / DTO a los valores canónicos. */
+export function normalizeArcaAmbiente(raw: unknown): 'homologacion' | 'produccion' {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (v === 'produccion' || v === 'production' || v === 'prod') {
+    return 'produccion';
+  }
+  return 'homologacion';
+}

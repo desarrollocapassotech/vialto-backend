@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -6,7 +7,8 @@ import {
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
-import { encryptField, isEncrypted, decryptField, validateKeyConfigured } from '../../shared/util/arca-crypto';
+import { encryptField, decryptField, validateKeyConfigured } from '../../shared/util/arca-crypto';
+import { normalizeArcaAmbiente } from './arca.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -29,6 +31,11 @@ const CONFIG_SELECT = {
   // cert/key se incluyen solo para saber si están configurados; el contenido no se expone
   certPem: true,
   keyPem: true,
+};
+
+export type UpsertArcaConfigOptions = {
+  /** Solo el superadmin de plataforma puede cambiar el ambiente ARCA. */
+  allowAmbienteChange?: boolean;
 };
 
 @Injectable()
@@ -54,7 +61,34 @@ export class ArcaConfigService {
     return key;
   }
 
-  async upsert(tenantId: string, dto: UpsertArcaConfigDto) {
+  async upsert(
+    tenantId: string,
+    dto: UpsertArcaConfigDto,
+    opts: UpsertArcaConfigOptions = {},
+  ) {
+    const allowAmbienteChange = opts.allowAmbienteChange === true;
+    const existing = await this.db.arcaConfig.findUnique({
+      where: { tenantId },
+      select: { ambiente: true },
+    });
+
+    const requestedAmbiente = normalizeArcaAmbiente(dto.ambiente);
+    let ambiente: 'homologacion' | 'produccion';
+
+    if (allowAmbienteChange) {
+      ambiente = requestedAmbiente;
+    } else if (existing) {
+      ambiente = normalizeArcaAmbiente(existing.ambiente);
+      if (requestedAmbiente !== ambiente) {
+        throw new ForbiddenException(
+          'Solo el superadmin de plataforma puede cambiar el ambiente de ARCA.',
+        );
+      }
+    } else {
+      // Primera configuración por admin de tenant: siempre homologación.
+      ambiente = 'homologacion';
+    }
+
     const now = new Date();
     const data: PrismaAny = {
       cuitEmisor: dto.cuitEmisor,
@@ -65,7 +99,7 @@ export class ArcaConfigService {
       inicActEmisor: dto.inicActEmisor ?? null,
       ptoVentaCvlp: dto.ptoVentaCvlp,
       ptoVentaFactura: dto.ptoVentaFactura,
-      ambiente: dto.ambiente,
+      ambiente,
       comisionPctDefault: dto.comisionPctDefault,
       comisionPctAlt: dto.comisionPctAlt,
       ivaGastosAdmin: dto.ivaGastosAdmin,
@@ -126,6 +160,7 @@ export class ArcaConfigService {
     const { certPem, keyPem, ...rest } = config;
     return {
       ...rest,
+      ambiente: normalizeArcaAmbiente(rest.ambiente),
       certConfigurado: Boolean(certPem),
       keyConfigurado: Boolean(keyPem),
     };
@@ -138,7 +173,11 @@ export class ArcaConfigService {
         'No hay configuración de ARCA para este tenant. Configurarla en el panel de superadmin.',
       );
     }
-    return { ...config, apiKey: this.getApiKey() };
+    return {
+      ...config,
+      ambiente: normalizeArcaAmbiente(config.ambiente),
+      apiKey: this.getApiKey(),
+    };
   }
 
   async validateConfigExists(tenantId: string): Promise<void> {

@@ -30,6 +30,21 @@ function normalizeCuit(cuit: string): string {
 }
 
 /**
+ * Normaliza un certificado/clave PEM antes de enviarlo al SDK de AFIP.
+ * Corrige el caso típico de credenciales pegadas o almacenadas con saltos de
+ * línea escapados ("\n" literales) o con CRLF, que hacen que afip.js falle con
+ * "Invalid PEM formatted message".
+ */
+function normalizePem(pem: string): string {
+  if (!pem) return pem;
+  return pem
+    .replace(/\\r/g, '')
+    .replace(/\\n/g, '\n')
+    .replace(/\r/g, '')
+    .trim() + '\n';
+}
+
+/**
  * Abstracción sobre el SDK oficial de AFIP (afipsdk.com).
  * Si en el futuro se cambia de proveedor, solo hay que reescribir este servicio.
  * Todas las operaciones WSFEv1 pasan por aquí:
@@ -214,11 +229,11 @@ export class ArcaClientService {
     try {
       if (certPem) {
         const dec = decryptField(certPem);
-        if (dec) certKey.cert = dec;
+        if (dec) certKey.cert = normalizePem(dec);
       }
       if (keyPem) {
         const dec = decryptField(keyPem);
-        if (dec) certKey.key = dec;
+        if (dec) certKey.key = normalizePem(dec);
       }
     } catch (decErr) {
       this.logger.error(`Error de descifrado de certificados para CUIT ${cuitNorm}: ${decErr.message}`);
@@ -249,7 +264,11 @@ export class ArcaClientService {
     } catch (err) {
       const errMsg = String(err?.message ?? err);
       const httpStatus = (err as any)?.status || (err as any)?.statusCode;
-      this.logger.error(`Error obteniendo token AFIP SDK: ${errMsg}`);
+      const respData = (err as any)?.data ?? (err as any)?.response?.data;
+      const respDetail = respData
+        ? ` | Respuesta AFIP SDK: ${typeof respData === 'string' ? respData : JSON.stringify(respData)}`
+        : '';
+      this.logger.error(`Error obteniendo token AFIP SDK: ${errMsg}${respDetail}`);
       throw this.mapError(err, httpStatus);
     }
   }

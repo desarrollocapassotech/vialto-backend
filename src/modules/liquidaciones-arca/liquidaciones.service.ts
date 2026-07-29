@@ -192,7 +192,11 @@ export class LiquidacionesService {
     const comision = round2(bruto * comisionPct / 100);
     // Los gastos del viaje viven en `otrosGastos` y no forman parte de la liquidación/CVLP.
     const gastosAdmin = 0;
-    const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
+    // Usar != null para respetar ivaPct === 0 (liquidar sin IVA).
+    const ivaPct =
+      dto.ivaPct != null && Number.isFinite(dto.ivaPct)
+        ? dto.ivaPct
+        : (config?.ivaGastosAdmin ?? 21);
     const lineasResueltas = await this.resolveConceptoLineas(tenantId, dto.conceptosLineas);
     const montos = computeLiquidacionTotales({
       bruto,

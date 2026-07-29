@@ -1038,11 +1038,10 @@ export class ViajesService {
     const current = await this.findOne(id, tenantId);
 
     const bloqueadoPorFactura = Boolean((current as any).factura);
-    const ESTADOS_LIQUIDACION_BLOQUEAN = ["pendiente_cae", "autorizado", "error"];
 
     const bloqueadoPorLiquidacion =
-      (current as any).liquidacionesViaje?.some((lv: any) =>
-        ESTADOS_LIQUIDACION_BLOQUEAN.includes(lv.liquidacion.estado),
+      (current as any).liquidacionesViaje?.some(
+        (lv: any) => lv.liquidacion.estado !== "anulado",
       ) ?? false;
 
     if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {

@@ -992,7 +992,7 @@ export class PlatformService {
 
   upsertArcaConfig(tenantId: string | undefined, dto: import('../../modules/liquidaciones-arca/dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
     const id = this.requiredTenantId(tenantId);
-    return this.arcaConfigService.upsert(id, dto);
+    return this.arcaConfigService.upsert(id, dto, { allowAmbienteChange: true });
   }
 
   listLiquidaciones(tenantId: string | undefined, estado?: string) {

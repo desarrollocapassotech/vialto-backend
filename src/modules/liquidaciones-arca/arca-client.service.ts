@@ -12,11 +12,16 @@ import {
   ARCA_ERROR_CODES,
 } from './types/arca.types';
 import { extractAfipRejectionMessage, formatAfipRejectionForUser } from './arca-error.util';
+import { normalizeArcaAmbiente } from './arca.util';
 import { round2 } from './arca-iva.util';
 
 /** AFIP SDK usa "dev"/"prod", no "homologacion"/"produccion" */
 function toSdkEnv(ambiente: ArcaAmbiente): 'dev' | 'prod' {
-  return ambiente === 'produccion' ? 'prod' : 'dev';
+  return normalizeArcaAmbiente(ambiente) === 'produccion' ? 'prod' : 'dev';
+}
+
+function isProductionAmbiente(ambiente: ArcaAmbiente): boolean {
+  return normalizeArcaAmbiente(ambiente) === 'produccion';
 }
 
 /** Normaliza CUIT: elimina guiones y espacios → "30-71234567-8" → "30712345678" */
@@ -54,7 +59,14 @@ export class ArcaClientService {
     keyPem?: string | null,
   ): Promise<ArcaLastVoucherResponse> {
     const cuitNorm = normalizeCuit(cuit);
-    const { token, sign, afip } = await this.getAfipClientAndToken(apiKey, cuitNorm, ambiente, certPem, keyPem);
+    const ambienteNorm = normalizeArcaAmbiente(ambiente);
+    const { token, sign, afip } = await this.getAfipClientAndToken(
+      apiKey,
+      cuitNorm,
+      ambienteNorm,
+      certPem,
+      keyPem,
+    );
 
     const params = {
       Auth: { Token: token, Sign: sign, Cuit: cuitNorm },
@@ -64,14 +76,13 @@ export class ArcaClientService {
 
     const response = await this.callAfipSdk(
       afip,
-      'wsfe',
       'FECompUltimoAutorizado',
       params,
       cuitNorm,
       tenantId,
       liquidacionId,
       facturaId,
-      ambiente,
+      ambienteNorm,
     );
 
     const result = (response?.FECompUltimoAutorizadoResult ?? response) as Record<string, unknown>;
@@ -89,7 +100,14 @@ export class ArcaClientService {
     auditMetadata?: Record<string, unknown>,
   ): Promise<ArcaAutorizarResponse> {
     const cuitNorm = normalizeCuit(req.cuit);
-    const { token, sign, afip } = await this.getAfipClientAndToken(apiKey, cuitNorm, req.ambiente, certPem, keyPem);
+    const ambienteNorm = normalizeArcaAmbiente(req.ambiente);
+    const { token, sign, afip } = await this.getAfipClientAndToken(
+      apiKey,
+      cuitNorm,
+      ambienteNorm,
+      certPem,
+      keyPem,
+    );
 
     const params = {
       Auth: { Token: token, Sign: sign, Cuit: cuitNorm },
@@ -133,14 +151,13 @@ export class ArcaClientService {
 
     const response = await this.callAfipSdk(
       afip,
-      'wsfe',
       'FECAESolicitar',
       params,
       cuitNorm,
       tenantId,
       liquidacionId,
       facturaId,
-      req.ambiente,
+      ambienteNorm,
       auditMetadata,
     );
 
@@ -191,6 +208,8 @@ export class ArcaClientService {
     keyPem?: string | null,
   ): Promise<{ token: string; sign: string; afip: Afip }> {
     const certKey: Record<string, string> = {};
+    const ambienteNorm = normalizeArcaAmbiente(ambiente);
+    const production = isProductionAmbiente(ambienteNorm);
 
     try {
       if (certPem) {
@@ -212,17 +231,20 @@ export class ArcaClientService {
     }
 
     try {
+      // `production` + ElectronicBilling (URLs prod/homo) — NO usar WebService('wsfe')
+      // genérico: deja url/wsdl undefined y el proxy de AFIP SDK cae en homologación.
       const afip = new Afip({
         CUIT: cuitNorm,
         access_token: apiKey,
-        production: ambiente === 'produccion',
+        production,
         ...certKey,
       });
 
-      const ws = afip.WebService('wsfe');
-      const ta = await ws.getTokenAuthorization();
+      const ta = await afip.ElectronicBilling.getTokenAuthorization();
 
-      this.logger.debug(`Token/Sign AFIP SDK obtenido exitosamente para CUIT ${cuitNorm} [${ambiente}]`);
+      this.logger.log(
+        `Token/Sign AFIP SDK OK CUIT ${cuitNorm} ambiente=${ambienteNorm} sdkEnv=${production ? 'prod' : 'dev'}`,
+      );
       return { token: ta.token, sign: ta.sign, afip };
     } catch (err) {
       const errMsg = String(err?.message ?? err);
@@ -234,7 +256,6 @@ export class ArcaClientService {
 
   private async callAfipSdk(
     afip: Afip,
-    wsid: string,
     method: string,
     params: Record<string, unknown>,
     cuit: string,
@@ -244,7 +265,9 @@ export class ArcaClientService {
     ambiente?: ArcaAmbiente,
     auditMetadata?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const requestBody = { environment: toSdkEnv(ambiente), method, wsid, params };
+    const ambienteNorm = normalizeArcaAmbiente(ambiente);
+    const sdkEnv = toSdkEnv(ambienteNorm);
+    const requestBody = { environment: sdkEnv, method, wsid: 'wsfe', params };
     const start = Date.now();
     let httpStatus: number | undefined;
     let responseBody: unknown;
@@ -252,8 +275,8 @@ export class ArcaClientService {
     let errorMsg: string | undefined;
 
     try {
-      const ws = afip.WebService(wsid);
-      const body = await ws.executeRequest(method, params);
+      // ElectronicBilling fija URL prod (servicios1) vs homo (wswhomo) según `production`.
+      const body = await afip.ElectronicBilling.executeRequest(method, params);
       responseBody = body;
       exitoso = true;
       return body;
@@ -277,7 +300,7 @@ export class ArcaClientService {
           liquidacionId: liquidacionId ?? null,
           facturaId: facturaId ?? null,
           method,
-          ambiente,
+          ambiente: ambienteNorm,
           cuit,
           requestBody: safeRequest as object,
           responseBody: responseBody ? (responseBody as object) : undefined,

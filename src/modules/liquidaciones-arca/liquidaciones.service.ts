@@ -777,6 +777,7 @@ export class LiquidacionesService {
       include: {
         transportista: { select: { id: true, nombre: true, idFiscal: true } },
         viajes: { select: { viajeId: true, subtotal: true, tnDestino: true } },
+        conceptosLineas: { orderBy: { orden: 'asc' } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -806,16 +807,13 @@ export class LiquidacionesService {
             },
           },
         },
+        conceptosLineas: { orderBy: { orden: 'asc' } },
       },
     });
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    const conceptosLineas = await this.db.liquidacionConceptoLinea.findMany({
-      where: { liquidacionId: id },
-      orderBy: { orden: 'asc' },
-    });
-    return { ...liq, conceptosLineas };
+    return liq;
   }
 
   // ── Facturas A/B via ARCA ──────────────────────────────────────────────────

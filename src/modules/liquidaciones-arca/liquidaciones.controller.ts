@@ -40,8 +40,6 @@ import {
 } from "./dto/concepto-liquidacion.dto";
 import { ConceptosLiquidacionService } from "./conceptos-liquidacion.service";
 
-//comentario para hacer nuevo PR
-
 // ── RUTAS REGULARES (USUARIOS) ──────────────────────────────────────────────
 
 @ApiTags("Integración ARCA")
@@ -256,6 +254,45 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
+    summary: "PDF de la Nota de Crédito 065 emitida al anular la liquidación",
+  })
+  @Get("liquidaciones/:id/pdf-anulacion")
+  @RequireModule("integracion-arca")
+  @Roles("admin", "member", "superadmin")
+  async getPdfAnulacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    try {
+      const { buffer, filename } = await this.pdfService.generateNotaCredito(
+        auth.tenantId,
+        id,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404 || e?.status === 400) {
+        res.status(e.status ?? 400).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
+  @ApiOperation({
     summary: "Emitir liquidación a ARCA — obtiene CAE en tiempo real",
   })
   @Post("liquidaciones/:id/emitir")
@@ -268,7 +305,7 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
-    summary: "Anular liquidación — emite comprobante negativo a ARCA",
+    summary: "Anular liquidación — emite Nota de Crédito 065 vía AFIP SDK",
   })
   @Post("liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
@@ -445,6 +482,40 @@ export class LiquidacionesPlatformController {
   ) {
     const tid = this.requiredTenantId(tenantId);
     return this.service.emitirLiquidacion(tid, id);
+  }
+
+  @Get("liquidaciones/:id/pdf-anulacion")
+  async getPdfAnulacion(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    try {
+      const { buffer, filename } = await this.pdfService.generateNotaCredito(
+        tid,
+        id,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404 || e?.status === 400) {
+        res.status(e.status ?? 400).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
   }
 
   @Post("liquidaciones/:id/anular")

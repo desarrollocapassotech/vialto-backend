@@ -11,7 +11,11 @@ import {
   ArcaLastVoucherResponse,
   ARCA_ERROR_CODES,
 } from './types/arca.types';
-import { extractAfipRejectionMessage, formatAfipRejectionForUser } from './arca-error.util';
+import {
+  extractAfipRejectionMessage,
+  extractAfipSdkErrorDetail,
+  formatAfipRejectionForUser,
+} from './arca-error.util';
 import { normalizeArcaAmbiente } from './arca.util';
 import { round2 } from './arca-iva.util';
 
@@ -159,6 +163,23 @@ export class ArcaClientService {
                 }));
               return alic.length ? { Iva: { AlicIva: alic } } : {};
             })(),
+            ...(() => {
+              const asoc = (req.cbtesAsoc ?? []).filter(
+                (c) => c.Tipo > 0 && c.PtoVta > 0 && c.Nro > 0,
+              );
+              if (!asoc.length) return {};
+              return {
+                CbtesAsoc: {
+                  CbteAsoc: asoc.map((c) => ({
+                    Tipo: c.Tipo,
+                    PtoVta: c.PtoVta,
+                    Nro: c.Nro,
+                    ...(c.Cuit ? { Cuit: c.Cuit } : {}),
+                    ...(c.CbteFch ? { CbteFch: Number(c.CbteFch) } : {}),
+                  })),
+                },
+              };
+            })(),
           },
         },
       },
@@ -299,9 +320,20 @@ export class ArcaClientService {
       responseBody = body;
       exitoso = true;
       return body;
-    } catch (err) {
-      errorMsg = String(err?.message ?? err);
-      httpStatus = (err as any)?.status || (err as any)?.statusCode;
+    } catch (err: any) {
+      // Axios (proxy AFIP SDK): el detalle útil vive en response.data, no en message.
+      const axiosData = err?.response?.data;
+      if (axiosData != null) responseBody = axiosData;
+      httpStatus =
+        err?.response?.status ?? err?.status ?? err?.statusCode ?? undefined;
+      const detail = extractAfipSdkErrorDetail(err);
+      errorMsg = detail ?? String(err?.message ?? err);
+      const respDetail = responseBody
+        ? ` | Respuesta AFIP SDK: ${typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody)}`
+        : '';
+      this.logger.error(
+        `AFIP SDK ${method} rechazado (status ${httpStatus ?? '?'}): ${errorMsg}${respDetail}`,
+      );
       throw this.mapError(err, httpStatus);
     } finally {
       // Log de auditoría — nunca se registra la apiKey
@@ -345,17 +377,20 @@ export class ArcaClientService {
 
     if (errCode) {
       const codeNum = Number(errCode);
+      const sdkDetail = extractAfipSdkErrorDetail(raw);
       switch (codeNum) {
         // Códigos oficiales de AFIP / ARCA (Manual de desarrollador WSFEv1):
         // 600: Error de validación de firma o token (WSAA/mismatch de CUIT).
         case 600:
           return new ArcaException(
             ARCA_ERROR_CODES.CUIT_INVALIDO,
-            'Error de validación de token (Error 600): El CUIT informado no corresponde con el certificado o el token es inválido.',
+            sdkDetail
+              ? `Rechazado por AFIP: ${sdkDetail}`
+              : 'Error de validación de token (Error 600): El CUIT informado no corresponde con el certificado o el token es inválido.',
             httpStatus,
             raw,
           );
-        // 10007: Punto de venta inválido.
+        // 10007: Punto de venta inválido / tipo no habilitado, según contexto AFIP.
         // 10008: Número de comprobante desde/hasta inválido.
         // 10016: El número o fecha del comprobante no corresponde al próximo a autorizar.
         case 10007:
@@ -363,7 +398,9 @@ export class ArcaClientService {
         case 10016:
           return new ArcaException(
             ARCA_ERROR_CODES.FUERA_DE_RANGO,
-            `El número o fecha de comprobante no corresponde al rango o al próximo a autorizar (Error ${codeNum}).`,
+            sdkDetail
+              ? `Rechazado por AFIP: ${sdkDetail}`
+              : `El número o fecha de comprobante no corresponde al rango o al próximo a autorizar (Error ${codeNum}).`,
             httpStatus,
             raw,
           );
@@ -371,7 +408,9 @@ export class ArcaClientService {
         case 10015:
           return new ArcaException(
             ARCA_ERROR_CODES.COMPROBANTE_DUPLICADO,
-            'El comprobante ya fue autorizado anteriormente en AFIP / ARCA (Error 10015).',
+            sdkDetail
+              ? `Rechazado por AFIP: ${sdkDetail}`
+              : 'El comprobante ya fue autorizado anteriormente en AFIP / ARCA (Error 10015).',
             httpStatus,
             raw,
           );
@@ -407,6 +446,28 @@ export class ArcaClientService {
       return new ArcaException(ARCA_ERROR_CODES.CONECTIVIDAD, 'AFIP SDK no respondió. El comprobante quedó en estado pendiente_cae para reintentar.', httpStatus, raw);
     }
     if (httpStatus === 400 || lower.match(/^http 4\d\d$/)) {
+      const detail = extractAfipSdkErrorDetail(raw);
+      if (detail) {
+        this.logger.warn(`AFIP SDK HTTP ${httpStatus ?? 400}: ${detail}`);
+        return new ArcaException(
+          ARCA_ERROR_CODES.GENERICO,
+          detail.startsWith('Rechazado por AFIP')
+            ? detail
+            : `Rechazado por AFIP: ${detail}`,
+          httpStatus,
+          raw,
+        );
+      }
+      const axiosData = (raw as any)?.response?.data;
+      if (axiosData != null) {
+        try {
+          this.logger.warn(
+            `AFIP SDK HTTP ${httpStatus ?? 400} sin detalle parseable. Body: ${JSON.stringify(axiosData).slice(0, 2000)}`,
+          );
+        } catch {
+          this.logger.warn(`AFIP SDK HTTP ${httpStatus ?? 400} sin detalle parseable (body no serializable).`);
+        }
+      }
       return new ArcaException(
         ARCA_ERROR_CODES.GENERICO,
         'AFIP / ARCA rechazó la solicitud. Verificá que el CUIT, el punto de venta y el certificado estén correctamente configurados.',

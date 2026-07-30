@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -7,10 +7,25 @@ import { normalizeArcaAmbiente } from './arca.util';
 import { buildComprobanteCvlp } from './arca-cvlp.util';
 import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
 import { buildCvlpConceptosList } from './cvlp-conceptos.util';
+import { CBTE_TIPO_NC_CVLP } from './arca.util';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
+
+type PdfCbteAsoc = { tipo: number; ptoVenta: number; nro: number };
+
+type PdfDrawOpts = {
+  kind: 'cvlp' | 'nc';
+  title: string;
+  cbteTipo: number;
+  cbteNro: number | null;
+  ptoVenta: number | null;
+  cae: string | null;
+  caeFechaVto: Date | null;
+  fecha: Date;
+  asociados?: PdfCbteAsoc[];
+};
 
 const CONDICION_IVA_LABEL: Record<number, string> = {
   1: 'RESP. INSCRIPTO',
@@ -130,6 +145,22 @@ export class LiquidacionPdfService {
     tenantId: string,
     liquidacionId: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
+    return this.generateInternal(tenantId, liquidacionId, 'cvlp');
+  }
+
+  /** PDF de la NC 065 de anulación, con comprobantes asociados en el detalle. */
+  async generateNotaCredito(
+    tenantId: string,
+    liquidacionId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    return this.generateInternal(tenantId, liquidacionId, 'nc');
+  }
+
+  private async generateInternal(
+    tenantId: string,
+    liquidacionId: string,
+    kind: 'cvlp' | 'nc',
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const liq = await this.db.liquidacion.findUnique({
       where: { id: liquidacionId },
       include: {
@@ -154,26 +185,61 @@ export class LiquidacionPdfService {
       throw new NotFoundException('Liquidación no encontrada');
     }
 
+    if (kind === 'nc') {
+      if (liq.estado !== 'anulado' || !liq.anulacionCae || !liq.anulacionCbteNro) {
+        throw new BadRequestException(
+          'No hay nota de crédito de anulación para esta liquidación.',
+        );
+      }
+    }
+
+    const drawOpts: PdfDrawOpts =
+      kind === 'nc'
+        ? {
+            kind: 'nc',
+            title: 'NOTA DE CREDITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO',
+            cbteTipo: liq.anulacionCbteTipo ?? CBTE_TIPO_NC_CVLP,
+            cbteNro: liq.anulacionCbteNro,
+            ptoVenta: liq.anulacionPtoVenta ?? liq.ptoVenta,
+            cae: liq.anulacionCae,
+            caeFechaVto: liq.anulacionCaeFechaVto,
+            fecha: liq.anulacionFecha ?? liq.updatedAt,
+            asociados:
+              liq.cbteNro != null && liq.ptoVenta != null
+                ? [{ tipo: liq.cbteTipo, ptoVenta: liq.ptoVenta, nro: liq.cbteNro }]
+                : [],
+          }
+        : {
+            kind: 'cvlp',
+            title: 'CUENTA DE VENTA Y LIQUIDO PRODUCTO',
+            cbteTipo: liq.cbteTipo,
+            cbteNro: liq.cbteNro,
+            ptoVenta: liq.ptoVenta,
+            cae: liq.cae,
+            caeFechaVto: liq.caeFechaVto,
+            fecha: liq.createdAt,
+          };
+
     const config = await this.arcaConfig.findPublic(tenantId);
 
     // QR solo si tiene CAE
     let qrBuffer: Buffer | null = null;
-    if (liq.cae && liq.cbteNro && liq.ptoVenta) {
+    if (drawOpts.cae && drawOpts.cbteNro && drawOpts.ptoVenta) {
       const cuitNum = Number(String(liq.transportista?.idFiscal ?? '0').replace(/-/g, ''));
       const payload = {
         ver: 1,
-        fecha: liq.createdAt.toISOString().slice(0, 10),
+        fecha: drawOpts.fecha.toISOString().slice(0, 10),
         cuit: Number(String(config?.cuitEmisor ?? '0').replace(/-/g, '')),
-        ptoVta: liq.ptoVenta,
-        tipoCmp: liq.cbteTipo,
-        nroCmp: liq.cbteNro,
+        ptoVta: drawOpts.ptoVenta,
+        tipoCmp: drawOpts.cbteTipo,
+        nroCmp: drawOpts.cbteNro,
         importe: Math.round(liq.liquido * 100) / 100,
         moneda: 'PES',
         ctz: 1,
         tipoDocRec: 80,
         nroDocRec: cuitNum,
         tipoCodAut: 'E',
-        codAut: Number(liq.cae),
+        codAut: Number(drawOpts.cae),
       };
       const qrUrl = `https://www.afip.gob.ar/fe/qr/?p=${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
       qrBuffer = await QRCode.toBuffer(qrUrl, { width: 72, margin: 1 }) as Buffer;
@@ -191,27 +257,31 @@ export class LiquidacionPdfService {
     }
 
     let cvlp: ArcaComprobanteCvlp;
-    if (liq.cae) {
-      // Si está autorizada, buscar el comprobante exacto en auditoría
-      const log = await this.db.arcaLog.findFirst({
+    if (drawOpts.cae) {
+      const logs = await this.db.arcaLog.findMany({
         where: { liquidacionId, exitoso: true, method: 'FECAESolicitar' },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: kind === 'nc' ? 'desc' : 'asc' },
+        take: 5,
       });
-      if (log && (log.requestBody as any)?.auditMetadata) {
-        const metadata = (log.requestBody as any).auditMetadata;
-        if (metadata && Array.isArray(metadata.items)) {
-          // No mostrar "Gastos Administrativos" en el PDF (concepto deprecado).
-          cvlp = {
-            ...metadata,
-            items: metadata.items.filter(
-              (it: { descripcion?: string }) =>
-                it?.descripcion !== 'Gastos Administrativos',
-            ),
-          };
-        }
+      for (const log of logs) {
+        const metadata = (log.requestBody as any)?.auditMetadata;
+        if (!metadata || !Array.isArray(metadata.items)) continue;
+        const metaTipo = Number(metadata.cbteTipo);
+        if (metaTipo && metaTipo !== drawOpts.cbteTipo) continue;
+        cvlp = {
+          ...metadata,
+          cbteTipo: drawOpts.cbteTipo,
+          cbteNro: drawOpts.cbteNro ?? metadata.cbteNro,
+          ptoVenta: drawOpts.ptoVenta ?? metadata.ptoVenta,
+          items: metadata.items.filter(
+            (it: { descripcion?: string }) =>
+              it?.descripcion !== 'Gastos Administrativos',
+          ),
+        };
+        break;
       }
     }
-    
+
     // Si no está autorizada o no se encontró el log, se reconstruye al vuelo para el borrador
     if (!cvlp) {
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
@@ -239,32 +309,35 @@ export class LiquidacionPdfService {
           orden: r.orden,
         })),
       });
-      
+
       const docNro = liq.transportista?.idFiscal ? Number(liq.transportista.idFiscal.replace(/-/g, '')) : 0;
       const docTipo = docNro ? 80 : 99;
 
       const baseCabecera = {
         cuit: config?.cuitEmisor ?? '',
-        ptoVenta: liq.ptoVenta ?? config?.ptoVentaCvlp ?? 0,
-        cbteTipo: liq.cbteTipo,
-        cbteNro: liq.cbteNro ?? 0,
-        fechaCbte: liq.createdAt.toISOString().slice(0, 10).replace(/-/g, ''),
+        ptoVenta: drawOpts.ptoVenta ?? config?.ptoVentaCvlp ?? 0,
+        cbteTipo: drawOpts.cbteTipo,
+        cbteNro: drawOpts.cbteNro ?? 0,
+        fechaCbte: drawOpts.fecha.toISOString().slice(0, 10).replace(/-/g, ''),
         concepto: 1,
         docTipo,
         docNro,
         condicionIvaReceptorId: liq.transportista?.condicionIva ?? 1,
       };
-      
+
       cvlp = buildComprobanteCvlp(baseCabecera, conceptos, ivaDefault);
     }
 
-    const buffer = await this.buildPdf(liq, config, qrBuffer, logoBuffer, cvlp);
+    const buffer = await this.buildPdf(liq, config, qrBuffer, logoBuffer, cvlp, drawOpts);
 
-    const cbteNroStr = liq.cbteNro
-      ? `${String(liq.ptoVenta).padStart(4, '0')}-${String(liq.cbteNro).padStart(8, '0')}`
+    const cbteNroStr = drawOpts.cbteNro
+      ? `${String(drawOpts.ptoVenta).padStart(4, '0')}-${String(drawOpts.cbteNro).padStart(8, '0')}`
       : liquidacionId.slice(0, 8);
     const transportistaSlug = slugify(liq.transportista?.nombre ?? '');
-    const filename = `CVLP_${cbteNroStr}_${transportistaSlug}.pdf`;
+    const filename =
+      kind === 'nc'
+        ? `NC065_${cbteNroStr}_${transportistaSlug}.pdf`
+        : `CVLP_${cbteNroStr}_${transportistaSlug}.pdf`;
 
     return { buffer, filename };
   }
@@ -275,6 +348,7 @@ export class LiquidacionPdfService {
     qrBuffer: Buffer | null,
     logoBuffer: Buffer | null,
     cvlp: ArcaComprobanteCvlp,
+    drawOpts: PdfDrawOpts,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (no acción manual del usuario).
     const showTestWatermark =
@@ -286,9 +360,9 @@ export class LiquidacionPdfService {
         doc.on('data', (c: Buffer) => chunks.push(c));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL', cvlp, showTestWatermark);
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL', cvlp, drawOpts, showTestWatermark);
         doc.addPage();
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO', cvlp, showTestWatermark);
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO', cvlp, drawOpts, showTestWatermark);
         doc.end();
       } catch (e) {
         reject(e);
@@ -335,6 +409,7 @@ export class LiquidacionPdfService {
     logoBuffer: Buffer | null,
     copia: 'ORIGINAL' | 'DUPLICADO',
     cvlp: ArcaComprobanteCvlp,
+    opts: PdfDrawOpts,
     showTestWatermark = false,
   ) {
     const M = MARGIN;
@@ -399,36 +474,40 @@ export class LiquidacionPdfService {
     }
 
     // Col 2: letra + tipo
-    const isLetter = liq.cbteTipo === 1 || liq.cbteTipo === 6 || liq.cbteTipo === 11;
-    const isCvlp = liq.cbteTipo === 60 || liq.cbteTipo === 61;
-    
+    const isLetter = opts.cbteTipo === 1 || opts.cbteTipo === 6 || opts.cbteTipo === 11;
+    const isCodBox =
+      opts.cbteTipo === 60 ||
+      opts.cbteTipo === 61 ||
+      opts.cbteTipo === CBTE_TIPO_NC_CVLP ||
+      opts.kind === 'nc';
+
     if (isLetter) {
-      const tipoStr = LETRA_POR_TIPO[liq.cbteTipo] ?? String(liq.cbteTipo);
+      const tipoStr = LETRA_POR_TIPO[opts.cbteTipo] ?? String(opts.cbteTipo);
       doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
       doc.fontSize(36).font('Helvetica-Bold').fillColor('#000')
         .text(tipoStr, c1x + 4, y + 14, { width: 60, align: 'center' });
-        
-      const codLabel = `COD. ${String(liq.cbteTipo).padStart(3, '0')}`;
+
+      const codLabel = `COD. ${String(opts.cbteTipo).padStart(3, '0')}`;
       doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
         .text(codLabel, c1x + 4, y + 72, { width: 60, align: 'center' });
-    } else if (isCvlp) {
-      // Diseño especial para CVLP: "COD." arriba y el número grande abajo adentro del recuadro
+    } else if (isCodBox) {
+      // Diseño especial para CVLP / NC 065: "COD." arriba y el número grande abajo
       doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#000')
         .text('COD.', c1x + 4, y + 16, { width: 60, align: 'center' });
       doc.fontSize(28).font('Helvetica-Bold').fillColor('#000')
-        .text(String(liq.cbteTipo).padStart(3, '0'), c1x + 4, y + 32, { width: 60, align: 'center' });
+        .text(String(opts.cbteTipo).padStart(3, '0'), c1x + 4, y + 32, { width: 60, align: 'center' });
     }
 
     // Col 3: título + datos del comprobante (Número/Fecha a la izq., CUIT/Ing.Brutos/Inic.Act a la der.)
     {
       const titleX = c2x + 6;
       const titleW = CW - (c2x - M) - 6;
-      doc.fontSize(13).font('Helvetica-Bold').fillColor('#000')
-        .text('CUENTA DE VENTA Y LIQUIDO PRODUCTO', titleX, y + 6, { width: titleW });
+      doc.fontSize(opts.kind === 'nc' ? 10 : 13).font('Helvetica-Bold').fillColor('#000')
+        .text(opts.title, titleX, y + 6, { width: titleW });
 
-      const cbteNroStr = liq.cbteNro
-        ? `${String(liq.ptoVenta).padStart(4, '0')}-${String(liq.cbteNro).padStart(8, '0')}`
+      const cbteNroStr = opts.cbteNro
+        ? `${String(opts.ptoVenta).padStart(4, '0')}-${String(opts.cbteNro).padStart(8, '0')}`
         : 'BORRADOR';
 
       const dataY = y + 42;
@@ -437,7 +516,7 @@ export class LiquidacionPdfService {
 
       doc.fontSize(7.5).font('Helvetica').fillColor('#000')
         .text(`Número: ${cbteNroStr}`, titleX, dataY, { width: subColW })
-        .text(`Fecha: ${fmtDate(liq.createdAt)}`, titleX, dataY + 13, { width: subColW });
+        .text(`Fecha: ${fmtDate(opts.fecha)}`, titleX, dataY + 13, { width: subColW });
 
       doc.fontSize(7.5).font('Helvetica').fillColor('#000')
         .text(`CUIT: ${config?.cuitEmisor ?? ''}`, rColX, dataY, { width: subColW })
@@ -561,6 +640,21 @@ export class LiquidacionPdfService {
       y += rowH;
     }
 
+    // Comprobantes asociados (NC 065 → CVLP original)
+    if (opts.asociados?.length) {
+      y += 8;
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
+        .text('Comprobantes asociados', M, y, { width: CW });
+      y += 14;
+      for (const asoc of opts.asociados) {
+        const nro = `${String(asoc.ptoVenta).padStart(4, '0')}-${String(asoc.nro).padStart(8, '0')}`;
+        const label = `Tipo ${String(asoc.tipo).padStart(3, '0')}  N° ${nro}`;
+        doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+          .text(label, M + 4, y, { width: CW - 8 });
+        y += 12;
+      }
+    }
+
     // ── Footer ────────────────────────────────────────────────────────────────
     const footerY = PAGE_H - MARGIN - 90;
     // Línea divisora
@@ -615,10 +709,10 @@ export class LiquidacionPdfService {
 
     currentY = Math.max(currentY, footerBoxY + 52);
 
-    if (liq.cae) {
+    if (opts.cae) {
       doc.fontSize(7.5).font('Helvetica').fillColor('#000')
-        .text(`CAE N°: ${liq.cae}`, totX, currentY, { width: 190 })
-        .text(`Vto CAE: ${fmtDate(liq.caeFechaVto)}`, totX, currentY + 10, { width: 190 });
+        .text(`CAE N°: ${opts.cae}`, totX, currentY, { width: 190 })
+        .text(`Vto CAE: ${fmtDate(opts.caeFechaVto)}`, totX, currentY + 10, { width: 190 });
     } else {
       doc.fontSize(7.5).font('Helvetica').fillColor('#999')
         .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });

@@ -57,7 +57,11 @@ export function buildComprobanteCvlp(
   };
 }
 
-export function mapCvlpToArcaRequest(cvlp: ArcaComprobanteCvlp, ambiente: 'homologacion'|'produccion'): ArcaAutorizarRequest {
+export function mapCvlpToArcaRequest(
+  cvlp: ArcaComprobanteCvlp,
+  ambiente: 'homologacion' | 'produccion',
+  cbtesAsoc?: ArcaAutorizarRequest['cbtesAsoc'],
+): ArcaAutorizarRequest {
   return {
     ambiente,
     cuit: cvlp.cuit,
@@ -73,5 +77,6 @@ export function mapCvlpToArcaRequest(cvlp: ArcaComprobanteCvlp, ambiente: 'homol
     impIva: cvlp.impIva,
     impTotal: cvlp.impTotal,
     alicuotasIva: cvlp.alicuotasIva,
+    ...(cbtesAsoc?.length ? { cbtesAsoc } : {}),
   };
 }

@@ -629,11 +629,9 @@ export class LiquidacionesService {
   }
 
   /**
-   * Anula una liquidación autorizada emitiendo vía AFIP una Liquidación de Ajuste
-   * (tipo 63/64) con los mismos importes en positivo y el siguiente correlativo
-   * de ese tipo. AFIP rechaza ImpNeto/ImpIVA/ImpTotal &lt; 0 en CVLP 60/61; el
-   * “comprobante inverso” es el ajuste, no montos negativos.
-   * Tras éxito, estado → `anulado` permanente; CAE/PDF originales se conservan.
+   * Anula una liquidación autorizada emitiendo vía AFIP una Nota de Crédito 065
+   * asociada al CVLP original (CbtesAsoc). Importes en positivo: AFIP rechaza
+   * negativos en 60/61. Tras éxito, estado → `anulado`; CAE/PDF originales se conservan.
    */
   async anularLiquidacion(tenantId: string, liquidacionId: string) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
@@ -645,8 +643,11 @@ export class LiquidacionesService {
     if (liquidacion.estado !== 'autorizado') {
       throw new BadRequestException('Solo se pueden anular liquidaciones con CAE autorizado');
     }
-    if (!liquidacion.cbteNro) {
+    if (!liquidacion.cbteNro || !liquidacion.ptoVenta) {
       throw new BadRequestException('La liquidación no tiene número de comprobante');
+    }
+    if ((liquidacion as { anulacionCae?: string | null }).anulacionCae) {
+      throw new BadRequestException('Esta liquidación ya tiene una nota de crédito de anulación.');
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
@@ -655,6 +656,7 @@ export class LiquidacionesService {
       select: { idFiscal: true, condicionIva: true },
     });
 
+    // NC 065: AFIP no acepta importes negativos sobre el CVLP 060/061.
     const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(transportista?.condicionIva);
 
     try {
@@ -681,11 +683,11 @@ export class LiquidacionesService {
         config?.ivaGastosAdmin ??
         21;
 
+      // Importes en positivo: la NC 065 acredita por su tipo, no por signos negativos.
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
       });
-      // Importes en positivo: el tipo 63/64 es el que invierte el efecto fiscal.
       const conceptos = buildCvlpConceptosList({
         bruto: Number(liquidacion.bruto || 0),
         comision: Number(liquidacion.comision || 0),
@@ -693,12 +695,15 @@ export class LiquidacionesService {
         lineas: this.lineasFromStored(lineasDb),
       });
 
+      const fechaNc = formatFechaCbte(new Date());
+      const fechaCvlpAsoc = await this.resolveFechaCbteOriginal(liquidacionId, liquidacion);
+
       const cabeceraBase = {
         cuit: config.cuitEmisor,
         ptoVenta: config.ptoVentaCvlp,
         cbteTipo: cbteTipoAnulacion,
         cbteNro,
-        fechaCbte: formatFechaCbte(new Date()),
+        fechaCbte: fechaNc,
         concepto: 1,
         docTipo,
         docNro,
@@ -706,12 +711,22 @@ export class LiquidacionesService {
       };
 
       const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
+      const cbtesAsoc = [
+        {
+          Tipo: liquidacion.cbteTipo,
+          PtoVta: liquidacion.ptoVenta,
+          Nro: liquidacion.cbteNro,
+          Cuit: String(config.cuitEmisor).replace(/[-\s]/g, ''),
+          CbteFch: fechaCvlpAsoc,
+        },
+      ];
       const arcaRequest = mapCvlpToArcaRequest(
         cvlp,
         config.ambiente as 'homologacion' | 'produccion',
+        cbtesAsoc,
       );
 
-      await this.arcaClient.autorizarComprobante(
+      const authResult = await this.arcaClient.autorizarComprobante(
         config.apiKey,
         arcaRequest,
         tenantId,
@@ -719,13 +734,33 @@ export class LiquidacionesService {
         undefined,
         config.certPem,
         config.keyPem,
-        cvlp as unknown as Record<string, unknown>,
+        {
+          ...(cvlp as unknown as Record<string, unknown>),
+          cbtesAsoc,
+          anulacionDe: {
+            cbteTipo: liquidacion.cbteTipo,
+            cbteNro: liquidacion.cbteNro,
+            ptoVenta: liquidacion.ptoVenta,
+            cae: liquidacion.cae,
+          },
+        },
       );
+
+      const caeFechaVto = parseAfipDate(authResult.CAEFchVto);
 
       // No se borra CAE / cbteNro / PDF: el comprobante original sigue disponible.
       await this.prisma.liquidacion.update({
         where: { id: liquidacionId },
-        data: { estado: 'anulado', updatedAt: new Date() },
+        data: {
+          estado: 'anulado',
+          anulacionCbteTipo: cbteTipoAnulacion,
+          anulacionCbteNro: cbteNro,
+          anulacionPtoVenta: config.ptoVentaCvlp,
+          anulacionCae: authResult.CAE,
+          anulacionCaeFechaVto: caeFechaVto,
+          anulacionFecha: new Date(),
+          updatedAt: new Date(),
+        } as PrismaAny,
       });
 
       return this.findById(tenantId, liquidacionId);
@@ -739,6 +774,27 @@ export class LiquidacionesService {
       this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
       throw new UnprocessableEntityException(errMsg);
     }
+  }
+
+  /** Fecha yyyymmdd del CVLP original (para CbteAsoc de la NC). */
+  private async resolveFechaCbteOriginal(
+    liquidacionId: string,
+    liquidacion: { updatedAt: Date; createdAt: Date },
+  ): Promise<string> {
+    const emitLog = await this.db.arcaLog.findFirst({
+      where: { liquidacionId, exitoso: true, method: 'FECAESolicitar' },
+      orderBy: { createdAt: 'asc' },
+    });
+    const metaFecha = (emitLog?.requestBody as PrismaAny)?.auditMetadata?.fechaCbte;
+    if (typeof metaFecha === 'string' && /^\d{8}$/.test(metaFecha)) {
+      return metaFecha;
+    }
+    const fromReq = (emitLog?.requestBody as PrismaAny)?.params?.FeCAEReq?.FeDetReq
+      ?.FECAEDetRequest?.CbteFch;
+    if (fromReq != null && String(fromReq).length >= 8) {
+      return String(fromReq).slice(0, 8);
+    }
+    return formatFechaCbte(liquidacion.updatedAt ?? liquidacion.createdAt);
   }
 
   async getConfig(tenantId: string) {

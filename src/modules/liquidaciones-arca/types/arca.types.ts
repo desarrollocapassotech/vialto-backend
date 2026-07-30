@@ -16,11 +16,21 @@ export interface AlicIva {
   Importe: number;
 }
 
+/** Comprobante asociado (obligatorio en NC/ND — error AFIP 10197 si falta). */
+export interface ArcaCbteAsoc {
+  Tipo: number;
+  PtoVta: number;
+  Nro: number;
+  Cuit?: string;
+  CbteFch?: string; // yyyymmdd
+}
+
 export interface ArcaAutorizarRequest {
   ambiente: ArcaAmbiente;
   cuit: string;
   ptoVenta: number;
-  cbteTipo: number;   // 1=Factura A, 6=Factura B, 60=CVLP A, 61=CVLP B
+  /** 1=Factura A, 6=Factura B, 60/61=CVLP, 65=NC CVLP */
+  cbteTipo: number;
   cbteNro: number;
   fechaCbte: string;  // yyyymmdd
   concepto: number;   // 1=Productos, 2=Servicios, 3=Ambos
@@ -33,6 +43,8 @@ export interface ArcaAutorizarRequest {
   monId?: string;     // default 'PES'
   monCotiz?: number;  // default 1
   alicuotasIva?: AlicIva[];
+  /** Comprobantes asociados (NC 065 → CVLP 060/061 original). */
+  cbtesAsoc?: ArcaCbteAsoc[];
 }
 
 export interface ArcaAutorizarResponse {

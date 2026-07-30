@@ -219,10 +219,6 @@ export class CombustibleService {
 
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
 
-    if (auth.role === "member") {
-      where["createdBy"] = auth.userId;
-    }
-
     if (vehiculoId) where["vehiculoId"] = vehiculoId;
     if (choferId) where["choferId"] = choferId;
     if (estacion)
@@ -261,9 +257,7 @@ export class CombustibleService {
   /** Estaciones distintas entre las cargas existentes, para poblar el filtro del listado. */
   async getEstaciones(auth: CombustibleAuth): Promise<string[]> {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
-    if (auth.role === "member") {
-      where["createdBy"] = auth.userId;
-    }
+
     const rows = await this.prisma.cargaCombustible.findMany({
       where,
       distinct: ["estacion"],
@@ -302,9 +296,7 @@ export class CombustibleService {
       where,
     });
     if (!carga) throw new NotFoundException("Carga no encontrada");
-    if (auth.role === "member" && carga.createdBy !== auth.userId) {
-      throw new ForbiddenException("No tenés acceso a esta carga");
-    }
+
     return carga;
   }
 
@@ -373,10 +365,6 @@ export class CombustibleService {
       dto.choferId === undefined ? carga.choferId : dto.choferId;
     if (nextVehiculo) {
       await this.assertVehiculoChofer(auth.tenantId, nextVehiculo, nextChofer);
-    }
-
-    if (auth.role === "member" && carga.createdBy !== auth.userId) {
-      throw new ForbiddenException("No podés editar esta carga");
     }
 
     const nextKm = dto.km !== undefined ? dto.km : carga.km;
@@ -535,18 +523,17 @@ export class CombustibleService {
    * resuelve a un vehículo: ese puede ser justamente el motivo del error, y
    * el log tiene que poder guardarse igual.
    */
-  async logSyncError(
-    dto: LogSyncErrorDto,
-    choferId: string,
-    tenantId: string,
-  ) {
+  async logSyncError(dto: LogSyncErrorDto, choferId: string, tenantId: string) {
     const patente =
       typeof dto.payload["patente"] === "string"
         ? (dto.payload["patente"] as string).replace(/\s+/g, "").toUpperCase()
         : undefined;
     const vehiculo = patente
       ? await this.prisma.vehiculo.findFirst({
-          where: { tenantId, patente: { equals: patente, mode: "insensitive" } },
+          where: {
+            tenantId,
+            patente: { equals: patente, mode: "insensitive" },
+          },
           select: { id: true },
         })
       : null;

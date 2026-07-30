@@ -45,9 +45,15 @@ export function getCbteTipoCvlp(condicionIva?: number | null): number {
 }
 
 /**
- * Determina el tipo de comprobante para ANULAR un CVLP (Ajuste o Nota de Crédito)
- * - 63: Liquidacion Ajuste Cuenta de Venta y Liquido Producto A
- * - 64: Liquidacion Ajuste Cuenta de Venta y Liquido Producto B
+ * Tipo AFIP de Nota de Crédito asociada a Cuenta de Venta y Líquido Producto.
+ * Código 065 — anula un CVLP 060/061 con importes positivos (AFIP no acepta negativos).
+ */
+export const CBTE_TIPO_NC_CVLP = 65;
+
+/**
+ * Tipo de comprobante para anular un CVLP autorizado: siempre NC 065.
+ * Se conserva la firma con `condicionIva` por compatibilidad con callers existentes;
+ * la NC 065 no se bifurca A/B como el CVLP 60/61.
  */
 export function getCbteTipoAnulacionCvlp(condicionIva?: number | null): number {
   if (condicionIva == null) {
@@ -55,7 +61,7 @@ export function getCbteTipoAnulacionCvlp(condicionIva?: number | null): number {
       'El transportista no tiene configurada su condición frente al IVA.',
     );
   }
-  return condicionIva === 1 ? 63 : 64;
+  return CBTE_TIPO_NC_CVLP;
 }
 
 /** Normaliza el ambiente ARCA guardado en DB / DTO a los valores canónicos. */

@@ -73,7 +73,9 @@ export class LiquidacionesController {
     @Body() dto: UpsertArcaConfigDto,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.upsertConfig(auth.tenantId, dto);
+    return this.service.upsertConfig(auth.tenantId, dto, {
+      allowAmbienteChange: auth.role === "superadmin",
+    });
   }
 
   @ApiOperation({

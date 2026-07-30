@@ -45,6 +45,7 @@ export class CreateLiquidacionDto {
    * si tampoco tiene, se usa comisionPctDefault de ArcaConfig o 0.
    */
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(100)
@@ -55,6 +56,7 @@ export class CreateLiquidacionDto {
    * Si no se envía, se usa ivaGastosAdmin de ArcaConfig o 21% por defecto.
    */
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(100)

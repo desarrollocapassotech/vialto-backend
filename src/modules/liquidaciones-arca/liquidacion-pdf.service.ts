@@ -217,7 +217,9 @@ export class LiquidacionPdfService {
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
       });
-      const ivaDefault = resolveIvaPct(config?.ivaGastosAdmin);
+      const ivaDefault = resolveIvaPct(
+        (liq as { ivaPct?: number | null }).ivaPct ?? config?.ivaGastosAdmin,
+      );
       const conceptos = buildCvlpConceptosList({
         bruto: liq.bruto,
         comision: liq.comision,

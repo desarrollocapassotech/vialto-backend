@@ -45,23 +45,38 @@ export function getCbteTipoCvlp(condicionIva?: number | null): number {
 }
 
 /**
- * Tipo AFIP de Nota de Crédito asociada a Cuenta de Venta y Líquido Producto.
- * Código 065 — anula un CVLP 060/061 con importes positivos (AFIP no acepta negativos).
+ * Código 065 (NC de Líquido Producto). AFIP NO lo habilita por web service
+ * (FEParamGetTiposCbte no lo lista; rechaza con 11001). Se conserva solo para
+ * detección/compatibilidad en el PDF de anulaciones históricas.
  */
 export const CBTE_TIPO_NC_CVLP = 65;
 
+export type TipoAnulacionCvlp = 'nota_credito' | 'nota_debito';
+
 /**
- * Tipo de comprobante para anular un CVLP autorizado: siempre NC 065.
- * Se conserva la firma con `condicionIva` por compatibilidad con callers existentes;
- * la NC 065 no se bifurca A/B como el CVLP 60/61.
+ * Tipo de comprobante para anular un CVLP autorizado.
+ * AFIP no acepta el 065 ni importes negativos por web service, así que el CVLP se
+ * anula con un comprobante ESTÁNDAR asociado (CbtesAsoc) al 060/061 original.
+ * El comprobante (Nota de Crédito o Nota de Débito) es configurable por tenant;
+ * la clase A/B se deriva de la condición frente al IVA del transportista.
+ * Verificado contra AFIP (homologación): los 4 tipos son aceptados y devuelven CAE.
+ *   - Nota de Crédito:  clase A → tipo 3,  clase B → tipo 8.
+ *   - Nota de Débito:   clase A → tipo 2,  clase B → tipo 7.
  */
-export function getCbteTipoAnulacionCvlp(condicionIva?: number | null): number {
+export function getCbteTipoAnulacionCvlp(
+  condicionIva?: number | null,
+  tipoAnulacion: TipoAnulacionCvlp = 'nota_credito',
+): number {
   if (condicionIva == null) {
     throw new BadRequestException(
       'El transportista no tiene configurada su condición frente al IVA.',
     );
   }
-  return CBTE_TIPO_NC_CVLP;
+  const claseA = condicionIva === 1;
+  if (tipoAnulacion === 'nota_debito') {
+    return claseA ? 2 : 7; // Nota de Débito A / B
+  }
+  return claseA ? 3 : 8; // Nota de Crédito A / B
 }
 
 /** Normaliza el ambiente ARCA guardado en DB / DTO a los valores canónicos. */

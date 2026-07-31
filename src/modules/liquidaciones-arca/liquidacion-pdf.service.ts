@@ -334,9 +334,18 @@ export class LiquidacionPdfService {
       ? `${String(drawOpts.ptoVenta).padStart(4, '0')}-${String(drawOpts.cbteNro).padStart(8, '0')}`
       : liquidacionId.slice(0, 8);
     const transportistaSlug = slugify(liq.transportista?.nombre ?? '');
+    const anulPrefix = (() => {
+      switch (drawOpts.cbteTipo) {
+        case 3: return 'NC_A';
+        case 8: return 'NC_B';
+        case 2: return 'ND_A';
+        case 7: return 'ND_B';
+        default: return `Comp${String(drawOpts.cbteTipo).padStart(3, '0')}`;
+      }
+    })();
     const filename =
       kind === 'nc'
-        ? `NC065_${cbteNroStr}_${transportistaSlug}.pdf`
+        ? `${anulPrefix}_${cbteNroStr}_${transportistaSlug}.pdf`
         : `CVLP_${cbteNroStr}_${transportistaSlug}.pdf`;
 
     return { buffer, filename };

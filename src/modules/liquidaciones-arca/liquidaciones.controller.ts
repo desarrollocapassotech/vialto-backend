@@ -33,6 +33,7 @@ import { LiquidacionPdfService } from "./liquidacion-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
 import { EmitirFacturaArcaDto } from "./dto/emitir-factura-arca.dto";
+import { AnularLiquidacionDto } from "./dto/anular-liquidacion.dto";
 import { UpsertArcaConfigDto } from "./dto/upsert-arca-config.dto";
 import {
   CreateConceptoLiquidacionDto,
@@ -305,15 +306,19 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
-    summary: "Anular liquidación — emite Nota de Crédito 065 vía AFIP SDK",
+    summary: "Anular liquidación — emite Nota de Crédito/Débito asociada vía AFIP SDK",
   })
   @Post("liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
   @RequireModule("integracion-arca")
   @Roles("admin", "superadmin")
-  anularLiquidacion(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
+  anularLiquidacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Body() dto: AnularLiquidacionDto,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.anularLiquidacion(auth.tenantId, id);
+    return this.service.anularLiquidacion(auth.tenantId, id, dto.tipoAnulacion);
   }
 
   @ApiOperation({

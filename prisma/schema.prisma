@@ -920,7 +920,8 @@ model Liquidacion {
   // Estado de la integración ARCA
   estado     String  @default("borrador")
   // borrador | pendiente_cae | autorizado | error | anulado
-  arcaError  String?
+  arcaError        String? // mensaje amigable del último error de ARCA
+  arcaErrorDetalle String? // detalle técnico crudo de AFIP SDK (para "ver error completo")
   reintentos Int     @default(0)
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)

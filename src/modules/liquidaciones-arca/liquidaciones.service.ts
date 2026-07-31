@@ -613,8 +613,10 @@ export class LiquidacionesService {
         data: {
           estado: isConectividad ? 'pendiente_cae' : 'error',
           arcaError: errMsg,
+          arcaErrorDetalle:
+            err instanceof ArcaException ? (err.detalle ?? null) : null,
           updatedAt: new Date(),
-        },
+        } as PrismaAny,
       });
 
       if (isConectividad) {

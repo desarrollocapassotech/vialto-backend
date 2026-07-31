@@ -625,14 +625,19 @@ export class LiquidacionesService {
       }
 
       this.logger.error(`Error al emitir liquidación ${liquidacionId}: ${errMsg}`);
-      throw new UnprocessableEntityException(errMsg);
+      throw new UnprocessableEntityException({
+        message: errMsg,
+        detalle: err instanceof ArcaException ? err.detalle : undefined,
+      });
     }
   }
 
   /**
-   * Anula una liquidación autorizada emitiendo vía AFIP una Nota de Crédito 065
-   * asociada al CVLP original (CbtesAsoc). Importes en positivo: AFIP rechaza
-   * negativos en 60/61. Tras éxito, estado → `anulado`; CAE/PDF originales se conservan.
+   * Anula una liquidación autorizada emitiendo vía AFIP un comprobante estándar
+   * (Nota de Crédito 3/8 o Nota de Débito 2/7, elegible por `tipoAnulacion`)
+   * asociado al CVLP original (CbtesAsoc). Importes en positivo: AFIP rechaza el
+   * 065 (no existe en WS) y los negativos. Tras éxito, estado → `anulado`;
+   * el CVLP original (CAE/PDF) se conserva.
    */
   async anularLiquidacion(
     tenantId: string,
@@ -652,7 +657,7 @@ export class LiquidacionesService {
       throw new BadRequestException('La liquidación no tiene número de comprobante');
     }
     if ((liquidacion as { anulacionCae?: string | null }).anulacionCae) {
-      throw new BadRequestException('Esta liquidación ya tiene una nota de crédito de anulación.');
+      throw new BadRequestException('Esta liquidación ya tiene un comprobante de anulación.');
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
@@ -784,7 +789,10 @@ export class LiquidacionesService {
             ? err.message
             : String(err);
       this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
-      throw new UnprocessableEntityException(errMsg);
+      throw new UnprocessableEntityException({
+        message: errMsg,
+        detalle: err instanceof ArcaException ? err.detalle : undefined,
+      });
     }
   }
 
@@ -1044,6 +1052,12 @@ export class LiquidacionesService {
         },
       });
 
+      if (err instanceof ArcaException) {
+        throw new UnprocessableEntityException({
+          message: err.message,
+          detalle: err.detalle,
+        });
+      }
       throw err;
     }
   }

@@ -115,6 +115,7 @@ Ejemplos de uso:
 4. **Nuevos módulos van en `src/modules/{nombre}/`** con su propio NestJS module, controller, service y schema Prisma.
 5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí (salvo `reportes`).
 6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** de Neon (entorno QA); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
+   - **OJO — la base develop es compartida entre ramas.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
 
 ### Configuración del tenant en PostgreSQL
 
@@ -743,6 +744,17 @@ model Remito {
 Implementado, no planeado. **El slug de gating real es `integracion-arca`** (ver nota sobre `VIALTO_MODULES` más arriba) aunque la carpeta del módulo, los nombres de archivo y varios comentarios del schema sigan diciendo `liquidaciones-arca` — inconsistencia de nombres conocida, no corregida a propósito por decisión del equipo (jul 2026). Para cualquier `Tenant.modules` o `@RequireModule(...)` nuevo, usar siempre `integracion-arca`.
 
 Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) + `arca-client.service.ts` (integración AFIP SDK, CAE) + `arca-config.service.ts` + `liquidacion-pdf.service.ts`, con auditoría completa de cada request/response a AFIP en `ArcaLog`.
+
+**Anulación de un CVLP (importante — no obvio):** AFIP **no** permite anular un CVLP (tipo 60/61) por web service con el código 065 (no existe en wsfev1 → error `11001`) ni con importes en negativo (error `10065`). Se anula emitiendo un comprobante **estándar asociado** (`CbtesAsoc`) al 060/061 original: Nota de Crédito (tipo **3** clase A / **8** clase B) o Nota de Débito (tipo **2** clase A / **7** clase B). La clase A/B sale de la condición IVA del transportista. El usuario elige NC o ND en el **modal de anulación** (no es config global); el backend lo recibe en el body (`AnularLiquidacionDto.tipoAnulacion`) y `getCbteTipoAnulacionCvlp(condicionIva, tipo)` mapea al código. Que NC vs ND sea lo fiscalmente correcto es decisión del contador del cliente (AFIP acepta ambos) — por eso es elegible por operación.
+
+**Gotchas operativos de ARCA (verificados en producción con NyM, jul 2026):**
+- `cms.sign.invalid` ("firma inválida o algoritmo no soportado") al autenticar = el cert y la clave guardados en `ArcaConfig` **no son pareja** (típico de re-pegar uno solo), o se usa el cert de producción en ambiente homologación. La firma la hace afipsdk en la nube; casi nunca es el algoritmo. Solución: re-cargar **ambos** (cert + clave juntos) desde el par correcto (verificar con un test de auth que el par del `.env` funciona).
+- El cert/clave se guardan cifrados con `ARCA_ENCRYPTION_KEY` (AES-256-GCM). Debe ser **la misma en todos los entornos que compartan base**; si difiere, falla el descifrado. En producción no puede estar vacía (fail-fast).
+- La config **solo re-guarda cert/clave si se envía contenido**; dejar un campo vacío conserva el valor anterior (por eso hay que pegar los dos juntos para no desaparearlos).
+- Homologación necesita un **certificado de homologación propio** (el de producción da `cms.cert.untrusted` / `cms.sign.invalid` en ese ambiente).
+- El PEM se normaliza antes de firmar (`normalizePem` en `arca-client.service.ts`): pegar la versión con `\n` literales (como en el `.env`) sin normalizar da `Invalid PEM formatted message`.
+- El punto de venta que usa el web service es de tipo **RECE/Web Services** y **no** aparece en "Comprobantes en Línea" (regímenes separados y permanentes). Verificar los habilitados con `FEParamGetTiposCbte` / `getSalesPoints`.
+- Al armar payloads, el CVLP va con `Concepto: 1` (Productos); con `Concepto: 2` (Servicios) AFIP exige fechas de servicio (`FchServDesde/Hasta/VtoPago`, error `10049`).
 
 ```prisma
 /** Configuración AFIP SDK por tenant. La API key viene de AFIP_SDK_API_KEY (env var). */

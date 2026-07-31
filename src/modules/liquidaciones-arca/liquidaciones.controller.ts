@@ -255,7 +255,8 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
-    summary: "PDF de la Nota de Crédito 065 emitida al anular la liquidación",
+    summary:
+      "PDF del comprobante de anulación (Nota de Crédito o Nota de Débito) de la liquidación",
   })
   @Get("liquidaciones/:id/pdf-anulacion")
   @RequireModule("integracion-arca")

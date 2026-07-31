@@ -7,7 +7,7 @@ import { normalizeArcaAmbiente } from './arca.util';
 import { buildComprobanteCvlp } from './arca-cvlp.util';
 import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
 import { buildCvlpConceptosList } from './cvlp-conceptos.util';
-import { CBTE_TIPO_NC_CVLP } from './arca.util';
+import { CBTE_TIPO_NC_CVLP, esNotaDebitoAnulacion } from './arca.util';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -148,7 +148,7 @@ export class LiquidacionPdfService {
     return this.generateInternal(tenantId, liquidacionId, 'cvlp');
   }
 
-  /** PDF de la NC 065 de anulación, con comprobantes asociados en el detalle. */
+  /** PDF del comprobante de anulación (Nota de Crédito o Nota de Débito), con comprobantes asociados en el detalle. */
   async generateNotaCredito(
     tenantId: string,
     liquidacionId: string,
@@ -188,7 +188,7 @@ export class LiquidacionPdfService {
     if (kind === 'nc') {
       if (liq.estado !== 'anulado' || !liq.anulacionCae || !liq.anulacionCbteNro) {
         throw new BadRequestException(
-          'No hay nota de crédito de anulación para esta liquidación.',
+          'No hay comprobante de anulación para esta liquidación.',
         );
       }
     }
@@ -197,7 +197,9 @@ export class LiquidacionPdfService {
       kind === 'nc'
         ? {
             kind: 'nc',
-            title: 'NOTA DE CREDITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO',
+            title: esNotaDebitoAnulacion(liq.anulacionCbteTipo)
+              ? 'NOTA DE DEBITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO'
+              : 'NOTA DE CREDITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO',
             cbteTipo: liq.anulacionCbteTipo ?? CBTE_TIPO_NC_CVLP,
             cbteNro: liq.anulacionCbteNro,
             ptoVenta: liq.anulacionPtoVenta ?? liq.ptoVenta,
@@ -500,7 +502,7 @@ export class LiquidacionPdfService {
       doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
         .text(codLabel, c1x + 4, y + 72, { width: 60, align: 'center' });
     } else if (isCodBox) {
-      // Diseño especial para CVLP / NC 065: "COD." arriba y el número grande abajo
+      // Diseño con "COD." arriba y el número grande abajo (CVLP y anulaciones)
       doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#000')
         .text('COD.', c1x + 4, y + 16, { width: 60, align: 'center' });
@@ -649,7 +651,7 @@ export class LiquidacionPdfService {
       y += rowH;
     }
 
-    // Comprobantes asociados (NC 065 → CVLP original)
+    // Comprobantes asociados (comprobante de anulación → CVLP original)
     if (opts.asociados?.length) {
       y += 8;
       doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')

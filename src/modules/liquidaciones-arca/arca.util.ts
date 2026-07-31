@@ -79,6 +79,11 @@ export function getCbteTipoAnulacionCvlp(
   return claseA ? 3 : 8; // Nota de Crédito A / B
 }
 
+/** true si el cbteTipo de anulación (2/3/7/8) corresponde a una Nota de Débito. */
+export function esNotaDebitoAnulacion(cbteTipo?: number | null): boolean {
+  return cbteTipo === 2 || cbteTipo === 7;
+}
+
 /** Normaliza el ambiente ARCA guardado en DB / DTO a los valores canónicos. */
 export function normalizeArcaAmbiente(raw: unknown): 'homologacion' | 'produccion' {
   const v = String(raw ?? '')

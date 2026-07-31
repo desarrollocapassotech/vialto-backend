@@ -905,6 +905,8 @@ model Liquidacion {
   ptoVenta    Int?
   cae         String?
   caeFechaVto DateTime?
+  // Ambiente ARCA con el que se emitió: 'produccion' | 'homologacion'
+  ambiente    String?
 
   // Nota de crédito 065 emitida al anular (el CVLP original se conserva arriba)
   anulacionCbteTipo    Int?

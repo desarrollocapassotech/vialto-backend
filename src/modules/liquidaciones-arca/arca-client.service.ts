@@ -328,6 +328,12 @@ export class ArcaClientService {
         err?.response?.status ?? err?.status ?? err?.statusCode ?? undefined;
       const detail = extractAfipSdkErrorDetail(err);
       errorMsg = detail ?? String(err?.message ?? err);
+      const respDetail = responseBody
+        ? ` | Respuesta AFIP SDK: ${typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody)}`
+        : '';
+      this.logger.error(
+        `AFIP SDK ${method} rechazado (status ${httpStatus ?? '?'}): ${errorMsg}${respDetail}`,
+      );
       throw this.mapError(err, httpStatus);
     } finally {
       // Log de auditoría — nunca se registra la apiKey

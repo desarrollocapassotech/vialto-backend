@@ -18,7 +18,7 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
-import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, parseNumeroFactura } from './arca.util';
+import { getCbteTipoCvlp, parseNumeroFactura } from './arca.util';
 import { buildComprobanteCvlp, mapCvlpToArcaRequest } from './arca-cvlp.util';
 import {
   buildCvlpConceptosList,
@@ -586,6 +586,7 @@ export class LiquidacionesService {
           cbteNro,
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
+          ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           gastosAdmin: 0,
           gastosAdminIva: cvlp.impIva,
@@ -650,130 +651,21 @@ export class LiquidacionesService {
       throw new BadRequestException('Esta liquidación ya tiene una nota de crédito de anulación.');
     }
 
-    const config = await this.arcaConfig.findWithApiKey(tenantId);
-    const transportista = await (this.prisma as PrismaAny).transportista.findUnique({
-      where: { id: liquidacion.transportistaId },
-      select: { idFiscal: true, condicionIva: true },
+    // La anulación del CVLP NO se puede emitir por web service:
+    //  - AFIP no habilita el tipo 065 (NC de Líquido Producto) vía wsfev1 (error 11001).
+    //  - Un CVLP en negativo tampoco: AFIP exige BaseImp > 0 en AlicIva (error 10020).
+    // La NC 065 (o el CVLP negativo) se emite a mano en "Comprobantes en Línea".
+    // Vialto hace la anulación interna; el frontend guía al operador a AFIP.
+    await this.prisma.liquidacion.update({
+      where: { id: liquidacionId },
+      data: {
+        estado: 'anulado',
+        anulacionFecha: new Date(),
+        updatedAt: new Date(),
+      } as PrismaAny,
     });
 
-    // NC 065: AFIP no acepta importes negativos sobre el CVLP 060/061.
-    const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(transportista?.condicionIva);
-
-    try {
-      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-        config.apiKey,
-        config.cuitEmisor,
-        config.ambiente as 'homologacion' | 'produccion',
-        config.ptoVentaCvlp,
-        cbteTipoAnulacion,
-        tenantId,
-        liquidacionId,
-        undefined,
-        config.certPem,
-        config.keyPem,
-      );
-      const cbteNro = ultimoCbte + 1;
-
-      const docNro = transportista?.idFiscal
-        ? Number(transportista.idFiscal.replace(/-/g, ''))
-        : 0;
-      const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
-      const ivaPct =
-        (liquidacion as { ivaPct?: number | null }).ivaPct ??
-        config?.ivaGastosAdmin ??
-        21;
-
-      // Importes en positivo: la NC 065 acredita por su tipo, no por signos negativos.
-      const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
-        where: { liquidacionId },
-        orderBy: { orden: 'asc' },
-      });
-      const conceptos = buildCvlpConceptosList({
-        bruto: Number(liquidacion.bruto || 0),
-        comision: Number(liquidacion.comision || 0),
-        ivaPctDefault: ivaPct,
-        lineas: this.lineasFromStored(lineasDb),
-      });
-
-      const fechaNc = formatFechaCbte(new Date());
-      const fechaCvlpAsoc = await this.resolveFechaCbteOriginal(liquidacionId, liquidacion);
-
-      const cabeceraBase = {
-        cuit: config.cuitEmisor,
-        ptoVenta: config.ptoVentaCvlp,
-        cbteTipo: cbteTipoAnulacion,
-        cbteNro,
-        fechaCbte: fechaNc,
-        concepto: 1,
-        docTipo,
-        docNro,
-        condicionIvaReceptorId: transportista?.condicionIva ?? 1,
-      };
-
-      const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
-      const cbtesAsoc = [
-        {
-          Tipo: liquidacion.cbteTipo,
-          PtoVta: liquidacion.ptoVenta,
-          Nro: liquidacion.cbteNro,
-          Cuit: String(config.cuitEmisor).replace(/[-\s]/g, ''),
-          CbteFch: fechaCvlpAsoc,
-        },
-      ];
-      const arcaRequest = mapCvlpToArcaRequest(
-        cvlp,
-        config.ambiente as 'homologacion' | 'produccion',
-        cbtesAsoc,
-      );
-
-      const authResult = await this.arcaClient.autorizarComprobante(
-        config.apiKey,
-        arcaRequest,
-        tenantId,
-        liquidacionId,
-        undefined,
-        config.certPem,
-        config.keyPem,
-        {
-          ...(cvlp as unknown as Record<string, unknown>),
-          cbtesAsoc,
-          anulacionDe: {
-            cbteTipo: liquidacion.cbteTipo,
-            cbteNro: liquidacion.cbteNro,
-            ptoVenta: liquidacion.ptoVenta,
-            cae: liquidacion.cae,
-          },
-        },
-      );
-
-      const caeFechaVto = parseAfipDate(authResult.CAEFchVto);
-
-      // No se borra CAE / cbteNro / PDF: el comprobante original sigue disponible.
-      await this.prisma.liquidacion.update({
-        where: { id: liquidacionId },
-        data: {
-          estado: 'anulado',
-          anulacionCbteTipo: cbteTipoAnulacion,
-          anulacionCbteNro: cbteNro,
-          anulacionPtoVenta: config.ptoVentaCvlp,
-          anulacionCae: authResult.CAE,
-          anulacionCaeFechaVto: caeFechaVto,
-          anulacionFecha: new Date(),
-          updatedAt: new Date(),
-        } as PrismaAny,
-      });
-
-      return this.findById(tenantId, liquidacionId);
-    } catch (err) {
-      const errMsg =
-        err instanceof ArcaException
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : String(err);
-      this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
-      throw new UnprocessableEntityException(errMsg);
-    }
+    return this.findById(tenantId, liquidacionId);
   }
 
   /** Fecha yyyymmdd del CVLP original (para CbteAsoc de la NC). */

@@ -3,6 +3,7 @@ import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
+import { normalizeArcaAmbiente } from './arca.util';
 import { buildComprobanteCvlp } from './arca-cvlp.util';
 import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
 import { buildCvlpConceptosList } from './cvlp-conceptos.util';
@@ -349,6 +350,9 @@ export class LiquidacionPdfService {
     cvlp: ArcaComprobanteCvlp,
     drawOpts: PdfDrawOpts,
   ): Promise<Buffer> {
+    // Ambiente desde ArcaConfig del tenant (no acción manual del usuario).
+    const showTestWatermark =
+      normalizeArcaAmbiente(config?.ambiente) !== 'produccion';
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: true });
@@ -356,14 +360,45 @@ export class LiquidacionPdfService {
         doc.on('data', (c: Buffer) => chunks.push(c));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL', cvlp, drawOpts);
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL', cvlp, drawOpts, showTestWatermark);
         doc.addPage();
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO', cvlp, drawOpts);
+        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO', cvlp, drawOpts, showTestWatermark);
         doc.end();
       } catch (e) {
         reject(e);
       }
     });
+  }
+
+  /**
+   * Marca de agua diagonal en homologación/testing.
+   * Se dibuja al final de cada página (por encima del contenido, traslúcida).
+   */
+  private drawHomologacionWatermark(doc: PDFKit.PDFDocument) {
+    doc.save();
+    doc.opacity(0.16);
+    doc.fillColor('#b71c1c');
+    doc.font('Helvetica-Bold');
+
+    const cx = PAGE_W / 2;
+    const cy = PAGE_H / 2;
+    doc.translate(cx, cy);
+    doc.rotate(-42);
+
+    // Ancho de la diagonal de la hoja A4 para que la banda cruce todo el documento.
+    const bandW = Math.sqrt(PAGE_W * PAGE_W + PAGE_H * PAGE_H);
+    doc.fontSize(28).text('COMPROBANTE DE PRUEBA', -bandW / 2, -28, {
+      width: bandW,
+      align: 'center',
+      lineBreak: false,
+    });
+    doc.fontSize(22).text('SIN VALIDEZ FISCAL', -bandW / 2, 8, {
+      width: bandW,
+      align: 'center',
+      lineBreak: false,
+    });
+
+    doc.restore();
   }
 
   private draw(
@@ -375,6 +410,7 @@ export class LiquidacionPdfService {
     copia: 'ORIGINAL' | 'DUPLICADO',
     cvlp: ArcaComprobanteCvlp,
     opts: PdfDrawOpts,
+    showTestWatermark = false,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -680,6 +716,11 @@ export class LiquidacionPdfService {
     } else {
       doc.fontSize(7.5).font('Helvetica').fillColor('#999')
         .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });
+    }
+
+    // Al final de la página: encima del contenido, sin taparlo (opacity).
+    if (showTestWatermark) {
+      this.drawHomologacionWatermark(doc);
     }
   }
 }

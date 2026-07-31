@@ -18,7 +18,7 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
-import { getCbteTipoCvlp, parseNumeroFactura } from './arca.util';
+import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, parseNumeroFactura } from './arca.util';
 import { buildComprobanteCvlp, mapCvlpToArcaRequest } from './arca-cvlp.util';
 import {
   buildCvlpConceptosList,
@@ -613,8 +613,10 @@ export class LiquidacionesService {
         data: {
           estado: isConectividad ? 'pendiente_cae' : 'error',
           arcaError: errMsg,
+          arcaErrorDetalle:
+            err instanceof ArcaException ? (err.detalle ?? null) : null,
           updatedAt: new Date(),
-        },
+        } as PrismaAny,
       });
 
       if (isConectividad) {
@@ -625,16 +627,25 @@ export class LiquidacionesService {
       }
 
       this.logger.error(`Error al emitir liquidación ${liquidacionId}: ${errMsg}`);
-      throw new UnprocessableEntityException(errMsg);
+      throw new UnprocessableEntityException({
+        message: errMsg,
+        detalle: err instanceof ArcaException ? err.detalle : undefined,
+      });
     }
   }
 
   /**
-   * Anula una liquidación autorizada emitiendo vía AFIP una Nota de Crédito 065
-   * asociada al CVLP original (CbtesAsoc). Importes en positivo: AFIP rechaza
-   * negativos en 60/61. Tras éxito, estado → `anulado`; CAE/PDF originales se conservan.
+   * Anula una liquidación autorizada emitiendo vía AFIP un comprobante estándar
+   * (Nota de Crédito 3/8 o Nota de Débito 2/7, elegible por `tipoAnulacion`)
+   * asociado al CVLP original (CbtesAsoc). Importes en positivo: AFIP rechaza el
+   * 065 (no existe en WS) y los negativos. Tras éxito, estado → `anulado`;
+   * el CVLP original (CAE/PDF) se conserva.
    */
-  async anularLiquidacion(tenantId: string, liquidacionId: string) {
+  async anularLiquidacion(
+    tenantId: string,
+    liquidacionId: string,
+    tipoAnulacion?: 'nota_credito' | 'nota_debito',
+  ) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
     });
@@ -648,24 +659,143 @@ export class LiquidacionesService {
       throw new BadRequestException('La liquidación no tiene número de comprobante');
     }
     if ((liquidacion as { anulacionCae?: string | null }).anulacionCae) {
-      throw new BadRequestException('Esta liquidación ya tiene una nota de crédito de anulación.');
+      throw new BadRequestException('Esta liquidación ya tiene un comprobante de anulación.');
     }
 
-    // La anulación del CVLP NO se puede emitir por web service:
-    //  - AFIP no habilita el tipo 065 (NC de Líquido Producto) vía wsfev1 (error 11001).
-    //  - Un CVLP en negativo tampoco: AFIP exige BaseImp > 0 en AlicIva (error 10020).
-    // La NC 065 (o el CVLP negativo) se emite a mano en "Comprobantes en Línea".
-    // Vialto hace la anulación interna; el frontend guía al operador a AFIP.
-    await this.prisma.liquidacion.update({
-      where: { id: liquidacionId },
-      data: {
-        estado: 'anulado',
-        anulacionFecha: new Date(),
-        updatedAt: new Date(),
-      } as PrismaAny,
+    const config = await this.arcaConfig.findWithApiKey(tenantId);
+    const transportista = await (this.prisma as PrismaAny).transportista.findUnique({
+      where: { id: liquidacion.transportistaId },
+      select: { idFiscal: true, condicionIva: true },
     });
 
-    return this.findById(tenantId, liquidacionId);
+    // AFIP no habilita la NC 065 ni importes negativos por web service. El CVLP se
+    // anula con una Nota de Crédito estándar (tipo 3 clase A / 8 clase B) asociada
+    // al 060/061 original mediante CbtesAsoc. Verificado contra AFIP (devuelve CAE).
+    const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(
+      transportista?.condicionIva,
+      tipoAnulacion ??
+        (config as { anulacionTipoComprobante?: 'nota_credito' | 'nota_debito' })
+          .anulacionTipoComprobante,
+    );
+
+    try {
+      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+        config.apiKey,
+        config.cuitEmisor,
+        config.ambiente as 'homologacion' | 'produccion',
+        config.ptoVentaCvlp,
+        cbteTipoAnulacion,
+        tenantId,
+        liquidacionId,
+        undefined,
+        config.certPem,
+        config.keyPem,
+      );
+      const cbteNro = ultimoCbte + 1;
+
+      const docNro = transportista?.idFiscal
+        ? Number(transportista.idFiscal.replace(/-/g, ''))
+        : 0;
+      const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+      const ivaPct =
+        (liquidacion as { ivaPct?: number | null }).ivaPct ??
+        config?.ivaGastosAdmin ??
+        21;
+
+      // Importes en positivo: la Nota de Crédito acredita por su tipo, no por signo.
+      const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
+        where: { liquidacionId },
+        orderBy: { orden: 'asc' },
+      });
+      const conceptos = buildCvlpConceptosList({
+        bruto: Number(liquidacion.bruto || 0),
+        comision: Number(liquidacion.comision || 0),
+        ivaPctDefault: ivaPct,
+        lineas: this.lineasFromStored(lineasDb),
+      });
+
+      const fechaNc = formatFechaCbte(new Date());
+      const fechaCvlpAsoc = await this.resolveFechaCbteOriginal(liquidacionId, liquidacion);
+
+      const cabeceraBase = {
+        cuit: config.cuitEmisor,
+        ptoVenta: config.ptoVentaCvlp,
+        cbteTipo: cbteTipoAnulacion,
+        cbteNro,
+        fechaCbte: fechaNc,
+        concepto: 1,
+        docTipo,
+        docNro,
+        condicionIvaReceptorId: transportista?.condicionIva ?? 1,
+      };
+
+      const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
+      const cbtesAsoc = [
+        {
+          Tipo: liquidacion.cbteTipo,
+          PtoVta: liquidacion.ptoVenta,
+          Nro: liquidacion.cbteNro,
+          Cuit: String(config.cuitEmisor).replace(/[-\s]/g, ''),
+          CbteFch: fechaCvlpAsoc,
+        },
+      ];
+      const arcaRequest = mapCvlpToArcaRequest(
+        cvlp,
+        config.ambiente as 'homologacion' | 'produccion',
+        cbtesAsoc,
+      );
+
+      const authResult = await this.arcaClient.autorizarComprobante(
+        config.apiKey,
+        arcaRequest,
+        tenantId,
+        liquidacionId,
+        undefined,
+        config.certPem,
+        config.keyPem,
+        {
+          ...(cvlp as unknown as Record<string, unknown>),
+          cbtesAsoc,
+          anulacionDe: {
+            cbteTipo: liquidacion.cbteTipo,
+            cbteNro: liquidacion.cbteNro,
+            ptoVenta: liquidacion.ptoVenta,
+            cae: liquidacion.cae,
+          },
+        },
+      );
+
+      const caeFechaVto = parseAfipDate(authResult.CAEFchVto);
+
+      // El CVLP original se conserva (CAE / número / PDF siguen disponibles).
+      await this.prisma.liquidacion.update({
+        where: { id: liquidacionId },
+        data: {
+          estado: 'anulado',
+          anulacionCbteTipo: cbteTipoAnulacion,
+          anulacionCbteNro: cbteNro,
+          anulacionPtoVenta: config.ptoVentaCvlp,
+          anulacionCae: authResult.CAE,
+          anulacionCaeFechaVto: caeFechaVto,
+          anulacionFecha: new Date(),
+          updatedAt: new Date(),
+        } as PrismaAny,
+      });
+
+      return this.findById(tenantId, liquidacionId);
+    } catch (err) {
+      const errMsg =
+        err instanceof ArcaException
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
+      throw new UnprocessableEntityException({
+        message: errMsg,
+        detalle: err instanceof ArcaException ? err.detalle : undefined,
+      });
+    }
   }
 
   /** Fecha yyyymmdd del CVLP original (para CbteAsoc de la NC). */
@@ -924,6 +1054,12 @@ export class LiquidacionesService {
         },
       });
 
+      if (err instanceof ArcaException) {
+        throw new UnprocessableEntityException({
+          message: err.message,
+          detalle: err.detalle,
+        });
+      }
       throw err;
     }
   }

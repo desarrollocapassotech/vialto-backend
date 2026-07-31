@@ -25,8 +25,8 @@ const CONFIG_SELECT = {
   ptoVentaFactura: true,
   ambiente: true,
   comisionPctDefault: true,
-  comisionPctAlt: true,
   ivaGastosAdmin: true,
+  anulacionTipoComprobante: true,
   updatedAt: true,
   // cert/key se incluyen solo para saber si están configurados; el contenido no se expone
   certPem: true,
@@ -101,8 +101,8 @@ export class ArcaConfigService {
       ptoVentaFactura: dto.ptoVentaFactura,
       ambiente,
       comisionPctDefault: dto.comisionPctDefault,
-      comisionPctAlt: dto.comisionPctAlt,
       ivaGastosAdmin: dto.ivaGastosAdmin,
+      anulacionTipoComprobante: dto.anulacionTipoComprobante ?? 'nota_credito',
       updatedAt: now,
     };
     // Solo sobreescribir cert/key si se envían con contenido

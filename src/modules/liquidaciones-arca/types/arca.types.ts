@@ -43,7 +43,7 @@ export interface ArcaAutorizarRequest {
   monId?: string;     // default 'PES'
   monCotiz?: number;  // default 1
   alicuotasIva?: AlicIva[];
-  /** Comprobantes asociados (NC 065 → CVLP 060/061 original). */
+  /** Comprobantes asociados (comprobante de anulación → CVLP 060/061 original). */
   cbtesAsoc?: ArcaCbteAsoc[];
 }
 
@@ -107,6 +107,8 @@ export const ARCA_ERROR_CODES = {
 export type ArcaErrorCode = (typeof ARCA_ERROR_CODES)[keyof typeof ARCA_ERROR_CODES];
 
 export class ArcaException extends Error {
+  /** Detalle técnico completo (cuerpo crudo de la respuesta de AFIP SDK), para "ver error completo". */
+  public readonly detalle?: string;
   constructor(
     public readonly code: ArcaErrorCode,
     message: string,
@@ -115,5 +117,20 @@ export class ArcaException extends Error {
   ) {
     super(message);
     this.name = 'ArcaException';
+    this.detalle = deriveArcaDetalle(raw);
+  }
+}
+
+/** Extrae el cuerpo crudo (JSON/string) de un error o respuesta de AFIP SDK. */
+function deriveArcaDetalle(raw: unknown): string | undefined {
+  if (raw == null) return undefined;
+  const r = raw as { data?: unknown; response?: { data?: unknown } };
+  const body = r?.data ?? r?.response?.data ?? raw;
+  if (body == null) return undefined;
+  if (typeof body === 'string') return body.trim() || undefined;
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return String(body);
   }
 }

@@ -458,15 +458,11 @@ export class ArcaClientService {
           raw,
         );
       }
-      const axiosData = (raw as any)?.response?.data;
-      if (axiosData != null) {
-        try {
-          this.logger.warn(
-            `AFIP SDK HTTP ${httpStatus ?? 400} sin detalle parseable. Body: ${JSON.stringify(axiosData).slice(0, 2000)}`,
-          );
-        } catch {
-          this.logger.warn(`AFIP SDK HTTP ${httpStatus ?? 400} sin detalle parseable (body no serializable).`);
-        }
+      const rawBody = this.rawSdkBody(raw);
+      if (rawBody) {
+        this.logger.warn(
+          `AFIP SDK HTTP ${httpStatus ?? 400} sin detalle parseable. Body: ${rawBody.slice(0, 2000)}`,
+        );
       }
       return new ArcaException(
         ARCA_ERROR_CODES.GENERICO,
@@ -475,6 +471,23 @@ export class ArcaClientService {
         raw,
       );
     }
-    return new ArcaException(ARCA_ERROR_CODES.GENERICO, rawStr, httpStatus, raw);
+    return new ArcaException(
+      ARCA_ERROR_CODES.GENERICO,
+      rawStr || 'Error desconocido al comunicarse con AFIP / ARCA.',
+      httpStatus,
+      raw,
+    );
+  }
+
+  /** Cuerpo crudo de la respuesta de AFIP SDK como string (solo para logging). */
+  private rawSdkBody(raw: any): string {
+    const d = raw?.data ?? raw?.response?.data;
+    if (d == null) return '';
+    if (typeof d === 'string') return d.trim();
+    try {
+      return JSON.stringify(d);
+    } catch {
+      return String(d);
+    }
   }
 }

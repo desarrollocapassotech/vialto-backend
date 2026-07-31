@@ -722,7 +722,6 @@ Table arca_configs as "[IMP-ARCA] arca_configs" {
   ptoVentaFactura Int [not null]
   ambiente String [default: 'homologacion']
   comisionPctDefault Float [default: 8]
-  comisionPctAlt Float [default: 7]
   ivaGastosAdmin Float [default: 21]
   certPem String [note: 'nunca exponer en API pública']
   keyPem String

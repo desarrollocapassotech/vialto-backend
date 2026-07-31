@@ -22,8 +22,12 @@ export class UpsertArcaConfigDto {
   ambiente: 'homologacion' | 'produccion';
 
   @IsNumber() @Min(0) @Max(100) comisionPctDefault: number;
-  @IsNumber() @Min(0) @Max(100) comisionPctAlt: number;
   @IsNumber() @Min(0) @Max(100) ivaGastosAdmin: number;
+
+  // Comprobante con que se anula un CVLP (NC = tipo 3/8, ND = tipo 2/7).
+  @IsOptional()
+  @IsIn(['nota_credito', 'nota_debito'])
+  anulacionTipoComprobante?: 'nota_credito' | 'nota_debito';
 
   @IsOptional() @IsString() certPem?: string;
   @IsOptional() @IsString() keyPem?: string;

@@ -865,8 +865,9 @@ model ArcaConfig {
   ambiente           String   @default("homologacion") // homologacion | produccion
   // Parámetros de liquidación
   comisionPctDefault Float    @default(8)
-  comisionPctAlt     Float    @default(7)
   ivaGastosAdmin     Float    @default(21)
+  // Comprobante con que se anula un CVLP: 'nota_credito' (tipo 3/8) | 'nota_debito' (tipo 2/7)
+  anulacionTipoComprobante String @default("nota_credito")
   // Certificado digital AFIP (PEM) — nunca se expone en la API pública
   certPem            String?
   keyPem             String?
@@ -919,7 +920,8 @@ model Liquidacion {
   // Estado de la integración ARCA
   estado     String  @default("borrador")
   // borrador | pendiente_cae | autorizado | error | anulado
-  arcaError  String?
+  arcaError        String? // mensaje amigable del último error de ARCA
+  arcaErrorDetalle String? // detalle técnico crudo de AFIP SDK (para "ver error completo")
   reintentos Int     @default(0)
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)

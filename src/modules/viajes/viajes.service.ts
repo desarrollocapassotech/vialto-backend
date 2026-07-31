@@ -77,7 +77,16 @@ const VIAJE_INCLUDE_FULL = {
       viajes: { select: { id: true, monto: true } },
     },
   },
-  liquidacionesViaje: { include: { liquidacion: true } },
+  liquidacionesViaje: {
+    include: {
+      liquidacion: {
+        include: {
+          conceptosLineas: true,
+          viajes: true,
+        },
+      },
+    },
+  },
 };
 
 /**
@@ -254,9 +263,10 @@ export class ViajesService {
 
   /**
    * Obtiene el monto real acordado sumando las liquidaciones emitidas,
-   * o haciendo un fallback al monto estimado original.
+   * prorrateando los conceptos según si son del viaje puntual o generales.
    */
   private calcularAcordado(v: {
+    id?: string;
     precioTransportistaExterno?: number | null;
     liquidacionesViaje?: any[];
   }): number {
@@ -272,7 +282,49 @@ export class ViajesService {
         if (liq && (liq.estado === "anulado" || liq.estado === "error"))
           continue;
 
-        if (lv.monto != null) {
+        // Cálculo contemplando conceptos asignados al viaje o generales divididos
+        if (liq && Array.isArray(liq.conceptosLineas) && v.id) {
+          const brutoViaje =
+            typeof lv.monto === "number"
+              ? lv.monto
+              : Number(v.precioTransportistaExterno) || 0;
+          const comisionPct = Number(liq.comisionPct) || 0;
+          const comisionMonto = (brutoViaje * comisionPct) / 100;
+
+          const divisor =
+            typeof liq.cantViajes === "number" && liq.cantViajes > 0
+              ? liq.cantViajes
+              : Array.isArray(liq.viajes) && liq.viajes.length > 0
+                ? liq.viajes.length
+                : 1;
+
+          const efectoConceptos = liq.conceptosLineas.reduce(
+            (sum: number, c: any) => {
+              const monto = Number(c.monto) || 0;
+              if (!monto) return sum;
+              const conSigno = c.signo === "contra" ? -monto : monto;
+
+              // 1. Asignado específicamente a ESTE viaje (100%)
+              if (c.viajeId && String(c.viajeId) === String(v.id)) {
+                return sum + conSigno;
+              }
+              // 2. Asignado a OTRO viaje (0%)
+              if (c.viajeId != null && String(c.viajeId).trim() !== "") {
+                return sum;
+              }
+              // 3. General (viajeId == null/empty) -> se divide en el total de viajes
+              return sum + conSigno / divisor;
+            },
+            0,
+          );
+
+          const netoGravado = brutoViaje - comisionMonto + efectoConceptos;
+          const ivaPct = Number(liq.ivaPct) || 0;
+          const ivaMonto = (netoGravado * ivaPct) / 100;
+
+          montoReal += netoGravado + ivaMonto;
+          tieneMontoReal = true;
+        } else if (lv.monto != null) {
           montoReal += Number(lv.monto);
           tieneMontoReal = true;
         } else if (liq?.liquido != null) {
@@ -359,6 +411,7 @@ export class ViajesService {
   }
 
   private assertPagosTransportistaNoSuperanSaldo(params: {
+    id?: string;
     transportistaId?: string | null;
     precioTransportistaExterno?: number | null;
     monedaPrecioTransportistaExterno?: string | null;
@@ -559,10 +612,20 @@ export class ViajesService {
           precioTransportistaExterno: { gt: 0 },
         },
         select: {
+          id: true,
           precioTransportistaExterno: true,
           monedaPrecioTransportistaExterno: true,
           pagosTransportista: true,
-          liquidacionesViaje: { include: { liquidacion: true } },
+          liquidacionesViaje: {
+            include: {
+              liquidacion: {
+                include: {
+                  conceptosLineas: true,
+                  viajes: true,
+                },
+              },
+            },
+          },
         },
       }),
     ]);
@@ -974,6 +1037,7 @@ export class ViajesService {
       dto,
     );
     this.assertPagosTransportistaNoSuperanSaldo({
+      id: undefined,
       transportistaId: refs.transportistaId,
       precioTransportistaExterno,
       monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
@@ -1243,6 +1307,7 @@ export class ViajesService {
       dto.monedaPrecioTransportistaExterno !== undefined
     ) {
       this.assertPagosTransportistaNoSuperanSaldo({
+        id,
         transportistaId: op.transportistaId,
         precioTransportistaExterno: precioTransportistaExternoResolved,
         monedaPrecioTransportistaExterno:
@@ -1374,6 +1439,7 @@ export class ViajesService {
     const pagosActualizados = [...pagosActuales, nuevoPago];
 
     this.assertPagosTransportistaNoSuperanSaldo({
+      id: viaje.id,
       transportistaId: viaje.transportistaId,
       precioTransportistaExterno: viaje.precioTransportistaExterno,
       monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
@@ -1454,7 +1520,16 @@ export class ViajesService {
         cliente: { select: { id: true, nombre: true } },
         transportista: { select: { id: true, nombre: true } },
         factura: { select: { id: true, numero: true } },
-        liquidacionesViaje: { include: { liquidacion: true } },
+        liquidacionesViaje: {
+          include: {
+            liquidacion: {
+              include: {
+                conceptosLineas: true,
+                viajes: true,
+              },
+            },
+          },
+        },
       },
     });
 

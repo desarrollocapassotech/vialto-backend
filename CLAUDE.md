@@ -758,7 +758,6 @@ model ArcaConfig {
   ptoVentaFactura    Int      // punto de venta para Facturas A/B
   ambiente           String   @default("homologacion") // homologacion | produccion
   comisionPctDefault Float    @default(8)
-  comisionPctAlt     Float    @default(7)
   ivaGastosAdmin     Float    @default(21)
   certPem            String?  // nunca se expone en la API pública
   keyPem             String?

@@ -865,7 +865,6 @@ model ArcaConfig {
   ambiente           String   @default("homologacion") // homologacion | produccion
   // Parámetros de liquidación
   comisionPctDefault Float    @default(8)
-  comisionPctAlt     Float    @default(7)
   ivaGastosAdmin     Float    @default(21)
   // Comprobante con que se anula un CVLP: 'nota_credito' (tipo 3/8) | 'nota_debito' (tipo 2/7)
   anulacionTipoComprobante String @default("nota_credito")

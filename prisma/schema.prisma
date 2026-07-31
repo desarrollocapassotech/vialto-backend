@@ -683,10 +683,12 @@ model CombustibleSyncErrorLog {
   mensaje    String // mensaje de error devuelto por la validación (ej. "El kilometraje ingresado... es inconsistente...")
   payload    Json // datos de la carga que se intentó sincronizar: patente, estacion, litros, precioPorLitro, importe, km, formaPago, fecha, localId (id en IndexedDB, para correlacionar reintentos)
   createdAt  DateTime  @default(now())
+  resueltoEn DateTime? // COMB-07-T5: se completa cuando el chofer logra resincronizar esta misma carga (correlacionada por payload.localId); null = sigue pendiente de revisión
 
   @@index([tenantId])
   @@index([tenantId, choferId])
   @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, resueltoEn])
   @@map("combustible_sync_error_logs")
 }
 

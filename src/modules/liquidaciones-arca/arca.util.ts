@@ -70,3 +70,17 @@ export function normalizeArcaAmbiente(raw: unknown): 'homologacion' | 'produccio
   }
   return 'homologacion';
 }
+
+/**
+ * Determina el tipo de Factura A/B según la condición frente al IVA del cliente.
+ * - 1: Responsable Inscripto → Factura A (cbteTipo 1)
+ * - Resto (monotributo, CF, exento, etc.) → Factura B (cbteTipo 6)
+ */
+export function getCbteTipoFactura(condicionIva?: number | null): number {
+  if (condicionIva == null) {
+    throw new BadRequestException(
+      'El cliente no tiene configurada su condición frente al IVA. Actualice sus datos maestros antes de operar.',
+    );
+  }
+  return condicionIva === 1 ? 1 : 6;
+}

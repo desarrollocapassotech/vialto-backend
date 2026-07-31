@@ -18,8 +18,16 @@ import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
-import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, parseNumeroFactura } from './arca.util';
+import { getCbteTipoCvlp, getCbteTipoAnulacionCvlp, getCbteTipoFactura, parseNumeroFactura } from './arca.util';
 import { buildComprobanteCvlp, mapCvlpToArcaRequest } from './arca-cvlp.util';
+import {
+  buildFacturaConceptosList,
+  defaultFacturaLineas,
+  type FacturaLineaInput,
+} from './factura-conceptos.util';
+import { assertFacturaEmitDatosCompletos } from './factura-emit-validation.util';
+import { resolveIvaPct } from './arca-iva.util';
+import { FacturaPdfService } from './factura-pdf.service';
 import {
   buildCvlpConceptosList,
   computeLiquidacionTotales,
@@ -48,6 +56,7 @@ export class LiquidacionesService {
     private readonly arcaClient: ArcaClientService,
     private readonly arcaConfig: ArcaConfigService,
     private readonly conceptosLiquidacion: ConceptosLiquidacionService,
+    private readonly facturaPdf: FacturaPdfService,
   ) {}
 
   /** Acceso a nuevos modelos Prisma pendientes de regenerar el cliente. */
@@ -821,20 +830,33 @@ export class LiquidacionesService {
   async emitirFacturaArca(tenantId: string, facturaId: string, dto: EmitirFacturaArcaDto) {
     const facturaRaw = await this.prisma.factura.findUnique({
       where: { id: facturaId },
+      include: {
+        viajes: {
+          select: {
+            id: true,
+            numero: true,
+            monto: true,
+            origen: true,
+            destino: true,
+          },
+        },
+        cliente: {
+          select: {
+            id: true,
+            nombre: true,
+            idFiscal: true,
+            direccion: true,
+            condicionIva: true,
+          },
+        },
+      },
     });
-    const clienteRaw = facturaRaw?.clienteId
-      ? await (this.prisma as PrismaAny).cliente.findUnique({
-          where: { id: facturaRaw.clienteId },
-          select: { idFiscal: true, condicionIva: true },
-        })
-      : null;
-    const factura = facturaRaw ? { ...facturaRaw, clienteDatos: clienteRaw } : null;
 
-    if (!factura || factura.tenantId !== tenantId) {
+    if (!facturaRaw || facturaRaw.tenantId !== tenantId) {
       throw new NotFoundException('Factura no encontrada');
     }
-    // arcaEstado es campo nuevo pendiente de prisma generate
-    const facturaExt = factura as typeof factura & {
+
+    const facturaExt = facturaRaw as typeof facturaRaw & {
       arcaEstado?: string | null;
       cbteTipo?: number | null;
       cbteNro?: number | null;
@@ -842,22 +864,64 @@ export class LiquidacionesService {
       cae?: string | null;
       caeFechaVto?: Date | null;
       arcaError?: string | null;
-      condicionIva?: number | null;
     };
-    if (facturaExt.arcaEstado === 'autorizado') {
+
+    if (facturaExt.arcaEstado === 'autorizado' || facturaExt.cae) {
       throw new ConflictException('La factura ya tiene CAE autorizado');
+    }
+    if (facturaRaw.tipo !== 'cliente') {
+      throw new BadRequestException(
+        'Solo se pueden emitir facturas de tipo cliente por ARCA.',
+      );
+    }
+    if (facturaRaw.moneda === 'USD') {
+      throw new BadRequestException(
+        'No se pueden emitir facturas en USD por ARCA.',
+      );
+    }
+    if (!facturaRaw.cliente) {
+      throw new BadRequestException('La factura no tiene un cliente asociado.');
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
 
-    // Marcar como pendiente
+    assertFacturaEmitDatosCompletos({
+      emisor: config,
+      cliente: facturaRaw.cliente,
+    });
+
+    const cbteTipoFinal = getCbteTipoFactura(facturaRaw.cliente.condicionIva);
+    const ivaPctDefault = resolveIvaPct(facturaRaw.ivaPct ?? config.ivaGastosAdmin);
+
+    const lineasInput: FacturaLineaInput[] =
+      dto.lineas && dto.lineas.length > 0
+        ? dto.lineas.map((l) => ({
+            descripcion: l.descripcion,
+            importe: l.importe,
+            ivaPct: l.ivaPct,
+          }))
+        : defaultFacturaLineas(facturaRaw, facturaRaw.viajes);
+
+    if (lineasInput.length === 0 || lineasInput.every((l) => l.importe === 0)) {
+      throw new BadRequestException(
+        'La factura no tiene líneas con importe para emitir.',
+      );
+    }
+
+    const conceptos = buildFacturaConceptosList(lineasInput, ivaPctDefault);
+    const importeNeto = round2(
+      conceptos.reduce((s, c) => s + c.importe, 0),
+    );
+
+    // Marcar como pendiente antes de llamar a AFIP SDK
     await (this.prisma as PrismaAny).factura.update({
       where: { id: facturaId },
       data: {
-        cbteTipo: dto.cbteTipo,
+        cbteTipo: cbteTipoFinal,
         ptoVenta: config.ptoVentaFactura,
         arcaEstado: 'pendiente_cae',
         arcaError: null,
+        importe: importeNeto,
       },
     });
 
@@ -867,7 +931,7 @@ export class LiquidacionesService {
         config.cuitEmisor,
         config.ambiente as 'homologacion' | 'produccion',
         config.ptoVentaFactura,
-        dto.cbteTipo,
+        cbteTipoFinal,
         tenantId,
         undefined,
         facturaId,
@@ -876,56 +940,52 @@ export class LiquidacionesService {
       );
       const cbteNro = ultimoCbte + 1;
 
-      // Verificar que la numeración no tenga desfasaje
       if (facturaExt.cbteNro != null) {
         this.validarCorrelatividad(facturaExt.cbteNro, cbteNro, 'Factura');
       } else {
-        const localCbteNro = parseNumeroFactura(factura.numero);
+        const localCbteNro = parseNumeroFactura(facturaRaw.numero);
         if (isNaN(localCbteNro)) {
           throw new ArcaException(
             ARCA_ERROR_CODES.GENERICO,
-            `El número de factura local "${factura.numero}" no es válido. Debe finalizar con el número correlativo del comprobante a autorizar (ej. "0001-00000045").`,
+            `El número de factura local "${facturaRaw.numero}" no es válido. Debe finalizar con el número correlativo del comprobante a autorizar (ej. "0001-00000045").`,
           );
         }
         this.validarCorrelatividad(localCbteNro, cbteNro, 'Factura');
       }
 
-      // Calcular IVA 21% sobre el importe (ImpNeto = importe / 1.21 si ya es c/IVA,
-      // o importe directamente si es neto). Aquí asumimos que factura.importe = neto.
-      const montos = computeAfipGravadoIva(factura.importe, 0, 0, 21);
-      const impNeto = montos.impNeto;
-      const impIva = montos.impIva;
-      const impTotal = montos.liquido;
-
-      const docNro = factura.clienteDatos?.idFiscal
-        ? Number(factura.clienteDatos.idFiscal.replace(/-/g, ''))
+      const docNro = facturaRaw.cliente.idFiscal
+        ? Number(facturaRaw.cliente.idFiscal.replace(/-/g, ''))
         : 0;
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
-      const condicionIvaReceptorId = factura.clienteDatos?.condicionIva ?? 5;
+      const condicionIvaReceptorId = facturaRaw.cliente.condicionIva ?? 5;
+
+      const cabeceraBase = {
+        cuit: config.cuitEmisor,
+        ptoVenta: config.ptoVentaFactura,
+        cbteTipo: cbteTipoFinal,
+        cbteNro,
+        fechaCbte: formatFechaCbte(new Date(facturaRaw.fechaEmision)),
+        concepto: 1,
+        docTipo,
+        docNro,
+        condicionIvaReceptorId,
+      };
+
+      const comprobante = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPctDefault);
+      const arcaRequest = mapCvlpToArcaRequest(
+        comprobante,
+        config.ambiente as 'homologacion' | 'produccion',
+      );
 
       const response = await this.arcaClient.autorizarComprobante(
         config.apiKey,
-        {
-          ambiente: config.ambiente as 'homologacion' | 'produccion',
-          cuit: config.cuitEmisor,
-          ptoVenta: config.ptoVentaFactura,
-          cbteTipo: dto.cbteTipo,
-          cbteNro,
-          fechaCbte: formatFechaCbte(new Date(factura.fechaEmision)),
-          concepto: 1,
-          docTipo,
-          docNro,
-          condicionIvaReceptorId,
-          impNeto,
-          impIva,
-          impTotal,
-          alicuotasIva: [montos.alicuota],
-        },
+        arcaRequest,
         tenantId,
         undefined,
         facturaId,
         config.certPem,
         config.keyPem,
+        comprobante as unknown as Record<string, unknown>,
       );
 
       await (this.prisma as PrismaAny).factura.update({
@@ -936,28 +996,74 @@ export class LiquidacionesService {
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaEstado: 'autorizado',
           arcaError: null,
+          importe: comprobante.impNeto,
         },
       });
 
-      return this.prisma.factura.findUnique({ where: { id: facturaId } });
+      // Generar PDF y subir a Cloudinary
+      let comprobanteUrl: string | null = null;
+      try {
+        const { buffer, filename } = await this.facturaPdf.generate(tenantId, facturaId);
+        if (this.cloudinary.isConfigured()) {
+          comprobanteUrl = await this.cloudinary.uploadComprobanteArchivo(
+            tenantId,
+            buffer,
+            filename,
+            'application/pdf',
+          );
+          await (this.prisma as PrismaAny).factura.update({
+            where: { id: facturaId },
+            data: { comprobanteUrl },
+          });
+        } else {
+          this.logger.warn(
+            `[emitirFacturaArca] Cloudinary no configurado; PDF no subido para ${facturaId}`,
+          );
+        }
+      } catch (pdfErr) {
+        this.logger.error(
+          `[emitirFacturaArca] Error generando/subiendo PDF para ${facturaId}: ${
+            pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
+          }`,
+        );
+      }
+
+      return this.prisma.factura.findUnique({
+        where: { id: facturaId },
+        include: {
+          viajes: { select: { id: true } },
+          cliente: {
+            select: { id: true, nombre: true, idFiscal: true, condicionIva: true },
+          },
+        },
+      });
     } catch (err) {
       const isConectividad =
         err instanceof ArcaException && err.code === ARCA_ERROR_CODES.CONECTIVIDAD;
+      const errMsg =
+        err instanceof ArcaException
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
 
       await (this.prisma as PrismaAny).factura.update({
         where: { id: facturaId },
         data: {
           arcaEstado: isConectividad ? 'pendiente_cae' : 'error',
-          arcaError:
-            err instanceof ArcaException
-              ? err.message
-              : err instanceof Error
-                ? err.message
-                : String(err),
+          arcaError: errMsg,
         },
       });
 
-      throw err;
+      if (isConectividad) {
+        this.logger.warn(
+          `[emitirFacturaArca] ${facturaId} pendiente_cae por fallo de conectividad`,
+        );
+        return this.prisma.factura.findUnique({ where: { id: facturaId } });
+      }
+
+      this.logger.error(`Error al emitir factura ${facturaId}: ${errMsg}`);
+      throw new UnprocessableEntityException(errMsg);
     }
   }
 

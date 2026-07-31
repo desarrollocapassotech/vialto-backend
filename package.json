@@ -21,7 +21,8 @@
     "migrate:bressan:dry": "ts-node scripts/migrate-bressan-cargas.ts --dry-run",
     "fix:combustible": "ts-node scripts/fix-combustible-cargas-sospechosas.ts",
     "fix:combustible:dry": "ts-node scripts/fix-combustible-cargas-sospechosas.ts --dry-run",
-    "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts"
+    "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts",
+    "test:tarifa-incremento": "ts-node src/modules/liquidaciones-arca/tarifa-incremento.util.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

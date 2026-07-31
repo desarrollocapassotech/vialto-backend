@@ -1124,6 +1124,40 @@ export class PlatformController {
     }
   }
 
+  @ApiOperation({ summary: "Descargar PDF de factura A/B (superadmin)" })
+  @Get("arca/facturas/:facturaId/pdf")
+  async getFacturaPdf(
+    @Param("facturaId") facturaId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const { buffer, filename } = await this.service.getFacturaPdf(
+        tenantId,
+        facturaId,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 400 || e?.status === 404) {
+        res.status(e.status).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
   @ApiOperation({ summary: "Emitir factura a ARCA (superadmin)" })
   @Post("arca/facturas/:facturaId/emitir")
   emitirFacturaArca(

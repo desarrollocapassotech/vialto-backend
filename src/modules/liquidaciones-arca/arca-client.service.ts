@@ -11,7 +11,12 @@ import {
   ArcaLastVoucherResponse,
   ARCA_ERROR_CODES,
 } from './types/arca.types';
-import { extractAfipRejectionMessage, formatAfipRejectionForUser } from './arca-error.util';
+import {
+  enrichAfipRejectionMessage,
+  extractAfipRejectionMessage,
+  extractAfipSdkHttpError,
+  formatAfipRejectionForUser,
+} from './arca-error.util';
 import { normalizeArcaAmbiente } from './arca.util';
 import { round2 } from './arca-iva.util';
 
@@ -189,7 +194,7 @@ export class ArcaClientService {
         .map((e) => String(e.Msg ?? e.Message ?? '').trim())
         .filter(Boolean);
       const userMsg = msgs.length
-        ? `Rechazado por AFIP: ${msgs.join(' ')}`
+        ? enrichAfipRejectionMessage(`Rechazado por AFIP: ${msgs.join(' ')}`)
         : formatAfipRejectionForUser(response);
       this.logger.error(`FECAESolicitar AFIP Errors: ${msgs.join(' | ') || userMsg}`);
       throw new ArcaException(ARCA_ERROR_CODES.GENERICO, userMsg, undefined, response);
@@ -245,6 +250,13 @@ export class ArcaClientService {
       );
     }
 
+    if (!certKey.cert?.trim() || !certKey.key?.trim()) {
+      throw new ArcaException(
+        ARCA_ERROR_CODES.GENERICO,
+        'Falta el certificado digital o la clave privada para conectar con AFIP. Cargalos en Superadmin → ARCA / AFIP (homologación) y guardá.',
+      );
+    }
+
     try {
       // `production` + ElectronicBilling (URLs prod/homo) — NO usar WebService('wsfe')
       // genérico: deja url/wsdl undefined y el proxy de AFIP SDK cae en homologación.
@@ -262,14 +274,24 @@ export class ArcaClientService {
       );
       return { token: ta.token, sign: ta.sign, afip };
     } catch (err) {
-      const errMsg = String(err?.message ?? err);
-      const httpStatus = (err as any)?.status || (err as any)?.statusCode;
-      const respData = (err as any)?.data ?? (err as any)?.response?.data;
-      const respDetail = respData
-        ? ` | Respuesta AFIP SDK: ${typeof respData === 'string' ? respData : JSON.stringify(respData)}`
-        : '';
-      this.logger.error(`Error obteniendo token AFIP SDK: ${errMsg}${respDetail}`);
-      throw this.mapError(err, httpStatus);
+      const errMsg = String((err as { message?: string })?.message ?? err);
+      const httpStatus =
+        (err as { status?: number })?.status ||
+        (err as { statusCode?: number })?.statusCode;
+      const sdkDetail =
+        extractAfipSdkHttpError(err) ??
+        (() => {
+          const respData = (err as { data?: unknown; response?: { data?: unknown } })?.data
+            ?? (err as { response?: { data?: unknown } })?.response?.data;
+          if (!respData) return null;
+          return typeof respData === 'string'
+            ? respData
+            : JSON.stringify(respData);
+        })();
+      this.logger.error(
+        `Error obteniendo token AFIP SDK: ${errMsg}${sdkDetail ? ` | AfipSDK: ${sdkDetail}` : ''}`,
+      );
+      throw this.mapTokenAuthError(err, httpStatus, ambienteNorm, sdkDetail);
     }
   }
 
@@ -332,13 +354,51 @@ export class ArcaClientService {
     }
   }
 
+  /** Error al obtener token WSAA (POST v1/afip/auth en AfipSDK). */
+  private mapTokenAuthError(
+    raw: unknown,
+    httpStatus?: number,
+    ambiente?: ArcaAmbiente,
+    sdkDetail?: string | null,
+  ): ArcaException {
+    const detail = sdkDetail?.trim();
+    const ambLabel = ambiente === 'produccion' ? 'producción' : 'homologación';
+
+    if (httpStatus === 401 || httpStatus === 403) {
+      return new ArcaException(
+        ARCA_ERROR_CODES.GENERICO,
+        `AfipSDK rechazó la API key (HTTP ${httpStatus}). Verificá AFIP_SDK_API_KEY en el servidor.${detail ? ` ${detail}` : ''}`,
+        httpStatus,
+        raw,
+      );
+    }
+
+    const lower = (detail ?? '').toLowerCase();
+    if (lower.includes('cert') || lower.includes('key') || lower.includes('tax_id')) {
+      return new ArcaException(
+        ARCA_ERROR_CODES.GENERICO,
+        `No se pudo autenticar con AFIP (${ambLabel}). Revisá CUIT, certificado y clave privada de homologación.${detail ? ` AfipSDK: ${detail}` : ''}`,
+        httpStatus,
+        raw,
+      );
+    }
+
+    return new ArcaException(
+      ARCA_ERROR_CODES.GENERICO,
+      `No se pudo obtener el token de AFIP (${ambLabel}). Verificá AFIP_SDK_API_KEY, CUIT ${ambiente === 'produccion' ? 'y certificado de producción' : 'y certificado de homologación'}.${detail ? ` AfipSDK: ${detail}` : ''}`,
+      httpStatus,
+      raw,
+    );
+  }
+
   private mapError(raw: any, httpStatus?: number): ArcaException {
     let errCode: number | undefined;
     let rawStr = '';
+    const sdkDetail = extractAfipSdkHttpError(raw);
 
     if (typeof raw === 'object' && raw !== null) {
       errCode = raw.code; // El SDK usa la propiedad 'code' en minúscula (instancia de AfipWebServiceError)
-      rawStr = raw.message || String(raw);
+      rawStr = sdkDetail || raw.message || String(raw);
     } else {
       rawStr = String(raw);
     }
@@ -375,6 +435,16 @@ export class ArcaClientService {
             httpStatus,
             raw,
           );
+        // 11002: Punto de venta no habilitado para WSFE (Factura electrónica).
+        case 11002:
+          return new ArcaException(
+            ARCA_ERROR_CODES.FUERA_DE_RANGO,
+            enrichAfipRejectionMessage(
+              'Rechazado por AFIP: (11002) El punto de venta no está habilitado para Factura electrónica (WSFE).',
+            ),
+            httpStatus,
+            raw,
+          );
       }
     }
 
@@ -407,9 +477,15 @@ export class ArcaClientService {
       return new ArcaException(ARCA_ERROR_CODES.CONECTIVIDAD, 'AFIP SDK no respondió. El comprobante quedó en estado pendiente_cae para reintentar.', httpStatus, raw);
     }
     if (httpStatus === 400 || lower.match(/^http 4\d\d$/)) {
+      const detail =
+        rawStr &&
+        !/^http 4\d\d$/i.test(rawStr.trim()) &&
+        rawStr.trim().length > 0
+          ? ` Detalle técnico: ${rawStr.trim()}`
+          : '';
       return new ArcaException(
         ARCA_ERROR_CODES.GENERICO,
-        'AFIP / ARCA rechazó la solicitud. Verificá que el CUIT, el punto de venta y el certificado estén correctamente configurados.',
+        `AFIP / ARCA rechazó la solicitud. Verificá que el CUIT, el punto de venta y el certificado estén correctamente configurados.${detail}`,
         httpStatus,
         raw,
       );

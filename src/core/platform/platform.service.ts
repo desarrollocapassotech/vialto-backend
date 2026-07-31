@@ -46,6 +46,7 @@ import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update
 import { ArcaConfigService } from '../../modules/liquidaciones-arca/arca-config.service';
 import { LiquidacionesService } from '../../modules/liquidaciones-arca/liquidaciones.service';
 import { LiquidacionPdfService } from '../../modules/liquidaciones-arca/liquidacion-pdf.service';
+import { FacturaPdfService } from '../../modules/liquidaciones-arca/factura-pdf.service';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 const TAKE = 500;
@@ -100,6 +101,7 @@ export class PlatformService {
     private readonly arcaConfigService: ArcaConfigService,
     private readonly liquidacionesService: LiquidacionesService,
     private readonly liquidacionPdfService: LiquidacionPdfService,
+    private readonly facturaPdfService: FacturaPdfService,
     private readonly fieldConfigService: TenantFieldConfigService,
   ) {}
 
@@ -1030,6 +1032,14 @@ export class PlatformService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionPdfService.generate(id, liquidacionId);
+  }
+
+  getFacturaPdf(
+    tenantId: string | undefined,
+    facturaId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const id = this.requiredTenantId(tenantId);
+    return this.facturaPdfService.generate(id, facturaId);
   }
 
   // ── Configuración de campos por empresa (superadmin) ──────────────────────

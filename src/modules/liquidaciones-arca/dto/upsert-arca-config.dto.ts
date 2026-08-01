@@ -29,6 +29,6 @@ export class UpsertArcaConfigDto {
   @IsIn(['nota_credito', 'nota_debito'])
   anulacionTipoComprobante?: 'nota_credito' | 'nota_debito';
 
-  @IsOptional() @IsString() certPem?: string;
-  @IsOptional() @IsString() keyPem?: string;
+  @IsOptional() @IsString() certPemProduccion?: string;
+  @IsOptional() @IsString() keyPemProduccion?: string;
 }

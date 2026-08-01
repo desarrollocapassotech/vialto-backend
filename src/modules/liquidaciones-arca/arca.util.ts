@@ -84,6 +84,14 @@ export function esNotaDebitoAnulacion(cbteTipo?: number | null): boolean {
   return cbteTipo === 2 || cbteTipo === 7;
 }
 
+/**
+ * CUIT de prueba estándar para homologación (usado ya en scripts/test-*.js de este repo).
+ * AFIP SDK maneja este CUIT en su sandbox sin necesidad de certificado propio: en
+ * homologación se usa este CUIT en vez del CUIT real del emisor — el certificado real
+ * (o el autofirmado que registre cada tenant) queda reservado para producción.
+ */
+export const CUIT_TEST_HOMOLOGACION = '20409378472';
+
 /** Normaliza el ambiente ARCA guardado en DB / DTO a los valores canónicos. */
 export function normalizeArcaAmbiente(raw: unknown): 'homologacion' | 'produccion' {
   const v = String(raw ?? '')

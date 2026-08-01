@@ -1005,9 +1005,17 @@ export class PlatformService {
     return this.liquidacionesService.findById(id, liquidacionId);
   }
 
-  emitirLiquidacion(tenantId: string | undefined, liquidacionId: string) {
+  emitirLiquidacion(
+    tenantId: string | undefined,
+    liquidacionId: string,
+    ptoVenta?: number,
+  ) {
     const id = this.requiredTenantId(tenantId);
-    return this.liquidacionesService.emitirLiquidacion(id, liquidacionId);
+    return this.liquidacionesService.emitirLiquidacion(
+      id,
+      liquidacionId,
+      ptoVenta,
+    );
   }
 
   emitirFacturaArca(

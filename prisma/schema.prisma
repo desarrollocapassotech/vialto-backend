@@ -868,10 +868,12 @@ model ArcaConfig {
   ivaGastosAdmin     Float    @default(21)
   // Comprobante con que se anula un CVLP: 'nota_credito' (tipo 3/8) | 'nota_debito' (tipo 2/7)
   anulacionTipoComprobante String @default("nota_credito")
-  // Certificado digital AFIP (PEM) — nunca se expone en la API pública
-  certPem            String?
-  keyPem             String?
-  updatedAt          DateTime @updatedAt
+  // Certificado digital AFIP (PEM), nunca se expone en la API pública. Solo hace falta para
+  // producción: en homologación se usa el CUIT de prueba de AFIP SDK sin certificado propio
+  // (ver CUIT_TEST_HOMOLOGACION en arca.util.ts).
+  certPemProduccion String?
+  keyPemProduccion  String?
+  updatedAt         DateTime @updatedAt
 
   @@map("arca_configs")
 }

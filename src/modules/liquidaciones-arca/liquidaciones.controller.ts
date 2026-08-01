@@ -33,6 +33,7 @@ import { LiquidacionPdfService } from "./liquidacion-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
 import { EmitirFacturaArcaDto } from "./dto/emitir-factura-arca.dto";
+import { EmitirLiquidacionDto } from "./dto/emitir-liquidacion.dto";
 import { AnularLiquidacionDto } from "./dto/anular-liquidacion.dto";
 import { UpsertArcaConfigDto } from "./dto/upsert-arca-config.dto";
 import {
@@ -301,9 +302,13 @@ export class LiquidacionesController {
   @HttpCode(HttpStatus.OK)
   @RequireModule("integracion-arca")
   @Roles("admin", "superadmin")
-  emitirLiquidacion(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
+  emitirLiquidacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Body() dto: EmitirLiquidacionDto,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.emitirLiquidacion(auth.tenantId, id);
+    return this.service.emitirLiquidacion(auth.tenantId, id, dto.ptoVenta);
   }
 
   @ApiOperation({

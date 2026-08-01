@@ -410,7 +410,11 @@ export class LiquidacionesService {
    * problemas de red, queda en `pendiente_cae` (HTTP 200). Si rechaza la solicitud,
    * pasa a `error` con el motivo guardado en `arcaError` (HTTP 422).
    */
-  async emitirLiquidacion(tenantId: string, liquidacionId: string) {
+  async emitirLiquidacion(
+    tenantId: string,
+    liquidacionId: string,
+    ptoVenta?: number,
+  ) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
       include: {
@@ -444,6 +448,8 @@ export class LiquidacionesService {
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
+    // Punto de venta editable por operación; si no se envía, se usa el de ArcaConfig.
+    const ptoVentaFinal = ptoVenta ?? config.ptoVentaCvlp;
 
     // Fail-fast: PDF CVLP no debe emitirse con secciones vacías (emisor / transportista / cliente).
     assertCvlpEmitDatosCompletos({
@@ -496,7 +502,7 @@ export class LiquidacionesService {
         config.apiKey,
         config.cuitEmisor,
         config.ambiente as 'homologacion' | 'produccion',
-        config.ptoVentaCvlp,
+        ptoVentaFinal,
         cbteTipoFinal,
         tenantId,
         liquidacionId,
@@ -553,7 +559,7 @@ export class LiquidacionesService {
       }
       const cabeceraBase = {
         cuit: config.cuitEmisor,
-        ptoVenta: config.ptoVentaCvlp,
+        ptoVenta: ptoVentaFinal,
         cbteTipo: cbteTipoFinal,
         cbteNro,
         fechaCbte,
@@ -584,6 +590,7 @@ export class LiquidacionesService {
           estado: 'autorizado',
           cbteTipo: cbteTipoFinal, // Actualizamos por si era un borrador viejo
           cbteNro,
+          ptoVenta: ptoVentaFinal,
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió

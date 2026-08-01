@@ -8,7 +8,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
 import { encryptField, decryptField, validateKeyConfigured } from '../../shared/util/arca-crypto';
-import { normalizeArcaAmbiente } from './arca.util';
+import { CUIT_TEST_HOMOLOGACION, normalizeArcaAmbiente } from './arca.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -29,8 +29,8 @@ const CONFIG_SELECT = {
   anulacionTipoComprobante: true,
   updatedAt: true,
   // cert/key se incluyen solo para saber si están configurados; el contenido no se expone
-  certPem: true,
-  keyPem: true,
+  certPemProduccion: true,
+  keyPemProduccion: true,
 };
 
 export type UpsertArcaConfigOptions = {
@@ -105,9 +105,13 @@ export class ArcaConfigService {
       anulacionTipoComprobante: dto.anulacionTipoComprobante ?? 'nota_credito',
       updatedAt: now,
     };
-    // Solo sobreescribir cert/key si se envían con contenido
-    if (dto.certPem?.trim()) data.certPem = encryptField(dto.certPem.trim());
-    if (dto.keyPem?.trim()) data.keyPem = encryptField(dto.keyPem.trim());
+    // Solo sobreescribir cert/key si se envían con contenido.
+    if (dto.certPemProduccion?.trim()) {
+      data.certPemProduccion = encryptField(dto.certPemProduccion.trim());
+    }
+    if (dto.keyPemProduccion?.trim()) {
+      data.keyPemProduccion = encryptField(dto.keyPemProduccion.trim());
+    }
 
     await this.db.arcaConfig.upsert({
       where: { tenantId },
@@ -157,12 +161,12 @@ export class ArcaConfigService {
       select: CONFIG_SELECT,
     });
     if (!config) return null;
-    const { certPem, keyPem, ...rest } = config;
+    const { certPemProduccion, keyPemProduccion, ...rest } = config;
     return {
       ...rest,
       ambiente: normalizeArcaAmbiente(rest.ambiente),
-      certConfigurado: Boolean(certPem),
-      keyConfigurado: Boolean(keyPem),
+      certConfiguradoProduccion: Boolean(certPemProduccion),
+      keyConfiguradoProduccion: Boolean(keyPemProduccion),
     };
   }
 
@@ -173,9 +177,21 @@ export class ArcaConfigService {
         'No hay configuración de ARCA para este tenant. Configurarla en el panel de superadmin.',
       );
     }
+    const ambiente = normalizeArcaAmbiente(config.ambiente);
+    // Homologación: se usa el CUIT de prueba estándar de AFIP SDK, sin certificado propio
+    // (mismo mecanismo que scripts/test-*.js) — evita depender de que cada tenant registre
+    // y mantenga su propio certificado de homologación ante AFIP.
+    // Producción: CUIT real del tenant + su certificado de producción.
+    const esHomologacion = ambiente !== 'produccion';
+    const cuitEmisor = esHomologacion ? CUIT_TEST_HOMOLOGACION : config.cuitEmisor;
+    const certPem = esHomologacion ? null : config.certPemProduccion;
+    const keyPem = esHomologacion ? null : config.keyPemProduccion;
     return {
       ...config,
-      ambiente: normalizeArcaAmbiente(config.ambiente),
+      ambiente,
+      cuitEmisor,
+      certPem,
+      keyPem,
       apiKey: this.getApiKey(),
     };
   }
@@ -189,31 +205,33 @@ export class ArcaConfigService {
 
   async migrateExistingConfigs(): Promise<void> {
     const configs = await this.db.arcaConfig.findMany({
-      select: { tenantId: true, certPem: true, keyPem: true },
+      select: {
+        tenantId: true,
+        certPemProduccion: true,
+        keyPemProduccion: true,
+      },
     });
-    
+
     let migratedCount = 0;
     let failedCount = 0;
 
     const ENCRYPTED_GCM_PATTERN = /^[0-9a-fA-F]{24}:[0-9a-fA-F]{32}:[0-9a-fA-F]+$/;
     const isGcm = (text: string) => ENCRYPTED_GCM_PATTERN.test(text);
+    const FIELDS = ['certPemProduccion', 'keyPemProduccion'] as const;
 
     for (const config of configs) {
       try {
         let needsUpdate = false;
         const data: PrismaAny = {};
-        
-        if (config.certPem && !isGcm(config.certPem)) {
-          const decrypted = decryptField(config.certPem);
-          data.certPem = encryptField(decrypted);
-          needsUpdate = true;
+
+        for (const field of FIELDS) {
+          const value = config[field] as string | null;
+          if (value && !isGcm(value)) {
+            data[field] = encryptField(decryptField(value));
+            needsUpdate = true;
+          }
         }
-        if (config.keyPem && !isGcm(config.keyPem)) {
-          const decrypted = decryptField(config.keyPem);
-          data.keyPem = encryptField(decrypted);
-          needsUpdate = true;
-        }
-        
+
         if (needsUpdate) {
           await this.db.arcaConfig.update({
             where: { tenantId: config.tenantId },

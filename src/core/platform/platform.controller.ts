@@ -1086,8 +1086,10 @@ export class PlatformController {
   emitirLiquidacion(
     @Param("id") id: string,
     @Query("tenantId") tenantId?: string,
+    @Body()
+    dto?: import("../../modules/liquidaciones-arca/dto/emitir-liquidacion.dto").EmitirLiquidacionDto,
   ) {
-    return this.service.emitirLiquidacion(tenantId, id);
+    return this.service.emitirLiquidacion(tenantId, id, dto?.ptoVenta);
   }
 
   @ApiOperation({ summary: "Descargar PDF de liquidación (superadmin)" })

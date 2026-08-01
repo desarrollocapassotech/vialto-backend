@@ -136,9 +136,7 @@ export class CombustibleService {
     const finDelDia = new Date(fecha.getTime());
     finDelDia.setUTCHours(23, 59, 59, 999);
 
-    const inicioDelDia = new Date(fecha.getTime());
-    inicioDelDia.setUTCHours(0, 0, 0, 0);
-
+    // 1. Carga anterior o del mismo día (piso): tomamos la de MAYOR km
     const prev = await this.prisma.cargaCombustible.findFirst({
       where: {
         tenantId,
@@ -166,7 +164,7 @@ export class CombustibleService {
       where: {
         tenantId,
         vehiculoId,
-        fecha: { gte: inicioDelDia },
+        fecha: { gt: finDelDia },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
       orderBy: [{ fecha: "asc" }, { km: "asc" }],
@@ -184,6 +182,48 @@ export class CombustibleService {
         `El kilometraje ingresado (${km} km) es inconsistente: no puede ser superior al de una carga posterior ya registrada el ${fechaFmt} (${next.km} km).`,
       );
     }
+  }
+
+  async getLimitesKm(
+    tenantId: string,
+    vehiculoId: string,
+    fecha: string,
+    excludeId?: string,
+  ) {
+    if (!vehiculoId || !fecha) {
+      return { prev: null, next: null };
+    }
+
+    const fechaBase = new Date(fecha);
+    const finDelDia = new Date(fechaBase.getTime());
+    finDelDia.setUTCHours(23, 59, 59, 999);
+
+    const prev = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        fecha: { lte: finDelDia },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ fecha: "desc" }, { km: "desc" }],
+      select: { km: true, fecha: true },
+    });
+
+    const next = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        fecha: { gt: finDelDia },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ fecha: "asc" }, { km: "asc" }],
+      select: { km: true, fecha: true },
+    });
+
+    return {
+      prev: prev ? { km: prev.km, fecha: prev.fecha.toISOString() } : null,
+      next: next ? { km: next.km, fecha: next.fecha.toISOString() } : null,
+    };
   }
 
   private async assertVehiculoChofer(

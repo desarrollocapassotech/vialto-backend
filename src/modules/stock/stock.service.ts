@@ -174,16 +174,33 @@ export class StockService {
     if (!nombre) throw new ConflictException('El nombre no puede quedar vacío.');
     const nombreNormalizado = normalizarNombre(nombre);
 
-    // Validar presentaciones: sin duplicados y todas activas
-    const presIds = dto.presentaciones.map((p) => p.presentacionId);
-    if (new Set(presIds).size !== presIds.length) {
-      throw new BadRequestException('No se pueden repetir presentaciones en el mismo producto.');
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    const hasStock = (tenant?.modules ?? []).some((m) => m.toLowerCase() === 'stock');
+    const presentaciones = dto.presentaciones ?? [];
+
+    if (hasStock) {
+      if (dto.pesoUnitarioKg == null) {
+        throw new BadRequestException('El peso unitario es obligatorio para productos con stock.');
+      }
+      if (presentaciones.length < 1) {
+        throw new BadRequestException('Agregá al menos una presentación.');
+      }
     }
-    for (const pp of dto.presentaciones) {
-      const p = await this.prisma.presentacion.findFirst({
-        where: { id: pp.presentacionId, tenantId, activo: true },
-      });
-      if (!p) throw new BadRequestException(`Presentación inválida o inactiva: ${pp.presentacionId}`);
+
+    if (presentaciones.length > 0) {
+      const presIds = presentaciones.map((p) => p.presentacionId);
+      if (new Set(presIds).size !== presIds.length) {
+        throw new BadRequestException('No se pueden repetir presentaciones en el mismo producto.');
+      }
+      for (const pp of presentaciones) {
+        const p = await this.prisma.presentacion.findFirst({
+          where: { id: pp.presentacionId, tenantId, activo: true },
+        });
+        if (!p) throw new BadRequestException(`Presentación inválida o inactiva: ${pp.presentacionId}`);
+      }
     }
 
     try {
@@ -196,20 +213,22 @@ export class StockService {
             nombreNormalizado,
             codigo,
             descripcion: dto.descripcion?.trim() || null,
-            pesoUnitarioKg: dto.pesoUnitarioKg,
+            pesoUnitarioKg: dto.pesoUnitarioKg ?? null,
             activo: dto.activo ?? true,
           },
           select: { id: true },
         });
 
-        await tx.productoPresentacion.createMany({
-          data: dto.presentaciones.map((pp) => ({
-            tenantId,
-            productoId: id,
-            presentacionId: pp.presentacionId,
-            unidadesPorBulto: pp.unidadesPorBulto,
-          })),
-        });
+        if (presentaciones.length > 0) {
+          await tx.productoPresentacion.createMany({
+            data: presentaciones.map((pp) => ({
+              tenantId,
+              productoId: id,
+              presentacionId: pp.presentacionId,
+              unidadesPorBulto: pp.unidadesPorBulto,
+            })),
+          });
+        }
 
         return tx.producto.findFirstOrThrow({ where: { id }, select: productoSelect });
       });
@@ -310,8 +329,14 @@ export class StockService {
     });
     if (!pp) throw new NotFoundException('Presentación de producto no encontrada.');
 
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    const hasStock = (tenant?.modules ?? []).some((m) => m.toLowerCase() === 'stock');
+
     const count = await this.prisma.productoPresentacion.count({ where: { productoId, tenantId } });
-    if (count <= 1) {
+    if (hasStock && count <= 1) {
       throw new ConflictException('El producto debe tener al menos una presentación.');
     }
 

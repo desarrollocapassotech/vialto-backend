@@ -992,7 +992,7 @@ export class PlatformService {
 
   upsertArcaConfig(tenantId: string | undefined, dto: import('../../modules/liquidaciones-arca/dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
     const id = this.requiredTenantId(tenantId);
-    return this.arcaConfigService.upsert(id, dto);
+    return this.arcaConfigService.upsert(id, dto, { allowAmbienteChange: true });
   }
 
   listLiquidaciones(tenantId: string | undefined, estado?: string) {
@@ -1005,9 +1005,17 @@ export class PlatformService {
     return this.liquidacionesService.findById(id, liquidacionId);
   }
 
-  emitirLiquidacion(tenantId: string | undefined, liquidacionId: string) {
+  emitirLiquidacion(
+    tenantId: string | undefined,
+    liquidacionId: string,
+    ptoVenta?: number,
+  ) {
     const id = this.requiredTenantId(tenantId);
-    return this.liquidacionesService.emitirLiquidacion(id, liquidacionId);
+    return this.liquidacionesService.emitirLiquidacion(
+      id,
+      liquidacionId,
+      ptoVenta,
+    );
   }
 
   anularLiquidacion(

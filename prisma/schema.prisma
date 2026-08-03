@@ -42,6 +42,7 @@ model Tenant {
   presentaciones          Presentacion[]
   productoPresentaciones  ProductoPresentacion[]
   cargasCombustible       CargaCombustible[]
+  combustibleSyncErrorLogs CombustibleSyncErrorLog[]
   intervenciones          Intervencion[]
   remitos                 Remito[]
   importTemplates         ImportTemplate[]
@@ -136,6 +137,7 @@ model Chofer {
 
   viajes            Viaje[]
   cargasCombustible CargaCombustible[]
+  combustibleSyncErrorLogs CombustibleSyncErrorLog[]
   remitos           Remito[]
 
   @@index([tenantId])
@@ -185,6 +187,7 @@ model Vehiculo {
 
   vehiculosViaje    ViajeVehiculo[]
   cargasCombustible CargaCombustible[]
+  combustibleSyncErrorLogs CombustibleSyncErrorLog[]
   intervenciones    Intervencion[]
   remitos           Remito[]
 
@@ -661,6 +664,32 @@ model CargaCombustible {
   @@map("cargas_combustible")
 }
 
+/**
+ * Registro de errores al sincronizar cargas de combustible cargadas offline
+ * en la app vialto-combustible (COMB-07-T4). A diferencia de CargaCombustible,
+ * acá la carga nunca llegó a crearse: el chofer intentó sincronizar una carga
+ * guardada localmente y el backend la rechazó (ej. validación de km). Sirve
+ * para que el administrador del tenant pueda revisar por qué le quedaron
+ * cargas sin sincronizar a un chofer.
+ */
+model CombustibleSyncErrorLog {
+  id         String    @id @default(cuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  choferId   String?
+  chofer     Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  vehiculoId String?
+  vehiculo   Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  mensaje    String // mensaje de error devuelto por la validación (ej. "El kilometraje ingresado... es inconsistente...")
+  payload    Json // datos de la carga que se intentó sincronizar: patente, estacion, litros, precioPorLitro, importe, km, formaPago, fecha, localId (id en IndexedDB, para correlacionar reintentos)
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, choferId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("combustible_sync_error_logs")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Módulo: mantenimiento (PostgreSQL; checklist diario en Firestore según doc)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -836,12 +865,15 @@ model ArcaConfig {
   ambiente           String   @default("homologacion") // homologacion | produccion
   // Parámetros de liquidación
   comisionPctDefault Float    @default(8)
-  comisionPctAlt     Float    @default(7)
   ivaGastosAdmin     Float    @default(21)
-  // Certificado digital AFIP (PEM) — nunca se expone en la API pública
-  certPem            String?
-  keyPem             String?
-  updatedAt          DateTime @updatedAt
+  // Comprobante con que se anula un CVLP: 'nota_credito' (tipo 3/8) | 'nota_debito' (tipo 2/7)
+  anulacionTipoComprobante String @default("nota_credito")
+  // Certificado digital AFIP (PEM), nunca se expone en la API pública. Solo hace falta para
+  // producción: en homologación se usa el CUIT de prueba de AFIP SDK sin certificado propio
+  // (ver CUIT_TEST_HOMOLOGACION en arca.util.ts).
+  certPemProduccion String?
+  keyPemProduccion  String?
+  updatedAt         DateTime @updatedAt
 
   @@map("arca_configs")
 }
@@ -865,21 +897,33 @@ model Liquidacion {
   bruto          Float // sum(tnDestino * tarifaTransportista) por todos los viajes
   comisionPct    Float // % de comisión aplicado
   comision       Float // bruto * comisionPct / 100
+  ivaPct         Float @default(21) // alícuota IVA aplicada (snapshot; default tenant o override)
   gastosAdmin    Float // cantViajes * gastosAdminPorViaje (sin IVA)
-  gastosAdminIva Float // IVA sobre gastosAdmin
-  liquido        Float // bruto - comision - gastosAdmin - gastosAdminIva (neto al transportista)
+  gastosAdminIva Float // IVA total del comprobante (impIva)
+  liquido        Float // neto + IVA (total al transportista)
 
-  // Campos del comprobante AFIP (cbteTipo siempre 60 para CVLP)
+  // Campos del comprobante AFIP (cbteTipo 60/61 para CVLP)
   cbteTipo    Int       @default(60)
   cbteNro     Int?
   ptoVenta    Int?
   cae         String?
   caeFechaVto DateTime?
+  // Ambiente ARCA con el que se emitió: 'produccion' | 'homologacion'
+  ambiente    String?
+
+  // Nota de crédito 065 emitida al anular (el CVLP original se conserva arriba)
+  anulacionCbteTipo    Int?
+  anulacionCbteNro     Int?
+  anulacionPtoVenta    Int?
+  anulacionCae         String?
+  anulacionCaeFechaVto DateTime?
+  anulacionFecha       DateTime?
 
   // Estado de la integración ARCA
   estado     String  @default("borrador")
   // borrador | pendiente_cae | autorizado | error | anulado
-  arcaError  String?
+  arcaError        String? // mensaje amigable del último error de ARCA
+  arcaErrorDetalle String? // detalle técnico crudo de AFIP SDK (para "ver error completo")
   reintentos Int     @default(0)
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)

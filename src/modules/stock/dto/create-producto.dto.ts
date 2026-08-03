@@ -1,5 +1,4 @@
 import {
-  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsInt,
@@ -39,15 +38,18 @@ export class CreateProductoDto {
   @MaxLength(2000)
   descripcion?: string;
 
+  /** Obligatorio solo si el tenant tiene el módulo stock (validado en servicio). */
+  @IsOptional()
   @IsNumber()
   @IsPositive()
-  pesoUnitarioKg!: number;
+  pesoUnitarioKg?: number;
 
+  /** Obligatorio solo si el tenant tiene el módulo stock (validado en servicio). */
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => ProductoPresentacionItemDto)
-  presentaciones!: ProductoPresentacionItemDto[];
+  presentaciones?: ProductoPresentacionItemDto[];
 
   @IsOptional()
   @IsBoolean()

@@ -12,6 +12,7 @@ import { CreateCargaDto } from "./dto/create-carga.dto";
 import { UpdateCargaDto } from "./dto/update-carga.dto";
 import { CreateCargaChoferDto } from "./dto/create-carga-chofer.dto";
 import { UpdateCargaChoferDto } from "./dto/update-carga-chofer.dto";
+import { LogSyncErrorDto } from "./dto/log-sync-error.dto";
 
 /** Datos mínimos de contexto de autenticación que el servicio necesita. */
 interface CombustibleAuth {
@@ -132,15 +133,18 @@ export class CombustibleService {
     km: number,
     excludeId?: string,
   ) {
-    // 1. Validar límite inferior: Carga inmediatamente ANTERIOR a la fecha indicada
+    const finDelDia = new Date(fecha.getTime());
+    finDelDia.setUTCHours(23, 59, 59, 999);
+
+    // 1. Carga anterior o del mismo día (piso): tomamos la de MAYOR km
     const prev = await this.prisma.cargaCombustible.findFirst({
       where: {
         tenantId,
         vehiculoId,
-        fecha: { lte: fecha }, // 'lte' incluye cargas registradas en el mismo día exacto
+        fecha: { lte: finDelDia },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { km: "desc" }],
       select: { km: true, fecha: true },
     });
 
@@ -156,15 +160,14 @@ export class CombustibleService {
       );
     }
 
-    // 2. Validar límite superior: Carga inmediatamente POSTERIOR a la fecha indicada (vital para cargas retroactivas)
     const next = await this.prisma.cargaCombustible.findFirst({
       where: {
         tenantId,
         vehiculoId,
-        fecha: { gte: fecha },
+        fecha: { gt: finDelDia },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
-      orderBy: { fecha: "asc" },
+      orderBy: [{ fecha: "asc" }, { km: "asc" }],
       select: { km: true, fecha: true },
     });
 
@@ -179,6 +182,48 @@ export class CombustibleService {
         `El kilometraje ingresado (${km} km) es inconsistente: no puede ser superior al de una carga posterior ya registrada el ${fechaFmt} (${next.km} km).`,
       );
     }
+  }
+
+  async getLimitesKm(
+    tenantId: string,
+    vehiculoId: string,
+    fecha: string,
+    excludeId?: string,
+  ) {
+    if (!vehiculoId || !fecha) {
+      return { prev: null, next: null };
+    }
+
+    const fechaBase = new Date(fecha);
+    const finDelDia = new Date(fechaBase.getTime());
+    finDelDia.setUTCHours(23, 59, 59, 999);
+
+    const prev = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        fecha: { lte: finDelDia },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ fecha: "desc" }, { km: "desc" }],
+      select: { km: true, fecha: true },
+    });
+
+    const next = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        fecha: { gt: finDelDia },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ fecha: "asc" }, { km: "asc" }],
+      select: { km: true, fecha: true },
+    });
+
+    return {
+      prev: prev ? { km: prev.km, fecha: prev.fecha.toISOString() } : null,
+      next: next ? { km: next.km, fecha: next.fecha.toISOString() } : null,
+    };
   }
 
   private async assertVehiculoChofer(
@@ -213,10 +258,6 @@ export class CombustibleService {
     const safeLimit = Math.min(200, Math.max(1, limit));
 
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
-
-    if (auth.role === "member") {
-      where["createdBy"] = auth.userId;
-    }
 
     if (vehiculoId) where["vehiculoId"] = vehiculoId;
     if (choferId) where["choferId"] = choferId;
@@ -256,9 +297,7 @@ export class CombustibleService {
   /** Estaciones distintas entre las cargas existentes, para poblar el filtro del listado. */
   async getEstaciones(auth: CombustibleAuth): Promise<string[]> {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
-    if (auth.role === "member") {
-      where["createdBy"] = auth.userId;
-    }
+
     const rows = await this.prisma.cargaCombustible.findMany({
       where,
       distinct: ["estacion"],
@@ -266,6 +305,26 @@ export class CombustibleService {
       orderBy: { estacion: "asc" },
     });
     return rows.map((r) => r.estacion);
+  }
+
+  /**
+   * Errores de sincronización offline reportados por los choferes del
+   * tenant (COMB-07-T4), más recientes primero. Sin paginado por cursor:
+   * el volumen esperado es bajo y un límite fijo alcanza para revisión.
+   */
+  async getSyncErrors(auth: CombustibleAuth, choferId?: string) {
+    const where: Record<string, unknown> = { tenantId: auth.tenantId };
+    if (choferId) where["choferId"] = choferId;
+
+    return this.prisma.combustibleSyncErrorLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        chofer: { select: { nombre: true, dni: true } },
+        vehiculo: { select: { patente: true } },
+      },
+    });
   }
 
   async findOne(id: string, auth: CombustibleAuth) {
@@ -277,9 +336,7 @@ export class CombustibleService {
       where,
     });
     if (!carga) throw new NotFoundException("Carga no encontrada");
-    if (auth.role === "member" && carga.createdBy !== auth.userId) {
-      throw new ForbiddenException("No tenés acceso a esta carga");
-    }
+
     return carga;
   }
 
@@ -348,10 +405,6 @@ export class CombustibleService {
       dto.choferId === undefined ? carga.choferId : dto.choferId;
     if (nextVehiculo) {
       await this.assertVehiculoChofer(auth.tenantId, nextVehiculo, nextChofer);
-    }
-
-    if (auth.role === "member" && carga.createdBy !== auth.userId) {
-      throw new ForbiddenException("No podés editar esta carga");
     }
 
     const nextKm = dto.km !== undefined ? dto.km : carga.km;
@@ -502,6 +555,38 @@ export class CombustibleService {
     });
     await this.syncVehiculoKmActual(tenantId, vehiculo.id);
     return carga;
+  }
+
+  /**
+   * Registra que una carga guardada offline por el chofer no se pudo
+   * sincronizar (COMB-07-T4). No falla si la patente del payload no
+   * resuelve a un vehículo: ese puede ser justamente el motivo del error, y
+   * el log tiene que poder guardarse igual.
+   */
+  async logSyncError(dto: LogSyncErrorDto, choferId: string, tenantId: string) {
+    const patente =
+      typeof dto.payload["patente"] === "string"
+        ? (dto.payload["patente"] as string).replace(/\s+/g, "").toUpperCase()
+        : undefined;
+    const vehiculo = patente
+      ? await this.prisma.vehiculo.findFirst({
+          where: {
+            tenantId,
+            patente: { equals: patente, mode: "insensitive" },
+          },
+          select: { id: true },
+        })
+      : null;
+
+    return this.prisma.combustibleSyncErrorLog.create({
+      data: {
+        tenantId,
+        choferId,
+        vehiculoId: vehiculo?.id ?? null,
+        mensaje: dto.mensaje,
+        payload: dto.payload as object,
+      },
+    });
   }
 
   async getUltimaCargaChofer(choferId: string, tenantId: string) {

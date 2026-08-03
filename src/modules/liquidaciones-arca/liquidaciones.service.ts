@@ -195,7 +195,11 @@ export class LiquidacionesService {
     const comision = round2(bruto * comisionPct / 100);
     // Los gastos del viaje viven en `otrosGastos` y no forman parte de la liquidación/CVLP.
     const gastosAdmin = 0;
-    const ivaPct = dto.ivaPct ?? config?.ivaGastosAdmin ?? 21;
+    // Usar != null para respetar ivaPct === 0 (liquidar sin IVA).
+    const ivaPct =
+      dto.ivaPct != null && Number.isFinite(dto.ivaPct)
+        ? dto.ivaPct
+        : (config?.ivaGastosAdmin ?? 21);
     const lineasResueltas = await this.resolveConceptoLineas(tenantId, dto.conceptosLineas);
     const montos = computeLiquidacionTotales({
       bruto,
@@ -225,6 +229,7 @@ export class LiquidacionesService {
           bruto,
           comisionPct,
           comision,
+          ivaPct,
           gastosAdmin,
           gastosAdminIva,
           liquido,
@@ -299,7 +304,7 @@ export class LiquidacionesService {
     const estadosEditables = new Set(['borrador', 'error', 'pendiente_cae']);
     if (wantsDatos && !estadosEditables.has(liq.estado)) {
       throw new BadRequestException(
-        'Solo se pueden modificar período/comisión/conceptos en liquidaciones en borrador, error o pendiente de CAE.',
+        'Solo se pueden modificar período/comisión/IVA/conceptos en liquidaciones en borrador, error o pendiente de CAE.',
       );
     }
 
@@ -338,8 +343,14 @@ export class LiquidacionesService {
 
       let ivaPct = dto.ivaPct;
       if (ivaPct === undefined) {
-        const config = await this.arcaConfig.findPublic(tenantId);
-        ivaPct = config?.ivaGastosAdmin ?? 21;
+        // Conservar el snapshot de la liquidación; solo cae a config si es legado sin ivaPct.
+        const stored = (liq as { ivaPct?: number | null }).ivaPct;
+        if (stored != null) {
+          ivaPct = stored;
+        } else {
+          const config = await this.arcaConfig.findPublic(tenantId);
+          ivaPct = config?.ivaGastosAdmin ?? 21;
+        }
       }
 
       const lineasResueltas =
@@ -361,6 +372,7 @@ export class LiquidacionesService {
       });
       data.comisionPct = comisionPct;
       data.comision = comision;
+      data.ivaPct = ivaPct;
       data.gastosAdmin = 0;
       data.gastosAdminIva = montos.impIva;
       data.liquido = montos.liquido;
@@ -401,7 +413,11 @@ export class LiquidacionesService {
    * problemas de red, queda en `pendiente_cae` (HTTP 200). Si rechaza la solicitud,
    * pasa a `error` con el motivo guardado en `arcaError` (HTTP 422).
    */
-  async emitirLiquidacion(tenantId: string, liquidacionId: string) {
+  async emitirLiquidacion(
+    tenantId: string,
+    liquidacionId: string,
+    ptoVenta?: number,
+  ) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
       include: {
@@ -435,6 +451,8 @@ export class LiquidacionesService {
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
+    // Punto de venta editable por operación; si no se envía, se usa el de ArcaConfig.
+    const ptoVentaFinal = ptoVenta ?? config.ptoVentaCvlp;
 
     // Fail-fast: PDF CVLP no debe emitirse con secciones vacías (emisor / transportista / cliente).
     assertCvlpEmitDatosCompletos({
@@ -487,7 +505,7 @@ export class LiquidacionesService {
         config.apiKey,
         config.cuitEmisor,
         config.ambiente as 'homologacion' | 'produccion',
-        config.ptoVentaCvlp,
+        ptoVentaFinal,
         cbteTipoFinal,
         tenantId,
         liquidacionId,
@@ -506,7 +524,11 @@ export class LiquidacionesService {
       const condicionIvaReceptorId = liquidacion.transportista?.condicionIva ?? 1;
 
       // impNeto/IVA/total: flete + comisión + conceptos configurables.
-      const ivaPct = config?.ivaGastosAdmin ?? 21;
+      // Preferir el snapshot de la liquidación para no pisar un override puntual.
+      const ivaPct =
+        (liquidacion as { ivaPct?: number | null }).ivaPct ??
+        config?.ivaGastosAdmin ??
+        21;
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
@@ -540,7 +562,7 @@ export class LiquidacionesService {
       }
       const cabeceraBase = {
         cuit: config.cuitEmisor,
-        ptoVenta: config.ptoVentaCvlp,
+        ptoVenta: ptoVentaFinal,
         cbteTipo: cbteTipoFinal,
         cbteNro,
         fechaCbte,
@@ -571,8 +593,10 @@ export class LiquidacionesService {
           estado: 'autorizado',
           cbteTipo: cbteTipoFinal, // Actualizamos por si era un borrador viejo
           cbteNro,
+          ptoVenta: ptoVentaFinal,
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
+          ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           gastosAdmin: 0,
           gastosAdminIva: cvlp.impIva,
@@ -599,8 +623,10 @@ export class LiquidacionesService {
         data: {
           estado: isConectividad ? 'pendiente_cae' : 'error',
           arcaError: errMsg,
+          arcaErrorDetalle:
+            err instanceof ArcaException ? (err.detalle ?? null) : null,
           updatedAt: new Date(),
-        },
+        } as PrismaAny,
       });
 
       if (isConectividad) {
@@ -611,10 +637,20 @@ export class LiquidacionesService {
       }
 
       this.logger.error(`Error al emitir liquidación ${liquidacionId}: ${errMsg}`);
-      throw new UnprocessableEntityException(errMsg);
+      throw new UnprocessableEntityException({
+        message: errMsg,
+        detalle: err instanceof ArcaException ? err.detalle : undefined,
+      });
     }
   }
 
+  /**
+   * Anula una liquidación autorizada emitiendo vía AFIP un comprobante estándar
+   * (Nota de Crédito 3/8 o Nota de Débito 2/7, elegible por `tipoAnulacion`)
+   * asociado al CVLP original (CbtesAsoc). Importes en positivo: AFIP rechaza el
+   * 065 (no existe en WS) y los negativos. Tras éxito, estado → `anulado`;
+   * el CVLP original (CAE/PDF) se conserva. Requiere `motivo` y libera viajes.
+   */
   async anularLiquidacion(
     tenantId: string,
     liquidacionId: string,
@@ -625,6 +661,7 @@ export class LiquidacionesService {
     if (!motivo) {
       throw new BadRequestException('El motivo de anulación es obligatorio.');
     }
+    const tipoAnulacion = dto?.tipoAnulacion;
 
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
@@ -636,8 +673,11 @@ export class LiquidacionesService {
     if (liquidacion.estado !== 'autorizado') {
       throw new BadRequestException('Solo se pueden anular liquidaciones con CAE autorizado');
     }
-    if (!liquidacion.cbteNro) {
+    if (!liquidacion.cbteNro || !liquidacion.ptoVenta) {
       throw new BadRequestException('La liquidación no tiene número de comprobante');
+    }
+    if ((liquidacion as { anulacionCae?: string | null }).anulacionCae) {
+      throw new BadRequestException('Esta liquidación ya tiene un comprobante de anulación.');
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
@@ -646,11 +686,18 @@ export class LiquidacionesService {
       select: { idFiscal: true, condicionIva: true },
     });
 
-    const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(transportista?.condicionIva);
+    // AFIP no habilita la NC 065 ni importes negativos por web service. El CVLP se
+    // anula con una Nota de Crédito estándar (tipo 3 clase A / 8 clase B) asociada
+    // al 060/061 original mediante CbtesAsoc. Verificado contra AFIP (devuelve CAE).
+    const cbteTipoAnulacion = getCbteTipoAnulacionCvlp(
+      transportista?.condicionIva,
+      tipoAnulacion ??
+        (config as { anulacionTipoComprobante?: 'nota_credito' | 'nota_debito' })
+          .anulacionTipoComprobante,
+    );
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
 
     try {
-      // Obtener próximo número para el comprobante de ajuste
       const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
         config.apiKey,
         config.cuitEmisor,
@@ -665,13 +712,16 @@ export class LiquidacionesService {
       );
       const cbteNro = ultimoCbte + 1;
 
-      const docNro = transportista?.idFiscal ? Number(transportista.idFiscal.replace(/-/g, '')) : 0;
+      const docNro = transportista?.idFiscal
+        ? Number(transportista.idFiscal.replace(/-/g, ''))
+        : 0;
       const docTipo = docNro ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+      const ivaPct =
+        (liquidacion as { ivaPct?: number | null }).ivaPct ??
+        config?.ivaGastosAdmin ??
+        21;
 
-      const ivaPct = config?.ivaGastosAdmin ?? 21;
-
-      // Para anular/ajustar se deben enviar los importes en positivo. AFIP sabe que restan
-      // gracias al tipo de comprobante (Liquidacion Ajuste A/B).
+      // Importes en positivo: la Nota de Crédito acredita por su tipo, no por signo.
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
@@ -683,12 +733,15 @@ export class LiquidacionesService {
         lineas: this.lineasFromStored(lineasDb),
       });
 
+      const fechaNc = formatFechaCbte(new Date());
+      const fechaCvlpAsoc = await this.resolveFechaCbteOriginal(liquidacionId, liquidacion);
+
       const cabeceraBase = {
         cuit: config.cuitEmisor,
         ptoVenta: config.ptoVentaCvlp,
         cbteTipo: cbteTipoAnulacion,
         cbteNro,
-        fechaCbte: formatFechaCbte(new Date()),
+        fechaCbte: fechaNc,
         concepto: 1,
         docTipo,
         docNro,
@@ -696,9 +749,22 @@ export class LiquidacionesService {
       };
 
       const cvlp = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPct);
-      const arcaRequest = mapCvlpToArcaRequest(cvlp, config.ambiente as 'homologacion' | 'produccion');
+      const cbtesAsoc = [
+        {
+          Tipo: liquidacion.cbteTipo,
+          PtoVta: liquidacion.ptoVenta,
+          Nro: liquidacion.cbteNro,
+          Cuit: String(config.cuitEmisor).replace(/[-\s]/g, ''),
+          CbteFch: fechaCvlpAsoc,
+        },
+      ];
+      const arcaRequest = mapCvlpToArcaRequest(
+        cvlp,
+        config.ambiente as 'homologacion' | 'produccion',
+        cbtesAsoc,
+      );
 
-      await this.arcaClient.autorizarComprobante(
+      const authResult = await this.arcaClient.autorizarComprobante(
         config.apiKey,
         arcaRequest,
         tenantId,
@@ -706,21 +772,39 @@ export class LiquidacionesService {
         undefined,
         config.certPem,
         config.keyPem,
-        cvlp as unknown as Record<string, unknown>, // auditMetadata
+        {
+          ...(cvlp as unknown as Record<string, unknown>),
+          cbtesAsoc,
+          anulacionDe: {
+            cbteTipo: liquidacion.cbteTipo,
+            cbteNro: liquidacion.cbteNro,
+            ptoVenta: liquidacion.ptoVenta,
+            cae: liquidacion.cae,
+          },
+        },
       );
 
+      const caeFechaVto = parseAfipDate(authResult.CAEFchVto);
       const anuladoAt = new Date();
       const anuladoPorLabel =
         (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || userId;
-      await (this.prisma as PrismaAny).liquidacion.update({
+
+      // El CVLP original se conserva (CAE / número / PDF siguen disponibles).
+      await this.prisma.liquidacion.update({
         where: { id: liquidacionId },
         data: {
           estado: 'anulado',
+          anulacionCbteTipo: cbteTipoAnulacion,
+          anulacionCbteNro: cbteNro,
+          anulacionPtoVenta: config.ptoVentaCvlp,
+          anulacionCae: authResult.CAE,
+          anulacionCaeFechaVto: caeFechaVto,
+          anulacionFecha: anuladoAt,
           motivoAnulacion: motivo,
           anuladoPor: userId,
           anuladoAt,
           updatedAt: anuladoAt,
-        },
+        } as PrismaAny,
       });
 
       // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada,
@@ -733,18 +817,51 @@ export class LiquidacionesService {
       // Asegura nombre en la respuesta inmediata (findById también lo resuelve).
       return { ...updated, anuladoPorNombre: anuladoPorLabel };
     } catch (err) {
-      const errMsg = err instanceof ArcaException ? err.message : err instanceof Error ? err.message : String(err);
+      const errMsg =
+        err instanceof ArcaException
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
       this.logger.error(`Error al anular liquidación ${liquidacionId}: ${errMsg}`);
-      throw new UnprocessableEntityException(errMsg);
+      throw new UnprocessableEntityException({
+        message: errMsg,
+        detalle: err instanceof ArcaException ? err.detalle : undefined,
+      });
     }
+  }
+
+  /** Fecha yyyymmdd del CVLP original (para CbteAsoc de la NC). */
+  private async resolveFechaCbteOriginal(
+    liquidacionId: string,
+    liquidacion: { updatedAt: Date; createdAt: Date },
+  ): Promise<string> {
+    const emitLog = await this.db.arcaLog.findFirst({
+      where: { liquidacionId, exitoso: true, method: 'FECAESolicitar' },
+      orderBy: { createdAt: 'asc' },
+    });
+    const metaFecha = (emitLog?.requestBody as PrismaAny)?.auditMetadata?.fechaCbte;
+    if (typeof metaFecha === 'string' && /^\d{8}$/.test(metaFecha)) {
+      return metaFecha;
+    }
+    const fromReq = (emitLog?.requestBody as PrismaAny)?.params?.FeCAEReq?.FeDetReq
+      ?.FECAEDetRequest?.CbteFch;
+    if (fromReq != null && String(fromReq).length >= 8) {
+      return String(fromReq).slice(0, 8);
+    }
+    return formatFechaCbte(liquidacion.updatedAt ?? liquidacion.createdAt);
   }
 
   async getConfig(tenantId: string) {
     return this.arcaConfig.findPublic(tenantId);
   }
 
-  async upsertConfig(tenantId: string, dto: import('./dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
-    return this.arcaConfig.upsert(tenantId, dto);
+  async upsertConfig(
+    tenantId: string,
+    dto: import('./dto/upsert-arca-config.dto').UpsertArcaConfigDto,
+    opts?: { allowAmbienteChange?: boolean },
+  ) {
+    return this.arcaConfig.upsert(tenantId, dto, opts);
   }
 
   async uploadLogo(tenantId: string, file: Express.Multer.File) {
@@ -790,6 +907,7 @@ export class LiquidacionesService {
       include: {
         transportista: { select: { id: true, nombre: true, idFiscal: true } },
         viajes: { select: { viajeId: true, subtotal: true, tnDestino: true } },
+        conceptosLineas: { orderBy: { orden: 'asc' } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -820,16 +938,13 @@ export class LiquidacionesService {
             },
           },
         },
+        conceptosLineas: { orderBy: { orden: 'asc' } },
       },
     });
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    const conceptosLineas = await this.db.liquidacionConceptoLinea.findMany({
-      where: { liquidacionId: id },
-      orderBy: { orden: 'asc' },
-    });
-    const [withNombre] = await this.attachAnuladoPorNombres([{ ...liq, conceptosLineas }]);
+    const [withNombre] = await this.attachAnuladoPorNombres([liq]);
     return withNombre;
   }
 
@@ -1003,6 +1118,12 @@ export class LiquidacionesService {
         },
       });
 
+      if (err instanceof ArcaException) {
+        throw new UnprocessableEntityException({
+          message: err.message,
+          detalle: err.detalle,
+        });
+      }
       throw err;
     }
   }

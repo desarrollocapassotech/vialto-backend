@@ -115,6 +115,7 @@ Ejemplos de uso:
 4. **Nuevos módulos van en `src/modules/{nombre}/`** con su propio NestJS module, controller, service y schema Prisma.
 5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí (salvo `reportes`).
 6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** de Neon (entorno QA); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
+   - **OJO — la base develop es compartida entre ramas.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
 
 ### Configuración del tenant en PostgreSQL
 
@@ -744,6 +745,30 @@ Implementado, no planeado. **El slug de gating real es `integracion-arca`** (ver
 
 Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) + `arca-client.service.ts` (integración AFIP SDK, CAE) + `arca-config.service.ts` + `liquidacion-pdf.service.ts`, con auditoría completa de cada request/response a AFIP en `ArcaLog`.
 
+**Anulación de un CVLP (importante — no obvio):** AFIP **no** permite anular un CVLP (tipo 60/61) por web service con el código 065 (no existe en wsfev1 → error `11001`) ni con importes en negativo (error `10065`). Se anula emitiendo un comprobante **estándar asociado** (`CbtesAsoc`) al 060/061 original: Nota de Crédito (tipo **3** clase A / **8** clase B) o Nota de Débito (tipo **2** clase A / **7** clase B). La clase A/B sale de la condición IVA del transportista. El usuario elige NC o ND en el **modal de anulación** (no es config global); el backend lo recibe en el body (`AnularLiquidacionDto.tipoAnulacion`) y `getCbteTipoAnulacionCvlp(condicionIva, tipo)` mapea al código. Que NC vs ND sea lo fiscalmente correcto es decisión del contador del cliente (AFIP acepta ambos) — por eso es elegible por operación.
+
+**Gotchas operativos de ARCA (verificados en producción con NyM, jul 2026):**
+
+- `cms.sign.invalid` ("firma inválida o algoritmo no soportado") al autenticar = el cert y la clave guardados en `ArcaConfig` **no son pareja** (típico de re-pegar uno solo). La firma la hace afipsdk en la nube; casi nunca es el algoritmo. Solución: re-cargar **ambos** (cert + clave juntos) desde el par correcto (verificar con un test de auth que el par del `.env` funciona).
+- El cert/clave se guardan cifrados con `ARCA_ENCRYPTION_KEY` (AES-256-GCM). Debe ser **la misma en todos los entornos que compartan base**; si difiere, falla el descifrado. En producción no puede estar vacía (fail-fast).
+- La config **solo re-guarda cert/clave si se envía contenido**; dejar un campo vacío conserva el valor anterior.
+- El PEM se normaliza antes de firmar (`normalizePem` en `arca-client.service.ts`): pegar la versión con `\n` literales (como en el `.env`) sin normalizar da `Invalid PEM formatted message`.
+- El punto de venta que usa el web service es de tipo **RECE/Web Services** y **no** aparece en "Comprobantes en Línea" (regímenes separados y permanentes). Verificar los habilitados con `FEParamGetTiposCbte` / `getSalesPoints`.
+- Al armar payloads, el CVLP va con `Concepto: 1` (Productos); con `Concepto: 2` (Servicios) AFIP exige fechas de servicio (`FchServDesde/Hasta/VtoPago`, error `10049`).
+
+**Homologación: CUIT de prueba para todos los tenants, sin certificado propio (jul 2026).** Registrar un certificado autofirmado por tenant en el portal de homologación de AFIP (`wsaahomo.afip.gov.ar`) requiere la clave fiscal real del tenant, que en la práctica casi nunca está disponible durante el onboarding — esto bloqueaba probar la integración antes de que el cliente tuviera todo el trámite fiscal resuelto. Solución adoptada: en homologación, **todos** los tenants (sin excepción) autentican con el CUIT de prueba estándar de AFIP SDK, **sin certificado propio** — el mismo mecanismo que ya usaban los scripts de este repo (`scripts/test-tipo65.js` y similares). Esto vive en `ArcaConfigService.findWithApiKey()` (`arca-config.service.ts`): si `ambiente !== 'produccion'`, sustituye `cuitEmisor` por `CUIT_TEST_HOMOLOGACION` (constante en `arca.util.ts`, valor `'20409378472'`) y fuerza `certPem`/`keyPem` a `null`, sin tocar el resto de la config. En producción se sigue usando el CUIT real del tenant + su certificado (`certPemProduccion`/`keyPemProduccion` en `ArcaConfig` — **un solo par**, ya no hay slot de certificado de homologación; se eliminó por innecesario en la migración `20260731220000_drop_arca_config_cert_homologacion`). Como `findWithApiKey()` es el único punto de entrada usado por los tres flujos de emisión (`emitirLiquidacion`, `anularLiquidacion`, `emitirFacturaArca`), el comportamiento es automático y no requiere lógica condicional en cada uno. Al emitir con éxito se persiste el ambiente usado en `Liquidacion.ambiente` (snapshot, no se re-escribe en la anulación) — es lo que el frontend usa para marcar un comprobante como "de prueba". **Importante para cualquier flujo de emisión nuevo (ej. UI de Facturas A/B):** el punto de venta configurado por el tenant para producción muy probablemente no sea válido para el CUIT de prueba en homologación — el usuario debe poder ingresarlo manualmente al emitir (no asumir el `ptoVentaCvlp`/`ptoVentaFactura` de la config).
+
+**Errores de ARCA — mensaje amigable + detalle técnico:** todo error de emisión/anulación viaja como `{ message, detalle }`: `message` es amigable (para el usuario), `detalle` es la respuesta cruda de AFIP SDK (para "ver error completo"). `ArcaException` deriva `detalle` de su `raw` en el constructor; los `catch` del service lo devuelven en el body del `UnprocessableEntityException` (422). En la liquidación se persisten los dos (`arcaError` = amigable, `arcaErrorDetalle` = crudo), así el modal de vista muestra el detalle incluso tiempo después. En el frontend: componente `ArcaErrorMessage` (mensaje + botón "Ver error completo" + copiar) y helper `getArcaErrorDetalle(err)` (lo saca de `ApiError.body.detalle`), usados en los modales de emisión (`EmitirLiquidacionModal`, `EmitirCvlpModal`), la grilla y el `LiquidacionViewModal`. Para sumar el patrón a un flujo nuevo, reusar esos dos en vez de mostrar el error pelado.
+
+**UI de "esto es de prueba" — reusar, no reinventar (jul 2026):** para cualquier pantalla nueva que muestre o emita un comprobante ARCA, reusar los dos componentes ya construidos en `vialto-frontend/src/components/liquidaciones/`:
+
+- `AmbienteTestBadge` — badge ámbar "Prueba" que se renderiza solo si `ambiente === 'homologacion'`; usado hoy en las columnas Estado de la grilla de Liquidaciones (tenant y superadmin) y en el título del `LiquidacionViewModal`.
+- `AmbienteHomologacionWarning` — banner ámbar de advertencia ("el comprobante no va a tener validez fiscal") que se muestra antes de confirmar la emisión cuando `config.ambiente === 'homologacion'`; ubicado al final del cuerpo del modal, justo antes de los botones de acción. Usado en `EmitirLiquidacionModal`, `EmitirCvlpModal` y `CrearLiquidacionManualModal`.
+
+Ambos leen el string `ambiente` (de `ArcaConfig.ambiente` para el warning antes de emitir, de `Liquidacion.ambiente` para el badge post-emisión) y no renderizan nada si es `'produccion'`. Cuando el flujo de Facturas A/B tenga UI propia, debe usar los mismos dos componentes en vez de crear un patrón nuevo.
+
+Además, cada emisión exitosa (CVLP o su reintento) debe mostrar un toast de confirmación vía `useToast()` (`@/lib/toast`) — antes no había ningún feedback visible al terminar de emitir; ahora `onEmitirSuccess`/equivalentes en `LiquidacionesTenantPage.tsx`, `SuperadminArcaPage.tsx` y `CrearLiquidacionManualModal.tsx` llaman `showToast('Comprobante emitido correctamente...')` (incluye el CAE si está disponible). Mantener este toast al tocar esos flujos.
+
 ```prisma
 /** Configuración AFIP SDK por tenant. La API key viene de AFIP_SDK_API_KEY (env var). */
 model ArcaConfig {
@@ -758,11 +783,13 @@ model ArcaConfig {
   ptoVentaFactura    Int      // punto de venta para Facturas A/B
   ambiente           String   @default("homologacion") // homologacion | produccion
   comisionPctDefault Float    @default(8)
-  comisionPctAlt     Float    @default(7)
   ivaGastosAdmin     Float    @default(21)
-  certPem            String?  // nunca se expone en la API pública
-  keyPem             String?
-  updatedAt          DateTime @updatedAt
+  // Solo hace falta para producción — en homologación se usa el CUIT de prueba de AFIP
+  // sin certificado propio (ver "Homologación: CUIT de prueba" arriba). Nunca se exponen
+  // en la API pública.
+  certPemProduccion String?
+  keyPemProduccion  String?
+  updatedAt         DateTime @updatedAt
 }
 
 /** Liquidación CVLP tipo 60 — emitida al transportista (fletero). */
@@ -788,6 +815,9 @@ model Liquidacion {
   ptoVenta    Int?
   cae         String?
   caeFechaVto DateTime?
+  // Ambiente ARCA con el que se emitió (snapshot al autorizar; homologacion | produccion).
+  // No se re-escribe en la anulación. Lo usa el frontend para el badge "Prueba".
+  ambiente    String?
 
   estado     String  @default("borrador") // borrador | pendiente_cae | autorizado | error | anulado
   arcaError  String?

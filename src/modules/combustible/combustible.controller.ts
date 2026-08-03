@@ -23,8 +23,8 @@ import { CreateCargaDto } from "../../modules/combustible/dto/create-carga.dto";
 @ApiBearerAuth("clerk-jwt")
 @Controller("platform/combustible")
 @UseGuards(ClerkAuthGuard, RolesGuard)
-// Agregamos org:admin y admin para cubrir las variantes del rol en la organización
-@Roles("superadmin", "org:admin", "admin")
+// Habilitamos acceso general de lectura incluyendo roles de miembro (member / org:member)
+@Roles("superadmin", "org:admin", "admin", "org:member", "member")
 export class CombustibleController {
   constructor(private readonly service: CombustibleService) {}
 
@@ -54,7 +54,7 @@ export class CombustibleController {
 
   @ApiOperation({
     summary:
-      "Estaciones distintas del tenant, para el filtro (superadmin/admin)",
+      "Estaciones distintas del tenant, para el filtro (superadmin/admin/member)",
   })
   @Get("estaciones")
   getEstaciones(
@@ -66,7 +66,8 @@ export class CombustibleController {
   }
 
   @ApiOperation({
-    summary: "Listar cargas de combustible de un tenant (superadmin/admin)",
+    summary:
+      "Listar cargas de combustible de un tenant (superadmin/admin/member)",
   })
   @Get()
   findAll(
@@ -96,7 +97,8 @@ export class CombustibleController {
   }
 
   @ApiOperation({
-    summary: "Obtener una carga por ID dentro del tenant (superadmin/admin)",
+    summary:
+      "Obtener una carga por ID dentro del tenant (superadmin/admin/member)",
   })
   @Get(":id")
   findOne(
@@ -108,11 +110,13 @@ export class CombustibleController {
     return this.service.findOne(id, this.scopedAuth(tid, current));
   }
 
-  // --- ACÁ ESTÁ EL MÉTODO QUE HABÍA DESAPARECIDO ---
+  // --- MÉTODOS DE ESCRITURA RESTRINGIDOS EXCLUSIVAMENTE A ADMINS ---
+
   @ApiOperation({
     summary: "Registrar carga de combustible en un tenant (superadmin/admin)",
   })
   @Post()
+  @Roles("superadmin", "org:admin", "admin")
   create(
     @Query("tenantId") tenantId: string | undefined,
     @Body() dto: CreateCargaDto,
@@ -126,6 +130,7 @@ export class CombustibleController {
     summary: "Actualizar carga de combustible en un tenant (superadmin/admin)",
   })
   @Patch(":id")
+  @Roles("superadmin", "org:admin", "admin")
   update(
     @Param("id") id: string,
     @Query("tenantId") tenantId: string | undefined,
@@ -140,6 +145,7 @@ export class CombustibleController {
     summary: "Eliminar carga de combustible de un tenant (superadmin/admin)",
   })
   @Delete(":id")
+  @Roles("superadmin", "org:admin", "admin")
   remove(
     @Param("id") id: string,
     @Query("tenantId") tenantId: string | undefined,

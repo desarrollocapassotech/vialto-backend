@@ -949,15 +949,14 @@ export class LiquidacionesService {
   }
 
   /** Resuelve Clerk userId → nombre legible para UI (campo virtual `anuladoPorNombre`). */
-  private async attachAnuladoPorNombres<T extends { anuladoPor?: string | null }>(
+  private async attachAnuladoPorNombres<T>(
     rows: T[],
   ): Promise<Array<T & { anuladoPorNombre: string | null }>> {
+    // anuladoPor puede no estar tipado en el client aún → cast local
+    const getAnuladoPor = (r: T) =>
+      (r as { anuladoPor?: string | null }).anuladoPor?.trim() || null;
     const ids = [
-      ...new Set(
-        rows
-          .map((r) => r.anuladoPor?.trim())
-          .filter((id): id is string => Boolean(id)),
-      ),
+      ...new Set(rows.map(getAnuladoPor).filter((id): id is string => Boolean(id))),
     ];
     const labels = new Map<string, string | null>();
     await Promise.all(
@@ -971,7 +970,7 @@ export class LiquidacionesService {
       }),
     );
     return rows.map((r) => {
-      const id = r.anuladoPor?.trim() || null;
+      const id = getAnuladoPor(r);
       const nombre = id ? labels.get(id) || id : null;
       return { ...r, anuladoPorNombre: nombre };
     });

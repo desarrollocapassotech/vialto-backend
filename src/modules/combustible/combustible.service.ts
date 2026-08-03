@@ -576,6 +576,23 @@ export class CombustibleService {
     return carga;
   }
 
+  /** Marca como resuelto el CombustibleSyncErrorLog correlacionado por localId, si existe. */
+  async resolveSyncErrorByLocalId(
+    localId: string,
+    choferId: string,
+    tenantId: string,
+  ): Promise<void> {
+    await this.prisma.combustibleSyncErrorLog.updateMany({
+      where: {
+        tenantId,
+        choferId,
+        resueltoEn: null,
+        payload: { path: ["localId"], equals: localId },
+      },
+      data: { resueltoEn: new Date() },
+    });
+  }
+
   /**
    * COMB-07-T5: si esta alta viene de un reintento de sincronización (trae `localId`),
    * marca como resuelto el CombustibleSyncErrorLog que haya quedado registrado para ese
@@ -588,15 +605,7 @@ export class CombustibleService {
     localId: string,
   ): Promise<void> {
     try {
-      await this.prisma.combustibleSyncErrorLog.updateMany({
-        where: {
-          tenantId,
-          choferId,
-          resueltoEn: null,
-          payload: { path: ["localId"], equals: localId },
-        },
-        data: { resueltoEn: new Date() },
-      });
+      await this.resolveSyncErrorByLocalId(localId, choferId, tenantId);
     } catch (error) {
       this.logger.error(
         `No se pudo resolver el CombustibleSyncErrorLog para localId ${localId} (chofer ${choferId})`,

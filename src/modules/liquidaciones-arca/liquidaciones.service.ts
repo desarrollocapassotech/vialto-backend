@@ -13,7 +13,12 @@ import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
-import { computeAfipGravadoIva, round2 } from './arca-iva.util';
+import {
+  computeAfipGravadoIva,
+  isAfipIvaPct,
+  AFIP_IVA_PCTS,
+  round2,
+} from './arca-iva.util';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
@@ -99,6 +104,32 @@ export class LiquidacionesService {
       monto: r.monto,
       orden: r.orden,
     }));
+  }
+
+  /**
+   * AFIP solo acepta alícuotas oficiales. Tasas libres (ej. 10%) se persisten
+   * bien en borrador, pero al emitir hay que usar 0 / 2.5 / 5 / 10.5 / 21 / 27.
+   */
+  private assertAfipIvaRates(
+    ivaPctDefault: number,
+    lineas: ConceptoLineaInput[],
+  ): void {
+    const tasas = [
+      ivaPctDefault,
+      ...lineas.map((l) => l.ivaPct),
+    ].filter((p) => Number.isFinite(p));
+    const invalidas = [
+      ...new Set(
+        tasas
+          .filter((p) => !isAfipIvaPct(p))
+          .map((p) => Math.round(p * 10) / 10),
+      ),
+    ];
+    if (invalidas.length === 0) return;
+    throw new BadRequestException(
+      `La alícuota IVA ${invalidas.join(', ')}% no es válida para AFIP. ` +
+        `Usá una de: ${AFIP_IVA_PCTS.join(', ')}.`,
+    );
   }
 
   async uploadComprobante(tenantId: string, file: Express.Multer.File): Promise<{ url: string }> {
@@ -534,6 +565,7 @@ export class LiquidacionesService {
         orderBy: { orden: 'asc' },
       });
       const lineas = this.lineasFromStored(lineasDb);
+      this.assertAfipIvaRates(ivaPct, lineas);
       const conceptos = buildCvlpConceptosList({
         bruto: liquidacion.bruto,
         comision: liquidacion.comision,

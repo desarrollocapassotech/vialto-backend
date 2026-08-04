@@ -42,10 +42,10 @@ export function buildCvlpConceptosList(args: {
 }
 
 /**
- * Totales para persistir en Liquidacion.
- * Cada línea aporta su base + IVA según su `ivaPct` configurado (flete/comisión
- * usan `ivaPctDefault`). No se reaplica el IVA general sobre los conceptos:
- * el IVA de cada concepto es independiente y convive con el del flete/comisión.
+ * Totales a persistir en Liquidacion.
+ * El IVA de la liquidación (`ivaPctDefault`) aplica a flete, comisión y conceptos.
+ * Así el campo IVA del formulario es la única fuente de verdad (no se remapea a
+ * alícuotas AFIP ni se pisa con el IVA del catálogo de conceptos).
  */
 export function computeLiquidacionTotales(args: {
   bruto: number;
@@ -53,15 +53,14 @@ export function computeLiquidacionTotales(args: {
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
 }): { impNeto: number; impIva: number; liquido: number } {
+  const pct = Number(args.ivaPctDefault);
+  const rate = Number.isFinite(pct) ? pct : 0;
   const conceptos = buildCvlpConceptosList(args).filter((c) => c.importe !== 0);
   let impNeto = 0;
-  let impIva = 0;
   for (const c of conceptos) {
-    const base = round2(c.importe);
-    const pct = c.ivaPct ?? args.ivaPctDefault;
-    impNeto = round2(impNeto + base);
-    impIva = round2(impIva + (base * (Number(pct) || 0)) / 100);
+    impNeto = round2(impNeto + round2(c.importe));
   }
+  const impIva = round2((impNeto * rate) / 100);
   return {
     impNeto,
     impIva,

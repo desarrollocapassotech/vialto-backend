@@ -34,14 +34,13 @@ export function buildComprobanteCvlp(
     });
   }
 
-  // Totales del comprobante = suma de líneas (cada una con su IVA configurado).
-  // Así el pie coincide con "SubTotal c/IVA" del detalle y el IVA de un concepto
-  // no se reaplica ni se pisa con el IVA general del flete/comisión.
+  // Totales de negocio = suma de líneas con el IVA configurado (no AlicIva AFIP,
+  // que remapea tasas no oficiales — p.ej. 10% — a 21% y pisaba el valor del usuario).
+  // El pie coincide con "SubTotal c/IVA" del detalle.
   const impNeto = round2(items.reduce((s, i) => s + i.importeBase, 0));
   const impIva = round2(items.reduce((s, i) => s + i.importeIva, 0));
 
-  // AlicIva para WSFEv1 (Ids oficiales AFIP). Puede redondear alícuotas no
-  // estándar; los totales de negocio siguen siendo la suma de ítems.
+  // AlicIva para WSFEv1 (Ids oficiales). Puede diferir si la alícuota no es de AFIP.
   const alicuotasIva = groupAlicuotasIva(items, { fallbackIvaPct: ivaPctDefault });
 
   return {

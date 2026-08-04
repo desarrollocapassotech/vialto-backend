@@ -50,6 +50,8 @@ export interface ArcaAutorizarRequest {
 export interface ArcaAutorizarResponse {
   CAE: string;
   CAEFchVto: string; // yyyymmdd
+  /** Presente cuando se usa createNextVoucher (homologación). */
+  cbteNro?: number;
 }
 
 /**

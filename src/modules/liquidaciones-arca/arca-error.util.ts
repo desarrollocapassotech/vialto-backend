@@ -169,6 +169,25 @@ export function enrichAfipRejectionMessage(message: string): string {
       'para Facturas A/B y actualizá ese número en Superadmin → ARCA / AFIP.'
     );
   }
+  if (lower.includes('10016')) {
+    return (
+      `${message} Suele deberse a (1) fecha anterior al último comprobante en AFIP o ` +
+      '(2) número correlativo desfasado para ese punto de venta y tipo de factura. ' +
+      'En homologación el backend usa createNextVoucher y fecha local Argentina automáticamente.'
+    );
+  }
+  if (
+    lower.includes('10015') &&
+    (lower.includes('padron') ||
+      lower.includes('padrón') ||
+      lower.includes('registrado') ||
+      lower.includes('cuit pais'))
+  ) {
+    return (
+      `${message} En homologación AFIP no reconoce CUITs reales de clientes: el sistema usa datos de prueba ` +
+      'al emitir (Factura B → consumidor final; Factura A → CUIT de prueba del sandbox).'
+    );
+  }
   return message;
 }
 

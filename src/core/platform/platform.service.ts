@@ -1018,6 +1018,21 @@ export class PlatformService {
     );
   }
 
+  anularLiquidacion(
+    tenantId: string | undefined,
+    liquidacionId: string,
+    userId: string,
+    dto: import('../../modules/liquidaciones-arca/dto/anular-liquidacion.dto').AnularLiquidacionDto,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.anularLiquidacion(id, liquidacionId, userId, dto);
+  }
+
+  deleteLiquidacion(tenantId: string | undefined, liquidacionId: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.deleteLiquidacion(id, liquidacionId);
+  }
+
   emitirFacturaArca(
     tenantId: string | undefined,
     facturaId: string,

@@ -34,18 +34,14 @@ export function buildComprobanteCvlp(
     });
   }
 
-  // Totales AFIP desde AlicIva (BaseImp > 0 y BaseImp × % por Id).
+  // Totales de negocio = suma de líneas con el IVA configurado (no AlicIva AFIP,
+  // que remapea tasas no oficiales — p.ej. 10% — a 21% y pisaba el valor del usuario).
+  // El pie coincide con "SubTotal c/IVA" del detalle.
+  const impNeto = round2(items.reduce((s, i) => s + i.importeBase, 0));
+  const impIva = round2(items.reduce((s, i) => s + i.importeIva, 0));
+
+  // AlicIva para WSFEv1 (Ids oficiales). Puede diferir si la alícuota no es de AFIP.
   const alicuotasIva = groupAlicuotasIva(items, { fallbackIvaPct: ivaPctDefault });
-  let impNeto: number;
-  let impIva: number;
-  if (alicuotasIva.length > 0) {
-    impNeto = round2(alicuotasIva.reduce((s, a) => s + a.BaseImp, 0));
-    impIva = round2(alicuotasIva.reduce((s, a) => s + a.Importe, 0));
-  } else {
-    // Neto ≤ 0 (p. ej. anulación): sin AlicIva; totales desde líneas.
-    impNeto = round2(items.reduce((s, i) => s + i.importeBase, 0));
-    impIva = round2(items.reduce((s, i) => s + i.importeIva, 0));
-  }
 
   return {
     ...cabeceraBase,

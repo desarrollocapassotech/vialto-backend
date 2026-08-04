@@ -1,4 +1,4 @@
-import { groupAlicuotasIva, round2 } from './arca-iva.util';
+import { round2 } from './arca-iva.util';
 import type { ConceptoFacturable } from './arca-cvlp.util';
 
 export type ConceptoSigno = 'favor' | 'contra';
@@ -41,32 +41,26 @@ export function buildCvlpConceptosList(args: {
   return conceptos;
 }
 
-/** Totales para persistir en Liquidacion antes/después de emitir (misma regla que AFIP AlicIva). */
+/**
+ * Totales a persistir en Liquidacion.
+ * El IVA de la liquidación (`ivaPctDefault`) aplica a flete, comisión y conceptos.
+ * Así el campo IVA del formulario es la única fuente de verdad (no se remapea a
+ * alícuotas AFIP ni se pisa con el IVA del catálogo de conceptos).
+ */
 export function computeLiquidacionTotales(args: {
   bruto: number;
   comision: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
 }): { impNeto: number; impIva: number; liquido: number } {
+  const pct = Number(args.ivaPctDefault);
+  const rate = Number.isFinite(pct) ? pct : 0;
   const conceptos = buildCvlpConceptosList(args).filter((c) => c.importe !== 0);
-  const alicuotas = groupAlicuotasIva(
-    conceptos.map((c) => ({
-      importeBase: c.importe,
-      ivaPct: c.ivaPct ?? args.ivaPctDefault,
-    })),
-    { fallbackIvaPct: args.ivaPctDefault },
-  );
-  if (alicuotas.length > 0) {
-    const impNeto = round2(alicuotas.reduce((s, a) => s + a.BaseImp, 0));
-    const impIva = round2(alicuotas.reduce((s, a) => s + a.Importe, 0));
-    return {
-      impNeto,
-      impIva,
-      liquido: round2(impNeto + impIva),
-    };
+  let impNeto = 0;
+  for (const c of conceptos) {
+    impNeto = round2(impNeto + round2(c.importe));
   }
-  const impNeto = round2(conceptos.reduce((s, c) => s + c.importe, 0));
-  const impIva = 0;
+  const impIva = round2((impNeto * rate) / 100);
   return {
     impNeto,
     impIva,

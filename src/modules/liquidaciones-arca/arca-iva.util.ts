@@ -15,7 +15,16 @@ export function normalizeIvaPct(pct: number): number {
 /**
  * AFIP AlicIva.Id según alícuota % (WSFEv1).
  * 3=0%, 4=10.5%, 5=21%, 6=27%, 8=5%, 9=2.5%.
+ * Tasas fuera de esta lista no tienen Id oficial (antes caían a 21% y
+ * recalculaban mal el IVA de la liquidación).
  */
+export const AFIP_IVA_PCTS = [0, 2.5, 5, 10.5, 21, 27] as const;
+
+export function isAfipIvaPct(pct: number): boolean {
+  const p = normalizeIvaPct(pct);
+  return (AFIP_IVA_PCTS as readonly number[]).includes(p);
+}
+
 export function ivaIdFromPct(pct: number): number {
   const p = normalizeIvaPct(pct);
   if (p === 0) return 3;

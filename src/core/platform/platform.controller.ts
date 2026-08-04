@@ -4,6 +4,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
   Patch,
@@ -67,6 +69,7 @@ import { CreatePagoDto } from "../../modules/facturacion/dto/create-pago.dto";
 import { queryParamFromRequest } from "../../shared/util/express-query-string";
 import { CurrentAuth } from "../auth/current-auth.decorator";
 import { AuthPayload } from "../auth/clerk-auth.guard";
+import { AnularLiquidacionDto } from "../../modules/liquidaciones-arca/dto/anular-liquidacion.dto";
 import { PaginationQueryDto } from "shared/dto/pagination-query.dto";
 import { GetFieldConfigDto } from "../tenant-field-config/dto/get-field-config.dto";
 import { ToggleFieldConfigDto } from "../tenant-field-config/dto/toggle-field-config.dto";
@@ -1090,6 +1093,30 @@ export class PlatformController {
     dto?: import("../../modules/liquidaciones-arca/dto/emitir-liquidacion.dto").EmitirLiquidacionDto,
   ) {
     return this.service.emitirLiquidacion(tenantId, id, dto?.ptoVenta);
+  }
+
+  @ApiOperation({
+    summary: "Anular liquidación — emite comprobante de ajuste a ARCA (superadmin)",
+  })
+  @Post("arca/liquidaciones/:id/anular")
+  @HttpCode(HttpStatus.OK)
+  anularLiquidacion(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+    @Body() dto: AnularLiquidacionDto,
+  ) {
+    return this.service.anularLiquidacion(tenantId, id, auth.userId, dto);
+  }
+
+  @ApiOperation({ summary: "Eliminar liquidación en borrador/error (superadmin)" })
+  @Delete("arca/liquidaciones/:id")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteLiquidacion(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    return this.service.deleteLiquidacion(tenantId, id);
   }
 
   @ApiOperation({ summary: "Descargar PDF de liquidación (superadmin)" })

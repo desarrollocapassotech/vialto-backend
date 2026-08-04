@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../../shared/prisma/prisma.service";
@@ -72,6 +73,19 @@ type Alerta = {
   precioPorLitro: number;
 };
 
+/** COMB-07-T5: alerta de una carga que el chofer intentó sincronizar y el backend rechazó. */
+type SyncErrorAlerta = {
+  id: string;
+  mensaje: string;
+  fechaCarga: string | null;
+  reportadoEn: string;
+  choferNombre: string;
+  patente: string;
+  litros: number | null;
+  importe: number | null;
+  estacion: string | null;
+};
+
 type PorVehiculoRow = {
   vehiculoId: string;
   patente: string;
@@ -88,6 +102,8 @@ type PorVehiculoRow = {
 
 @Injectable()
 export class CombustibleService {
+  private readonly logger = new Logger(CombustibleService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
@@ -554,7 +570,48 @@ export class CombustibleService {
       },
     });
     await this.syncVehiculoKmActual(tenantId, vehiculo.id);
+    if (dto.localId) {
+      await this.resolveSyncErrorLog(tenantId, choferId, dto.localId);
+    }
     return carga;
+  }
+
+  /** Marca como resuelto el CombustibleSyncErrorLog correlacionado por localId, si existe. */
+  async resolveSyncErrorByLocalId(
+    localId: string,
+    choferId: string,
+    tenantId: string,
+  ): Promise<void> {
+    await this.prisma.combustibleSyncErrorLog.updateMany({
+      where: {
+        tenantId,
+        choferId,
+        resueltoEn: null,
+        payload: { path: ["localId"], equals: localId },
+      },
+      data: { resueltoEn: new Date() },
+    });
+  }
+
+  /**
+   * COMB-07-T5: si esta alta viene de un reintento de sincronización (trae `localId`),
+   * marca como resuelto el CombustibleSyncErrorLog que haya quedado registrado para ese
+   * mismo intento. Best-effort: si falla, no debe tirar abajo el alta ya confirmada — la
+   * carga real ya se creó, en el peor caso la alerta queda visible una vez de más.
+   */
+  private async resolveSyncErrorLog(
+    tenantId: string,
+    choferId: string,
+    localId: string,
+  ): Promise<void> {
+    try {
+      await this.resolveSyncErrorByLocalId(localId, choferId, tenantId);
+    } catch (error) {
+      this.logger.error(
+        `No se pudo resolver el CombustibleSyncErrorLog para localId ${localId} (chofer ${choferId})`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   /**
@@ -822,39 +879,41 @@ export class CombustibleService {
       ),
     );
 
-    const [vehiculos, historicas, choferes, alertas] = await Promise.all([
-      vehiculoIds.length > 0
-        ? this.prisma.vehiculo.findMany({
-            where: { id: { in: vehiculoIds } },
-            select: { id: true, patente: true, tipo: true },
-          })
-        : Promise.resolve([]),
-      vehiculoIds.length > 0
-        ? this.prisma.cargaCombustible.findMany({
-            where: {
-              tenantId,
-              vehiculoId: { in: vehiculoIds },
-              sospechoso: false,
-            },
-            orderBy: [{ vehiculoId: "asc" }, { fecha: "asc" }],
-            select: {
-              id: true,
-              vehiculoId: true,
-              km: true,
-              fecha: true,
-              litros: true,
-              importe: true,
-            },
-          })
-        : Promise.resolve([]),
-      choferIds.length > 0
-        ? this.prisma.chofer.findMany({
-            where: { id: { in: choferIds } },
-            select: { id: true, nombre: true },
-          })
-        : Promise.resolve([]),
-      this.buildAlertasSospechosas(where),
-    ]);
+    const [vehiculos, historicas, choferes, alertas, erroresSincronizacion] =
+      await Promise.all([
+        vehiculoIds.length > 0
+          ? this.prisma.vehiculo.findMany({
+              where: { id: { in: vehiculoIds } },
+              select: { id: true, patente: true, tipo: true },
+            })
+          : Promise.resolve([]),
+        vehiculoIds.length > 0
+          ? this.prisma.cargaCombustible.findMany({
+              where: {
+                tenantId,
+                vehiculoId: { in: vehiculoIds },
+                sospechoso: false,
+              },
+              orderBy: [{ vehiculoId: "asc" }, { fecha: "asc" }],
+              select: {
+                id: true,
+                vehiculoId: true,
+                km: true,
+                fecha: true,
+                litros: true,
+                importe: true,
+              },
+            })
+          : Promise.resolve([]),
+        choferIds.length > 0
+          ? this.prisma.chofer.findMany({
+              where: { id: { in: choferIds } },
+              select: { id: true, nombre: true },
+            })
+          : Promise.resolve([]),
+        this.buildAlertasSospechosas(where),
+        this.buildSyncErrorAlertas(tenantId, fromDate, toDate),
+      ]);
 
     const vehiculoMap = new Map(vehiculos.map((v) => [v.id, v]));
     const choferNombreMap = new Map(choferes.map((c) => [c.id, c.nombre]));
@@ -908,6 +967,7 @@ export class CombustibleService {
           (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
         )
         .slice(0, 50),
+      erroresSincronizacion,
       evolucionPrecio,
       evolucionCostoPorKm,
       viajesCruce,
@@ -1057,6 +1117,62 @@ export class CombustibleService {
       importe: c.importe,
       precioPorLitro: c.litros > 0 ? roundMoney(c.importe / c.litros) : 0,
     }));
+  }
+
+  /**
+   * COMB-07-T5: cargas que el chofer intentó sincronizar y el backend rechazó, todavía sin
+   * resolver. Filtra por `createdAt` (cuándo se reportó el error, campo tipado e indexado)
+   * — no por la fecha dentro de `payload`, que es un log sin tipar. El detalle de cada item
+   * sí muestra esa fecha de la carga (`payload.fecha`) para que el admin sepa a qué intento
+   * corresponde.
+   */
+  private async buildSyncErrorAlertas(
+    tenantId: string,
+    fromDate: Date | null,
+    toDate: Date | null,
+  ): Promise<SyncErrorAlerta[]> {
+    const createdAtWhere: Record<string, Date> = {};
+    if (fromDate) createdAtWhere.gte = fromDate;
+    if (toDate) createdAtWhere.lte = toDate;
+
+    const logs = await this.prisma.combustibleSyncErrorLog.findMany({
+      where: {
+        tenantId,
+        resueltoEn: null,
+        ...(fromDate || toDate ? { createdAt: createdAtWhere } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        chofer: { select: { nombre: true } },
+        vehiculo: { select: { patente: true } },
+      },
+    });
+
+    return logs.map((log) => {
+      const payload = (log.payload ?? {}) as Record<string, unknown>;
+      const fechaCarga =
+        typeof payload["fecha"] === "string" ? payload["fecha"] : null;
+      const patentePayload =
+        typeof payload["patente"] === "string" ? payload["patente"] : null;
+      const litros =
+        typeof payload["litros"] === "number" ? payload["litros"] : null;
+      const importe =
+        typeof payload["importe"] === "number" ? payload["importe"] : null;
+      const estacion =
+        typeof payload["estacion"] === "string" ? payload["estacion"] : null;
+
+      return {
+        id: log.id,
+        mensaje: log.mensaje,
+        fechaCarga,
+        reportadoEn: log.createdAt.toISOString(),
+        choferNombre: log.chofer?.nombre ?? "—",
+        patente: log.vehiculo?.patente ?? patentePayload ?? "—",
+        litros,
+        importe,
+        estacion,
+      };
+    });
   }
 
   /** Ranking por vehículo (litros/monto/cantidad del período + eficiencia + outlier + semáforo). */

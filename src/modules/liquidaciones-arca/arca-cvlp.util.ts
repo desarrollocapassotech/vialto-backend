@@ -36,6 +36,7 @@ export function buildComprobanteCvlp(
 
   // Totales de negocio = suma de líneas con el IVA configurado (no AlicIva AFIP,
   // que remapea tasas no oficiales — p.ej. 10% — a 21% y pisaba el valor del usuario).
+  // El pie coincide con "SubTotal c/IVA" del detalle.
   const impNeto = round2(items.reduce((s, i) => s + i.importeBase, 0));
   const impIva = round2(items.reduce((s, i) => s + i.importeIva, 0));
 

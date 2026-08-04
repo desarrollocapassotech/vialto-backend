@@ -683,10 +683,12 @@ model CombustibleSyncErrorLog {
   mensaje    String // mensaje de error devuelto por la validación (ej. "El kilometraje ingresado... es inconsistente...")
   payload    Json // datos de la carga que se intentó sincronizar: patente, estacion, litros, precioPorLitro, importe, km, formaPago, fecha, localId (id en IndexedDB, para correlacionar reintentos)
   createdAt  DateTime  @default(now())
+  resueltoEn DateTime? // COMB-07-T5: se completa cuando el chofer logra resincronizar esta misma carga (correlacionada por payload.localId); null = sigue pendiente de revisión
 
   @@index([tenantId])
   @@index([tenantId, choferId])
   @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, resueltoEn])
   @@map("combustible_sync_error_logs")
 }
 
@@ -865,12 +867,15 @@ model ArcaConfig {
   ambiente           String   @default("homologacion") // homologacion | produccion
   // Parámetros de liquidación
   comisionPctDefault Float    @default(8)
-  comisionPctAlt     Float    @default(7)
   ivaGastosAdmin     Float    @default(21)
-  // Certificado digital AFIP (PEM) — nunca se expone en la API pública
-  certPem            String?
-  keyPem             String?
-  updatedAt          DateTime @updatedAt
+  // Comprobante con que se anula un CVLP: 'nota_credito' (tipo 3/8) | 'nota_debito' (tipo 2/7)
+  anulacionTipoComprobante String @default("nota_credito")
+  // Certificado digital AFIP (PEM), nunca se expone en la API pública. Solo hace falta para
+  // producción: en homologación se usa el CUIT de prueba de AFIP SDK sin certificado propio
+  // (ver CUIT_TEST_HOMOLOGACION en arca.util.ts).
+  certPemProduccion String?
+  keyPemProduccion  String?
+  updatedAt         DateTime @updatedAt
 
   @@map("arca_configs")
 }
@@ -899,20 +904,36 @@ model Liquidacion {
   gastosAdminIva Float // IVA total del comprobante (impIva)
   liquido        Float // neto + IVA (total al transportista)
 
-  // Campos del comprobante AFIP (cbteTipo siempre 60 para CVLP)
+  // Campos del comprobante AFIP (cbteTipo 60/61 para CVLP)
   cbteTipo    Int       @default(60)
   cbteNro     Int?
   ptoVenta    Int?
   cae         String?
   caeFechaVto DateTime?
+  // Ambiente ARCA con el que se emitió: 'produccion' | 'homologacion'
+  ambiente    String?
+
+  // Nota de crédito 065 emitida al anular (el CVLP original se conserva arriba)
+  anulacionCbteTipo    Int?
+  anulacionCbteNro     Int?
+  anulacionPtoVenta    Int?
+  anulacionCae         String?
+  anulacionCaeFechaVto DateTime?
+  anulacionFecha       DateTime?
 
   // Estado de la integración ARCA
   estado     String  @default("borrador")
   // borrador | pendiente_cae | autorizado | error | anulado
-  arcaError  String?
+  arcaError        String? // mensaje amigable del último error de ARCA
+  arcaErrorDetalle String? // detalle técnico crudo de AFIP SDK (para "ver error completo")
   reintentos Int     @default(0)
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
+
+  // Auditoría de anulación (solo cuando estado = anulado)
+  motivoAnulacion String?
+  anuladoPor      String? // Clerk userId
+  anuladoAt       DateTime?
 
   // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
   payloadHash String?

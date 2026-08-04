@@ -95,6 +95,19 @@ export class ChoferCombustibleController {
     return this.service.logSyncError(dto, choferId, tenantId);
   }
 
+  @ApiOperation({
+    summary:
+      'Marcar como resuelto un error de sincronización reportado antes, ej. al eliminar localmente la carga pendiente en vez de corregirla (COMB-07-T5)',
+  })
+  @Post('errores-sincronizacion/:localId/resolver')
+  resolverErrorSincronizacion(
+    @Req() req: ChoferAuthRequest,
+    @Param('localId') localId: string,
+  ) {
+    const { sub: choferId, tenantId } = req.choferAuth;
+    return this.service.resolveSyncErrorByLocalId(localId, choferId, tenantId);
+  }
+
   @ApiOperation({ summary: 'Subir foto para carga de combustible (chofer)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({

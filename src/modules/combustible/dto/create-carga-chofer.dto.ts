@@ -13,4 +13,8 @@ export class CreateCargaChoferDto {
   @IsOptional() @IsDateString() fecha?: string;
   @IsOptional() @IsString() fotoTacometro?: string;
   @IsOptional() @IsString() fotoTicket?: string;
+  // COMB-07-T5: id de IndexedDB de la carga en la cola offline, presente solo cuando este
+  // alta viene de un reintento de sincronización — permite resolver automáticamente el
+  // CombustibleSyncErrorLog que haya quedado registrado para ese mismo intento.
+  @IsOptional() @IsString() localId?: string;
 }

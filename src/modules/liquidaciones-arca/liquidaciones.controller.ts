@@ -33,15 +33,15 @@ import { LiquidacionPdfService } from "./liquidacion-pdf.service";
 import { FacturaPdfService } from "./factura-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
+import { AnularLiquidacionDto } from "./dto/anular-liquidacion.dto";
 import { EmitirFacturaArcaDto } from "./dto/emitir-factura-arca.dto";
+import { EmitirLiquidacionDto } from "./dto/emitir-liquidacion.dto";
 import { UpsertArcaConfigDto } from "./dto/upsert-arca-config.dto";
 import {
   CreateConceptoLiquidacionDto,
   UpdateConceptoLiquidacionDto,
 } from "./dto/concepto-liquidacion.dto";
 import { ConceptosLiquidacionService } from "./conceptos-liquidacion.service";
-
-//comentario para hacer nuevo PR
 
 // ── RUTAS REGULARES (USUARIOS) ──────────────────────────────────────────────
 
@@ -258,27 +258,75 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
+    summary:
+      "PDF del comprobante de anulación (Nota de Crédito o Nota de Débito) de la liquidación",
+  })
+  @Get("liquidaciones/:id/pdf-anulacion")
+  @RequireModule("integracion-arca")
+  @Roles("admin", "member", "superadmin")
+  async getPdfAnulacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    try {
+      const { buffer, filename } = await this.pdfService.generateNotaCredito(
+        auth.tenantId,
+        id,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404 || e?.status === 400) {
+        res.status(e.status ?? 400).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
+  @ApiOperation({
     summary: "Emitir liquidación a ARCA — obtiene CAE en tiempo real",
   })
   @Post("liquidaciones/:id/emitir")
   @HttpCode(HttpStatus.OK)
   @RequireModule("integracion-arca")
   @Roles("admin", "superadmin")
-  emitirLiquidacion(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
+  emitirLiquidacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Body() dto: EmitirLiquidacionDto,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.emitirLiquidacion(auth.tenantId, id);
+    return this.service.emitirLiquidacion(auth.tenantId, id, dto.ptoVenta);
   }
 
   @ApiOperation({
-    summary: "Anular liquidación — emite comprobante negativo a ARCA",
+    summary: "Anular liquidación — emite Nota de Crédito/Débito asociada vía AFIP SDK",
   })
   @Post("liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
   @RequireModule("integracion-arca")
   @Roles("admin", "superadmin")
-  anularLiquidacion(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
+  anularLiquidacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Body() dto: AnularLiquidacionDto,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.anularLiquidacion(auth.tenantId, id);
+    return this.service.anularLiquidacion(auth.tenantId, id, auth.userId, dto);
   }
 
   @ApiOperation({
@@ -487,14 +535,50 @@ export class LiquidacionesPlatformController {
     return this.service.emitirLiquidacion(tid, id);
   }
 
+  @Get("liquidaciones/:id/pdf-anulacion")
+  async getPdfAnulacion(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    try {
+      const { buffer, filename } = await this.pdfService.generateNotaCredito(
+        tid,
+        id,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404 || e?.status === 400) {
+        res.status(e.status ?? 400).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
   @Post("liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
   anularLiquidacion(
     @Query("tenantId") tenantId: string | undefined,
     @Param("id") id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Body() dto: AnularLiquidacionDto,
   ) {
     const tid = this.requiredTenantId(tenantId);
-    return this.service.anularLiquidacion(tid, id);
+    return this.service.anularLiquidacion(tid, id, auth.userId, dto);
   }
 
   @Get("facturas/:facturaId/pdf")

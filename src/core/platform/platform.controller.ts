@@ -265,8 +265,12 @@ export class PlatformController {
   }
 
   @Delete("viajes/:id")
-  removeViaje(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
-    return this.service.removeViaje(tenantId, id);
+  removeViaje(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+    @Query("force") force?: string,
+  ) {
+    return this.service.removeViaje(tenantId, id, force === "true");
   }
 
   @Post("viajes/:id/gastos")

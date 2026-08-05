@@ -227,9 +227,9 @@ export class PlatformService {
     return this.viajesService.update(id, scopedTenantId, dto);
   }
 
-  async removeViaje(tenantId: string | undefined, id: string) {
+  async removeViaje(tenantId: string | undefined, id: string, force = false) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.viajesService.remove(id, scopedTenantId);
+    return this.viajesService.remove(id, scopedTenantId, force);
   }
 
   listClientes(tenantId?: string) {

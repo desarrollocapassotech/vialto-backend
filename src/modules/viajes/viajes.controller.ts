@@ -319,8 +319,12 @@ export class ViajesController {
   @ApiOperation({ summary: 'Eliminar viaje' })
   @Delete(':id')
   @Roles('admin', 'superadmin')
-  remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+  remove(
+    @Param('id') id: string,
+    @Query('force') force: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.remove(id, auth.tenantId);
+    return this.service.remove(id, auth.tenantId, force === 'true');
   }
 }

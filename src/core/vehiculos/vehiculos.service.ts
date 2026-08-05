@@ -39,6 +39,10 @@ export class VehiculosService {
     const modelo = query.modelo?.trim();
     if (modelo) where.modelo = { contains: modelo, mode: 'insensitive' };
 
+    const filtroActivo = query.filtroActivo ?? 'todos';
+    if (filtroActivo === 'activos') where.activo = true;
+    else if (filtroActivo === 'inactivos') where.activo = false;
+
     const [total, items] = await this.prisma.$transaction([
       this.prisma.vehiculo.count({ where }),
       this.prisma.vehiculo.findMany({
@@ -130,6 +134,7 @@ export class VehiculosService {
             dto.precinto !== undefined ? (dto.precinto?.trim() || null) : undefined,
           transportistaId:
             dto.transportistaId === undefined ? undefined : dto.transportistaId,
+          activo: dto.activo,
         },
       });
     } catch (e) {

@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsDateString, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsDateString, Min, ValidateIf } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateVehiculoDto {
@@ -22,4 +22,8 @@ export class UpdateVehiculoDto {
   @ValidateIf((_, v) => v !== null && v !== undefined)
   @IsString()
   transportistaId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  activo?: boolean;
 }

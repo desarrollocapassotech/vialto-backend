@@ -23,6 +23,11 @@ export class ChoferAuthService {
     if (!chofer || !chofer.pin || !verifyPin(dto.pin, chofer.pin)) {
       throw new UnauthorizedException('DNI o PIN incorrectos');
     }
+    if (!chofer.activo) {
+      throw new UnauthorizedException(
+        'Tu usuario fue desactivado. Contactá a tu empresa.',
+      );
+    }
 
     const secret = process.env.CHOFER_JWT_SECRET;
     if (!secret) {

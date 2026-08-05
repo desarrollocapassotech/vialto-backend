@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../../shared/dto/pagination-query.dto';
 
 export class VehiculosPaginatedQueryDto extends PaginationQueryDto {
@@ -17,4 +17,9 @@ export class VehiculosPaginatedQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   modelo?: string;
+
+  /** todos (default) | activos | inactivos */
+  @IsOptional()
+  @IsIn(['todos', 'activos', 'inactivos'])
+  filtroActivo?: 'todos' | 'activos' | 'inactivos';
 }

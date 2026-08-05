@@ -133,6 +133,8 @@ model Chofer {
   transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   /** Hash del PIN de login para la app vialto-combustible (formato salt:hash, ver shared/util/pin-hash.ts). Nunca se expone en respuestas de API. */
   pin             String?
+  /** Chofer desactivado no puede loguearse en la app vialto-combustible (ver chofer-auth.service.ts / chofer-auth.guard.ts). */
+  activo          Boolean        @default(true)
   createdAt       DateTime       @default(now())
 
   viajes            Viaje[]
@@ -141,6 +143,7 @@ model Chofer {
   remitos           Remito[]
 
   @@index([tenantId])
+  @@index([tenantId, activo])
   @@map("choferes")
 }
 
@@ -183,6 +186,7 @@ model Vehiculo {
   precinto          String?
   transportistaId   String?
   transportista     Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
+  activo            Boolean        @default(true)
   createdAt         DateTime       @default(now())
 
   vehiculosViaje    ViajeVehiculo[]
@@ -193,6 +197,7 @@ model Vehiculo {
 
   @@unique([tenantId, patente])
   @@index([tenantId])
+  @@index([tenantId, activo])
   @@map("vehiculos")
 }
 

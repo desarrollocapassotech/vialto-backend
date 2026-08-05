@@ -41,6 +41,10 @@ export class ChoferesService {
     const dni = query.dni?.trim();
     if (dni) where.dni = { contains: dni, mode: 'insensitive' };
 
+    const filtroActivo = query.filtroActivo ?? 'todos';
+    if (filtroActivo === 'activos') where.activo = true;
+    else if (filtroActivo === 'inactivos') where.activo = false;
+
     const [total, items] = await this.prisma.$transaction([
       this.prisma.chofer.count({ where }),
       this.prisma.chofer.findMany({
@@ -122,6 +126,7 @@ export class ChoferesService {
               ? new Date(dto.licenciaVence)
               : null,
         pin: dto.pin === undefined ? undefined : hashPin(dto.pin),
+        activo: dto.activo,
       },
     });
     return sanitize(row);

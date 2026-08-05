@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ViajesAutoEstadoService } from "./viajes-auto-estado.service";
 import { CreateViajeDto } from "./dto/create-viaje.dto";
@@ -30,7 +31,6 @@ import {
 } from "./viaje-vehiculos.helper";
 import { UpdateViajeDto } from "./dto/update-viaje.dto";
 import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
-import { Prisma } from "@prisma/client";
 import {
   VIAJE_ESTADOS_SET,
   esEstadoViajeFinal,
@@ -1554,8 +1554,84 @@ export class ViajesService {
     });
   }
 
-  async remove(id: string, tenantId: string) {
-    await this.findOne(id, tenantId);
-    return this.prisma.viaje.delete({ where: { id } });
+  async remove(id: string, tenantId: string, force = false) {
+    const viaje = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        liquidacionesViaje: {
+          select: {
+            liquidacion: {
+              select: {
+                id: true,
+                estado: true,
+                cae: true,
+                cbteNro: true,
+                ptoVenta: true,
+                periodoDesde: true,
+                periodoHasta: true,
+                transportista: { select: { nombre: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!viaje) throw new NotFoundException("Viaje no encontrado");
+
+    const liquidaciones = [
+      ...new Map(
+        viaje.liquidacionesViaje.map((lv) => [lv.liquidacion.id, lv.liquidacion]),
+      ).values(),
+    ];
+
+    const toImpactoDto = (l: (typeof liquidaciones)[number]) => ({
+      id: l.id,
+      transportistaNombre: l.transportista.nombre,
+      estado: l.estado,
+      tieneCae: Boolean(l.cae),
+      cbteNro: l.cbteNro,
+      ptoVenta: l.ptoVenta,
+      periodoDesde: l.periodoDesde,
+      periodoHasta: l.periodoHasta,
+    });
+
+    const autorizadas = liquidaciones.filter(
+      (l) => l.estado === "autorizado" || l.estado === "anulado",
+    );
+    if (autorizadas.length > 0) {
+      throw new ConflictException({
+        message:
+          "No se puede eliminar el viaje: está incluido en una liquidación ya autorizada o anulada en AFIP.",
+        code: "VIAJE_LIQUIDACION_AUTORIZADA",
+        liquidaciones: autorizadas.map(toImpactoDto),
+      });
+    }
+
+    if (liquidaciones.length > 0 && !force) {
+      throw new ConflictException({
+        message:
+          "Este viaje está incluido en liquidaciones que todavía no fueron autorizadas por AFIP. Si continuás, también se van a eliminar.",
+        code: "VIAJE_TIENE_LIQUIDACIONES",
+        liquidaciones: liquidaciones.map(toImpactoDto),
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      for (const liq of liquidaciones) {
+        await tx.liquidacionViaje.deleteMany({
+          where: { liquidacionId: liq.id, viajeId: id },
+        });
+        const restantes = await tx.liquidacionViaje.count({
+          where: { liquidacionId: liq.id },
+        });
+        if (restantes === 0) {
+          await tx.liquidacion.delete({ where: { id: liq.id } });
+        }
+      }
+      const { count } = await tx.viaje.deleteMany({ where: { id, tenantId } });
+      if (count === 0) throw new NotFoundException("Viaje no encontrado");
+      return { id };
+    });
   }
 }

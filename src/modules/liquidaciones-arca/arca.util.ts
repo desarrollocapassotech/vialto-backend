@@ -92,6 +92,70 @@ export function esNotaDebitoAnulacion(cbteTipo?: number | null): boolean {
  */
 export const CUIT_TEST_HOMOLOGACION = '20409378472';
 
+/**
+ * CUIT receptor de prueba en homologación (scripts/test-*.js).
+ * Está en el padrón del entorno de pruebas de AFIP.
+ */
+export const CUIT_RECEPTOR_TEST_HOMOLOGACION = 30668346908;
+
+const DOC_TIPO_CUIT = 80;
+const DOC_TIPO_CF = 99;
+
+export type ReceptorAfip = {
+  docTipo: number;
+  docNro: number;
+  condicionIvaReceptorId: number;
+};
+
+/** true si el cbteTipo pertenece a la clase A (Factura/CVLP/NC/ND A). */
+export function esCbteTipoClaseA(cbteTipo: number): boolean {
+  return cbteTipo === 1 || cbteTipo === 2 || cbteTipo === 3 || cbteTipo === 60;
+}
+
+/**
+ * DocTipo / DocNro / Condición IVA del receptor para WSFE.
+ * Homologación: los CUIT reales no están en el padrón de AFIP — se usan valores de prueba
+ * (Factura B → CF 99/0; clase A y CVLP B → CUIT 30668346908).
+ */
+export function resolveReceptorAfip(args: {
+  ambiente: 'homologacion' | 'produccion';
+  cbteTipo: number;
+  docNroReal: number;
+  condicionIvaReceptorId: number;
+}): ReceptorAfip {
+  if (normalizeArcaAmbiente(args.ambiente) === 'produccion') {
+    return {
+      docTipo: args.docNroReal ? DOC_TIPO_CUIT : DOC_TIPO_CF,
+      docNro: args.docNroReal,
+      condicionIvaReceptorId: args.condicionIvaReceptorId,
+    };
+  }
+
+  if (esCbteTipoClaseA(args.cbteTipo)) {
+    return {
+      docTipo: DOC_TIPO_CUIT,
+      docNro: CUIT_RECEPTOR_TEST_HOMOLOGACION,
+      condicionIvaReceptorId: 1,
+    };
+  }
+
+  // Factura B: consumidor final (Doc 99/0) — patrón oficial AfipSDK en homologación.
+  if (args.cbteTipo === 6) {
+    return {
+      docTipo: DOC_TIPO_CF,
+      docNro: 0,
+      condicionIvaReceptorId: 5,
+    };
+  }
+
+  // CVLP B (61), NC/ND B (7/8): CUIT de prueba + condición del receptor real.
+  return {
+    docTipo: DOC_TIPO_CUIT,
+    docNro: CUIT_RECEPTOR_TEST_HOMOLOGACION,
+    condicionIvaReceptorId: args.condicionIvaReceptorId || 6,
+  };
+}
+
 /** Normaliza el ambiente ARCA guardado en DB / DTO a los valores canónicos. */
 export function normalizeArcaAmbiente(raw: unknown): 'homologacion' | 'produccion' {
   const v = String(raw ?? '')
@@ -103,4 +167,66 @@ export function normalizeArcaAmbiente(raw: unknown): 'homologacion' | 'produccio
     return 'produccion';
   }
   return 'homologacion';
+}
+
+/**
+ * Determina el tipo de Factura A/B según la condición frente al IVA del cliente.
+ * - 1: Responsable Inscripto → Factura A (cbteTipo 1)
+ * - Resto (monotributo, CF, exento, etc.) → Factura B (cbteTipo 6)
+ */
+export function getCbteTipoFactura(condicionIva?: number | null): number {
+  if (condicionIva == null) {
+    throw new BadRequestException(
+      'El cliente no tiene configurada su condición frente al IVA. Actualice sus datos maestros antes de operar.',
+    );
+  }
+  return condicionIva === 1 ? 1 : 6;
+}
+
+/** Fecha yyyymmdd para AFIP en UTC (alineado con scripts/test-*.js). */
+export function formatFechaCbteUtc(date: Date = new Date()): string {
+  return date.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+/** Fecha yyyymmdd en zona horaria Argentina (AFIP opera en hora local). */
+export function formatFechaCbteArgentina(date: Date = new Date()): string {
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(date);
+  return ymd.replace(/-/g, '');
+}
+
+/**
+ * Fecha de comprobante a enviar a AFIP.
+ * Homologación: hoy (ARG y UTC, el mayor) y nunca anterior al último comprobante autorizado.
+ * Producción: fecha de emisión, sin futuro.
+ */
+export function resolveFechaCbteEmision(
+  ambiente: 'homologacion' | 'produccion',
+  fechaEmision: Date,
+  ultimoCbteFechaYmd?: string | null,
+): string {
+  if (normalizeArcaAmbiente(ambiente) !== 'produccion') {
+    return resolveFechaCbteHomologacion(ultimoCbteFechaYmd);
+  }
+  const hoy = formatFechaCbteArgentina(new Date());
+  const emision = formatFechaCbteArgentina(fechaEmision);
+  return emision > hoy ? hoy : emision;
+}
+
+/** Homologación: evita 10016 por desfase UTC vs AR o fecha anterior al último comprobante. */
+export function resolveFechaCbteHomologacion(ultimoCbteFechaYmd?: string | null): string {
+  const ar = formatFechaCbteArgentina(new Date());
+  const utc = formatFechaCbteUtc(new Date());
+  let fecha = ar > utc ? ar : utc;
+  const min = ultimoCbteFechaYmd?.replace(/\D/g, '').slice(0, 8);
+  if (min && /^\d{8}$/.test(min) && min > fecha) {
+    fecha = min;
+  }
+  return fecha;
+}
+
+/** Formato estándar PV-número para facturas/comprobantes (ej. 0001-00000045). */
+export function formatNumeroComprobante(ptoVenta: number, cbteNro: number): string {
+  return `${String(ptoVenta).padStart(4, '0')}-${String(cbteNro).padStart(8, '0')}`;
 }

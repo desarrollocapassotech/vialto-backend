@@ -30,6 +30,7 @@ import { AuthPayload } from "../../core/auth/clerk-auth.guard";
 import { assertTenantId } from "../../shared/util/assert-tenant";
 import { LiquidacionesService } from "./liquidaciones.service";
 import { LiquidacionPdfService } from "./liquidacion-pdf.service";
+import { FacturaPdfService } from "./factura-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
 import { AnularLiquidacionDto } from "./dto/anular-liquidacion.dto";
@@ -52,6 +53,7 @@ export class LiquidacionesController {
   constructor(
     private readonly service: LiquidacionesService,
     private readonly pdfService: LiquidacionPdfService,
+    private readonly facturaPdfService: FacturaPdfService,
     private readonly conceptosService: ConceptosLiquidacionService,
   ) {}
 
@@ -328,7 +330,7 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
-    summary: "Emitir factura existente a ARCA (Tipo A o B)",
+    summary: "Emitir factura existente a ARCA (Tipo A o B, automático)",
   })
   @Post("facturas/:facturaId/emitir")
   @HttpCode(HttpStatus.OK)
@@ -341,6 +343,43 @@ export class LiquidacionesController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.emitirFacturaArca(auth.tenantId, facturaId, dto);
+  }
+
+  @ApiOperation({ summary: "Descargar PDF de factura A/B" })
+  @Get("facturas/:facturaId/pdf")
+  @RequireModule("integracion-arca")
+  @Roles("admin", "member", "superadmin")
+  async getFacturaPdf(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("facturaId") facturaId: string,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    try {
+      const { buffer, filename } = await this.facturaPdfService.generate(
+        auth.tenantId,
+        facturaId,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404) {
+        res.status(404).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
   }
 
   @ApiOperation({
@@ -389,6 +428,7 @@ export class LiquidacionesPlatformController {
   constructor(
     private readonly service: LiquidacionesService,
     private readonly pdfService: LiquidacionPdfService,
+    private readonly facturaPdfService: FacturaPdfService,
   ) {}
 
   private requiredTenantId(tenantId?: string): string {
@@ -539,5 +579,36 @@ export class LiquidacionesPlatformController {
   ) {
     const tid = this.requiredTenantId(tenantId);
     return this.service.anularLiquidacion(tid, id, auth.userId, dto);
+  }
+
+  @Get("facturas/:facturaId/pdf")
+  async getFacturaPdf(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("facturaId") facturaId: string,
+    @Res() res: Response,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    try {
+      const { buffer, filename } = await this.facturaPdfService.generate(tid, facturaId);
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404) {
+        res.status(404).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
   }
 }

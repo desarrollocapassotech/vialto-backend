@@ -5,6 +5,7 @@ import { ArcaConfigService } from './arca-config.service';
 import { LiquidacionesService } from './liquidaciones.service';
 import { LiquidacionesController } from './liquidaciones.controller';
 import { LiquidacionPdfService } from './liquidacion-pdf.service';
+import { FacturaPdfService } from './factura-pdf.service';
 import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
 
 @Module({
@@ -15,12 +16,14 @@ import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
     ArcaConfigService,
     LiquidacionesService,
     LiquidacionPdfService,
+    FacturaPdfService,
     ConceptosLiquidacionService,
   ],
   exports: [
     ArcaConfigService,
     LiquidacionesService,
     LiquidacionPdfService,
+    FacturaPdfService,
     ConceptosLiquidacionService,
   ],
 })

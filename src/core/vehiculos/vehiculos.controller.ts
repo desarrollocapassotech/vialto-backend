@@ -12,7 +12,7 @@ import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
-import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { VehiculosPaginatedQueryDto } from './dto/vehiculos-paginated-query.dto';
 
 @ApiTags('Core — Vehículos')
 @ApiBearerAuth('clerk-jwt')
@@ -34,7 +34,7 @@ export class VehiculosController {
   @Roles('admin', 'member', 'superadmin')
   findAllPaginated(
     @CurrentAuth() auth: AuthPayload,
-    @Query() query: PaginationQueryDto,
+    @Query() query: VehiculosPaginatedQueryDto,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.findAllPaginated(auth.tenantId, query);

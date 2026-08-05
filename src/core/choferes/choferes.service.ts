@@ -3,10 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateChoferDto } from './dto/create-chofer.dto';
 import { UpdateChoferDto } from './dto/update-chofer.dto';
-import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { ChoferesPaginatedQueryDto } from './dto/choferes-paginated-query.dto';
 import { hashPin } from '../../shared/util/pin-hash';
 
 /** Nunca devolver el hash del PIN en respuestas de API; exponer solo si está configurado. */
@@ -29,13 +30,25 @@ export class ChoferesService {
     return rows.map(sanitize);
   }
 
-  async findAllPaginated(tenantId: string, query: PaginationQueryDto) {
+  async findAllPaginated(tenantId: string, query: ChoferesPaginatedQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
+    const where: Prisma.ChoferWhereInput = { tenantId };
+
+    const nombre = query.nombre?.trim();
+    if (nombre) where.nombre = { contains: nombre, mode: 'insensitive' };
+
+    const dni = query.dni?.trim();
+    if (dni) where.dni = { contains: dni, mode: 'insensitive' };
+
+    const filtroActivo = query.filtroActivo ?? 'todos';
+    if (filtroActivo === 'activos') where.activo = true;
+    else if (filtroActivo === 'inactivos') where.activo = false;
+
     const [total, items] = await this.prisma.$transaction([
-      this.prisma.chofer.count({ where: { tenantId } }),
+      this.prisma.chofer.count({ where }),
       this.prisma.chofer.findMany({
-        where: { tenantId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -113,6 +126,7 @@ export class ChoferesService {
               ? new Date(dto.licenciaVence)
               : null,
         pin: dto.pin === undefined ? undefined : hashPin(dto.pin),
+        activo: dto.activo,
       },
     });
     return sanitize(row);

@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsDateString, IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
+import { IsBoolean, IsDateString, IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
 
 /**
  * En PATCH: si el body trae `cuit` (aunque sea null o ""), no usar alias `CUIT`/`cuitCuil`
@@ -48,4 +48,9 @@ export class UpdateChoferDto {
   @IsOptional()
   @Matches(/^\d{4}$/, { message: 'PIN debe tener 4 dígitos' })
   pin?: string;
+
+  /** false = no puede loguearse en la app vialto-combustible (ver chofer-auth). */
+  @IsOptional()
+  @IsBoolean()
+  activo?: boolean;
 }

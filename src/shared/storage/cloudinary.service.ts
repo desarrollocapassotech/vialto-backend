@@ -312,7 +312,7 @@ export class CloudinaryService {
       .replace(/^-+|-+$/g, '')
       .slice(0, 80) || 'comprobante';
 
-    const publicId = `${Date.now()}-${baseName}`;
+    const publicId = isPdf ? `${Date.now()}-${baseName}.pdf` : `${Date.now()}-${baseName}`;
 
     try {
       const result = await new Promise<UploadApiResponse>((resolve, reject) => {

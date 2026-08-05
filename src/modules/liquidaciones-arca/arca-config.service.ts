@@ -186,12 +186,17 @@ export class ArcaConfigService {
     const cuitEmisor = esHomologacion ? CUIT_TEST_HOMOLOGACION : config.cuitEmisor;
     const certPem = esHomologacion ? null : config.certPemProduccion;
     const keyPem = esHomologacion ? null : config.keyPemProduccion;
+    // En homologación AFIP SDK usa el CUIT de prueba con PV 1 (scripts/test-*.js).
+    const ptoVentaFactura = esHomologacion ? 1 : config.ptoVentaFactura;
+    const ptoVentaCvlp = esHomologacion ? 1 : config.ptoVentaCvlp;
     return {
       ...config,
       ambiente,
       cuitEmisor,
       certPem,
       keyPem,
+      ptoVentaFactura,
+      ptoVentaCvlp,
       apiKey: this.getApiKey(),
     };
   }

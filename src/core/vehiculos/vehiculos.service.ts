@@ -9,7 +9,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
-import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { VehiculosPaginatedQueryDto } from './dto/vehiculos-paginated-query.dto';
 
 @Injectable()
 export class VehiculosService {
@@ -22,13 +22,27 @@ export class VehiculosService {
     });
   }
 
-  async findAllPaginated(tenantId: string, query: PaginationQueryDto) {
+  async findAllPaginated(tenantId: string, query: VehiculosPaginatedQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
+    const where: Prisma.VehiculoWhereInput = { tenantId };
+
+    const patente = query.patente?.trim();
+    if (patente) where.patente = { contains: patente, mode: 'insensitive' };
+
+    const tipo = query.tipo?.trim();
+    if (tipo) where.tipo = tipo;
+
+    const marca = query.marca?.trim();
+    if (marca) where.marca = { contains: marca, mode: 'insensitive' };
+
+    const modelo = query.modelo?.trim();
+    if (modelo) where.modelo = { contains: modelo, mode: 'insensitive' };
+
     const [total, items] = await this.prisma.$transaction([
-      this.prisma.vehiculo.count({ where: { tenantId } }),
+      this.prisma.vehiculo.count({ where }),
       this.prisma.vehiculo.findMany({
-        where: { tenantId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,

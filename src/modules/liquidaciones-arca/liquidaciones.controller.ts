@@ -34,6 +34,7 @@ import { FacturaPdfService } from "./factura-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
 import { AnularLiquidacionDto } from "./dto/anular-liquidacion.dto";
+import { AnularFacturaDto } from "./dto/anular-factura.dto";
 import { EmitirFacturaArcaDto } from "./dto/emitir-factura-arca.dto";
 import { EmitirLiquidacionDto } from "./dto/emitir-liquidacion.dto";
 import { UpsertArcaConfigDto } from "./dto/upsert-arca-config.dto";
@@ -345,6 +346,28 @@ export class LiquidacionesController {
     return this.service.emitirFacturaArca(auth.tenantId, facturaId, dto);
   }
 
+  @ApiOperation({
+    summary:
+      "Anular factura A/B — emite Nota de Crédito (03/08) asociada vía AFIP SDK",
+  })
+  @Post("facturas/:facturaId/anular")
+  @HttpCode(HttpStatus.OK)
+  @RequireModule("integracion-arca")
+  @Roles("admin", "superadmin")
+  anularFactura(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("facturaId") facturaId: string,
+    @Body() dto: AnularFacturaDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.anularFacturaArca(
+      auth.tenantId,
+      facturaId,
+      auth.userId,
+      dto,
+    );
+  }
+
   @ApiOperation({ summary: "Descargar PDF de factura A/B" })
   @Get("facturas/:facturaId/pdf")
   @RequireModule("integracion-arca")
@@ -374,6 +397,46 @@ export class LiquidacionesController {
       };
       if (e?.status === 404) {
         res.status(404).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
+  @ApiOperation({
+    summary: "Descargar PDF de Nota de Crédito de anulación de factura",
+  })
+  @Get("facturas/:facturaId/pdf-anulacion")
+  @RequireModule("integracion-arca")
+  @Roles("admin", "member", "superadmin")
+  async getFacturaPdfAnulacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("facturaId") facturaId: string,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    try {
+      const { buffer, filename } =
+        await this.facturaPdfService.generateNotaCredito(
+          auth.tenantId,
+          facturaId,
+        );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 400 || e?.status === 404) {
+        res.status(e.status).json(e.response ?? { message: e.message });
       } else {
         res
           .status(500)

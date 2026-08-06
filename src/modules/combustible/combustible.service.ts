@@ -142,6 +142,52 @@ export class CombustibleService {
     }
   }
 
+  private async getLimitesCronologicos(
+    tenantId: string,
+    vehiculoId: string,
+    fecha: Date,
+    excludeId?: string,
+  ) {
+    let targetCreatedAt = new Date();
+    if (excludeId) {
+      const edited = await this.prisma.cargaCombustible.findUnique({
+        where: { id: excludeId },
+        select: { createdAt: true },
+      });
+      if (edited) targetCreatedAt = edited.createdAt;
+    }
+
+    const prev = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        OR: [
+          { fecha: { lt: fecha } },
+          { fecha, createdAt: { lte: targetCreatedAt } },
+        ],
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+      select: { km: true, fecha: true },
+    });
+
+    const next = await this.prisma.cargaCombustible.findFirst({
+      where: {
+        tenantId,
+        vehiculoId,
+        OR: [
+          { fecha: { gt: fecha } },
+          { fecha, createdAt: { gte: targetCreatedAt } },
+        ],
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ fecha: "asc" }, { createdAt: "asc" }],
+      select: { km: true, fecha: true },
+    });
+
+    return { prev, next };
+  }
+
   private async assertKmNoRetroceso(
     tenantId: string,
     vehiculoId: string,
@@ -149,20 +195,12 @@ export class CombustibleService {
     km: number,
     excludeId?: string,
   ) {
-    const finDelDia = new Date(fecha.getTime());
-    finDelDia.setUTCHours(23, 59, 59, 999);
-
-    // 1. Carga anterior o del mismo día (piso): tomamos la de MAYOR km
-    const prev = await this.prisma.cargaCombustible.findFirst({
-      where: {
-        tenantId,
-        vehiculoId,
-        fecha: { lte: finDelDia },
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-      orderBy: [{ fecha: "desc" }, { km: "desc" }],
-      select: { km: true, fecha: true },
-    });
+    const { prev, next } = await this.getLimitesCronologicos(
+      tenantId,
+      vehiculoId,
+      fecha,
+      excludeId,
+    );
 
     if (prev && km < prev.km) {
       const fechaFmt = new Intl.DateTimeFormat("es-AR", {
@@ -175,17 +213,6 @@ export class CombustibleService {
         `El kilometraje ingresado (${km} km) es inconsistente: no puede ser inferior al de la carga anterior registrada el ${fechaFmt} (${prev.km} km).`,
       );
     }
-
-    const next = await this.prisma.cargaCombustible.findFirst({
-      where: {
-        tenantId,
-        vehiculoId,
-        fecha: { gt: finDelDia },
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-      orderBy: [{ fecha: "asc" }, { km: "asc" }],
-      select: { km: true, fecha: true },
-    });
 
     if (next && km > next.km) {
       const fechaFmt = new Intl.DateTimeFormat("es-AR", {
@@ -210,31 +237,12 @@ export class CombustibleService {
       return { prev: null, next: null };
     }
 
-    const fechaBase = new Date(fecha);
-    const finDelDia = new Date(fechaBase.getTime());
-    finDelDia.setUTCHours(23, 59, 59, 999);
-
-    const prev = await this.prisma.cargaCombustible.findFirst({
-      where: {
-        tenantId,
-        vehiculoId,
-        fecha: { lte: finDelDia },
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-      orderBy: [{ fecha: "desc" }, { km: "desc" }],
-      select: { km: true, fecha: true },
-    });
-
-    const next = await this.prisma.cargaCombustible.findFirst({
-      where: {
-        tenantId,
-        vehiculoId,
-        fecha: { gt: finDelDia },
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-      orderBy: [{ fecha: "asc" }, { km: "asc" }],
-      select: { km: true, fecha: true },
-    });
+    const { prev, next } = await this.getLimitesCronologicos(
+      tenantId,
+      vehiculoId,
+      new Date(fecha),
+      excludeId,
+    );
 
     return {
       prev: prev ? { km: prev.km, fecha: prev.fecha.toISOString() } : null,
@@ -660,6 +668,7 @@ export class CombustibleService {
     patente: string,
     tenantId: string,
     excludeId?: string,
+    fecha?: string,
   ) {
     const patenteClean = patente.replace(/\s+/g, "").toUpperCase();
     const vehiculo = await this.prisma.vehiculo.findFirst({
@@ -669,6 +678,18 @@ export class CombustibleService {
       },
     });
     if (!vehiculo) return null;
+
+    if (fecha) {
+      const { prev } = await this.getLimitesCronologicos(
+        tenantId,
+        vehiculo.id,
+        new Date(fecha),
+        excludeId,
+      );
+      if (!prev) return null;
+      return { km: prev.km, fecha: prev.fecha.toISOString() };
+    }
+
     const ultima = await this.prisma.cargaCombustible.findFirst({
       where: {
         tenantId,

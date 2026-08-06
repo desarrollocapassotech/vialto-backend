@@ -34,14 +34,42 @@ export function buildComprobanteCvlp(
     });
   }
 
-  // Totales de negocio = suma de líneas con el IVA configurado (no AlicIva AFIP,
-  // que remapea tasas no oficiales — p.ej. 10% — a 21% y pisaba el valor del usuario).
-  // El pie coincide con "SubTotal c/IVA" del detalle.
   const impNeto = round2(items.reduce((s, i) => s + i.importeBase, 0));
-  const impIva = round2(items.reduce((s, i) => s + i.importeIva, 0));
 
-  // AlicIva para WSFEv1 (Ids oficiales). Puede diferir si la alícuota no es de AFIP.
-  const alicuotasIva = groupAlicuotasIva(items, { fallbackIvaPct: ivaPctDefault });
+  // AlicIva para WSFEv1: Importe = BaseImp neta × % oficial (AFIP 10051).
+  const alicuotasIva = groupAlicuotasIva(items, {
+    fallbackIvaPct: ivaPctDefault,
+  });
+
+  // AFIP 10023: ImpIVA DEBE ser la suma de AlicIva.Importe.
+  // La suma de IVAs redondeados por línea puede diferir en centavos
+  // (ej. 200.06 − 100.03 → líneas 21.00 vs AlicIva 21.01).
+  // Sin AlicIva (neto ≤ 0 / anulación) se conserva la suma de líneas.
+  const ivaLineas = round2(items.reduce((s, i) => s + i.importeIva, 0));
+  const impIva =
+    alicuotasIva.length > 0
+      ? round2(alicuotasIva.reduce((s, a) => s + a.Importe, 0))
+      : ivaLineas;
+
+  // Ajustar detalle para que Σ importeIva === ImpIVA (inyectar en la línea de mayor |base|).
+  const diffIva = round2(impIva - ivaLineas);
+  if (diffIva !== 0 && items.length > 0) {
+    let idx = 0;
+    let maxAbs = Math.abs(items[0].importeBase);
+    for (let i = 1; i < items.length; i++) {
+      const abs = Math.abs(items[i].importeBase);
+      if (abs > maxAbs) {
+        maxAbs = abs;
+        idx = i;
+      }
+    }
+    const importeIva = round2(items[idx].importeIva + diffIva);
+    items[idx] = {
+      ...items[idx],
+      importeIva,
+      subtotal: round2(items[idx].importeBase + importeIva),
+    };
+  }
 
   return {
     ...cabeceraBase,

@@ -1100,7 +1100,8 @@ export class PlatformController {
   }
 
   @ApiOperation({
-    summary: "Anular liquidación — emite comprobante de ajuste a ARCA (superadmin)",
+    summary:
+      "Anular liquidación — emite comprobante de ajuste a ARCA (superadmin)",
   })
   @Post("arca/liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
@@ -1113,7 +1114,9 @@ export class PlatformController {
     return this.service.anularLiquidacion(tenantId, id, auth.userId, dto);
   }
 
-  @ApiOperation({ summary: "Eliminar liquidación en borrador/error (superadmin)" })
+  @ApiOperation({
+    summary: "Eliminar liquidación en borrador/error (superadmin)",
+  })
   @Delete("arca/liquidaciones/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteLiquidacion(
@@ -1220,6 +1223,19 @@ export class PlatformController {
   @Get("field-config/catalogo")
   getFieldConfigCatalogo() {
     return this.service.getFieldConfigCatalogo();
+  }
+
+  // --- NUEVO ENDPOINT DE AUDITORÍA ACÁ (¡ARRIBA DEL GENÉRICO!) ---
+  @ApiOperation({
+    summary: "Obtiene el historial de cambios de campos para una empresa",
+  })
+  @Get("field-config/:tenantId/audit")
+  getAuditHistory(
+    @Param("tenantId") tenantId: string,
+    @Query("modulo") modulo?: string,
+    @Query("formulario") formulario?: string,
+  ) {
+    return this.service.getAuditLogs(tenantId, modulo, formulario);
   }
 
   @ApiOperation({

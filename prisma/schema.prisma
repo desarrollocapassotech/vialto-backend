@@ -346,8 +346,21 @@ model Factura {
   ptoVenta         Int?
   cae              String?
   caeFechaVto      DateTime?
-  arcaEstado       String? // pendiente_cae | autorizado | error
+  arcaEstado       String? // pendiente_cae | autorizado | error | anulado
   arcaError        String?
+
+  // Nota de Crédito A/B (03/08) emitida al anular; la factura original se conserva arriba
+  anulacionCbteTipo    Int?
+  anulacionCbteNro     Int?
+  anulacionPtoVenta    Int?
+  anulacionCae         String?
+  anulacionCaeFechaVto DateTime?
+  anulacionFecha       DateTime?
+  motivoAnulacion      String?
+  anuladoPor           String? // Clerk userId
+  anuladoAt            DateTime?
+  notaCreditoUrl       String? // PDF NC en Cloudinary
+
   createdAt        DateTime       @default(now())
   pagos            Pago[]
 

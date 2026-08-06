@@ -1319,6 +1319,21 @@ export class PlatformService {
     return this.liquidacionesService.emitirFacturaArca(id, facturaId, dto);
   }
 
+  anularFacturaArca(
+    tenantId: string | undefined,
+    facturaId: string,
+    userId: string,
+    dto: import("../../modules/liquidaciones-arca/dto/anular-factura.dto").AnularFacturaDto,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.anularFacturaArca(
+      id,
+      facturaId,
+      userId,
+      dto,
+    );
+  }
+
   getArcaLogs(
     tenantId: string | undefined,
     liquidacionId?: string,
@@ -1342,6 +1357,14 @@ export class PlatformService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const id = this.requiredTenantId(tenantId);
     return this.facturaPdfService.generate(id, facturaId);
+  }
+
+  getFacturaPdfAnulacion(
+    tenantId: string | undefined,
+    facturaId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const id = this.requiredTenantId(tenantId);
+    return this.facturaPdfService.generateNotaCredito(id, facturaId);
   }
 
   // ── Configuración de campos por empresa (superadmin) ──────────────────────

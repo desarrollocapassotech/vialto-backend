@@ -183,6 +183,27 @@ export function getCbteTipoFactura(condicionIva?: number | null): number {
   return condicionIva === 1 ? 1 : 6;
 }
 
+/**
+ * Nota de Crédito que anula una Factura A/B.
+ * Factura A (01) → NC A (03); Factura B (06) → NC B (08).
+ * Misma correspondencia de clase que la anulación de CVLP (3/8).
+ * Si se pasa el cbteTipo original (1/6), se usa eso; si no, se deriva de la
+ * condición IVA del cliente.
+ */
+export function getCbteTipoAnulacionFactura(
+  cbteTipoOriginal?: number | null,
+  condicionIvaCliente?: number | null,
+): number {
+  if (cbteTipoOriginal === 1 || cbteTipoOriginal === 3) return 3;
+  if (cbteTipoOriginal === 6 || cbteTipoOriginal === 8) return 8;
+  if (condicionIvaCliente == null) {
+    throw new BadRequestException(
+      'No se puede determinar el tipo de Nota de Crédito: falta cbteTipo de la factura y condición IVA del cliente.',
+    );
+  }
+  return condicionIvaCliente === 1 ? 3 : 8;
+}
+
 /** Fecha yyyymmdd para AFIP en UTC (alineado con scripts/test-*.js). */
 export function formatFechaCbteUtc(date: Date = new Date()): string {
   return date.toISOString().slice(0, 10).replace(/-/g, '');

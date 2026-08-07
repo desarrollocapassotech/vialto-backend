@@ -29,9 +29,11 @@ export function parseNumeroFactura(numero: string): number {
 }
 
 /**
- * Determina el tipo de comprobante CVLP a emitir según la condición frente al IVA del transportista.
- * - 60: Responsable Inscripto (ID: 1)
- * - 61: Monotributista (ID: 6) o Exentos/No Alcanzados
+ * Determina el tipo de comprobante CVLP a emitir.
+ * Siempre 60 (clase A): AFIP rechaza la emisión del 061 (clase B) por web service
+ * en la práctica, así que se dejó de emitir — ver "Gotchas operativos de ARCA" en CLAUDE.md.
+ * Se mantiene la exigencia de condición IVA cargada porque el resto del flujo
+ * (anulación, Facturas A/B) sigue dependiendo de ese dato.
  *
  * @param condicionIva ID de la condición frente al IVA en AFIP
  */
@@ -41,7 +43,7 @@ export function getCbteTipoCvlp(condicionIva?: number | null): number {
       'El transportista no tiene configurada su condición frente al IVA. Actualice sus datos maestros antes de operar.',
     );
   }
-  return condicionIva === 1 ? 60 : 61;
+  return 60;
 }
 
 /**

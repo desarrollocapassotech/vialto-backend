@@ -255,13 +255,6 @@ export class LiquidacionesService {
     });
     const gastosAdminIva = montos.impIva;
     const liquido = montos.liquido;
-    // CVLP: RI → 60 (A), resto → 61 (B). Override opcional desde el DTO.
-    const cbteTipo =
-      dto.cbteTipo === 60 || dto.cbteTipo === 61
-        ? dto.cbteTipo
-        : transportista.condicionIva === 1
-          ? 60
-          : 61;
 
     let liquidacion;
     try {

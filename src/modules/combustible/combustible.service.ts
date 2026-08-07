@@ -27,6 +27,22 @@ const OUTLIER_PCT_CATEGORIA = 0.3; // +30% de litros sobre el promedio de su cat
 const SEMAFORO_AMARILLO_PCT = 0.15; // costo/km +15% sobre el promedio de su categoría
 const SEMAFORO_ROJO_PCT = 0.5; // costo/km +50% sobre el promedio de su categoría
 
+/**
+ * "YPF EN RUTA" reemplazó a la estación genérica "YPF" en las listas de selección
+ * (app chofer y panel admin). Las cargas históricas guardadas como "YPF" siguen así en
+ * la base — acá se las trata como alias de "YPF EN RUTA" para métricas y filtros, sin
+ * reescribir datos.
+ */
+const ESTACION_ALIASES_LEGACY: Record<string, string[]> = {
+  "YPF EN RUTA": ["YPF EN RUTA", "YPF"],
+};
+
+/** Agrupa una estación histórica bajo su nombre actual (ver `ESTACION_ALIASES_LEGACY`). */
+function normalizeEstacion(estacion: string): string {
+  const upper = estacion.trim().toUpperCase();
+  return upper === "YPF" ? "YPF EN RUTA" : estacion;
+}
+
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
@@ -285,8 +301,12 @@ export class CombustibleService {
 
     if (vehiculoId) where["vehiculoId"] = vehiculoId;
     if (choferId) where["choferId"] = choferId;
-    if (estacion)
-      where["estacion"] = { contains: estacion, mode: "insensitive" };
+    if (estacion) {
+      const aliases = ESTACION_ALIASES_LEGACY[estacion.trim().toUpperCase()];
+      where["estacion"] = aliases
+        ? { in: aliases, mode: "insensitive" }
+        : { contains: estacion, mode: "insensitive" };
+    }
     if (formaPago) {
       where["formaPago"] = {
         contains: formaPago,
@@ -326,9 +346,9 @@ export class CombustibleService {
       where,
       distinct: ["estacion"],
       select: { estacion: true },
-      orderBy: { estacion: "asc" },
     });
-    return rows.map((r) => r.estacion);
+    const normalizadas = new Set(rows.map((r) => normalizeEstacion(r.estacion)));
+    return Array.from(normalizadas).sort();
   }
 
   /**
@@ -880,9 +900,8 @@ export class CombustibleService {
       toDate,
     );
 
-    const distribucionEstaciones = this.buildDistribucion(
-      todasCargas,
-      (c) => c.estacion,
+    const distribucionEstaciones = this.buildDistribucion(todasCargas, (c) =>
+      normalizeEstacion(c.estacion),
     );
     const distribucionFormaPago = this.buildDistribucion(
       todasCargas,
@@ -1634,7 +1653,8 @@ export class CombustibleService {
     };
 
     for (const c of cargas) {
-      stats.porEstacion[c.estacion] = (stats.porEstacion[c.estacion] ?? 0) + 1;
+      const estacion = normalizeEstacion(c.estacion);
+      stats.porEstacion[estacion] = (stats.porEstacion[estacion] ?? 0) + 1;
       if (c.formaPago) {
         stats.porFormaPago[c.formaPago] =
           (stats.porFormaPago[c.formaPago] ?? 0) + 1;

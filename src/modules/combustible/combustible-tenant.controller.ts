@@ -44,4 +44,24 @@ export class CombustibleTenantController {
     assertTenantId(auth.tenantId);
     return this.service.getSyncErrors(auth, choferId);
   }
+
+  @ApiOperation({
+    summary: "Límites cronológicos para validación de kilometraje",
+  })
+  @Get("limites-km")
+  @Roles("admin", "member", "superadmin")
+  getLimitesKm(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("vehiculoId") vehiculoId: string,
+    @Query("fecha") fecha: string,
+    @Query("excludeId") excludeId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getLimitesKm(
+      auth.tenantId,
+      vehiculoId,
+      fecha,
+      excludeId,
+    );
+  }
 }

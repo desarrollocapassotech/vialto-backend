@@ -1,85 +1,94 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../shared/prisma/prisma.service';
-import { CreateClienteDto } from '../clientes/dto/create-cliente.dto';
-import { UpdateClienteDto } from '../clientes/dto/update-cliente.dto';
-import { ChoferesService } from '../choferes/choferes.service';
-import { CreateChoferDto } from '../choferes/dto/create-chofer.dto';
-import { UpdateChoferDto } from '../choferes/dto/update-chofer.dto';
-import { DestinatariosService } from '../destinatarios/destinatarios.service';
-import { CreateDestinatarioDto } from '../destinatarios/dto/create-destinatario.dto';
-import { UpdateDestinatarioDto } from '../destinatarios/dto/update-destinatario.dto';
-import { DireccionesEntregaService } from '../direcciones-entrega/direcciones-entrega.service';
-import { CreateDireccionEntregaDto } from '../direcciones-entrega/dto/create-direccion-entrega.dto';
-import { UpdateDireccionEntregaDto } from '../direcciones-entrega/dto/update-direccion-entrega.dto';
-import { VehiculosService } from '../vehiculos/vehiculos.service';
-import { CreateVehiculoDto } from '../vehiculos/dto/create-vehiculo.dto';
-import { UpdateVehiculoDto } from '../vehiculos/dto/update-vehiculo.dto';
-import { CreateTransportistaDto } from '../transportistas/dto/create-transportista.dto';
-import { UpdateTransportistaDto } from '../transportistas/dto/update-transportista.dto';
-import { CreateViajeDto } from '../../modules/viajes/dto/create-viaje.dto';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+import { CreateClienteDto } from "../clientes/dto/create-cliente.dto";
+import { UpdateClienteDto } from "../clientes/dto/update-cliente.dto";
+import { ChoferesService } from "../choferes/choferes.service";
+import { CreateChoferDto } from "../choferes/dto/create-chofer.dto";
+import { UpdateChoferDto } from "../choferes/dto/update-chofer.dto";
+import { DestinatariosService } from "../destinatarios/destinatarios.service";
+import { CreateDestinatarioDto } from "../destinatarios/dto/create-destinatario.dto";
+import { UpdateDestinatarioDto } from "../destinatarios/dto/update-destinatario.dto";
+import { DireccionesEntregaService } from "../direcciones-entrega/direcciones-entrega.service";
+import { CreateDireccionEntregaDto } from "../direcciones-entrega/dto/create-direccion-entrega.dto";
+import { UpdateDireccionEntregaDto } from "../direcciones-entrega/dto/update-direccion-entrega.dto";
+import { VehiculosService } from "../vehiculos/vehiculos.service";
+import { CreateVehiculoDto } from "../vehiculos/dto/create-vehiculo.dto";
+import { UpdateVehiculoDto } from "../vehiculos/dto/update-vehiculo.dto";
+import { CreateTransportistaDto } from "../transportistas/dto/create-transportista.dto";
+import { UpdateTransportistaDto } from "../transportistas/dto/update-transportista.dto";
+import { CreateViajeDto } from "../../modules/viajes/dto/create-viaje.dto";
 import {
   VIAJE_INCLUDE_VEHICULOS,
   type ViajeConVehiculosViaje,
-} from '../../modules/viajes/viaje-vehiculos.helper';
-import { UpdateViajeDto } from '../../modules/viajes/dto/update-viaje.dto';
-import { AddGastoDto } from '../../modules/viajes/dto/add-gasto.dto';
-import { AddPagoTransportistaDto } from '../../modules/viajes/dto/add-pago-transportista.dto';
-import { ViajesPaginatedQueryDto } from '../../modules/viajes/dto/viajes-paginated-query.dto';
-import { MicCrtService } from '../../modules/viajes/mic-crt.service';
-import { PautService } from '../../modules/viajes/paut.service';
-import { FacturacionService } from '../../modules/facturacion/facturacion.service';
-import { CreateFacturaDto } from '../../modules/facturacion/dto/create-factura.dto';
-import { UpdateFacturaDto } from '../../modules/facturacion/dto/update-factura.dto';
-import { CreatePagoDto } from '../../modules/facturacion/dto/create-pago.dto';
-import { createClerkClient } from '@clerk/backend';
-import { ViajesService } from '../../modules/viajes/viajes.service';
-import { StockService } from '../../modules/stock/stock.service';
-import { ProductosPaginatedQueryDto } from '../../modules/stock/dto/productos-paginated-query.dto';
-import { CreateProductoDto } from '../../modules/stock/dto/create-producto.dto';
-import { UpdateProductoDto } from '../../modules/stock/dto/update-producto.dto';
-import { CreatePresentacionDto } from '../../modules/stock/dto/create-presentacion.dto';
-import { UpdatePresentacionDto } from '../../modules/stock/dto/update-presentacion.dto';
-import { CreateIngresoDto } from '../../modules/stock/dto/create-ingreso.dto';
-import { CreateEgresoDto } from '../../modules/stock/dto/create-egreso.dto';
-import { CreateDivisionDto } from '../../modules/stock/dto/create-division.dto';
-import { UpdateStockEgresoRemitoConfigDto } from '../../modules/stock/dto/update-stock-egreso-remito-config.dto';
-import { ArcaConfigService } from '../../modules/liquidaciones-arca/arca-config.service';
-import { LiquidacionesService } from '../../modules/liquidaciones-arca/liquidaciones.service';
-import { LiquidacionPdfService } from '../../modules/liquidaciones-arca/liquidacion-pdf.service';
-import { FacturaPdfService } from '../../modules/liquidaciones-arca/factura-pdf.service';
-import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
+} from "../../modules/viajes/viaje-vehiculos.helper";
+import { UpdateViajeDto } from "../../modules/viajes/dto/update-viaje.dto";
+import { AddGastoDto } from "../../modules/viajes/dto/add-gasto.dto";
+import { AddPagoTransportistaDto } from "../../modules/viajes/dto/add-pago-transportista.dto";
+import { ViajesPaginatedQueryDto } from "../../modules/viajes/dto/viajes-paginated-query.dto";
+import { MicCrtService } from "../../modules/viajes/mic-crt.service";
+import { PautService } from "../../modules/viajes/paut.service";
+import { FacturacionService } from "../../modules/facturacion/facturacion.service";
+import { CreateFacturaDto } from "../../modules/facturacion/dto/create-factura.dto";
+import { UpdateFacturaDto } from "../../modules/facturacion/dto/update-factura.dto";
+import { CreatePagoDto } from "../../modules/facturacion/dto/create-pago.dto";
+import { createClerkClient } from "@clerk/backend";
+import { ViajesService } from "../../modules/viajes/viajes.service";
+import { StockService } from "../../modules/stock/stock.service";
+import { ProductosPaginatedQueryDto } from "../../modules/stock/dto/productos-paginated-query.dto";
+import { CreateProductoDto } from "../../modules/stock/dto/create-producto.dto";
+import { UpdateProductoDto } from "../../modules/stock/dto/update-producto.dto";
+import { CreatePresentacionDto } from "../../modules/stock/dto/create-presentacion.dto";
+import { UpdatePresentacionDto } from "../../modules/stock/dto/update-presentacion.dto";
+import { CreateIngresoDto } from "../../modules/stock/dto/create-ingreso.dto";
+import { CreateEgresoDto } from "../../modules/stock/dto/create-egreso.dto";
+import { CreateDivisionDto } from "../../modules/stock/dto/create-division.dto";
+import { UpdateStockEgresoRemitoConfigDto } from "../../modules/stock/dto/update-stock-egreso-remito-config.dto";
+import { ArcaConfigService } from "../../modules/liquidaciones-arca/arca-config.service";
+import { LiquidacionesService } from "../../modules/liquidaciones-arca/liquidaciones.service";
+import { LiquidacionPdfService } from "../../modules/liquidaciones-arca/liquidacion-pdf.service";
+import { FacturaPdfService } from "../../modules/liquidaciones-arca/factura-pdf.service";
+import { PaginationQueryDto } from "shared/dto/pagination-query.dto";
 
 const TAKE = 500;
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
-import { toClerkOrganizationRole, toVialtoRole } from '../auth/clerk-organization-roles';
-import { TenantFieldConfigService } from '../tenant-field-config/tenant-field-config.service';
-import { ToggleFieldConfigDto } from '../tenant-field-config/dto/toggle-field-config.dto';
+import {
+  toClerkOrganizationRole,
+  toVialtoRole,
+} from "../auth/clerk-organization-roles";
+import { TenantFieldConfigService } from "../tenant-field-config/tenant-field-config.service";
+import { ToggleFieldConfigDto } from "../tenant-field-config/dto/toggle-field-config.dto";
 
 function splitFullName(fullName: string) {
-  const normalized = fullName.trim().replace(/\s+/g, ' ');
-  const [firstName = '', ...rest] = normalized.split(' ');
-  return { firstName, lastName: rest.join(' ') || undefined };
+  const normalized = fullName.trim().replace(/\s+/g, " ");
+  const [firstName = "", ...rest] = normalized.split(" ");
+  return { firstName, lastName: rest.join(" ") || undefined };
 }
 
 function isClerkNotFound(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
+  if (!error || typeof error !== "object") return false;
   const maybe = error as {
     status?: number;
     errors?: Array<{ code?: string }>;
   };
   if (maybe.status === 404) return true;
   return Array.isArray(maybe.errors)
-    ? maybe.errors.some((e) => e?.code === 'resource_not_found')
+    ? maybe.errors.some((e) => e?.code === "resource_not_found")
     : false;
 }
 
-async function getUserPlatformRole(userId: string | null): Promise<string | null> {
+async function getUserPlatformRole(
+  userId: string | null,
+): Promise<string | null> {
   if (!userId) return null;
   try {
     const user = await clerk.users.getUser(userId);
     const rawRole = user.publicMetadata?.vialtoRole;
-    return typeof rawRole === 'string' ? rawRole : null;
+    return typeof rawRole === "string" ? rawRole : null;
   } catch {
     return null;
   }
@@ -108,7 +117,7 @@ export class PlatformService {
   private requiredTenantId(tenantId?: string) {
     const id = tenantId?.trim();
     if (!id) {
-      throw new BadRequestException('tenantId es requerido');
+      throw new BadRequestException("tenantId es requerido");
     }
     return id;
   }
@@ -118,20 +127,26 @@ export class PlatformService {
       where: { id, tenantId: scopedTenantId },
       select: { id: true },
     });
-    if (!row) throw new NotFoundException('Transportista no encontrado');
+    if (!row) throw new NotFoundException("Transportista no encontrado");
   }
 
   private async assertTenantExists(tenantId: string) {
-    const tenant = await this.prisma.tenant.findUnique({ where: { clerkOrgId: tenantId } });
-    if (!tenant) throw new BadRequestException('Empresa inválida');
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+    });
+    if (!tenant) throw new BadRequestException("Empresa inválida");
   }
 
-  private async assertTransportista(tenantId: string, transportistaId?: string) {
+  private async assertTransportista(
+    tenantId: string,
+    transportistaId?: string,
+  ) {
     if (!transportistaId) return;
     const t = await this.prisma.transportista.findFirst({
       where: { id: transportistaId, tenantId },
     });
-    if (!t) throw new BadRequestException('Transportista inválido para esta empresa');
+    if (!t)
+      throw new BadRequestException("Transportista inválido para esta empresa");
   }
 
   listViajes(tenantId?: string) {
@@ -143,7 +158,7 @@ export class PlatformService {
       .findMany({
         where: { tenantId: id },
         take: TAKE,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: {
           tenant: { select: { name: true } },
           ...VIAJE_INCLUDE_VEHICULOS,
@@ -157,12 +172,20 @@ export class PlatformService {
       );
   }
 
-  viajesPaginated(tenantId: string | undefined, query: ViajesPaginatedQueryDto) {
+  viajesPaginated(
+    tenantId: string | undefined,
+    query: ViajesPaginatedQueryDto,
+  ) {
     const scoped = this.requiredTenantId(tenantId);
     return this.viajesService.findAllPaginated(scoped, query);
   }
 
-  addViajeGasto(tenantId: string | undefined, viajeId: string, userId: string, dto: AddGastoDto) {
+  addViajeGasto(
+    tenantId: string | undefined,
+    viajeId: string,
+    userId: string,
+    dto: AddGastoDto,
+  ) {
     const scoped = this.requiredTenantId(tenantId);
     return this.viajesService.addGasto(viajeId, scoped, userId, dto);
   }
@@ -174,7 +197,12 @@ export class PlatformService {
     dto: AddPagoTransportistaDto,
   ) {
     const scoped = this.requiredTenantId(tenantId);
-    return this.viajesService.addPagoTransportista(viajeId, scoped, userId, dto);
+    return this.viajesService.addPagoTransportista(
+      viajeId,
+      scoped,
+      userId,
+      dto,
+    );
   }
 
   deleteViajePagoTransportista(
@@ -184,7 +212,12 @@ export class PlatformService {
     index: number,
   ) {
     const scoped = this.requiredTenantId(tenantId);
-    return this.viajesService.deletePagoTransportista(viajeId, scoped, userId, index);
+    return this.viajesService.deletePagoTransportista(
+      viajeId,
+      scoped,
+      userId,
+      index,
+    );
   }
 
   micCrtPrefill(tenantId: string | undefined, viajeId: string) {
@@ -195,7 +228,7 @@ export class PlatformService {
   micCrtPdf(
     tenantId: string | undefined,
     viajeId: string,
-    dto: import('../../modules/viajes/dto/mic-crt-export.dto').MicCrtExportDto,
+    dto: import("../../modules/viajes/dto/mic-crt-export.dto").MicCrtExportDto,
   ) {
     const scoped = this.requiredTenantId(tenantId);
     return this.micCrt.generate(viajeId, scoped, dto);
@@ -211,7 +244,10 @@ export class PlatformService {
     return this.viajesService.getExportaciones(viajeId, scoped);
   }
 
-  async getViajeById(tenantId: string | undefined, id: string): Promise<ViajeConVehiculosViaje> {
+  async getViajeById(
+    tenantId: string | undefined,
+    id: string,
+  ): Promise<ViajeConVehiculosViaje> {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.viajesService.findOne(id, scopedTenantId);
   }
@@ -219,10 +255,18 @@ export class PlatformService {
   async createViaje(tenantId: string, dto: CreateViajeDto, userId?: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
-    return this.viajesService.create(scopedTenantId, userId ?? 'superadmin', dto);
+    return this.viajesService.create(
+      scopedTenantId,
+      userId ?? "superadmin",
+      dto,
+    );
   }
 
-  async updateViaje(tenantId: string | undefined, id: string, dto: UpdateViajeDto) {
+  async updateViaje(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateViajeDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.viajesService.update(id, scopedTenantId, dto);
   }
@@ -241,7 +285,7 @@ export class PlatformService {
       .findMany({
         where: { tenantId: id },
         take: TAKE,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: { tenant: { select: { name: true } } },
       })
       .then((rows) =>
@@ -257,7 +301,7 @@ export class PlatformService {
     const row = await this.prisma.cliente.findFirst({
       where: { id, tenantId: scopedTenantId },
     });
-    if (!row) throw new NotFoundException('Cliente no encontrado');
+    if (!row) throw new NotFoundException("Cliente no encontrado");
     return row;
   }
 
@@ -277,7 +321,11 @@ export class PlatformService {
     });
   }
 
-  async updateCliente(tenantId: string | undefined, id: string, dto: UpdateClienteDto) {
+  async updateCliente(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateClienteDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.getClienteById(scopedTenantId, id);
     return this.prisma.cliente.update({
@@ -300,6 +348,77 @@ export class PlatformService {
     return this.choferesService.findAll(id);
   }
 
+  async getAuditLogs(clerkOrgId: string, modulo?: string, formulario?: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId },
+      select: { clerkOrgId: true },
+    });
+
+    if (!tenant) throw new NotFoundException("Tenant no encontrado");
+
+    const logs = await this.prisma.tenantFieldConfigAuditLog.findMany({
+      where: {
+        tenantId: tenant.clerkOrgId,
+        ...(modulo ? { modulo } : {}),
+        ...(formulario ? { formulario } : {}),
+      },
+      orderBy: { changedAt: "desc" },
+    });
+
+    // 1. Extraer los IDs de usuario únicos
+    const uniqueUserIds = [
+      ...new Set(logs.map((log) => log.changedBy).filter(Boolean)),
+    ];
+
+    // 2. Buscar los datos de esos usuarios en Clerk usando for...of
+    const userMap: Record<string, string> = {};
+    if (uniqueUserIds.length > 0) {
+      try {
+        const clerkUsers = await clerk.users.getUserList({
+          userId: uniqueUserIds,
+        });
+
+        const usersArray = Array.isArray(clerkUsers)
+          ? clerkUsers
+          : clerkUsers.data;
+
+        // ACÁ ESTÁ LA SOLUCIÓN: Usamos for...of en lugar de reduce
+        for (const user of usersArray) {
+          const fullName = [user.firstName, user.lastName]
+            .filter(Boolean)
+            .join(" ");
+
+          const email = user.emailAddresses?.[0]?.emailAddress;
+
+          userMap[user.id] = fullName || email || "Usuario desconocido";
+        }
+      } catch (error) {
+        console.error(
+          "Error buscando usuarios en Clerk para auditoría:",
+          error,
+        );
+      }
+    }
+
+    // 3. Devolver los logs con el nombre mapeado
+    return logs.map((log) => {
+      const ant = log.configAnterior as { visible: boolean } | null;
+      const nue = log.configNuevo as { visible: boolean } | null;
+
+      return {
+        id: log.id,
+        modulo: log.modulo,
+        formulario: log.formulario,
+        campo: log.campo,
+        estadoAnterior: ant ? ant.visible : true,
+        estadoNuevo: nue ? nue.visible : true,
+        userId: log.changedBy,
+        userName: userMap[log.changedBy] || log.changedBy,
+        createdAt: log.changedAt,
+      };
+    });
+  }
+
   async getChoferById(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.choferesService.findOne(id, scopedTenantId);
@@ -311,7 +430,11 @@ export class PlatformService {
     return this.choferesService.create(scopedTenantId, dto);
   }
 
-  async updateChofer(tenantId: string | undefined, id: string, dto: UpdateChoferDto) {
+  async updateChofer(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateChoferDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.choferesService.update(id, scopedTenantId, dto);
   }
@@ -330,7 +453,7 @@ export class PlatformService {
     return this.prisma.destinatario
       .findMany({
         where: { tenantId: id },
-        orderBy: { nombre: 'asc' },
+        orderBy: { nombre: "asc" },
         include: { tenant: { select: { name: true } } },
       })
       .then((rows) =>
@@ -346,7 +469,10 @@ export class PlatformService {
     return this.destinatariosService.findOne(id, scopedTenantId);
   }
 
-  async createDestinatario(tenantId: string | undefined, dto: CreateDestinatarioDto) {
+  async createDestinatario(
+    tenantId: string | undefined,
+    dto: CreateDestinatarioDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
     return this.destinatariosService.create(scopedTenantId, dto);
@@ -375,7 +501,7 @@ export class PlatformService {
     return this.prisma.direccionEntrega
       .findMany({
         where: { tenantId: id },
-        orderBy: { direccion: 'asc' },
+        orderBy: { direccion: "asc" },
         include: { tenant: { select: { name: true } } },
       })
       .then((rows) =>
@@ -424,7 +550,7 @@ export class PlatformService {
       .findMany({
         where: { tenantId: id },
         take: TAKE,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: { tenant: { select: { name: true } } },
       })
       .then((rows) =>
@@ -444,7 +570,7 @@ export class PlatformService {
       .findMany({
         where: { tenantId: id },
         take: TAKE,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: { tenant: { select: { name: true } } },
       })
       .then((rows) =>
@@ -460,11 +586,14 @@ export class PlatformService {
     const row = await this.prisma.transportista.findFirst({
       where: { id, tenantId: scopedTenantId },
     });
-    if (!row) throw new NotFoundException('Transportista no encontrado');
+    if (!row) throw new NotFoundException("Transportista no encontrado");
     return row;
   }
 
-  async createTransportista(tenantId: string | undefined, dto: CreateTransportistaDto) {
+  async createTransportista(
+    tenantId: string | undefined,
+    dto: CreateTransportistaDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
     return this.prisma.transportista.create({
@@ -480,7 +609,9 @@ export class PlatformService {
         condicionTributaria: dto.condicionTributaria ?? null,
         paut: dto.paut ?? null,
         permisoInternacional: dto.permisoInternacional ?? null,
-        fechaVencimientoPermiso: dto.fechaVencimientoPermiso ? new Date(dto.fechaVencimientoPermiso) : null,
+        fechaVencimientoPermiso: dto.fechaVencimientoPermiso
+          ? new Date(dto.fechaVencimientoPermiso)
+          : null,
       },
     });
   }
@@ -526,9 +657,11 @@ export class PlatformService {
       return [];
     }
     const organizationId = tenantId.trim();
-    const memberships = await clerk.organizations.getOrganizationMembershipList({
-      organizationId,
-    });
+    const memberships = await clerk.organizations.getOrganizationMembershipList(
+      {
+        organizationId,
+      },
+    );
     return Promise.all(
       memberships.data.map(async (m) => {
         const userId = m.publicUserData?.userId ?? null;
@@ -547,12 +680,16 @@ export class PlatformService {
 
   async getUserById(tenantId: string | undefined, userId: string) {
     const organizationId = this.requiredTenantId(tenantId);
-    const memberships = await clerk.organizations.getOrganizationMembershipList({
-      organizationId,
-    });
-    const membership = memberships.data.find((m) => m.publicUserData?.userId === userId);
+    const memberships = await clerk.organizations.getOrganizationMembershipList(
+      {
+        organizationId,
+      },
+    );
+    const membership = memberships.data.find(
+      (m) => m.publicUserData?.userId === userId,
+    );
     if (!membership) {
-      throw new NotFoundException('Usuario no encontrado en esta empresa');
+      throw new NotFoundException("Usuario no encontrado en esta empresa");
     }
     const resolvedUserId = membership.publicUserData?.userId ?? null;
     return {
@@ -577,16 +714,18 @@ export class PlatformService {
     const normalizedName = name.trim();
     const normalizedEmail = emailAddress.trim().toLowerCase();
     if (!normalizedName) {
-      throw new BadRequestException('Nombre requerido');
+      throw new BadRequestException("Nombre requerido");
     }
     if (!normalizedEmail) {
-      throw new BadRequestException('Email requerido');
+      throw new BadRequestException("Email requerido");
     }
     if (!password) {
-      throw new BadRequestException('Contraseña requerida');
+      throw new BadRequestException("Contraseña requerida");
     }
     if (password.length < 8) {
-      throw new BadRequestException('La contraseña debe tener al menos 8 caracteres');
+      throw new BadRequestException(
+        "La contraseña debe tener al menos 8 caracteres",
+      );
     }
     const { firstName, lastName } = splitFullName(normalizedName);
 
@@ -623,9 +762,10 @@ export class PlatformService {
         },
       });
 
-      const memberships = await clerk.organizations.getOrganizationMembershipList({
-        organizationId,
-      });
+      const memberships =
+        await clerk.organizations.getOrganizationMembershipList({
+          organizationId,
+        });
       const alreadyMember = memberships.data.some(
         (m) => m.publicUserData?.userId === userId,
       );
@@ -636,7 +776,7 @@ export class PlatformService {
           userId,
           role: toClerkOrganizationRole(role),
         });
-        return { userId, organizationId, action: 'role-updated' };
+        return { userId, organizationId, action: "role-updated" };
       }
 
       await clerk.organizations.createOrganizationMembership({
@@ -644,20 +784,30 @@ export class PlatformService {
         userId,
         role: toClerkOrganizationRole(role),
       });
-      return { userId, organizationId, action: 'created-and-added' };
-
-    } catch (error) {
+      return { userId, organizationId, action: "created-and-added" };
+    } catch (error: any) {
       if (!userAlreadyExisted) {
         await clerk.users.deleteUser(userId);
       }
-      if (error?.status === 403) {
-        throw new BadRequestException('No se puede agregar el usuario a la organización. Verificá el límite de miembros del plan.');
+      if (
+        error &&
+        typeof error === "object" &&
+        "status" in error &&
+        error.status === 403
+      ) {
+        throw new BadRequestException(
+          "No se puede agregar el usuario a la organización. Verificá el límite de miembros del plan.",
+        );
       }
       throw error;
     }
   }
 
-  async updateUserRole(tenantId: string | undefined, userId: string, role: string) {
+  async updateUserRole(
+    tenantId: string | undefined,
+    userId: string,
+    role: string,
+  ) {
     const organizationId = this.requiredTenantId(tenantId);
     const result = await clerk.organizations.updateOrganizationMembership({
       organizationId,
@@ -712,7 +862,7 @@ export class PlatformService {
     const row = await this.prisma.vehiculo.findFirst({
       where: { id, tenantId: scopedTenantId },
     });
-    if (!row) throw new NotFoundException('Vehículo no encontrado');
+    if (!row) throw new NotFoundException("Vehículo no encontrado");
     return row;
   }
 
@@ -722,7 +872,11 @@ export class PlatformService {
     return this.vehiculosService.create(scopedTenantId, dto);
   }
 
-  async updateVehiculo(tenantId: string | undefined, id: string, dto: UpdateVehiculoDto) {
+  async updateVehiculo(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateVehiculoDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.vehiculosService.update(id, scopedTenantId, dto);
   }
@@ -737,10 +891,17 @@ export class PlatformService {
 
   async listFacturas(tenantId?: string, clienteId?: string) {
     if (!tenantId?.trim()) return Promise.resolve([]);
-    return this.facturacionService.listFacturas(tenantId.trim(), clienteId?.trim() || undefined);
+    return this.facturacionService.listFacturas(
+      tenantId.trim(),
+      clienteId?.trim() || undefined,
+    );
   }
 
-  async updateFactura(tenantId: string | undefined, id: string, dto: UpdateFacturaDto) {
+  async updateFactura(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateFacturaDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.facturacionService.updateFactura(id, scopedTenantId, dto);
   }
@@ -768,7 +929,10 @@ export class PlatformService {
 
   // ─── Productos (módulo stock) ────────────────────────────────────────────────
 
-  listProductosPaginated(tenantId: string | undefined, query: ProductosPaginatedQueryDto) {
+  listProductosPaginated(
+    tenantId: string | undefined,
+    query: ProductosPaginatedQueryDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.findAllProductosPaginated(scopedTenantId, query);
   }
@@ -784,7 +948,11 @@ export class PlatformService {
     return this.stockService.createProducto(scopedTenantId, dto);
   }
 
-  updateProducto(tenantId: string | undefined, id: string, dto: UpdateProductoDto) {
+  updateProducto(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdateProductoDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.updateProducto(id, scopedTenantId, dto);
   }
@@ -799,7 +967,11 @@ export class PlatformService {
     return this.stockService.createPresentacion(scopedTenantId, dto);
   }
 
-  updatePresentacion(tenantId: string | undefined, id: string, dto: UpdatePresentacionDto) {
+  updatePresentacion(
+    tenantId: string | undefined,
+    id: string,
+    dto: UpdatePresentacionDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.updatePresentacion(id, scopedTenantId, dto);
   }
@@ -809,7 +981,11 @@ export class PlatformService {
     return this.stockService.removePresentacion(id, scopedTenantId);
   }
 
-  listDepositos(tenantId: string | undefined, query: PaginationQueryDto, activo?: boolean) {
+  listDepositos(
+    tenantId: string | undefined,
+    query: PaginationQueryDto,
+    activo?: boolean,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listDepositos(scopedTenantId, query, activo);
   }
@@ -824,19 +1000,49 @@ export class PlatformService {
     return this.uploadIngresoFoto(tenantId, file);
   }
 
-  createIngreso(tenantId: string | undefined, dto: CreateIngresoDto, createdBy: string) {
+  createIngreso(
+    tenantId: string | undefined,
+    dto: CreateIngresoDto,
+    createdBy: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.createIngreso(scopedTenantId, dto, createdBy);
   }
 
-  listIngresos(tenantId: string | undefined, query: PaginationQueryDto, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
+  listIngresos(
+    tenantId: string | undefined,
+    query: PaginationQueryDto,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listIngresos(scopedTenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.stockService.listIngresos(
+      scopedTenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
-  listStockDisponible(tenantId: string | undefined, clienteId?: string, productoId?: string, depositoId?: string) {
+  listStockDisponible(
+    tenantId: string | undefined,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listStockDisponible(scopedTenantId, clienteId, productoId, depositoId);
+    return this.stockService.listStockDisponible(
+      scopedTenantId,
+      clienteId,
+      productoId,
+      depositoId,
+    );
   }
 
   getLotesHistorico(
@@ -847,7 +1053,13 @@ export class PlatformService {
     presentacionId?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.getLotesHistorico(scopedTenantId, productoId, clienteId, depositoId, presentacionId);
+    return this.stockService.getLotesHistorico(
+      scopedTenantId,
+      productoId,
+      clienteId,
+      depositoId,
+      presentacionId,
+    );
   }
 
   getLotesDisponibles(
@@ -858,7 +1070,13 @@ export class PlatformService {
     presentacionId?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.getLotesDisponibles(scopedTenantId, productoId, clienteId, depositoId, presentacionId);
+    return this.stockService.getLotesDisponibles(
+      scopedTenantId,
+      productoId,
+      clienteId,
+      depositoId,
+      presentacionId,
+    );
   }
 
   getEgresoRemitoConfig(tenantId: string | undefined) {
@@ -866,19 +1084,42 @@ export class PlatformService {
     return this.stockService.getEgresoRemitoConfig(scopedTenantId);
   }
 
-  upsertEgresoRemitoConfig(tenantId: string | undefined, dto: UpdateStockEgresoRemitoConfigDto) {
+  upsertEgresoRemitoConfig(
+    tenantId: string | undefined,
+    dto: UpdateStockEgresoRemitoConfigDto,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.upsertEgresoRemitoConfig(scopedTenantId, dto);
   }
 
-  createEgreso(tenantId: string | undefined, dto: CreateEgresoDto, createdBy: string) {
+  createEgreso(
+    tenantId: string | undefined,
+    dto: CreateEgresoDto,
+    createdBy: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.createEgreso(scopedTenantId, dto, createdBy);
   }
 
-  listEgresos(tenantId: string | undefined, query: PaginationQueryDto, clienteId?: string, productoId?: string, depositoId?: string, fechaDesde?: string, fechaHasta?: string) {
+  listEgresos(
+    tenantId: string | undefined,
+    query: PaginationQueryDto,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listEgresos(scopedTenantId, query, clienteId, productoId, depositoId, fechaDesde, fechaHasta);
+    return this.stockService.listEgresos(
+      scopedTenantId,
+      query,
+      clienteId,
+      productoId,
+      depositoId,
+      fechaDesde,
+      fechaHasta,
+    );
   }
 
   findEgreso(tenantId: string | undefined, id: string) {
@@ -894,13 +1135,21 @@ export class PlatformService {
   streamRemitoInternoView(
     tenantId: string | undefined,
     egresoId: string,
-    res: import('express').Response,
+    res: import("express").Response,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.streamRemitoInternoView(egresoId, scopedTenantId, res);
+    return this.stockService.streamRemitoInternoView(
+      egresoId,
+      scopedTenantId,
+      res,
+    );
   }
 
-  createDivision(tenantId: string | undefined, dto: CreateDivisionDto, createdBy: string) {
+  createDivision(
+    tenantId: string | undefined,
+    dto: CreateDivisionDto,
+    createdBy: string,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.createDivision(scopedTenantId, dto, createdBy);
   }
@@ -932,19 +1181,25 @@ export class PlatformService {
     productoId?: string,
     clienteId?: string,
     depositoId?: string,
-    tipo?: 'ingreso' | 'egreso' | 'division',
+    tipo?: "ingreso" | "egreso" | "division",
     fechaDesde?: string,
     fechaHasta?: string,
     createdBy?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listMovimientos(scopedTenantId, query, productoId, clienteId, {
-      depositoId,
-      tipo,
-      fechaDesde,
-      fechaHasta,
-      createdBy,
-    });
+    return this.stockService.listMovimientos(
+      scopedTenantId,
+      query,
+      productoId,
+      clienteId,
+      {
+        depositoId,
+        tipo,
+        fechaDesde,
+        fechaHasta,
+        createdBy,
+      },
+    );
   }
 
   listOperacionesStockPaginated(
@@ -953,21 +1208,27 @@ export class PlatformService {
     productoId?: string,
     clienteId?: string,
     depositoId?: string,
-    tipo?: 'ingreso' | 'egreso' | 'division',
+    tipo?: "ingreso" | "egreso" | "division",
     fechaDesde?: string,
     fechaHasta?: string,
     createdBy?: string,
     lote?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.stockService.listOperacionesPaginated(scopedTenantId, query, productoId, clienteId, {
-      depositoId,
-      tipo,
-      fechaDesde,
-      fechaHasta,
-      createdBy,
-      lote,
-    });
+    return this.stockService.listOperacionesPaginated(
+      scopedTenantId,
+      query,
+      productoId,
+      clienteId,
+      {
+        depositoId,
+        tipo,
+        fechaDesde,
+        fechaHasta,
+        createdBy,
+        lote,
+      },
+    );
   }
 
   getOperacionStock(tenantId: string | undefined, id: string) {
@@ -980,7 +1241,11 @@ export class PlatformService {
     return this.stockService.findMovimiento(id, scopedTenantId);
   }
 
-  streamRemitoAdjunto(tenantId: string | undefined, id: string, res: import('express').Response) {
+  streamRemitoAdjunto(
+    tenantId: string | undefined,
+    id: string,
+    res: import("express").Response,
+  ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.streamRemitoAdjunto(id, scopedTenantId, res);
   }
@@ -992,9 +1257,14 @@ export class PlatformService {
     return this.arcaConfigService.findPublic(id);
   }
 
-  upsertArcaConfig(tenantId: string | undefined, dto: import('../../modules/liquidaciones-arca/dto/upsert-arca-config.dto').UpsertArcaConfigDto) {
+  upsertArcaConfig(
+    tenantId: string | undefined,
+    dto: import("../../modules/liquidaciones-arca/dto/upsert-arca-config.dto").UpsertArcaConfigDto,
+  ) {
     const id = this.requiredTenantId(tenantId);
-    return this.arcaConfigService.upsert(id, dto, { allowAmbienteChange: true });
+    return this.arcaConfigService.upsert(id, dto, {
+      allowAmbienteChange: true,
+    });
   }
 
   listLiquidaciones(tenantId: string | undefined, estado?: string) {
@@ -1024,10 +1294,15 @@ export class PlatformService {
     tenantId: string | undefined,
     liquidacionId: string,
     userId: string,
-    dto: import('../../modules/liquidaciones-arca/dto/anular-liquidacion.dto').AnularLiquidacionDto,
+    dto: import("../../modules/liquidaciones-arca/dto/anular-liquidacion.dto").AnularLiquidacionDto,
   ) {
     const id = this.requiredTenantId(tenantId);
-    return this.liquidacionesService.anularLiquidacion(id, liquidacionId, userId, dto);
+    return this.liquidacionesService.anularLiquidacion(
+      id,
+      liquidacionId,
+      userId,
+      dto,
+    );
   }
 
   deleteLiquidacion(tenantId: string | undefined, liquidacionId: string) {
@@ -1038,13 +1313,32 @@ export class PlatformService {
   emitirFacturaArca(
     tenantId: string | undefined,
     facturaId: string,
-    dto: import('../../modules/liquidaciones-arca/dto/emitir-factura-arca.dto').EmitirFacturaArcaDto,
+    dto: import("../../modules/liquidaciones-arca/dto/emitir-factura-arca.dto").EmitirFacturaArcaDto,
   ) {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionesService.emitirFacturaArca(id, facturaId, dto);
   }
 
-  getArcaLogs(tenantId: string | undefined, liquidacionId?: string, facturaId?: string) {
+  anularFacturaArca(
+    tenantId: string | undefined,
+    facturaId: string,
+    userId: string,
+    dto: import("../../modules/liquidaciones-arca/dto/anular-factura.dto").AnularFacturaDto,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    return this.liquidacionesService.anularFacturaArca(
+      id,
+      facturaId,
+      userId,
+      dto,
+    );
+  }
+
+  getArcaLogs(
+    tenantId: string | undefined,
+    liquidacionId?: string,
+    facturaId?: string,
+  ) {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionesService.findLogs(id, liquidacionId, facturaId);
   }
@@ -1065,14 +1359,30 @@ export class PlatformService {
     return this.facturaPdfService.generate(id, facturaId);
   }
 
+  getFacturaPdfAnulacion(
+    tenantId: string | undefined,
+    facturaId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const id = this.requiredTenantId(tenantId);
+    return this.facturaPdfService.generateNotaCredito(id, facturaId);
+  }
+
   // ── Configuración de campos por empresa (superadmin) ──────────────────────
 
-  getFieldConfig(tenantId: string | undefined, modulo: string, formulario: string) {
+  getFieldConfig(
+    tenantId: string | undefined,
+    modulo: string,
+    formulario: string,
+  ) {
     const id = this.requiredTenantId(tenantId);
     return this.fieldConfigService.getConfigEfectiva(id, modulo, formulario);
   }
 
-  toggleFieldConfig(tenantId: string | undefined, dto: ToggleFieldConfigDto, changedBy: string) {
+  toggleFieldConfig(
+    tenantId: string | undefined,
+    dto: ToggleFieldConfigDto,
+    changedBy: string,
+  ) {
     const id = this.requiredTenantId(tenantId);
     return this.fieldConfigService.toggleCampo(id, dto, changedBy);
   }

@@ -1,7 +1,15 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../../shared/prisma/prisma.service';
-import { getCatalogoFormulario, getCatalogoModulo, FIELD_CATALOG } from './field-catalog';
-import { ToggleFieldConfigDto } from './dto/toggle-field-config.dto';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from "@nestjs/common";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+import {
+  getCatalogoFormulario,
+  getCatalogoModulo,
+  FIELD_CATALOG,
+} from "./field-catalog";
+import { ToggleFieldConfigDto } from "./dto/toggle-field-config.dto";
 
 type FieldConfigValue = { visible: boolean };
 type CamposJson = Record<string, FieldConfigValue>;
@@ -11,7 +19,11 @@ export class TenantFieldConfigService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Obtiene la configuración de un formulario combinando el catálogo base con la configuración del tenant. */
-  async getConfigEfectiva(tenantId: string, modulo: string, formulario: string) {
+  async getConfigEfectiva(
+    tenantId: string,
+    modulo: string,
+    formulario: string,
+  ) {
     const catalogo = getCatalogoFormulario(modulo, formulario);
     const row = await this.prisma.tenantFieldConfig.findUnique({
       where: { tenantId_modulo_formulario: { tenantId, modulo, formulario } },
@@ -32,7 +44,9 @@ export class TenantFieldConfigService {
     const rows = await this.prisma.tenantFieldConfig.findMany({
       where: { tenantId, modulo },
     });
-    const overridesPorFormulario = new Map(rows.map((r) => [r.formulario, r.campos as CamposJson]));
+    const overridesPorFormulario = new Map(
+      rows.map((r) => [r.formulario, r.campos as CamposJson]),
+    );
 
     const resultado: Record<string, Record<string, boolean>> = {};
     for (const [formulario, def] of Object.entries(formularios)) {
@@ -44,7 +58,11 @@ export class TenantFieldConfigService {
     return resultado;
   }
 
-  async toggleCampo(tenantId: string, dto: ToggleFieldConfigDto, changedBy: string) {
+  async toggleCampo(
+    tenantId: string,
+    dto: ToggleFieldConfigDto,
+    changedBy: string,
+  ) {
     const formulariosAActualizar = dto.aplicarATodosLosFormularios
       ? Object.keys(getCatalogoModulo(dto.modulo))
       : [dto.formulario];
@@ -62,7 +80,14 @@ export class TenantFieldConfigService {
         );
       }
 
-      await this.upsertCampo(tenantId, dto.modulo, formulario, dto.campo, dto.visible, changedBy);
+      await this.upsertCampo(
+        tenantId,
+        dto.modulo,
+        formulario,
+        dto.campo,
+        dto.visible,
+        changedBy,
+      );
     }
   }
 
@@ -80,12 +105,19 @@ export class TenantFieldConfigService {
     const camposActuales = (row?.campos as CamposJson) ?? {};
     const configAnterior = camposActuales[campo] ?? null;
     const configNuevo: FieldConfigValue = { visible };
-    const camposNuevos: CamposJson = { ...camposActuales, [campo]: configNuevo };
+    const camposNuevos: CamposJson = {
+      ...camposActuales,
+      [campo]: configNuevo,
+    };
 
     await this.prisma.$transaction([
       this.prisma.tenantFieldConfig.upsert({
         where: { tenantId_modulo_formulario: { tenantId, modulo, formulario } },
-        update: { campos: camposNuevos, updatedBy: changedBy, updatedAt: new Date() },
+        update: {
+          campos: camposNuevos,
+          updatedBy: changedBy,
+          updatedAt: new Date(),
+        },
         create: {
           tenantId,
           modulo,
@@ -111,5 +143,43 @@ export class TenantFieldConfigService {
 
   getCatalogoCompleto() {
     return FIELD_CATALOG;
+  }
+
+  /** Obtiene el historial de auditoría de los campos modificados en una empresa */
+  async getAuditLogs(clerkOrgId: string, modulo?: string, formulario?: string) {
+    // Nota: Según tu schema, el tenantId en esta tabla apunta a clerkOrgId directamente.
+    // Confirmemos buscando el tenant.
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId },
+      select: { clerkOrgId: true }, // Usamos clerkOrgId porque tu relation reference apunta ahí
+    });
+
+    if (!tenant) throw new NotFoundException("Tenant no encontrado");
+
+    const logs = await this.prisma.tenantFieldConfigAuditLog.findMany({
+      where: {
+        tenantId: tenant.clerkOrgId,
+        ...(modulo ? { modulo } : {}),
+        ...(formulario ? { formulario } : {}),
+      },
+      orderBy: { changedAt: "desc" }, // <-- CORREGIDO: Usamos changedAt
+    });
+
+    return logs.map((log) => {
+      const ant = log.configAnterior as FieldConfigValue | null;
+      const nue = log.configNuevo as FieldConfigValue | null;
+
+      return {
+        id: log.id,
+        modulo: log.modulo,
+        formulario: log.formulario,
+        campo: log.campo,
+        // Si no hay estado anterior (es el primer cambio), por defecto el campo era visible
+        estadoAnterior: ant ? ant.visible : true,
+        estadoNuevo: nue ? nue.visible : true,
+        userId: log.changedBy,
+        createdAt: log.changedAt, // <-- CORREGIDO: Mapeamos changedAt para el frontend
+      };
+    });
   }
 }

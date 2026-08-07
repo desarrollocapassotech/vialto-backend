@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -9,6 +9,10 @@ import {
   buildFacturaConceptosList,
   defaultFacturaLineas,
 } from './factura-conceptos.util';
+import {
+  drawHomologacionWatermark,
+  shouldShowHomologacionWatermark,
+} from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -23,8 +27,18 @@ const CONDICION_IVA_LABEL: Record<number, string> = {
 
 const LETRA_POR_TIPO: Record<number, string> = {
   1: 'A',
+  3: 'A', // Nota de Crédito A
   6: 'B',
+  8: 'B', // Nota de Crédito B
   11: 'C',
+};
+
+const TITULO_POR_TIPO: Record<number, string> = {
+  1: 'FACTURA',
+  3: 'NOTA DE CREDITO',
+  6: 'FACTURA',
+  8: 'NOTA DE CREDITO',
+  11: 'FACTURA',
 };
 
 function fmtNum(n: number, decimals = 2): string {
@@ -119,6 +133,22 @@ export class FacturaPdfService {
     tenantId: string,
     facturaId: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
+    return this.generateInternal(tenantId, facturaId, 'factura');
+  }
+
+  /** PDF de la Nota de Crédito A/B que anula la factura, con comprobante asociado. */
+  async generateNotaCredito(
+    tenantId: string,
+    facturaId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    return this.generateInternal(tenantId, facturaId, 'nc');
+  }
+
+  private async generateInternal(
+    tenantId: string,
+    facturaId: string,
+    kind: 'factura' | 'nc',
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const factura = await this.prisma.factura.findUnique({
       where: { id: facturaId },
       include: {
@@ -146,41 +176,105 @@ export class FacturaPdfService {
       throw new NotFoundException('Factura no encontrada');
     }
 
-    const config = await this.arcaConfig.findPublic(tenantId);
     const facturaExt = factura as typeof factura & {
       cbteTipo?: number | null;
       cbteNro?: number | null;
       ptoVenta?: number | null;
       cae?: string | null;
       caeFechaVto?: Date | null;
+      anulacionCbteTipo?: number | null;
+      anulacionCbteNro?: number | null;
+      anulacionPtoVenta?: number | null;
+      anulacionCae?: string | null;
+      anulacionCaeFechaVto?: Date | null;
+      anulacionFecha?: Date | null;
+      arcaEstado?: string | null;
     };
 
+    if (kind === 'nc') {
+      if (
+        facturaExt.arcaEstado !== 'anulado' ||
+        !facturaExt.anulacionCae ||
+        !facturaExt.anulacionCbteNro
+      ) {
+        throw new BadRequestException(
+          'No hay Nota de Crédito de anulación para esta factura.',
+        );
+      }
+    }
+
+    const drawCbteTipo =
+      kind === 'nc'
+        ? (facturaExt.anulacionCbteTipo ?? 3)
+        : (facturaExt.cbteTipo ?? 6);
+    const drawCbteNro =
+      kind === 'nc' ? facturaExt.anulacionCbteNro : facturaExt.cbteNro;
+    const drawPtoVenta =
+      kind === 'nc'
+        ? (facturaExt.anulacionPtoVenta ?? facturaExt.ptoVenta)
+        : facturaExt.ptoVenta;
+    const drawCae =
+      kind === 'nc' ? facturaExt.anulacionCae : facturaExt.cae;
+    const drawCaeVto =
+      kind === 'nc'
+        ? facturaExt.anulacionCaeFechaVto
+        : facturaExt.caeFechaVto;
+    const drawFecha =
+      kind === 'nc'
+        ? (facturaExt.anulacionFecha ?? factura.fechaEmision)
+        : factura.fechaEmision;
+
+    const drawExt = {
+      ...facturaExt,
+      cbteTipo: drawCbteTipo,
+      cbteNro: drawCbteNro,
+      ptoVenta: drawPtoVenta,
+      cae: drawCae,
+      caeFechaVto: drawCaeVto,
+    };
+
+    const asociados =
+      kind === 'nc' &&
+      facturaExt.cbteNro != null &&
+      facturaExt.ptoVenta != null &&
+      facturaExt.cbteTipo != null
+        ? [
+            {
+              tipo: facturaExt.cbteTipo,
+              ptoVenta: facturaExt.ptoVenta,
+              nro: facturaExt.cbteNro,
+            },
+          ]
+        : [];
+
+    const config = await this.arcaConfig.findPublic(tenantId);
+
     let qrBuffer: Buffer | null = null;
-    if (facturaExt.cae && facturaExt.cbteNro && facturaExt.ptoVenta) {
+    if (drawCae && drawCbteNro && drawPtoVenta) {
       const docNroRec = factura.cliente?.idFiscal
         ? Number(String(factura.cliente.idFiscal).replace(/-/g, ''))
         : 0;
-      const impTotal =
-        facturaExt.cae
-          ? await this.resolveImpTotal(facturaId, factura, config)
-          : factura.importe;
+      const impTotal = await this.resolveImpTotal(facturaId, factura, config);
       const payload = {
         ver: 1,
-        fecha: factura.fechaEmision.toISOString().slice(0, 10),
+        fecha: drawFecha.toISOString().slice(0, 10),
         cuit: Number(String(config?.cuitEmisor ?? '0').replace(/-/g, '')),
-        ptoVta: facturaExt.ptoVenta,
-        tipoCmp: facturaExt.cbteTipo ?? 6,
-        nroCmp: facturaExt.cbteNro,
+        ptoVta: drawPtoVenta,
+        tipoCmp: drawCbteTipo,
+        nroCmp: drawCbteNro,
         importe: Math.round(impTotal * 100) / 100,
         moneda: 'PES',
         ctz: 1,
         tipoDocRec: docNroRec ? 80 : 99,
         nroDocRec: docNroRec,
         tipoCodAut: 'E',
-        codAut: Number(facturaExt.cae),
+        codAut: Number(drawCae),
       };
       const qrUrl = `https://www.afip.gob.ar/fe/qr/?p=${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
-      qrBuffer = await QRCode.toBuffer(qrUrl, { width: 72, margin: 1 }) as Buffer;
+      qrBuffer = (await QRCode.toBuffer(qrUrl, {
+        width: 72,
+        margin: 1,
+      })) as Buffer;
     }
 
     let logoBuffer: Buffer | null = null;
@@ -193,15 +287,30 @@ export class FacturaPdfService {
       }
     }
 
-    const comprobante = await this.resolveComprobante(factura, config);
-    const buffer = await this.buildPdf(factura, facturaExt, config, qrBuffer, logoBuffer, comprobante);
+    const comprobante = await this.resolveComprobanteForKind(
+      factura,
+      config,
+      kind,
+      drawExt,
+    );
+    const buffer = await this.buildPdf(
+      { ...factura, fechaEmision: drawFecha },
+      drawExt,
+      config,
+      qrBuffer,
+      logoBuffer,
+      comprobante,
+      asociados,
+    );
 
-    const cbteNroStr = facturaExt.cbteNro && facturaExt.ptoVenta
-      ? `${String(facturaExt.ptoVenta).padStart(4, '0')}-${String(facturaExt.cbteNro).padStart(8, '0')}`
-      : factura.numero.slice(0, 20);
+    const cbteNroStr =
+      drawCbteNro && drawPtoVenta
+        ? `${String(drawPtoVenta).padStart(4, '0')}-${String(drawCbteNro).padStart(8, '0')}`
+        : factura.numero.slice(0, 20);
     const clienteSlug = slugify(factura.cliente?.nombre ?? 'cliente');
-    const letra = LETRA_POR_TIPO[facturaExt.cbteTipo ?? 6] ?? 'B';
-    const filename = `Factura_${letra}_${cbteNroStr}_${clienteSlug}.pdf`;
+    const letra = LETRA_POR_TIPO[drawCbteTipo] ?? 'B';
+    const prefix = kind === 'nc' ? 'NC' : 'Factura';
+    const filename = `${prefix}_${letra}_${cbteNroStr}_${clienteSlug}.pdf`;
 
     return { buffer, filename };
   }
@@ -215,6 +324,55 @@ export class FacturaPdfService {
     return comprobante.impTotal;
   }
 
+  private async resolveComprobanteForKind(
+    factura: PrismaAny,
+    config: PrismaAny,
+    kind: 'factura' | 'nc',
+    drawExt: PrismaAny,
+  ): Promise<ArcaComprobanteCvlp> {
+    if (kind === 'nc') {
+      // Preferir metadata del log de la NC; si no, reconstruir con datos de anulación.
+      const log = await this.db.arcaLog.findFirst({
+        where: { facturaId: factura.id, exitoso: true, method: 'FECAESolicitar' },
+        orderBy: { createdAt: 'desc' },
+      });
+      const metadata = (log?.requestBody as { auditMetadata?: ArcaComprobanteCvlp })
+        ?.auditMetadata;
+      if (
+        metadata &&
+        Array.isArray(metadata.items) &&
+        metadata.cbteTipo === drawExt.cbteTipo
+      ) {
+        return metadata;
+      }
+      const ivaPct = resolveIvaPct(factura.ivaPct ?? config?.ivaGastosAdmin);
+      const lineas = defaultFacturaLineas(factura, factura.viajes ?? []);
+      const conceptos = buildFacturaConceptosList(lineas, ivaPct);
+      const docNro = factura.cliente?.idFiscal
+        ? Number(String(factura.cliente.idFiscal).replace(/-/g, ''))
+        : 0;
+      return buildComprobanteCvlp(
+        {
+          cuit: config?.cuitEmisor ?? '',
+          ptoVenta: drawExt.ptoVenta ?? 0,
+          cbteTipo: drawExt.cbteTipo ?? 3,
+          cbteNro: drawExt.cbteNro ?? 0,
+          fechaCbte: (factura.fechaEmision as Date)
+            .toISOString()
+            .slice(0, 10)
+            .replace(/-/g, ''),
+          concepto: 1,
+          docTipo: docNro ? 80 : 99,
+          docNro,
+          condicionIvaReceptorId: factura.cliente?.condicionIva ?? 5,
+        },
+        conceptos,
+        ivaPct,
+      );
+    }
+    return this.resolveComprobante(factura, config);
+  }
+
   private async resolveComprobante(
     factura: PrismaAny,
     config: PrismaAny,
@@ -224,7 +382,8 @@ export class FacturaPdfService {
         where: { facturaId: factura.id, exitoso: true, method: 'FECAESolicitar' },
         orderBy: { createdAt: 'desc' },
       });
-      const metadata = (log?.requestBody as { auditMetadata?: ArcaComprobanteCvlp })?.auditMetadata;
+      const metadata = (log?.requestBody as { auditMetadata?: ArcaComprobanteCvlp })
+        ?.auditMetadata;
       if (metadata && Array.isArray(metadata.items)) {
         return metadata;
       }
@@ -242,7 +401,10 @@ export class FacturaPdfService {
       ptoVenta: factura.ptoVenta ?? config?.ptoVentaFactura ?? 0,
       cbteTipo: factura.cbteTipo ?? 6,
       cbteNro: factura.cbteNro ?? 0,
-      fechaCbte: factura.fechaEmision.toISOString().slice(0, 10).replace(/-/g, ''),
+      fechaCbte: factura.fechaEmision
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, ''),
       concepto: 1,
       docTipo: docNro ? 80 : 99,
       docNro,
@@ -259,7 +421,10 @@ export class FacturaPdfService {
     qrBuffer: Buffer | null,
     logoBuffer: Buffer | null,
     comprobante: ArcaComprobanteCvlp,
+    asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
   ): Promise<Buffer> {
+    // Ambiente desde ArcaConfig del tenant (misma condición que PDF CVLP).
+    const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: true });
@@ -267,9 +432,31 @@ export class FacturaPdfService {
         doc.on('data', (c: Buffer) => chunks.push(c));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
-        this.draw(doc, factura, facturaExt, config, qrBuffer, logoBuffer, 'ORIGINAL', comprobante);
+        this.draw(
+          doc,
+          factura,
+          facturaExt,
+          config,
+          qrBuffer,
+          logoBuffer,
+          'ORIGINAL',
+          comprobante,
+          asociados,
+          showTestWatermark,
+        );
         doc.addPage();
-        this.draw(doc, factura, facturaExt, config, qrBuffer, logoBuffer, 'DUPLICADO', comprobante);
+        this.draw(
+          doc,
+          factura,
+          facturaExt,
+          config,
+          qrBuffer,
+          logoBuffer,
+          'DUPLICADO',
+          comprobante,
+          asociados,
+          showTestWatermark,
+        );
         doc.end();
       } catch (e) {
         reject(e);
@@ -286,6 +473,8 @@ export class FacturaPdfService {
     logoBuffer: Buffer | null,
     copia: 'ORIGINAL' | 'DUPLICADO',
     comprobante: ArcaComprobanteCvlp,
+    asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
+    showTestWatermark = false,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -356,8 +545,14 @@ export class FacturaPdfService {
     {
       const titleX = c2x + 6;
       const titleW = CW - (c2x - M) - 6;
+      const tituloCbteTipo = facturaExt.cbteTipo ?? 6;
       doc.fontSize(13).font('Helvetica-Bold').fillColor('#000')
-        .text('FACTURA', titleX, y + 6, { width: titleW });
+        .text(
+          TITULO_POR_TIPO[tituloCbteTipo] ?? 'FACTURA',
+          titleX,
+          y + 6,
+          { width: titleW },
+        );
 
       const cbteNroStr = facturaExt.cbteNro && facturaExt.ptoVenta
         ? `${String(facturaExt.ptoVenta).padStart(4, '0')}-${String(facturaExt.cbteNro).padStart(8, '0')}`
@@ -423,32 +618,67 @@ export class FacturaPdfService {
     let cx = M;
     for (const w of colWidths) { colX.push(cx); cx += w; }
     const tableW = CW;
-    const rowH = 16;
+    const headerRowH = 16;
+    const cellPadY = 4;
+    const cellPadX = 2;
 
     const tHeaders = ['Producto', 'Descripción', 'Cantidad', 'Precio', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
-    doc.rect(M, y, tableW, rowH).fill('#e8e8e8').stroke('#aaa');
+    doc.rect(M, y, tableW, headerRowH).fill('#e8e8e8').stroke('#aaa');
     tHeaders.forEach((h, i) => {
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
-        .text(h, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: i >= 2 ? 'right' : 'left' });
+        .text(h, colX[i] + cellPadX, y + cellPadY, {
+          width: colWidths[i] - cellPadX * 2,
+          align: i >= 2 ? 'right' : 'left',
+        });
     });
-    y += rowH;
+    y += headerRowH;
 
     for (const item of comprobante.items) {
-      doc.rect(M, y, tableW, rowH).stroke('#ddd');
       const cells = [
-        { v: item.descripcion.toUpperCase(), align: 'left' },
-        { v: item.descripcion.toUpperCase(), align: 'left' },
-        { v: '1,00', align: 'right' },
-        { v: fmtNum(item.importeBase), align: 'right' },
-        { v: fmtNum(item.importeBase), align: 'right' },
-        { v: fmtNum(item.ivaPct), align: 'right' },
-        { v: fmtNum(item.subtotal), align: 'right' },
+        { v: item.descripcion.toUpperCase(), align: 'left' as const },
+        { v: item.descripcion.toUpperCase(), align: 'left' as const },
+        { v: '1,00', align: 'right' as const },
+        { v: fmtNum(item.importeBase), align: 'right' as const },
+        { v: fmtNum(item.importeBase), align: 'right' as const },
+        { v: fmtNum(item.ivaPct), align: 'right' as const },
+        { v: fmtNum(item.subtotal), align: 'right' as const },
       ];
+
+      // Altura dinámica: descripciones largas (ej. viaje con origen/destino) wrappean
+      // y no deben solaparse con "Comprobantes asociados" debajo.
+      doc.fontSize(7).font('Helvetica');
+      let contentH = 0;
+      for (let i = 0; i < cells.length; i++) {
+        const h = doc.heightOfString(cells[i].v, {
+          width: colWidths[i] - cellPadX * 2,
+        });
+        if (h > contentH) contentH = h;
+      }
+      const rowH = Math.max(headerRowH, contentH + cellPadY * 2);
+
+      doc.rect(M, y, tableW, rowH).stroke('#ddd');
       cells.forEach((cell, i) => {
         doc.fontSize(7).font('Helvetica').fillColor('#000')
-          .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.align as 'left' | 'right' });
+          .text(cell.v, colX[i] + cellPadX, y + cellPadY, {
+            width: colWidths[i] - cellPadX * 2,
+            align: cell.align,
+          });
       });
       y += rowH;
+    }
+
+    if (asociados.length > 0) {
+      y += 8;
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
+        .text('Comprobantes asociados', M, y, { width: CW });
+      y += 14;
+      for (const asoc of asociados) {
+        const nro = `${String(asoc.ptoVenta).padStart(4, '0')}-${String(asoc.nro).padStart(8, '0')}`;
+        const label = `Tipo ${String(asoc.tipo).padStart(3, '0')}  N° ${nro}`;
+        doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+          .text(label, M + 4, y, { width: CW - 8 });
+        y += 12;
+      }
     }
 
     const footerY = PAGE_H - MARGIN - 90;
@@ -512,6 +742,11 @@ export class FacturaPdfService {
     } else {
       doc.fontSize(7.5).font('Helvetica').fillColor('#999')
         .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });
+    }
+
+    // Al final de la página: encima del contenido, sin taparlo (opacity).
+    if (showTestWatermark) {
+      drawHomologacionWatermark(doc);
     }
   }
 }

@@ -749,6 +749,7 @@ Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) +
 
 **Gotchas operativos de ARCA (verificados en producción con NyM, jul 2026):**
 
+- **CVLP tipo 61 (clase B) no se emite — solo se emite 060.** En producción no se pudo autorizar el 061 vía AFIP SDK para transportistas no Responsables Inscriptos. `getCbteTipoCvlp()` (`arca.util.ts`) devuelve siempre `60`, sin importar la condición IVA del transportista; el selector manual 60/61 que existía en el modal de creación de liquidación (`CrearLiquidacionManualModal.tsx`) se sacó (era además dead code: `createLiquidacion`/`emitirLiquidacion` recalculaban el tipo con `getCbteTipoCvlp` e ignoraban el override del DTO). Si se retoma el 061 a futuro, hay que revertir `getCbteTipoCvlp` y reintroducir la selección en el frontend.
 - `cms.sign.invalid` ("firma inválida o algoritmo no soportado") al autenticar = el cert y la clave guardados en `ArcaConfig` **no son pareja** (típico de re-pegar uno solo). La firma la hace afipsdk en la nube; casi nunca es el algoritmo. Solución: re-cargar **ambos** (cert + clave juntos) desde el par correcto (verificar con un test de auth que el par del `.env` funciona).
 - El cert/clave se guardan cifrados con `ARCA_ENCRYPTION_KEY` (AES-256-GCM). Debe ser **la misma en todos los entornos que compartan base**; si difiere, falla el descifrado. En producción no puede estar vacía (fail-fast).
 - La config **solo re-guarda cert/clave si se envía contenido**; dejar un campo vacío conserva el valor anterior.

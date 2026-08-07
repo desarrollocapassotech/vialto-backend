@@ -46,9 +46,10 @@ export class ChoferCombustibleController {
     @Req() req: ChoferAuthRequest,
     @Query('patente') patente: string,
     @Query('excludeId') excludeId?: string,
+    @Query('fecha') fecha?: string,
   ) {
     const { tenantId } = req.choferAuth;
-    return this.service.getUltimoKmPorPatente(patente, tenantId, excludeId);
+    return this.service.getUltimoKmPorPatente(patente, tenantId, excludeId, fecha);
   }
 
   @ApiOperation({ summary: 'Registrar una carga de combustible (usa patente en lugar de vehiculoId)' })

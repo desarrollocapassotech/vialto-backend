@@ -1100,7 +1100,8 @@ export class PlatformController {
   }
 
   @ApiOperation({
-    summary: "Anular liquidación — emite comprobante de ajuste a ARCA (superadmin)",
+    summary:
+      "Anular liquidación — emite comprobante de ajuste a ARCA (superadmin)",
   })
   @Post("arca/liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
@@ -1113,7 +1114,9 @@ export class PlatformController {
     return this.service.anularLiquidacion(tenantId, id, auth.userId, dto);
   }
 
-  @ApiOperation({ summary: "Eliminar liquidación en borrador/error (superadmin)" })
+  @ApiOperation({
+    summary: "Eliminar liquidación en borrador/error (superadmin)",
+  })
   @Delete("arca/liquidaciones/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteLiquidacion(
@@ -1202,6 +1205,63 @@ export class PlatformController {
     return this.service.emitirFacturaArca(tenantId, facturaId, dto);
   }
 
+  @ApiOperation({
+    summary:
+      "Anular factura A/B — emite Nota de Crédito (03/08) vía AFIP SDK (superadmin)",
+  })
+  @Post("arca/facturas/:facturaId/anular")
+  @HttpCode(HttpStatus.OK)
+  anularFacturaArca(
+    @Param("facturaId") facturaId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+    @Body()
+    dto: import("../../modules/liquidaciones-arca/dto/anular-factura.dto").AnularFacturaDto,
+  ) {
+    return this.service.anularFacturaArca(
+      tenantId,
+      facturaId,
+      auth.userId,
+      dto,
+    );
+  }
+
+  @ApiOperation({
+    summary: "Descargar PDF de Nota de Crédito de anulación de factura (superadmin)",
+  })
+  @Get("arca/facturas/:facturaId/pdf-anulacion")
+  async getFacturaPdfAnulacion(
+    @Param("facturaId") facturaId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const { buffer, filename } = await this.service.getFacturaPdfAnulacion(
+        tenantId,
+        facturaId,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 400 || e?.status === 404) {
+        res.status(e.status).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
   @ApiOperation({ summary: "Logs de auditoría de AFIP SDK (superadmin)" })
   @Get("arca/logs")
   getArcaLogs(
@@ -1220,6 +1280,19 @@ export class PlatformController {
   @Get("field-config/catalogo")
   getFieldConfigCatalogo() {
     return this.service.getFieldConfigCatalogo();
+  }
+
+  // --- NUEVO ENDPOINT DE AUDITORÍA ACÁ (¡ARRIBA DEL GENÉRICO!) ---
+  @ApiOperation({
+    summary: "Obtiene el historial de cambios de campos para una empresa",
+  })
+  @Get("field-config/:tenantId/audit")
+  getAuditHistory(
+    @Param("tenantId") tenantId: string,
+    @Query("modulo") modulo?: string,
+    @Query("formulario") formulario?: string,
+  ) {
+    return this.service.getAuditLogs(tenantId, modulo, formulario);
   }
 
   @ApiOperation({

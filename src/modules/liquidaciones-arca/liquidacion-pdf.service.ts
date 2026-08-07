@@ -3,11 +3,14 @@ import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
-import { normalizeArcaAmbiente } from './arca.util';
 import { buildComprobanteCvlp } from './arca-cvlp.util';
 import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
 import { buildCvlpConceptosList } from './cvlp-conceptos.util';
 import { CBTE_TIPO_NC_CVLP, esNotaDebitoAnulacion } from './arca.util';
+import {
+  drawHomologacionWatermark,
+  shouldShowHomologacionWatermark,
+} from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -362,8 +365,7 @@ export class LiquidacionPdfService {
     drawOpts: PdfDrawOpts,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (no acción manual del usuario).
-    const showTestWatermark =
-      normalizeArcaAmbiente(config?.ambiente) !== 'produccion';
+    const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: true });
@@ -379,37 +381,6 @@ export class LiquidacionPdfService {
         reject(e);
       }
     });
-  }
-
-  /**
-   * Marca de agua diagonal en homologación/testing.
-   * Se dibuja al final de cada página (por encima del contenido, traslúcida).
-   */
-  private drawHomologacionWatermark(doc: PDFKit.PDFDocument) {
-    doc.save();
-    doc.opacity(0.16);
-    doc.fillColor('#b71c1c');
-    doc.font('Helvetica-Bold');
-
-    const cx = PAGE_W / 2;
-    const cy = PAGE_H / 2;
-    doc.translate(cx, cy);
-    doc.rotate(-42);
-
-    // Ancho de la diagonal de la hoja A4 para que la banda cruce todo el documento.
-    const bandW = Math.sqrt(PAGE_W * PAGE_W + PAGE_H * PAGE_H);
-    doc.fontSize(28).text('COMPROBANTE DE PRUEBA', -bandW / 2, -28, {
-      width: bandW,
-      align: 'center',
-      lineBreak: false,
-    });
-    doc.fontSize(22).text('SIN VALIDEZ FISCAL', -bandW / 2, 8, {
-      width: bandW,
-      align: 'center',
-      lineBreak: false,
-    });
-
-    doc.restore();
   }
 
   private draw(
@@ -731,7 +702,7 @@ export class LiquidacionPdfService {
 
     // Al final de la página: encima del contenido, sin taparlo (opacity).
     if (showTestWatermark) {
-      this.drawHomologacionWatermark(doc);
+      drawHomologacionWatermark(doc);
     }
   }
 }

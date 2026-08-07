@@ -1467,81 +1467,43 @@ export class LiquidacionesService {
         condicionIvaReceptorId,
       });
 
-      if (esHomologacion) {
-        const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-          config.apiKey,
-          config.cuitEmisor,
-          ambiente,
-          config.ptoVentaFactura,
-          cbteTipoFinal,
-          tenantId,
-          undefined,
-          facturaId,
-          config.certPem,
-          config.keyPem,
-        );
-        const ultimoFecha =
-          ultimoCbte > 0
-            ? await this.arcaClient.getFechaComprobanteAutorizado(
-                config.apiKey,
-                config.cuitEmisor,
-                ambiente,
-                config.ptoVentaFactura,
-                cbteTipoFinal,
-                ultimoCbte,
-                config.certPem,
-                config.keyPem,
-              )
-            : null;
-        fechaCbte = resolveFechaCbteEmision(ambiente, facturaRaw.fechaEmision, ultimoFecha);
-        const fechaEmisionAfip = parseAfipDate(fechaCbte);
+      // Mismo camino que CVLP / anulación NC: FECAESolicitar vía autorizarComprobante.
+      // Homologación no usa createNextVoucher: el SDK proxy a veces responde
+      // "Invalid XML Error: Unexpected close tag" en ese helper.
+      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+        config.apiKey,
+        config.cuitEmisor,
+        ambiente,
+        config.ptoVentaFactura,
+        cbteTipoFinal,
+        tenantId,
+        undefined,
+        facturaId,
+        config.certPem,
+        config.keyPem,
+      );
+      cbteNro = ultimoCbte + 1;
 
-        const cabeceraBase = {
-          cuit: config.cuitEmisor,
-          ptoVenta: config.ptoVentaFactura,
-          cbteTipo: cbteTipoFinal,
-          cbteNro: 0,
-          fechaCbte,
-          concepto: 1,
-          docTipo: receptor.docTipo,
-          docNro: receptor.docNro,
-          condicionIvaReceptorId: receptor.condicionIvaReceptorId,
-        };
-        const comprobante = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPctDefault);
-        const arcaRequest = mapCvlpToArcaRequest(comprobante, ambiente);
+      const ultimoFecha =
+        esHomologacion && ultimoCbte > 0
+          ? await this.arcaClient.getFechaComprobanteAutorizado(
+              config.apiKey,
+              config.cuitEmisor,
+              ambiente,
+              config.ptoVentaFactura,
+              cbteTipoFinal,
+              ultimoCbte,
+              config.certPem,
+              config.keyPem,
+            )
+          : null;
+      fechaCbte = resolveFechaCbteEmision(
+        ambiente,
+        facturaRaw.fechaEmision,
+        ultimoFecha,
+      );
 
-        response = await this.arcaClient.autorizarComprobanteNext(
-          config.apiKey,
-          arcaRequest,
-          tenantId,
-          undefined,
-          facturaId,
-          config.certPem,
-          config.keyPem,
-          comprobante as unknown as Record<string, unknown>,
-        );
-        cbteNro = response.cbteNro ?? ultimoCbte + 1;
-
-        await (this.prisma as PrismaAny).factura.update({
-          where: { id: facturaId },
-          data: { cbteNro, fechaEmision: fechaEmisionAfip },
-        });
-      } else {
-        const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-          config.apiKey,
-          config.cuitEmisor,
-          ambiente,
-          config.ptoVentaFactura,
-          cbteTipoFinal,
-          tenantId,
-          undefined,
-          facturaId,
-          config.certPem,
-          config.keyPem,
-        );
-        cbteNro = ultimoCbte + 1;
-        fechaCbte = resolveFechaCbteEmision(ambiente, facturaRaw.fechaEmision);
-
+      if (!esHomologacion) {
         if (facturaExt.cbteNro != null) {
           this.validarCorrelatividad(facturaExt.cbteNro, cbteNro, 'Factura');
         } else {
@@ -1554,32 +1516,39 @@ export class LiquidacionesService {
           }
           this.validarCorrelatividad(localCbteNro, cbteNro, 'Factura');
         }
-
-        const cabeceraBase = {
-          cuit: config.cuitEmisor,
-          ptoVenta: config.ptoVentaFactura,
-          cbteTipo: cbteTipoFinal,
-          cbteNro,
-          fechaCbte,
-          concepto: 1,
-          docTipo: receptor.docTipo,
-          docNro: receptor.docNro,
-          condicionIvaReceptorId: receptor.condicionIvaReceptorId,
-        };
-        const comprobante = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPctDefault);
-        const arcaRequest = mapCvlpToArcaRequest(comprobante, ambiente);
-
-        response = await this.arcaClient.autorizarComprobante(
-          config.apiKey,
-          arcaRequest,
-          tenantId,
-          undefined,
-          facturaId,
-          config.certPem,
-          config.keyPem,
-          comprobante as unknown as Record<string, unknown>,
-        );
       }
+
+      const cabeceraBase = {
+        cuit: config.cuitEmisor,
+        ptoVenta: config.ptoVentaFactura,
+        cbteTipo: cbteTipoFinal,
+        cbteNro,
+        fechaCbte,
+        concepto: 1,
+        docTipo: receptor.docTipo,
+        docNro: receptor.docNro,
+        condicionIvaReceptorId: receptor.condicionIvaReceptorId,
+      };
+      const comprobante = buildComprobanteCvlp(cabeceraBase, conceptos, ivaPctDefault);
+      const arcaRequest = mapCvlpToArcaRequest(comprobante, ambiente);
+
+      if (esHomologacion) {
+        await (this.prisma as PrismaAny).factura.update({
+          where: { id: facturaId },
+          data: { cbteNro, fechaEmision: parseAfipDate(fechaCbte) },
+        });
+      }
+
+      response = await this.arcaClient.autorizarComprobante(
+        config.apiKey,
+        arcaRequest,
+        tenantId,
+        undefined,
+        facturaId,
+        config.certPem,
+        config.keyPem,
+        comprobante as unknown as Record<string, unknown>,
+      );
 
       const comprobanteFinal = buildComprobanteCvlp(
         {

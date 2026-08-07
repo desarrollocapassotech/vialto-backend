@@ -9,6 +9,10 @@ import {
   buildFacturaConceptosList,
   defaultFacturaLineas,
 } from './factura-conceptos.util';
+import {
+  drawHomologacionWatermark,
+  shouldShowHomologacionWatermark,
+} from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -419,6 +423,8 @@ export class FacturaPdfService {
     comprobante: ArcaComprobanteCvlp,
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
   ): Promise<Buffer> {
+    // Ambiente desde ArcaConfig del tenant (misma condición que PDF CVLP).
+    const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: true });
@@ -436,6 +442,7 @@ export class FacturaPdfService {
           'ORIGINAL',
           comprobante,
           asociados,
+          showTestWatermark,
         );
         doc.addPage();
         this.draw(
@@ -448,6 +455,7 @@ export class FacturaPdfService {
           'DUPLICADO',
           comprobante,
           asociados,
+          showTestWatermark,
         );
         doc.end();
       } catch (e) {
@@ -466,6 +474,7 @@ export class FacturaPdfService {
     copia: 'ORIGINAL' | 'DUPLICADO',
     comprobante: ArcaComprobanteCvlp,
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
+    showTestWatermark = false,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -733,6 +742,11 @@ export class FacturaPdfService {
     } else {
       doc.fontSize(7.5).font('Helvetica').fillColor('#999')
         .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });
+    }
+
+    // Al final de la página: encima del contenido, sin taparlo (opacity).
+    if (showTestWatermark) {
+      drawHomologacionWatermark(doc);
     }
   }
 }

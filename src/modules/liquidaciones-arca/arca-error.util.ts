@@ -173,7 +173,15 @@ export function enrichAfipRejectionMessage(message: string): string {
     return (
       `${message} Suele deberse a (1) fecha anterior al último comprobante en AFIP o ` +
       '(2) número correlativo desfasado para ese punto de venta y tipo de factura. ' +
-      'En homologación el backend usa createNextVoucher y fecha local Argentina automáticamente.'
+      'En homologación el backend ajusta la fecha al último comprobante autorizado.'
+    );
+  }
+  if (lower.includes('invalid xml') || lower.includes('unexpected close tag')) {
+    return (
+      'AfipSDK no pudo hablar con el WSFE de AFIP (respuesta XML inválida, HTTP 422). ' +
+      'No es un error de los datos de la factura: falla incluso FEDummy / consulta de ' +
+      'último comprobante. Verificá AFIP_SDK_API_KEY, el estado del servicio AfipSDK y ' +
+      'que AFIP homologación (wswhomo) esté operativo; luego reintentá.'
     );
   }
   if (

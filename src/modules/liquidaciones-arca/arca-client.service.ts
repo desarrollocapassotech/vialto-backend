@@ -725,11 +725,12 @@ export class ArcaClientService {
       const detail = extractAfipSdkErrorDetail(raw);
       if (detail) {
         this.logger.warn(`AFIP SDK HTTP ${httpStatus ?? 400}: ${detail}`);
+        const msg = detail.startsWith('Rechazado por AFIP')
+          ? detail
+          : `Rechazado por AFIP: ${detail}`;
         return new ArcaException(
           ARCA_ERROR_CODES.GENERICO,
-          detail.startsWith('Rechazado por AFIP')
-            ? detail
-            : `Rechazado por AFIP: ${detail}`,
+          enrichAfipRejectionMessage(msg),
           httpStatus,
           raw,
         );

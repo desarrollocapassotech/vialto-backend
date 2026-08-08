@@ -21,17 +21,20 @@ END;
 -- facturacionEstado, paso 1: viajes sin factura vinculada.
 UPDATE "viajes" SET "facturacionEstado" = 'sin_facturar' WHERE "facturaId" IS NULL;
 
--- facturacionEstado, paso 2: viajes con factura vinculada, según arcaEstado
--- (null = tenant sin integracion-arca) y el `estado` combinado viejo para distinguir cobrado.
+-- facturacionEstado, paso 2: viajes con factura vinculada. Los sub-estados de AFIP
+-- (esperando/error/anulado) solo aplican si el tenant tiene integracion-arca activa —
+-- si no, se ignora arcaEstado por completo (no debería tener nada seteado en operación
+-- normal, pero por las dudas de datos de prueba o un módulo desactivado después).
 UPDATE "viajes" v
 SET "facturacionEstado" = CASE
-  WHEN f."arcaEstado" = 'pendiente_cae' THEN 'esperando_afip'
-  WHEN f."arcaEstado" = 'error' THEN 'error_afip'
-  WHEN f."arcaEstado" = 'anulado' THEN 'anulado'
+  WHEN 'integracion-arca' = ANY(t."modules") AND f."arcaEstado" = 'pendiente_cae' THEN 'esperando_afip'
+  WHEN 'integracion-arca' = ANY(t."modules") AND f."arcaEstado" = 'error' THEN 'error_afip'
+  WHEN 'integracion-arca' = ANY(t."modules") AND f."arcaEstado" = 'anulado' THEN 'anulado'
   WHEN v."estado" = 'cobrado' THEN 'cobrado'
   ELSE 'facturado'
 END
 FROM "facturas" f
+JOIN "tenants" t ON t."clerkOrgId" = v."tenantId"
 WHERE v."facturaId" = f."id";
 
 -- facturacionEstado, paso 3: red de seguridad para facturaId huérfano (factura borrada).
@@ -39,8 +42,11 @@ UPDATE "viajes" SET "facturacionEstado" = 'sin_facturar'
 WHERE "facturaId" IS NOT NULL
   AND "facturacionEstado" IS NULL;
 
--- liquidacionEstado: solo viajes con transportista externo. Toma la liquidación más
--- reciente (por updatedAt) entre las vinculadas al viaje; si no hay ninguna, sin_liquidar.
+-- liquidacionEstado: solo viajes con transportista externo Y tenant con integracion-arca
+-- activa (un tenant sin el módulo nunca debe mostrar nada de AFIP, aunque tenga
+-- liquidaciones colgadas de datos de prueba o de un módulo desactivado después). Toma la
+-- liquidación más reciente (por updatedAt) entre las vinculadas al viaje; si no hay
+-- ninguna, sin_liquidar.
 UPDATE "viajes" v
 SET "liquidacionEstado" = sub.mapped
 FROM (
@@ -56,10 +62,17 @@ FROM (
   JOIN "liquidaciones" l ON l."id" = lv."liquidacionId"
   ORDER BY lv."viajeId", l."updatedAt" DESC
 ) sub
-WHERE v."id" = sub.viaje_id AND v."transportistaId" IS NOT NULL;
+JOIN "tenants" t ON t."clerkOrgId" = v."tenantId"
+WHERE v."id" = sub.viaje_id
+  AND v."transportistaId" IS NOT NULL
+  AND 'integracion-arca' = ANY(t."modules");
 
-UPDATE "viajes" SET "liquidacionEstado" = 'sin_liquidar'
-WHERE "transportistaId" IS NOT NULL AND "liquidacionEstado" IS NULL;
+UPDATE "viajes" v SET "liquidacionEstado" = 'sin_liquidar'
+FROM "tenants" t
+WHERE t."clerkOrgId" = v."tenantId"
+  AND v."transportistaId" IS NOT NULL
+  AND 'integracion-arca' = ANY(t."modules")
+  AND v."liquidacionEstado" IS NULL;
 
 -- Endurecer: a partir de acá el código siempre escribe etapa/facturacionEstado.
 ALTER TABLE "viajes" ALTER COLUMN "etapa" SET DEFAULT 'pendiente';

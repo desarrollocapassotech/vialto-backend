@@ -5,9 +5,12 @@ type Tx = Prisma.TransactionClient;
 
 /**
  * Mapea el `arcaEstado` de la factura vinculada al indicador de facturación del viaje.
- * `tieneArca` distingue el `arcaEstado === null` de un tenant sin integración (factura
- * manual → cuenta como facturada de una) del de un tenant CON integración cuya factura
- * todavía no se emitió a AFIP (sigue "sin facturar" hasta el primer intento de emisión).
+ * Tenant sin integración ARCA: se ignora `arcaEstado` por completo (no debería tener
+ * ninguno seteado en operación normal, pero si quedó algo de datos de prueba o el
+ * módulo se desactivó después, no debe filtrarse ningún estado de AFIP) — el indicador
+ * queda simple (sin_facturar/facturado/cobrado). Tenant con ARCA: `arcaEstado === null`
+ * significa que la factura todavía no se emitió (sigue "sin facturar" hasta el primer
+ * intento de emisión).
  */
 export function mapFacturacionEstado(
   factura: { arcaEstado: string | null } | null,
@@ -15,10 +18,12 @@ export function mapFacturacionEstado(
   tieneArca: boolean,
 ): ViajeFacturacionEstado {
   if (!factura) return 'sin_facturar';
-  if (factura.arcaEstado === 'pendiente_cae') return 'esperando_afip';
-  if (factura.arcaEstado === 'error') return 'error_afip';
-  if (factura.arcaEstado === 'anulado') return 'anulado';
-  if (factura.arcaEstado == null && tieneArca) return 'sin_facturar';
+  if (tieneArca) {
+    if (factura.arcaEstado === 'pendiente_cae') return 'esperando_afip';
+    if (factura.arcaEstado === 'error') return 'error_afip';
+    if (factura.arcaEstado === 'anulado') return 'anulado';
+    if (factura.arcaEstado == null) return 'sin_facturar';
+  }
   return cobrado ? 'cobrado' : 'facturado';
 }
 
@@ -84,7 +89,10 @@ export async function syncFacturacionEstadoViajes(
  * más reciente vinculada (`LiquidacionViaje`). Ignora liquidaciones anuladas
  * salvo que sea la única existente (para poder mostrar "Anulado" en vez de
  * "Sin liquidar" cuando corresponde). `null` si el viaje no tiene transportista
- * externo — el tenant sin integración ARCA simplemente nunca genera filas acá.
+ * externo o el tenant no tiene integración ARCA activa — se chequea el flag
+ * explícitamente (no alcanza con asumir que un tenant sin ARCA "nunca genera
+ * filas": datos de prueba, migraciones viejas o un módulo desactivado después
+ * pueden dejar liquidaciones colgadas que no deben mostrarse).
  */
 export async function syncLiquidacionEstadoViaje(
   tx: Tx,
@@ -100,11 +108,13 @@ export async function syncLiquidacionEstadoViaje(
       liquidacionesViaje: {
         select: { liquidacion: { select: { estado: true, updatedAt: true } } },
       },
+      tenant: { select: { modules: true } },
     },
   });
   if (!viaje) return;
 
-  if (!viaje.transportistaId?.trim()) {
+  const tieneArca = viaje.tenant.modules.includes('integracion-arca');
+  if (!tieneArca || !viaje.transportistaId?.trim()) {
     if (viaje.liquidacionEstado !== null) {
       await tx.viaje.update({ where: { id: viajeId }, data: { liquidacionEstado: null } });
     }

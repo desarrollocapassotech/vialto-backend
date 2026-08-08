@@ -42,6 +42,13 @@ test('bug de re-facturación: factura anulada vuelve a estar disponible (fix his
   assert.equal(mapFacturacionEstado({ arcaEstado: 'anulado' }, true, true), 'anulado');
 });
 
+test('tenant sin ARCA: ignora arcaEstado colgado de datos de prueba o módulo desactivado', () => {
+  assert.equal(mapFacturacionEstado({ arcaEstado: 'pendiente_cae' }, false, false), 'facturado');
+  assert.equal(mapFacturacionEstado({ arcaEstado: 'error' }, false, false), 'facturado');
+  assert.equal(mapFacturacionEstado({ arcaEstado: 'anulado' }, false, false), 'facturado');
+  assert.equal(mapFacturacionEstado({ arcaEstado: 'anulado' }, true, false), 'cobrado');
+});
+
 test('liquidación: mapeo de estados AFIP', () => {
   assert.equal(mapLiquidacionEstado(null), 'sin_liquidar');
   assert.equal(mapLiquidacionEstado('borrador'), 'esperando_afip');

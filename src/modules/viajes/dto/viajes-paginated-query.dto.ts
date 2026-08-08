@@ -65,6 +65,12 @@ export class ViajesPaginatedQueryDto {
   @IsString()
   transportistaId?: string;
 
+  /** Chofer asignado al viaje (`viaje.choferId`). */
+  @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
+  @IsString()
+  choferId?: string;
+
   /**
    * Si es true, excluye viajes que ya tienen una liquidación activa
    * (estado ≠ anulado) para el transportista filtrado — o cualquier

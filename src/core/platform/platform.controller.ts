@@ -114,6 +114,7 @@ export class PlatformController {
       queryParamFromRequest(req, "clienteId") ?? query.clienteId;
     const transportistaId =
       queryParamFromRequest(req, "transportistaId") ?? query.transportistaId;
+    const choferId = queryParamFromRequest(req, "choferId") ?? query.choferId;
     const tipoUbicacionRaw =
       queryParamFromRequest(req, "tipoUbicacion") ?? query.tipoUbicacion;
     const tipoUbicacion =
@@ -150,6 +151,7 @@ export class PlatformController {
       liquidacionEstado: query.liquidacionEstado,
       clienteId,
       transportistaId,
+      choferId,
       tipoFecha,
       fechaDesde,
       fechaHasta,

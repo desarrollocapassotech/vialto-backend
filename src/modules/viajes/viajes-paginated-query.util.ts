@@ -150,6 +150,9 @@ export function buildViajesPaginatedWhere(
   const tid = query.transportistaId?.trim();
   if (tid) where.transportistaId = tid;
 
+  const chid = query.choferId?.trim();
+  if (chid) where.choferId = chid;
+
   if (query.sinLiquidacionActiva) {
     where.liquidacionesViaje = {
       none: {

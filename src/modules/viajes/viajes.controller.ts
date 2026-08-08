@@ -83,6 +83,7 @@ export class ViajesController {
       queryParamFromRequest(req, "clienteId") ?? query.clienteId;
     const transportistaId =
       queryParamFromRequest(req, "transportistaId") ?? query.transportistaId;
+    const choferId = queryParamFromRequest(req, "choferId") ?? query.choferId;
     const tipoUbicacionRaw =
       queryParamFromRequest(req, "tipoUbicacion") ?? query.tipoUbicacion;
     const tipoUbicacion =
@@ -136,6 +137,7 @@ export class ViajesController {
       liquidacionEstado,
       clienteId,
       transportistaId,
+      choferId,
       sinLiquidacionActiva: sinLiquidacionActiva || undefined,
       tipoFecha,
       fechaDesde,

@@ -145,7 +145,9 @@ export class PlatformController {
     return this.service.viajesPaginated(tenantId, {
       page: query.page,
       pageSize: query.pageSize,
-      estado: query.estado,
+      etapa: query.etapa,
+      facturacionEstado: query.facturacionEstado,
+      liquidacionEstado: query.liquidacionEstado,
       clienteId,
       transportistaId,
       tipoFecha,

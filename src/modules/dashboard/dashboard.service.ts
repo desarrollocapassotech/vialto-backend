@@ -11,7 +11,6 @@ import {
   sinFacturarArHalfOpenRanges,
   type SinFacturarArHalfOpen,
 } from './dashboard-sin-facturar-ar-range';
-import { VIAJE_ESTADOS_COMPLETADOS_TABLERO } from '../viajes/viaje-estados';
 import {
   computeEstadoFacturaLectura,
   importeOperativoFactura,
@@ -104,12 +103,6 @@ export type OwnerDashboardResponse = {
 };
 
 type CompareMode = 'higher_better' | 'lower_better';
-
-/** Viajes con factura emitida, pendientes de cobro (incluye alias legados en BD). */
-const ESTADOS_VIAJE_FACTURADO = ['facturado_sin_cobrar', 'finalizado_facturado'] as const;
-
-/** Viajes cobrados (incluye alias legados en BD). */
-const ESTADOS_VIAJE_COBRADO = ['cobrado', 'finalizado_cobrado'] as const;
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
@@ -231,13 +224,18 @@ export class DashboardService {
         : null,
       hasViajes
         ? Promise.all([
-            this.countEstadoEnVentana(tenantId, 'en_curso', resolved.start, resolved.end),
-            this.countEstadoEnVentana(tenantId, 'en_curso', resolved.prevStart, resolved.prevEnd),
+            this.countViajesEnVentana(tenantId, { etapa: 'en_curso' }, resolved.start, resolved.end),
+            this.countViajesEnVentana(tenantId, { etapa: 'en_curso' }, resolved.prevStart, resolved.prevEnd),
             this.countCompletadosEnVentana(tenantId, resolved.start, resolved.end),
             this.countCompletadosEnVentana(tenantId, resolved.prevStart, resolved.prevEnd),
             this.sumMontoSinFacturar(tenantId),
-            this.countEstadoEnVentana(tenantId, 'finalizado_sin_facturar', resolved.start, resolved.end),
-            this.countEstadosSnapshot(tenantId, [...ESTADOS_VIAJE_FACTURADO]),
+            this.countViajesEnVentana(
+              tenantId,
+              { etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
+              resolved.start,
+              resolved.end,
+            ),
+            this.countViajesSnapshot(tenantId, { facturacionEstado: 'facturado' }),
             this.countCobradosEnPeriodo(tenantId, resolved.start, resolved.end),
           ])
         : null,
@@ -423,7 +421,7 @@ export class DashboardService {
       by: ['monedaMonto'],
       where: {
         tenantId,
-        estado: { in: [...ESTADOS_VIAJE_FACTURADO] },
+        facturacionEstado: 'facturado',
       },
       _sum: { monto: true },
     });
@@ -454,7 +452,7 @@ export class DashboardService {
       by: ['monedaMonto'],
       where: {
         tenantId,
-        estado: { in: [...ESTADOS_VIAJE_FACTURADO] },
+        facturacionEstado: 'facturado',
         ...this.whereViajeAtribuidoAlPeriodo(start, end),
       },
       _sum: { monto: true },
@@ -484,7 +482,7 @@ export class DashboardService {
       this.prisma.viaje.findMany({
         where: {
           tenantId,
-          estado: { in: [...ESTADOS_VIAJE_COBRADO] },
+          facturacionEstado: 'cobrado',
           facturaId: { not: null },
           factura: { tipo: 'cliente' },
           ...this.whereViajeAtribuidoAlPeriodo(start, end),
@@ -536,7 +534,7 @@ export class DashboardService {
       this.prisma.viaje.findMany({
         where: {
           tenantId,
-          estado: { in: [...ESTADOS_VIAJE_COBRADO] },
+          facturacionEstado: 'cobrado',
           facturaId: { not: null },
           factura: { tipo: 'cliente' },
           ...this.whereViajeAtribuidoAlPeriodo(start, end),
@@ -596,12 +594,12 @@ export class DashboardService {
         AND v."monedaMonto" = ${moneda}
         AND (
           (
-            v."estado" = 'finalizado_sin_facturar'
+            v."etapa" = 'finalizado' AND v."facturacionEstado" = 'sin_facturar'
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) >= ${from}::date
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) < ${toEx}::date
           )
           OR (
-            v."estado" IN ('pendiente', 'en_curso')
+            v."etapa" IN ('pendiente', 'en_curso')
             AND (
               (
                 v."fechaCarga" IS NOT NULL
@@ -669,7 +667,7 @@ export class DashboardService {
         moneda: true,
         fechaVencimiento: true,
         pagos: { select: { importe: true } },
-        viajes: { select: { estado: true, monto: true } },
+        viajes: { select: { facturacionEstado: true, monto: true } },
       },
     });
     const vencidas = candidatas.filter(
@@ -707,7 +705,8 @@ export class DashboardService {
     const sinFactura = await this.prisma.viaje.findMany({
       where: {
         tenantId,
-        estado: 'finalizado_sin_facturar',
+        etapa: 'finalizado',
+        facturacionEstado: 'sin_facturar',
       },
       select: {
         id: true,
@@ -818,7 +817,7 @@ export class DashboardService {
     const viajes = await this.prisma.viaje.findMany({
       where: {
         tenantId,
-        estado: { not: 'cancelado' },
+        etapa: { not: 'cancelado' },
         OR: [
           { fechaCarga: { gte: start, lte: cappedEnd } },
           { fechaCarga: null, fechaFinalizado: { gte: start, lte: cappedEnd } },
@@ -867,41 +866,31 @@ export class DashboardService {
   }
 
   /**
-   * Cuenta viajes con el estado dado cuya fecha de atribución al período cae en [start, end).
-   * Atribución: fechaCarga → fechaFinalizado → createdAt (primer campo no nulo).
+   * Cuenta viajes que matchean `extraWhere` cuya fecha de atribución al período
+   * cae en [start, end). Atribución: fechaCarga → fechaFinalizado → createdAt
+   * (primer campo no nulo).
    */
-  private async countEstadoEnVentana(
+  private async countViajesEnVentana(
     tenantId: string,
-    estado: string,
+    extraWhere: Prisma.ViajeWhereInput,
     start: Date,
     end: Date,
   ): Promise<number> {
-    return this.countEstadosEnVentana(tenantId, [estado], start, end);
-  }
-
-  /** Conteo por estado(s) con atribución al período alineada al resumen financiero. */
-  private async countEstadosEnVentana(
-    tenantId: string,
-    estados: string[],
-    start: Date,
-    end: Date,
-  ): Promise<number> {
-    if (estados.length === 0) return 0;
     return this.prisma.viaje.count({
       where: {
         tenantId,
-        estado: { in: estados },
+        ...extraWhere,
         ...this.whereViajeAtribuidoAlPeriodo(start, end),
       },
     });
   }
 
-  /** Conteo snapshot por estado(s) (pipeline operativo actual). */
-  private countEstadosSnapshot(tenantId: string, estados: string[]): Promise<number> {
-    if (estados.length === 0) return Promise.resolve(0);
-    return this.prisma.viaje.count({
-      where: { tenantId, estado: { in: estados } },
-    });
+  /** Conteo snapshot que matchea `extraWhere` (pipeline operativo actual). */
+  private countViajesSnapshot(
+    tenantId: string,
+    extraWhere: Prisma.ViajeWhereInput,
+  ): Promise<number> {
+    return this.prisma.viaje.count({ where: { tenantId, ...extraWhere } });
   }
 
   /**
@@ -916,7 +905,7 @@ export class DashboardService {
         factura: { tipo: 'cliente' },
         OR: [
           {
-            estado: { in: [...ESTADOS_VIAJE_COBRADO] },
+            facturacionEstado: 'cobrado',
             ...this.whereViajeAtribuidoAlPeriodo(start, end),
           },
           {
@@ -929,12 +918,12 @@ export class DashboardService {
     });
   }
 
-  /** Viajes “en curso” en el instante `at` (estado actual en BD + ventana temporal). */
+  /** Viajes “en curso” en el instante `at` (etapa actual en BD + ventana temporal). */
   private async countEnCursoAt(tenantId: string, at: Date): Promise<number> {
     return this.prisma.viaje.count({
       where: {
         tenantId,
-        estado: 'en_curso',
+        etapa: 'en_curso',
         createdAt: { lte: at },
         OR: [{ fechaFinalizado: null }, { fechaFinalizado: { gt: at } }],
       },
@@ -949,7 +938,7 @@ export class DashboardService {
     return this.prisma.viaje.count({
       where: {
         tenantId,
-        estado: { in: [...VIAJE_ESTADOS_COMPLETADOS_TABLERO] },
+        etapa: 'finalizado',
         fechaFinalizado: { gte: start, lt: end },
       },
     });
@@ -974,12 +963,12 @@ export class DashboardService {
         WHERE v."tenantId" = ${tenantId}
         AND (
           (
-            v."estado" = 'finalizado_sin_facturar'
+            v."etapa" = 'finalizado' AND v."facturacionEstado" = 'sin_facturar'
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) >= ${from}::date
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) < ${toEx}::date
           )
           OR (
-            v."estado" IN ('pendiente', 'en_curso')
+            v."etapa" IN ('pendiente', 'en_curso')
             AND (
               (
                 v."fechaCarga" IS NOT NULL
@@ -1006,9 +995,10 @@ export class DashboardService {
     const agg = await this.prisma.viaje.aggregate({
       where: {
         tenantId,
-        estado: {
-          in: ['pendiente', 'en_curso', 'finalizado_sin_facturar'],
-        },
+        OR: [
+          { etapa: { in: ['pendiente', 'en_curso'] } },
+          { etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
+        ],
       },
       _sum: { monto: true },
     });

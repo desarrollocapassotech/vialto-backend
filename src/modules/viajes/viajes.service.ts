@@ -32,10 +32,12 @@ import {
 import { UpdateViajeDto } from "./dto/update-viaje.dto";
 import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
 import {
-  VIAJE_ESTADOS_SET,
-  esEstadoViajeFinal,
-  normalizarEstadoViaje,
-  type ViajeEstado,
+  VIAJE_ETAPAS_SET,
+  esEtapaFinal,
+  normalizarEtapaViaje,
+  FACTURACION_ESTADOS_DISPONIBLES,
+  LIQUIDACION_ESTADOS_DISPONIBLES,
+  type ViajeEtapa,
 } from "./viaje-estados";
 import {
   buildViajeExportacionesResponse,
@@ -74,6 +76,12 @@ const VIAJE_INCLUDE_FULL = {
       moneda: true,
       estado: true,
       arcaEstado: true,
+      arcaError: true,
+      cae: true,
+      caeFechaVto: true,
+      cbteNro: true,
+      ptoVenta: true,
+      fechaEmision: true,
       viajes: { select: { id: true, monto: true } },
     },
   },
@@ -252,13 +260,13 @@ export class ViajesService {
     private readonly autoEstado: ViajesAutoEstadoService,
   ) {}
 
-  /** Acepta legado `finalizado` y valida contra {@link VIAJE_ESTADOS}. */
-  private parseEstadoViaje(estado: string): ViajeEstado {
-    const n = normalizarEstadoViaje(estado);
-    if (!VIAJE_ESTADOS_SET.has(n)) {
-      throw new BadRequestException("Estado de viaje inválido");
+  /** Acepta legado del `estado` combinado y valida contra {@link VIAJE_ETAPAS}. */
+  private parseEtapaViaje(etapa: string): ViajeEtapa {
+    const n = normalizarEtapaViaje(etapa);
+    if (!VIAJE_ETAPAS_SET.has(n)) {
+      throw new BadRequestException("Etapa de viaje inválida");
     }
-    return n as ViajeEstado;
+    return n as ViajeEtapa;
   }
 
   /**
@@ -540,9 +548,9 @@ export class ViajesService {
       );
   }
 
-  async findAll(tenantId: string, estado?: string) {
+  async findAll(tenantId: string, etapa?: string) {
     const rows = await this.prisma.viaje.findMany({
-      where: { tenantId, ...(estado ? { estado: estado } : {}) },
+      where: { tenantId, ...(etapa ? { etapa } : {}) },
       orderBy: { createdAt: "desc" },
       take: 200,
       include: {
@@ -565,7 +573,10 @@ export class ViajesService {
     const baseWhere = { tenantId, createdAt: { gte: monthStart } };
 
     const [
-      estadoRows,
+      etapaRows,
+      finalizadoSinFacturar,
+      facturadoSinCobrar,
+      cobrado,
       ingresosARS,
       ingresosUSD,
       gastosARS,
@@ -573,9 +584,18 @@ export class ViajesService {
       saldoViajes,
     ] = await Promise.all([
       this.prisma.viaje.groupBy({
-        by: ["estado"],
+        by: ["etapa"],
         where: { tenantId },
         _count: { _all: true },
+      }),
+      this.prisma.viaje.count({
+        where: { tenantId, etapa: "finalizado", facturacionEstado: "sin_facturar" },
+      }),
+      this.prisma.viaje.count({
+        where: { tenantId, facturacionEstado: "facturado" },
+      }),
+      this.prisma.viaje.count({
+        where: { tenantId, facturacionEstado: "cobrado" },
       }),
       this.prisma.viaje.aggregate({
         where: {
@@ -655,7 +675,10 @@ export class ViajesService {
     }
 
     return {
-      ...Object.fromEntries(estadoRows.map((r) => [r.estado, r._count._all])),
+      ...Object.fromEntries(etapaRows.map((r) => [r.etapa, r._count._all])),
+      finalizado_sin_facturar: finalizadoSinFacturar,
+      facturado_sin_cobrar: facturadoSinCobrar,
+      cobrado,
       montos: {
         ingresos: {
           ARS: ingresosARS._sum.monto ?? 0,
@@ -1018,10 +1041,10 @@ export class ViajesService {
       new Date(dto.fechaCarga),
       new Date(dto.fechaDescarga),
     );
-    const estado = this.parseEstadoViaje(dto.estado);
-    if (esEstadoViajeFinal(estado)) {
+    const etapa = this.parseEtapaViaje(dto.etapa);
+    if (esEtapaFinal(etapa)) {
       throw new BadRequestException(
-        "Un viaje no puede crearse en un estado final",
+        "Un viaje no puede crearse en etapa finalizado",
       );
     }
     const precioTransportistaExterno = dto.precioTransportistaExterno;
@@ -1051,7 +1074,7 @@ export class ViajesService {
       const data: Prisma.ViajeUncheckedCreateInput = {
         tenantId,
         numero,
-        estado,
+        etapa,
         clienteId: dto.clienteId,
         transportistaId: refs.transportistaId,
         transportistaEfectivoId: refs.transportistaEfectivoId,
@@ -1098,26 +1121,59 @@ export class ViajesService {
     }, VIAJE_INTERACTIVE_TX);
   }
 
+  /**
+   * Campos que afectan comprobantes ya emitidos (montos, tarifas, cliente,
+   * transportista). Se bloquean solo mientras el viaje tiene una factura o
+   * liquidación vigente; los campos operativos (fechas, km, litros,
+   * observaciones, etc.) siempre se pueden editar.
+   */
+  private static readonly CAMPOS_FISCALES_VIAJE = [
+    "clienteId",
+    "transportistaId",
+    "transportistaEfectivoId",
+    "contratanteRealizaFlete",
+    "monto",
+    "monedaMonto",
+    "precioTransportistaExterno",
+    "monedaPrecioTransportistaExterno",
+    "gananciaBrutaManual",
+    "monedaGananciaBrutaManual",
+    "otrosGastos",
+    "pagosTransportista",
+  ] as const;
+
   async update(id: string, tenantId: string, dto: UpdateViajeDto) {
     const current = await this.findOne(id, tenantId);
 
-    const bloqueadoPorFactura = Boolean((current as any).factura);
-
+    const facturacionEstado = (current as any).facturacionEstado as string;
+    const liquidacionEstado = (current as any).liquidacionEstado as
+      | string
+      | null;
+    const bloqueadoPorFactura = !(
+      FACTURACION_ESTADOS_DISPONIBLES as readonly string[]
+    ).includes(facturacionEstado);
     const bloqueadoPorLiquidacion =
-      (current as any).liquidacionesViaje?.some(
-        (lv: any) => lv.liquidacion.estado !== "anulado",
-      ) ?? false;
+      liquidacionEstado != null &&
+      !(LIQUIDACION_ESTADOS_DISPONIBLES as readonly string[]).includes(
+        liquidacionEstado,
+      );
 
     if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {
-      const motivo =
-        bloqueadoPorFactura && bloqueadoPorLiquidacion
-          ? "facturado y liquidado"
-          : bloqueadoPorFactura
-            ? "facturado"
-            : "liquidado";
-      throw new ConflictException(
-        `No se puede editar: el viaje ya fue ${motivo}.`,
+      const camposTocados = ViajesService.CAMPOS_FISCALES_VIAJE.filter(
+        (campo) => (dto as Record<string, unknown>)[campo] !== undefined,
       );
+      if (camposTocados.length > 0) {
+        const motivo =
+          bloqueadoPorFactura && bloqueadoPorLiquidacion
+            ? "facturado y liquidado"
+            : bloqueadoPorFactura
+              ? "facturado"
+              : "liquidado";
+        throw new ConflictException(
+          `No se puede editar ${camposTocados.join(", ")}: el viaje ya fue ${motivo}. ` +
+          "Los datos operativos (fechas, km, litros, observaciones) sí se pueden seguir editando.",
+        );
+      }
     }
 
     const currentIds = current.vehiculosViaje.map((x) => x.vehiculoId);
@@ -1203,15 +1259,15 @@ export class ViajesService {
       dto.pagosTransportista !== undefined
         ? dto.pagosTransportista
         : current.pagosTransportista;
-    const currentNorm = this.parseEstadoViaje(
-      current.estado != null && String(current.estado).trim() !== ""
-        ? String(current.estado)
+    const etapaActual = this.parseEtapaViaje(
+      current.etapa != null && String(current.etapa).trim() !== ""
+        ? String(current.etapa)
         : "pendiente",
     );
-    const estadoSiguiente =
-      dto.estado != null && String(dto.estado).trim() !== ""
-        ? this.parseEstadoViaje(String(dto.estado))
-        : currentNorm;
+    const etapaSiguiente =
+      dto.etapa != null && String(dto.etapa).trim() !== ""
+        ? this.parseEtapaViaje(String(dto.etapa))
+        : etapaActual;
 
     const data: Prisma.ViajeUpdateInput = {
       ...dto,
@@ -1256,14 +1312,11 @@ export class ViajesService {
       (data as any).monedaPrecioTransportistaExterno =
         dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
     }
-    if (
-      !esEstadoViajeFinal(currentNorm) &&
-      esEstadoViajeFinal(estadoSiguiente)
-    ) {
+    if (!esEtapaFinal(etapaActual) && esEtapaFinal(etapaSiguiente)) {
       data.fechaFinalizado = new Date();
     }
 
-    (data as any).estado = estadoSiguiente;
+    (data as any).etapa = etapaSiguiente;
     (data as any).transportistaId = op.transportistaId;
     (data as any).transportistaEfectivoId = merged.transportistaEfectivoId;
     (data as any).choferId = op.choferId;
@@ -1343,7 +1396,7 @@ export class ViajesService {
         where: { id, tenantId },
         include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
-      if (esEstadoViajeFinal(full.estado)) {
+      if (esEtapaFinal(full.etapa)) {
         await this.upsertCargoFinalizacion(tx, full);
       }
       return enrichViajeConGananciaBruta(
@@ -1360,8 +1413,10 @@ export class ViajesService {
   ) {
     const viaje = await this.findOne(id, tenantId);
 
-    const ESTADOS_BLOQUEADOS = ["facturado_sin_cobrar", "cobrado", "cancelado"];
-    if (ESTADOS_BLOQUEADOS.includes(viaje.estado)) {
+    const facturacionBloqueaGasto = !(
+      FACTURACION_ESTADOS_DISPONIBLES as readonly string[]
+    ).includes((viaje as any).facturacionEstado);
+    if (viaje.etapa === "cancelado" || facturacionBloqueaGasto) {
       throw new BadRequestException(
         "No se pueden agregar gastos a un viaje facturado o cancelado.",
       );
@@ -1394,7 +1449,7 @@ export class ViajesService {
         include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
 
-      if (esEstadoViajeFinal(full.estado)) {
+      if (esEtapaFinal(full.etapa)) {
         await this.upsertCargoFinalizacion(tx, full);
       }
 
@@ -1410,7 +1465,7 @@ export class ViajesService {
   ) {
     const viaje = await this.findOne(id, tenantId);
 
-    if (viaje.estado === "cancelado") {
+    if (viaje.etapa === "cancelado") {
       throw new BadRequestException(
         "No se pueden registrar pagos en un viaje cancelado.",
       );
@@ -1471,7 +1526,7 @@ export class ViajesService {
   ) {
     const viaje = await this.findOne(id, tenantId);
 
-    if (viaje.estado === "cancelado") {
+    if (viaje.etapa === "cancelado") {
       throw new BadRequestException(
         "No se pueden eliminar pagos en un viaje cancelado.",
       );

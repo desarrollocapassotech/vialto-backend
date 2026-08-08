@@ -1,10 +1,7 @@
 /**
  * Utilidades puras de lectura del estado de una factura.
  * Usadas por: facturacion, dashboard, platform.
- *
- * Importa `normalizarEstadoViaje` de modules/viajes (función pura sin dependencias NestJS).
  */
-import { normalizarEstadoViaje } from '../../modules/viajes/viaje-estados';
 
 /** Misma regla que `FacturacionService.computeImporte` para alinear importe con viajes. */
 export function importeOperativoFactura(
@@ -22,7 +19,7 @@ export function importeOperativoFactura(
  * - Vencida solo si no es cobrada y la fecha de vencimiento ya pasó.
  */
 export function computeEstadoFacturaLectura(args: {
-  viajes: { estado: string; monto?: number | null }[];
+  viajes: { facturacionEstado: string; monto?: number | null }[];
   fechaVencimiento: Date | null;
   importeGuardado: number;
   pagos: { importe: number }[];
@@ -31,7 +28,7 @@ export function computeEstadoFacturaLectura(args: {
 
   if (
     args.viajes.length > 0 &&
-    args.viajes.every((v) => normalizarEstadoViaje(v.estado) === 'cobrado')
+    args.viajes.every((v) => v.facturacionEstado === 'cobrado')
   ) {
     return 'cobrada';
   }

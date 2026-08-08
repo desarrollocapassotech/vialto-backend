@@ -4,7 +4,6 @@ import {
   buildGananciaBrutaResumen,
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
-import { VIAJE_ESTADOS_FINALES } from '../viajes/viaje-estados';
 import { importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
 
 export type Money = { ARS: number; USD: number };
@@ -53,7 +52,7 @@ export type FinancieroDashboardResponse = {
     alertas: FinancieroMargenAlerta[];
   };
   viajesFunnel?: {
-    porEstado: Array<{ estado: string; cantidad: number }>;
+    porEtapa: Array<{ etapa: string; cantidad: number }>;
     /** Viajes finalizados con transportista y costo cargado, ya pagados por completo. */
     liquidados: {
       cantidad: number;
@@ -223,7 +222,7 @@ export class DashboardFinancieroService {
     const viajes = await this.prisma.viaje.findMany({
       where: {
         tenantId,
-        estado: { not: 'cancelado' },
+        etapa: { not: 'cancelado' },
         ...whereViajeAtribuido(start, end),
       },
       select: {
@@ -445,7 +444,8 @@ export class DashboardFinancieroService {
       select: {
         id: true,
         numero: true,
-        estado: true,
+        etapa: true,
+        facturacionEstado: true,
         clienteId: true,
         transportistaId: true,
         precioTransportistaExterno: true,
@@ -454,15 +454,14 @@ export class DashboardFinancieroService {
       },
     });
 
-    const porEstadoMap = new Map<string, number>();
+    const porEtapaMap = new Map<string, number>();
     for (const v of viajes) {
-      porEstadoMap.set(v.estado, (porEstadoMap.get(v.estado) ?? 0) + 1);
+      porEtapaMap.set(v.etapa, (porEtapaMap.get(v.etapa) ?? 0) + 1);
     }
 
-    const finales = new Set<string>(VIAJE_ESTADOS_FINALES as unknown as string[]);
     const sinLiquidarCandidatos = viajes.filter(
       (v) =>
-        finales.has(v.estado) &&
+        v.etapa === 'finalizado' &&
         !!v.transportistaId &&
         (v.precioTransportistaExterno ?? 0) > 0,
     );
@@ -504,7 +503,9 @@ export class DashboardFinancieroService {
         : null;
     }
 
-    const sinFacturarViajes = viajes.filter((v) => v.estado === 'finalizado_sin_facturar');
+    const sinFacturarViajes = viajes.filter(
+      (v) => v.etapa === 'finalizado' && v.facturacionEstado === 'sin_facturar',
+    );
     const clienteIds = [...new Set(sinFacturarViajes.map((v) => v.clienteId))];
     const clientes = clienteIds.length
       ? await this.prisma.cliente.findMany({
@@ -523,7 +524,7 @@ export class DashboardFinancieroService {
     }
 
     return {
-      porEstado: [...porEstadoMap.entries()].map(([estado, cantidad]) => ({ estado, cantidad })),
+      porEtapa: [...porEtapaMap.entries()].map(([etapa, cantidad]) => ({ etapa, cantidad })),
       liquidados: {
         cantidad: cantidadLiquidados,
         montoTotal: montoLiquidado,
@@ -694,7 +695,7 @@ export class DashboardFinancieroService {
         cbteTipo: true,
         fechaVencimiento: true,
         pagos: { select: { importe: true, fecha: true } },
-        viajes: { select: { estado: true, monto: true } },
+        viajes: { select: { monto: true } },
       },
     });
 
@@ -757,7 +758,7 @@ export class DashboardFinancieroService {
       .slice(0, 20);
 
     const pendientesEmitir = await this.prisma.viaje.findMany({
-      where: { tenantId, estado: 'finalizado_sin_facturar' },
+      where: { tenantId, etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
       select: { id: true, numero: true, monto: true, monedaMonto: true, clienteId: true },
     });
     const clienteIdsPendientes = [...new Set(pendientesEmitir.map((v) => v.clienteId))];
@@ -776,7 +777,7 @@ export class DashboardFinancieroService {
         importe: true,
         moneda: true,
         pagos: { select: { importe: true } },
-        viajes: { select: { estado: true, monto: true } },
+        viajes: { select: { monto: true } },
       },
     });
     const pendienteCobroTotal = emptyMoney();

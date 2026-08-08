@@ -135,8 +135,14 @@ export function buildViajesPaginatedWhere(
 ): Prisma.ViajeWhereInput {
   const where: Prisma.ViajeWhereInput = { tenantId };
 
-  const est = query.estado?.trim();
-  if (est) where.estado = est;
+  const etapa = query.etapa?.trim();
+  if (etapa) where.etapa = etapa;
+
+  const facturacionEstado = query.facturacionEstado?.trim();
+  if (facturacionEstado) where.facturacionEstado = facturacionEstado;
+
+  const liquidacionEstado = query.liquidacionEstado?.trim();
+  if (liquidacionEstado) where.liquidacionEstado = liquidacionEstado;
 
   const cid = query.clienteId?.trim();
   if (cid) where.clienteId = cid;

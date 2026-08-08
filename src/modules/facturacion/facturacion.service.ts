@@ -14,14 +14,11 @@ import {
   computeEstadoFacturaLectura,
   importeOperativoFactura,
 } from "./factura-estado-lectura";
-import {
-  syncViajeEstadoTrasComprobante,
-  syncViajesEstadoTrasComprobante,
-} from "../viajes/viaje-estado-financiero";
+import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
 
 type ViajeSnap = {
   id: string;
-  estado: string;
+  facturacionEstado: string;
   monto: number | null;
   monedaMonto: string;
 };
@@ -118,7 +115,7 @@ export class FacturacionService {
     if (viajeIds.length === 0) return [];
     const rows = await this.prisma.viaje.findMany({
       where: { id: { in: viajeIds }, tenantId },
-      select: { id: true, estado: true, monto: true, monedaMonto: true },
+      select: { id: true, facturacionEstado: true, monto: true, monedaMonto: true },
     });
     if (rows.length !== viajeIds.length) {
       throw new BadRequestException(
@@ -141,7 +138,7 @@ export class FacturacionService {
 
   private readonly VIAJE_SELECT = {
     id: true,
-    estado: true,
+    facturacionEstado: true,
     monto: true,
     monedaMonto: true,
   } as const;
@@ -341,7 +338,7 @@ export class FacturacionService {
             where: { id: { in: viajeIds }, tenantId },
             data: { facturaId: factura.id },
           });
-          await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
+          await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
         }
 
         const updated = await tx.factura.findFirst({
@@ -442,7 +439,7 @@ export class FacturacionService {
             where: { id: { in: idsDesvinculados }, tenantId },
             data: { facturaId: null },
           });
-          await syncViajesEstadoTrasComprobante(tx, tenantId, idsDesvinculados);
+          await syncFacturacionEstadoViajes(tx, tenantId, idsDesvinculados);
         }
 
         if (newIds.length > 0) {
@@ -450,7 +447,7 @@ export class FacturacionService {
             where: { id: { in: newIds }, tenantId },
             data: { facturaId: id },
           });
-          await syncViajesEstadoTrasComprobante(tx, tenantId, newIds);
+          await syncFacturacionEstadoViajes(tx, tenantId, newIds);
         }
       }
 
@@ -487,7 +484,7 @@ export class FacturacionService {
         where: { facturaId: id, tenantId },
         data: { facturaId: null },
       });
-      await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
+      await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
       return tx.factura.delete({ where: { id } });
     });
   }
@@ -544,21 +541,11 @@ export class FacturacionService {
       pagos: factura.pagos,
     });
 
-    if (estadoLectura === "cobrada") {
-      await this.prisma.viaje.updateMany({
-        where: {
-          facturaId,
-          tenantId,
-          estado: { in: ["facturado_sin_cobrar", "finalizado_facturado"] },
-        },
-        data: { estado: "cobrado" },
-      });
-      return;
-    }
-
-    await this.prisma.viaje.updateMany({
-      where: { facturaId, tenantId, estado: "cobrado" },
-      data: { estado: "facturado_sin_cobrar" },
-    });
+    await syncFacturacionEstadoViajes(
+      this.prisma,
+      tenantId,
+      factura.viajes.map((v) => v.id),
+      { cobrado: estadoLectura === "cobrada" },
+    );
   }
 }

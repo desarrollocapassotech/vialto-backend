@@ -922,6 +922,11 @@ export class PlatformService {
     return this.facturacionService.createPago(scopedTenantId, dto);
   }
 
+  async marcarFacturaComoCobrada(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.facturacionService.marcarComoCobrada(scopedTenantId, id);
+  }
+
   async deletePago(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.facturacionService.removePago(id, scopedTenantId);

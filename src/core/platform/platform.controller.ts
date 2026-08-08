@@ -602,6 +602,14 @@ export class PlatformController {
     return this.service.removeFactura(tenantId, id);
   }
 
+  @Post("facturas/:id/marcar-cobrada")
+  marcarFacturaComoCobrada(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    return this.service.marcarFacturaComoCobrada(tenantId, id);
+  }
+
   @Patch("facturas/:id")
   updateFactura(
     @Param("id") id: string,

@@ -86,6 +86,17 @@ export class FacturacionController {
     return this.service.removeFactura(id, auth.tenantId);
   }
 
+  @ApiOperation({
+    summary:
+      'Marcar factura como cobrada: registra un pago por el saldo pendiente y actualiza los viajes vinculados',
+  })
+  @Post('facturas/:id/marcar-cobrada')
+  @Roles('admin', 'superadmin')
+  marcarComoCobrada(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.marcarComoCobrada(auth.tenantId, id);
+  }
+
   @ApiOperation({ summary: 'Listar pagos (opcionalmente filtrar por factura)' })
   @Get('pagos')
   @Roles('admin', 'member', 'superadmin')

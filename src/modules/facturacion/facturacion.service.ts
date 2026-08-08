@@ -512,6 +512,54 @@ export class FacturacionService {
     return pago;
   }
 
+  /**
+   * Registra un pago por el saldo pendiente de la factura (importe operativo menos
+   * lo ya cobrado) con fecha de hoy, y deja que `syncViajesEstadoTrasPago` pase
+   * automáticamente todos los viajes vinculados a `facturacionEstado: "cobrado"`.
+   * Si ya no queda saldo, no crea un pago duplicado — devuelve `yaCobrada: true`.
+   */
+  async marcarComoCobrada(tenantId: string, id: string) {
+    const factura = await this.prisma.factura.findFirst({
+      where: { id, tenantId },
+      include: {
+        viajes: { select: this.VIAJE_SELECT },
+        pagos: { select: this.PAGO_SELECT },
+      },
+    });
+    if (!factura) throw new NotFoundException("Factura no encontrada");
+
+    const importeOperativo = importeOperativoFactura(
+      factura.importe,
+      factura.viajes,
+    );
+    const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
+    const saldo = Math.round((importeOperativo - totalPagado) * 100) / 100;
+
+    if (saldo <= 0.005) {
+      return { yaCobrada: true, factura: this.toShape(factura) };
+    }
+
+    await this.prisma.pago.create({
+      data: {
+        tenantId,
+        facturaId: id,
+        importe: saldo,
+        fecha: new Date(),
+        formaPago: null,
+      },
+    });
+    await this.syncViajesEstadoTrasPago(id, tenantId);
+
+    const updated = await this.prisma.factura.findFirst({
+      where: { id, tenantId },
+      include: {
+        viajes: { select: this.VIAJE_SELECT },
+        pagos: { select: this.PAGO_SELECT },
+      },
+    });
+    return { yaCobrada: false, factura: this.toShape(updated!) };
+  }
+
   async removePago(id: string, tenantId: string) {
     const row = await this.prisma.pago.findFirst({ where: { id, tenantId } });
     if (!row) throw new NotFoundException("Pago no encontrado");

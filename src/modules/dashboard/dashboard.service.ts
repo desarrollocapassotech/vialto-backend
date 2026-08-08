@@ -654,6 +654,11 @@ export class DashboardService {
   }
 
   private async buildAlertas(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    const tieneArca = tenant?.modules.includes('integracion-arca') ?? false;
     const candidatas = await this.prisma.factura.findMany({
       where: {
         tenantId,
@@ -666,6 +671,7 @@ export class DashboardService {
         importe: true,
         moneda: true,
         fechaVencimiento: true,
+        arcaEstado: true,
         pagos: { select: { importe: true } },
         viajes: { select: { facturacionEstado: true, monto: true } },
       },
@@ -677,7 +683,9 @@ export class DashboardService {
           fechaVencimiento: f.fechaVencimiento,
           importeGuardado: f.importe,
           pagos: f.pagos,
-        }) === 'vencida',
+          arcaEstado: f.arcaEstado,
+          tieneArca,
+        }).vencida,
     );
     let montoVencidas = 0;
     let montoVencidasARS = 0;

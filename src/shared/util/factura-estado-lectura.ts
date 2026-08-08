@@ -12,34 +12,57 @@ export function importeOperativoFactura(
   return viajes.reduce((s, v) => s + (v.monto ?? 0), 0);
 }
 
+/** Ciclo de vida del comprobante — un solo valor a la vez, nunca "cobrado" (ver `cobrado` abajo). */
+export type FacturaEstadoLectura =
+  | 'borrador'
+  | 'esperando_afip'
+  | 'facturado'
+  | 'error_afip'
+  | 'anulado';
+
+export interface FacturaEstadoResult {
+  estado: FacturaEstadoLectura;
+  /** Eje independiente del ciclo de vida: se puede estar cobrado en cualquier estado (ej. cobrado antes de anular). */
+  cobrado: boolean;
+  /** Solo relevante mientras no está cobrado y ya se llegó a "facturado" (con CAE si aplica). */
+  vencida: boolean;
+}
+
 /**
- * Estado de negocio de la factura en lectura (el campo `estado` en BD no se mantiene al vencer).
- * - Cobrada si todos los viajes vinculados están cobrados (incl. códigos legados normalizados).
- * - Cobrada si los pagos registrados cubren el importe operativo.
- * - Vencida solo si no es cobrada y la fecha de vencimiento ya pasó.
+ * Estado de negocio de la factura en lectura. `estado` (ciclo de vida) y `cobrado`/
+ * `vencida` (cobro) son ejes independientes — la UI los muestra como badges separados,
+ * uno nunca reemplaza al otro. Sigue el mismo orden de prioridad para `estado` que
+ * `mapFacturacionEstado` en `modules/viajes/viaje-estado-financiero.ts` — mantener
+ * ambos sincronizados si cambia la regla.
  */
 export function computeEstadoFacturaLectura(args: {
   viajes: { facturacionEstado: string; monto?: number | null }[];
   fechaVencimiento: Date | null;
   importeGuardado: number;
   pagos: { importe: number }[];
-}): 'cobrada' | 'vencida' | 'pendiente' {
+  arcaEstado: string | null;
+  tieneArca: boolean;
+}): FacturaEstadoResult {
+  let estado: FacturaEstadoLectura = 'facturado';
+  if (args.tieneArca) {
+    if (args.arcaEstado == null) estado = 'borrador';
+    else if (args.arcaEstado === 'pendiente_cae') estado = 'esperando_afip';
+    else if (args.arcaEstado === 'error') estado = 'error_afip';
+    else if (args.arcaEstado === 'anulado') estado = 'anulado';
+  }
+
   const importe = importeOperativoFactura(args.importeGuardado, args.viajes);
-
-  if (
-    args.viajes.length > 0 &&
-    args.viajes.every((v) => v.facturacionEstado === 'cobrado')
-  ) {
-    return 'cobrada';
-  }
-
   const totalPagado = args.pagos.reduce((s, p) => s + p.importe, 0);
-  if (importe > 0 && totalPagado + 0.005 >= importe) {
-    return 'cobrada';
-  }
+  const cobrado =
+    (args.viajes.length > 0 &&
+      args.viajes.every((v) => v.facturacionEstado === 'cobrado')) ||
+    (importe > 0 && totalPagado + 0.005 >= importe);
 
-  if (args.fechaVencimiento && new Date(args.fechaVencimiento) <= new Date()) {
-    return 'vencida';
-  }
-  return 'pendiente';
+  const vencida =
+    !cobrado &&
+    estado === 'facturado' &&
+    args.fechaVencimiento != null &&
+    new Date(args.fechaVencimiento) <= new Date();
+
+  return { estado, cobrado, vencida };
 }

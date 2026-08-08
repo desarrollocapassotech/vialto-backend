@@ -34,35 +34,53 @@ export class FacturacionService {
     return viajes.reduce((sum, v) => sum + (v.monto ?? 0), 0);
   }
 
-  private toShape(row: {
-    id: string;
-    tenantId: string;
-    numero: string;
-    tipo: string;
-    clienteId: string | null;
-    transportistaId: string | null;
-    importe: number;
-    moneda: string;
-    fechaEmision: Date;
-    fechaVencimiento: Date | null;
-    estado: string;
-    diferencia: number | null;
-    createdAt: Date;
-    viajes: ViajeSnap[];
-    pagos?: { importe: number }[];
-  }) {
+  private async tieneArca(tenantId: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    return tenant?.modules.includes("integracion-arca") ?? false;
+  }
+
+  private toShape(
+    row: {
+      id: string;
+      tenantId: string;
+      numero: string;
+      tipo: string;
+      clienteId: string | null;
+      transportistaId: string | null;
+      importe: number;
+      moneda: string;
+      fechaEmision: Date;
+      fechaVencimiento: Date | null;
+      estado: string;
+      arcaEstado: string | null;
+      ambiente: string | null;
+      diferencia: number | null;
+      createdAt: Date;
+      viajes: ViajeSnap[];
+      pagos?: { importe: number }[];
+    },
+    tieneArca: boolean,
+  ) {
     const { viajes, pagos = [], ...f } = row;
     const importe = importeOperativoFactura(f.importe, viajes);
+    const { estado, cobrado, vencida } = computeEstadoFacturaLectura({
+      viajes,
+      fechaVencimiento: f.fechaVencimiento,
+      importeGuardado: f.importe,
+      pagos,
+      arcaEstado: f.arcaEstado,
+      tieneArca,
+    });
     return {
       ...f,
       viajeIds: viajes.map((v) => v.id),
       importe,
-      estado: computeEstadoFacturaLectura({
-        viajes,
-        fechaVencimiento: f.fechaVencimiento,
-        importeGuardado: f.importe,
-        pagos,
-      }),
+      estado,
+      cobrado,
+      vencida,
     };
   }
 
@@ -232,6 +250,7 @@ export class FacturacionService {
   }
 
   async listFacturas(tenantId: string, clienteId?: string) {
+    const tieneArca = await this.tieneArca(tenantId);
     const rows = await this.prisma.factura.findMany({
       where: { tenantId, ...(clienteId ? { clienteId } : {}) },
       orderBy: { fechaEmision: "desc" },
@@ -241,13 +260,14 @@ export class FacturacionService {
       },
       take: 200,
     });
-    return rows.map((r) => this.toShape(r));
+    return rows.map((r) => this.toShape(r, tieneArca));
   }
 
   async findAllPaginated(tenantId: string, query: FacturasPaginatedQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const where = this.buildFacturasWhere(tenantId, query);
+    const tieneArca = await this.tieneArca(tenantId);
     const include = {
       viajes: { select: this.VIAJE_SELECT },
       pagos: { select: this.PAGO_SELECT },
@@ -259,9 +279,11 @@ export class FacturacionService {
         orderBy: { fechaEmision: "desc" },
         include,
       });
-      const filtered = rows
-        .map((r) => this.toShape(r))
-        .filter((f) => f.estado === query.estado);
+      const filtered = rows.map((r) => this.toShape(r, tieneArca)).filter((f) => {
+        if (query.estado === "cobrado") return f.cobrado;
+        if (query.estado === "vencida") return f.vencida;
+        return f.estado === query.estado;
+      });
       const total = filtered.length;
       const items = filtered.slice((page - 1) * pageSize, page * pageSize);
       return { items, meta: this.paginatedMeta(page, pageSize, total) };
@@ -279,7 +301,7 @@ export class FacturacionService {
     ]);
 
     return {
-      items: rows.map((r) => this.toShape(r)),
+      items: rows.map((r) => this.toShape(r, tieneArca)),
       meta: this.paginatedMeta(page, pageSize, total),
     };
   }
@@ -293,7 +315,8 @@ export class FacturacionService {
       },
     });
     if (!row) throw new NotFoundException("Factura no encontrada");
-    return this.toShape(row);
+    const tieneArca = await this.tieneArca(tenantId);
+    return this.toShape(row, tieneArca);
   }
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
@@ -307,6 +330,7 @@ export class FacturacionService {
     const viajes = await this.resolveViajes(tenantId, viajeIds);
     const moneda = this.assertMonedaUnica(viajes);
     const importe = this.computeImporte(viajes);
+    const tieneArca = await this.tieneArca(tenantId);
 
     try {
       // Retornamos el resultado de la transacción esperando su resolución con 'await'
@@ -349,7 +373,7 @@ export class FacturacionService {
           },
         });
 
-        return this.toShape(updated!);
+        return this.toShape(updated!, tieneArca);
       });
     } catch (error) {
       // Capturamos el error P2002 de Prisma (Unique constraint failed)
@@ -389,6 +413,7 @@ export class FacturacionService {
       monedaNueva = this.assertMonedaUnica(viajesNuevos);
     }
 
+    const tieneArca = await this.tieneArca(tenantId);
     return this.prisma.$transaction(async (tx) => {
       // Actualizar campos de la factura
       const facturaActualizada = await tx.factura.update({
@@ -468,7 +493,7 @@ export class FacturacionService {
           pagos: { select: this.PAGO_SELECT },
         },
       });
-      return this.toShape(updated);
+      return this.toShape(updated, tieneArca);
     });
   }
 
@@ -527,6 +552,7 @@ export class FacturacionService {
       },
     });
     if (!factura) throw new NotFoundException("Factura no encontrada");
+    const tieneArca = await this.tieneArca(tenantId);
 
     const importeOperativo = importeOperativoFactura(
       factura.importe,
@@ -536,7 +562,7 @@ export class FacturacionService {
     const saldo = Math.round((importeOperativo - totalPagado) * 100) / 100;
 
     if (saldo <= 0.005) {
-      return { yaCobrada: true, factura: this.toShape(factura) };
+      return { yaCobrada: true, factura: this.toShape(factura, tieneArca) };
     }
 
     await this.prisma.pago.create({
@@ -557,7 +583,7 @@ export class FacturacionService {
         pagos: { select: this.PAGO_SELECT },
       },
     });
-    return { yaCobrada: false, factura: this.toShape(updated!) };
+    return { yaCobrada: false, factura: this.toShape(updated!, tieneArca) };
   }
 
   async removePago(id: string, tenantId: string) {
@@ -582,18 +608,21 @@ export class FacturacionService {
     });
     if (!factura) return;
 
-    const estadoLectura = computeEstadoFacturaLectura({
+    const tieneArca = await this.tieneArca(tenantId);
+    const { cobrado } = computeEstadoFacturaLectura({
       viajes: factura.viajes,
       fechaVencimiento: factura.fechaVencimiento,
       importeGuardado: factura.importe,
       pagos: factura.pagos,
+      arcaEstado: factura.arcaEstado,
+      tieneArca,
     });
 
     await syncFacturacionEstadoViajes(
       this.prisma,
       tenantId,
       factura.viajes.map((v) => v.id),
-      { cobrado: estadoLectura === "cobrada" },
+      { cobrado },
     );
   }
 }

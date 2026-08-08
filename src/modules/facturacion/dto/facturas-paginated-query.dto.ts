@@ -65,9 +65,24 @@ export class FacturasPaginatedQueryDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   vencimientoHasta?: string;
 
-  /** Estado de lectura: pendiente | cobrada | vencida */
+  /** Estado de lectura: borrador | esperando_afip | facturado | cobrado | error_afip | anulado | vencida */
   @IsOptional()
   @Transform(({ value }) => firstQueryString(value))
-  @IsIn(['pendiente', 'cobrada', 'vencida'])
-  estado?: 'pendiente' | 'cobrada' | 'vencida';
+  @IsIn([
+    'borrador',
+    'esperando_afip',
+    'facturado',
+    'cobrado',
+    'error_afip',
+    'anulado',
+    'vencida',
+  ])
+  estado?:
+    | 'borrador'
+    | 'esperando_afip'
+    | 'facturado'
+    | 'cobrado'
+    | 'error_afip'
+    | 'anulado'
+    | 'vencida';
 }

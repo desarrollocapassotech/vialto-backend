@@ -1589,6 +1589,7 @@ export class LiquidacionesService {
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaEstado: 'autorizado',
+          ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           importe: comprobanteFinal.impNeto,
         },

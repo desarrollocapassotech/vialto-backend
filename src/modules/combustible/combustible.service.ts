@@ -31,6 +31,21 @@ function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Normaliza `formaPago` a un formato único (trim + minúsculas) antes de persistir.
+ * Sin esto, clientes distintos (ej. la app del chofer manda "EFECTIVO" en mayúsculas,
+ * el admin "efectivo") terminan guardando la misma forma de pago con distinta
+ * capitalización, y la distribución del dashboard las cuenta como categorías separadas.
+ * `undefined` se preserva tal cual (en un update, así Prisma sabe que ese campo no
+ * vino en el DTO y no debe tocarlo).
+ */
+function normalizeFormaPago(
+  v: string | null | undefined,
+): string | null | undefined {
+  if (v === undefined || v === null) return v;
+  return v.trim().toLowerCase() || null;
+}
+
 function avg(arr: number[]): number {
   return arr.length > 0 ? arr.reduce((s, n) => s + n, 0) / arr.length : 0;
 }
@@ -388,7 +403,7 @@ export class CombustibleService {
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
-        formaPago: dto.formaPago ?? null,
+        formaPago: normalizeFormaPago(dto.formaPago) ?? null,
         fecha: fechaCarga,
         createdBy: auth.userId,
         fotoTacometro: dto.fotoTacometro ?? null,
@@ -480,7 +495,7 @@ export class CombustibleService {
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
-        formaPago: dto.formaPago,
+        formaPago: normalizeFormaPago(dto.formaPago),
         fecha:
           dto.fecha === undefined
             ? undefined
@@ -566,7 +581,7 @@ export class CombustibleService {
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
-        formaPago: dto.formaPago ?? null,
+        formaPago: normalizeFormaPago(dto.formaPago) ?? null,
         fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
         createdBy: choferId,
         fotoTacometro: dto.fotoTacometro ?? null,
@@ -791,7 +806,9 @@ export class CombustibleService {
         }),
         ...(dto.importe !== undefined && { importe: dto.importe }),
         ...(dto.km !== undefined && { km: dto.km }),
-        ...(dto.formaPago !== undefined && { formaPago: dto.formaPago }),
+        ...(dto.formaPago !== undefined && {
+          formaPago: normalizeFormaPago(dto.formaPago),
+        }),
         ...(dto.fecha !== undefined && { fecha: new Date(dto.fecha) }),
         ...(dto.fotoTacometro !== undefined && {
           fotoTacometro: dto.fotoTacometro,
@@ -886,7 +903,7 @@ export class CombustibleService {
     );
     const distribucionFormaPago = this.buildDistribucion(
       todasCargas,
-      (c) => c.formaPago ?? "sin_especificar",
+      (c) => c.formaPago?.trim().toLowerCase() || "sin_especificar",
     );
 
     const vehiculoIds = Array.from(

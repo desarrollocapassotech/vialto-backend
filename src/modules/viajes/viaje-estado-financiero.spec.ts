@@ -49,11 +49,23 @@ test('tenant sin ARCA: ignora arcaEstado colgado de datos de prueba o módulo de
   assert.equal(mapFacturacionEstado({ arcaEstado: 'anulado' }, true, false), 'cobrado');
 });
 
-test('liquidación: mapeo de estados AFIP', () => {
-  assert.equal(mapLiquidacionEstado(null), 'sin_liquidar');
-  assert.equal(mapLiquidacionEstado('borrador'), 'esperando_afip');
-  assert.equal(mapLiquidacionEstado('pendiente_cae'), 'esperando_afip');
-  assert.equal(mapLiquidacionEstado('autorizado'), 'liquidado');
-  assert.equal(mapLiquidacionEstado('error'), 'error_afip');
-  assert.equal(mapLiquidacionEstado('anulado'), 'anulado');
+test('liquidación con ARCA: mapeo de estados AFIP', () => {
+  assert.equal(mapLiquidacionEstado(null, true), 'sin_liquidar');
+  assert.equal(mapLiquidacionEstado('borrador', true), 'esperando_afip');
+  assert.equal(mapLiquidacionEstado('pendiente_cae', true), 'esperando_afip');
+  assert.equal(mapLiquidacionEstado('autorizado', true), 'liquidado');
+  assert.equal(mapLiquidacionEstado('error', true), 'error_afip');
+  assert.equal(mapLiquidacionEstado('anulado', true), 'anulado');
+});
+
+test('liquidación sin ARCA: registro manual (borrador permanente) cuenta como liquidado', () => {
+  assert.equal(mapLiquidacionEstado(null, false), 'sin_liquidar');
+  assert.equal(mapLiquidacionEstado('borrador', false), 'liquidado');
+  // Nunca deberían aparecer estos valores para un tenant sin ARCA, pero si quedaron
+  // colgados de datos de prueba o el módulo se desactivó después, no hay que mostrar
+  // vocabulario de AFIP — solo "liquidado" (hay un registro) o "anulado".
+  assert.equal(mapLiquidacionEstado('pendiente_cae', false), 'liquidado');
+  assert.equal(mapLiquidacionEstado('autorizado', false), 'liquidado');
+  assert.equal(mapLiquidacionEstado('error', false), 'liquidado');
+  assert.equal(mapLiquidacionEstado('anulado', false), 'anulado');
 });

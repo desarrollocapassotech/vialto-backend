@@ -39,6 +39,7 @@ import {
   LIQUIDACION_ESTADOS_DISPONIBLES,
   type ViajeEtapa,
 } from "./viaje-estados";
+import { syncLiquidacionEstadoViaje } from "./viaje-estado-financiero";
 import {
   buildViajeExportacionesResponse,
   enrichViajeConExportaciones,
@@ -1103,6 +1104,11 @@ export class ViajesService {
         createdBy: userId,
       };
       const viaje = await tx.viaje.create({ data });
+      // Inicializa liquidacionEstado (sin_liquidar | null) según transportista + ARCA del
+      // tenant — la columna no tiene default propio porque su valor depende de eso, y sin
+      // esta llamada un viaje recién creado queda en null hasta el primer evento de
+      // liquidación, lo que bloquea a los selectores que exigen "sin_liquidar" explícito.
+      await syncLiquidacionEstadoViaje(tx, tenantId, viaje.id);
       await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
       await reemplazarProductosDelViaje(
         tx,

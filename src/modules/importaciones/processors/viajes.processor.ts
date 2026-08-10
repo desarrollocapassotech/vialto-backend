@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client"; // Importante: necesario para capturar errores específicos
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { generateNumeroViaje } from "../../viajes/generate-viaje-numero";
+import { syncLiquidacionEstadoViaje } from "../../viajes/viaje-estado-financiero";
 import type { IImportProcessor } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 
@@ -131,6 +132,9 @@ export class ViajesProcessor implements IImportProcessor {
           },
           select: { id: true },
         });
+        // Igual que en la creación manual: sin esto, un viaje con transportista en un
+        // tenant con ARCA queda en liquidacionEstado null en vez de "sin_liquidar".
+        await syncLiquidacionEstadoViaje(tx, tenantId, viaje.id);
 
         if (row.vehiculoId) {
           // Usamos tx para el vehículo

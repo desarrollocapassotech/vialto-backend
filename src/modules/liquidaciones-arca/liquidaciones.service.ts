@@ -10,6 +10,7 @@ import * as crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
+import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
@@ -1298,7 +1299,7 @@ export class LiquidacionesService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return this.attachAnuladoPorNombres(rows);
+    return attachAnuladoPorNombres(this.clerkUsers, rows);
   }
 
   async findById(tenantId: string, id: string) {
@@ -1331,36 +1332,8 @@ export class LiquidacionesService {
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    const [withNombre] = await this.attachAnuladoPorNombres([liq]);
+    const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [liq]);
     return withNombre;
-  }
-
-  /** Resuelve Clerk userId → nombre legible para UI (campo virtual `anuladoPorNombre`). */
-  private async attachAnuladoPorNombres<T>(
-    rows: T[],
-  ): Promise<Array<T & { anuladoPorNombre: string | null }>> {
-    // anuladoPor puede no estar tipado en el client aún → cast local
-    const getAnuladoPor = (r: T) =>
-      (r as { anuladoPor?: string | null }).anuladoPor?.trim() || null;
-    const ids = [
-      ...new Set(rows.map(getAnuladoPor).filter((id): id is string => Boolean(id))),
-    ];
-    const labels = new Map<string, string | null>();
-    await Promise.all(
-      ids.map(async (id) => {
-        if (id.startsWith('user_')) {
-          labels.set(id, await this.clerkUsers.getUserDisplayLabel(id));
-        } else {
-          // Ya era un label persistido o valor no-Clerk
-          labels.set(id, id);
-        }
-      }),
-    );
-    return rows.map((r) => {
-      const id = getAnuladoPor(r);
-      const nombre = id ? labels.get(id) || id : null;
-      return { ...r, anuladoPorNombre: nombre };
-    });
   }
 
   // ── Facturas A/B via ARCA ──────────────────────────────────────────────────

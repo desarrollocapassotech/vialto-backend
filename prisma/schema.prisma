@@ -24,37 +24,37 @@ model Tenant {
   whiteLabelDomain String?
   createdAt        DateTime  @default(now())
 
-  clientes                Cliente[]
-  transportistas          Transportista[]
-  choferes                Chofer[]
-  destinatarios           Destinatario[]
-  direccionesEntrega      DireccionEntrega[]
-  vehiculos               Vehiculo[]
-  viajes                  Viaje[]
-  facturas                Factura[]
-  pagos                   Pago[]
-  movimientosCc           MovimientoCuentaCorriente[]
-  productos               Producto[]
-  movimientosStock        MovimientoStock[]
-  stockOperaciones        StockOperacion[]
-  stockItems              StockItem[]
-  depositos               Deposito[]
-  presentaciones          Presentacion[]
-  productoPresentaciones  ProductoPresentacion[]
-  cargasCombustible       CargaCombustible[]
-  combustibleSyncErrorLogs CombustibleSyncErrorLog[]
-  intervenciones          Intervencion[]
-  remitos                 Remito[]
-  importTemplates         ImportTemplate[]
-  importLogs              ImportLog[]
-  importSessions          ImportSession[]
-  stockRemitoSecuencias   StockRemitoSecuencia[]
-  stockEgresoRemitoConfig StockEgresoRemitoConfig?
-  arcaConfig              ArcaConfig?
-  liquidaciones           Liquidacion[]
-  arcaLogs                ArcaLog[]
-  conceptosLiquidacion    ConceptoLiquidacion[]
-  tenantFieldConfigs      TenantFieldConfig[]
+  clientes                   Cliente[]
+  transportistas             Transportista[]
+  choferes                   Chofer[]
+  destinatarios              Destinatario[]
+  direccionesEntrega         DireccionEntrega[]
+  vehiculos                  Vehiculo[]
+  viajes                     Viaje[]
+  facturas                   Factura[]
+  pagos                      Pago[]
+  movimientosCc              MovimientoCuentaCorriente[]
+  productos                  Producto[]
+  movimientosStock           MovimientoStock[]
+  stockOperaciones           StockOperacion[]
+  stockItems                 StockItem[]
+  depositos                  Deposito[]
+  presentaciones             Presentacion[]
+  productoPresentaciones     ProductoPresentacion[]
+  cargasCombustible          CargaCombustible[]
+  combustibleSyncErrorLogs   CombustibleSyncErrorLog[]
+  intervenciones             Intervencion[]
+  remitos                    Remito[]
+  importTemplates            ImportTemplate[]
+  importLogs                 ImportLog[]
+  importSessions             ImportSession[]
+  stockRemitoSecuencias      StockRemitoSecuencia[]
+  stockEgresoRemitoConfig    StockEgresoRemitoConfig?
+  arcaConfig                 ArcaConfig?
+  liquidaciones              Liquidacion[]
+  arcaLogs                   ArcaLog[]
+  conceptosLiquidacion       ConceptoLiquidacion[]
+  tenantFieldConfigs         TenantFieldConfig[]
   tenantFieldConfigAuditLogs TenantFieldConfigAuditLog[]
 
   @@map("tenants")
@@ -131,16 +131,20 @@ model Chofer {
   telefono        String?
   transportistaId String?
   transportista   Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
-  /** Hash del PIN de login para la app vialto-combustible (formato salt:hash, ver shared/util/pin-hash.ts). Nunca se expone en respuestas de API. */
+  /**
+   * Hash del PIN de login para la app vialto-combustible (formato salt:hash, ver shared/util/pin-hash.ts). Nunca se expone en respuestas de API.
+   */
   pin             String?
-  /** Chofer desactivado no puede loguearse en la app vialto-combustible (ver chofer-auth.service.ts / chofer-auth.guard.ts). */
+  /**
+   * Chofer desactivado no puede loguearse en la app vialto-combustible (ver chofer-auth.service.ts / chofer-auth.guard.ts).
+   */
   activo          Boolean        @default(true)
   createdAt       DateTime       @default(now())
 
-  viajes            Viaje[]
-  cargasCombustible CargaCombustible[]
+  viajes                   Viaje[]
+  cargasCombustible        CargaCombustible[]
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
-  remitos           Remito[]
+  remitos                  Remito[]
 
   @@index([tenantId])
   @@index([tenantId, activo])
@@ -189,11 +193,11 @@ model Vehiculo {
   activo            Boolean        @default(true)
   createdAt         DateTime       @default(now())
 
-  vehiculosViaje    ViajeVehiculo[]
-  cargasCombustible CargaCombustible[]
+  vehiculosViaje           ViajeVehiculo[]
+  cargasCombustible        CargaCombustible[]
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
-  intervenciones    Intervencion[]
-  remitos           Remito[]
+  intervenciones           Intervencion[]
+  remitos                  Remito[]
 
   @@unique([tenantId, patente])
   @@index([tenantId])
@@ -255,13 +259,21 @@ model Viaje {
   tenantId                         String
   tenant                           Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero                           String
-  /** @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura. */
+  /**
+   * @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura.
+   */
   estado                           String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
-  /** Etapa operativa del viaje, editable a mano y por fecha (ver ViajesAutoEstadoService). */
+  /**
+   * Etapa operativa del viaje, editable a mano y por fecha (ver ViajesAutoEstadoService).
+   */
   etapa                            String          @default("pendiente") // pendiente | en_curso | finalizado | cancelado
-  /** Estado de facturación al cliente, sincronizado automáticamente — no editable a mano. */
+  /**
+   * Estado de facturación al cliente, sincronizado automáticamente — no editable a mano.
+   */
   facturacionEstado                String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
-  /** Estado de liquidación al transportista externo (null si no aplica: sin transportista externo o tenant sin integracion-arca). */
+  /**
+   * Estado de liquidación al transportista externo (null si no aplica: sin transportista externo o tenant sin integracion-arca).
+   */
   liquidacionEstado                String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
   clienteId                        String
   cliente                          Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
@@ -288,21 +300,26 @@ model Viaje {
   monedaMonto                      String          @default("ARS") // ARS | USD
   precioTransportistaExterno       Float?
   monedaPrecioTransportistaExterno String          @default("ARS") // ARS | USD
+
+  cantidadFactura             Float?
+  precioUnitarioFactura       Float?
+  cantidadTransportista       Float?
+  precioUnitarioTransportista Float?
   /**
    * Solo cuando monedaMonto ≠ monedaPrecioTransportistaExterno (VT-82 / multimoneda).
    */
-  gananciaBrutaManual              Float?
-  monedaGananciaBrutaManual        String? // ARS | USD
-  observaciones                    String?
-  otrosGastos                      Json            @default("[]")
-  pagosTransportista               Json            @default("[]")
+  gananciaBrutaManual         Float?
+  monedaGananciaBrutaManual   String? // ARS | USD
+  observaciones               String?
+  otrosGastos                 Json      @default("[]")
+  pagosTransportista          Json      @default("[]")
   /**
    * Datos comerciales/aduaneros MIC·CRT (independientes del monto operativo del viaje).
    */
-  documentoAduanero                Json            @default("{}")
-  fechaFinalizado                  DateTime?
-  createdAt                        DateTime        @default(now())
-  createdBy                        String
+  documentoAduanero           Json      @default("{}")
+  fechaFinalizado             DateTime?
+  createdAt                   DateTime  @default(now())
+  createdBy                   String
 
   facturaId                  String?
   factura                    Factura?                    @relation(fields: [facturaId], references: [id], onDelete: SetNull)
@@ -374,8 +391,8 @@ model Factura {
   anuladoAt            DateTime?
   notaCreditoUrl       String? // PDF NC en Cloudinary
 
-  createdAt        DateTime       @default(now())
-  pagos            Pago[]
+  createdAt DateTime @default(now())
+  pagos     Pago[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])
@@ -441,9 +458,11 @@ model Producto {
   tenantId          String
   tenant            Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre            String
-  /** lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive). */
+  /**
+   * lower(trim(collapsed spaces)) — unicidad por tenant (case-insensitive).
+   */
   nombreNormalizado String
-  codigo            String?  // generado por el sistema: P-001, P-002… único por tenant cuando presente
+  codigo            String? // generado por el sistema: P-001, P-002… único por tenant cuando presente
   descripcion       String?
   pesoUnitarioKg    Float?
   activo            Boolean  @default(true)
@@ -467,7 +486,9 @@ model Presentacion {
   tenantId          String
   tenant            Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre            String
-  /** lower(trim(collapsed spaces)) — unicidad por tenant. */
+  /**
+   * lower(trim(collapsed spaces)) — unicidad por tenant.
+   */
   nombreNormalizado String
   activo            Boolean  @default(true)
   createdAt         DateTime @default(now())
@@ -490,27 +511,29 @@ model ProductoSecuencia {
 }
 
 model MovimientoStock {
-  id                    String              @id @default(cuid())
+  id                    String                @id @default(cuid())
   tenantId              String
-  tenant                Tenant              @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant                Tenant                @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   operacionId           String
-  operacion             StockOperacion      @relation(fields: [operacionId], references: [id], onDelete: Cascade)
+  operacion             StockOperacion        @relation(fields: [operacionId], references: [id], onDelete: Cascade)
   productoId            String
-  producto              Producto            @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  producto              Producto              @relation(fields: [productoId], references: [id], onDelete: Restrict)
   presentacionId        String?
   presentacion          ProductoPresentacion? @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
   fechaVencimiento      DateTime?
-  bultos                Float               @default(0)
-  unidades              Float               @default(0)
+  bultos                Float                 @default(0)
+  unidades              Float                 @default(0)
   lote                  String?
   observaciones         String?
-  /** ID del movimiento par en una división (el origen apunta al destino y viceversa). */
+  /**
+   * ID del movimiento par en una división (el origen apunta al destino y viceversa).
+   */
   movimientoVinculadoId String?
   remitoId              String?
-  remito                Remito?             @relation(fields: [remitoId], references: [id], onDelete: SetNull)
-  createdBy             String              @default("")
+  remito                Remito?               @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  createdBy             String                @default("")
   fecha                 DateTime
-  createdAt             DateTime            @default(now())
+  createdAt             DateTime              @default(now())
 
   @@index([tenantId])
   @@index([tenantId, operacionId])
@@ -568,20 +591,20 @@ model StockEgresoRemitoConfig {
 }
 
 model StockItem {
-  id              String               @id @default(cuid())
-  tenantId        String
-  tenant          Tenant               @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  productoId      String
-  producto        Producto             @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  presentacionId  String?
-  presentacion    ProductoPresentacion? @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
-  clienteId       String
-  cliente         Cliente              @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  depositoId      String
-  deposito        Deposito             @relation(fields: [depositoId], references: [id], onDelete: Restrict)
-  cantidad1       Float                @default(0)
-  cantidad2       Float                @default(0)
-  updatedAt       DateTime             @updatedAt
+  id             String                @id @default(cuid())
+  tenantId       String
+  tenant         Tenant                @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  productoId     String
+  producto       Producto              @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  presentacionId String?
+  presentacion   ProductoPresentacion? @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
+  clienteId      String
+  cliente        Cliente               @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  depositoId     String
+  deposito       Deposito              @relation(fields: [depositoId], references: [id], onDelete: Restrict)
+  cantidad1      Float                 @default(0)
+  cantidad2      Float                 @default(0)
+  updatedAt      DateTime              @updatedAt
 
   @@unique([productoId, presentacionId, clienteId, depositoId])
   @@index([tenantId])
@@ -592,35 +615,47 @@ model StockItem {
   @@map("stock_items")
 }
 
-/** Encabezado de una operación de stock (ingreso, egreso o división). */
+/**
+ * Encabezado de una operación de stock (ingreso, egreso o división).
+ */
 model StockOperacion {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  clienteId     String
-  cliente       Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  depositoId    String
-  deposito      Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
-  tipo          String   // ingreso | egreso | division
-  fecha         DateTime
-  observaciones String?
-  /** URL del remito interno en PDF (Cloudinary). Solo egresos; generado por el sistema. */
-  remitoUrl     String?
-  /** URLs de fotos del producto en ingresos (hasta 2, Cloudinary). */
-  fotosUrls     String[]
-  /** Número de remito interno generado al egresar (ej. R-2026-00001). */
-  numeroRemito  String?
-  /** Número de remito del proveedor, informado manualmente al registrar un ingreso. */
-  numeroRemitoProveedor String?
-  remitoId      String?
-  remito        Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
-  entregadoPor  String?
-  destinatario  String?
-  destinoFinal  String?
-  /** Pedido del cliente, nota de despacho u otro documento externo. Valor «No tiene» si no aplica. */
+  id                     String   @id @default(cuid())
+  tenantId               String
+  tenant                 Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  clienteId              String
+  cliente                Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  depositoId             String
+  deposito               Deposito @relation(fields: [depositoId], references: [id], onDelete: Restrict)
+  tipo                   String // ingreso | egreso | division
+  fecha                  DateTime
+  observaciones          String?
+  /**
+   * URL del remito interno en PDF (Cloudinary). Solo egresos; generado por el sistema.
+   */
+  remitoUrl              String?
+  /**
+   * URLs de fotos del producto en ingresos (hasta 2, Cloudinary).
+   */
+  fotosUrls              String[]
+  /**
+   * Número de remito interno generado al egresar (ej. R-2026-00001).
+   */
+  numeroRemito           String?
+  /**
+   * Número de remito del proveedor, informado manualmente al registrar un ingreso.
+   */
+  numeroRemitoProveedor  String?
+  remitoId               String?
+  remito                 Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
+  entregadoPor           String?
+  destinatario           String?
+  destinoFinal           String?
+  /**
+   * Pedido del cliente, nota de despacho u otro documento externo. Valor «No tiene» si no aplica.
+   */
   numeroDocumentoExterno String?
-  createdBy     String   @default("")
-  createdAt     DateTime @default(now())
+  createdBy              String   @default("")
+  createdAt              DateTime @default(now())
 
   movimientos MovimientoStock[]
 
@@ -634,7 +669,9 @@ model StockOperacion {
   @@map("stock_operaciones")
 }
 
-/** Vincula un producto a una presentación con cantidad de unidades por bulto. */
+/**
+ * Vincula un producto a una presentación con cantidad de unidades por bulto.
+ */
 model ProductoPresentacion {
   id               String       @id @default(cuid())
   tenantId         String
@@ -662,29 +699,29 @@ model ProductoPresentacion {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model CargaCombustible {
-  id         String   @id @default(cuid())
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  vehiculoId String?
-  vehiculo   Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
-  choferId   String?
-  chofer     Chofer?  @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  estacion   String
-  litros     Float
-  precioPorLitro Float @default(0)
-  importe    Float
-  km         Int
-  formaPago  String? // transferencia | cheque | efectivo
-  fecha      DateTime
-  createdAt  DateTime @default(now())
-  createdBy  String
-  fotoTacometro String?
-  fotoTicket    String?
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  vehiculoId     String?
+  vehiculo       Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  choferId       String?
+  chofer         Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  estacion       String
+  litros         Float
+  precioPorLitro Float     @default(0)
+  importe        Float
+  km             Int
+  formaPago      String? // transferencia | cheque | efectivo
+  fecha          DateTime
+  createdAt      DateTime  @default(now())
+  createdBy      String
+  fotoTacometro  String?
+  fotoTicket     String?
 
-  sospechoso      Boolean @default(false)
-  motivoSospecha  String? // litros_extremo | importe_invalido | precio_litro_fuera_de_rango | km_delta_invalido
-  litrosOriginal  Float?  // valor previo a la corrección automática de litros (regla ÷1000), null si nunca se corrigió
-  kmOriginal      Int?    // valor previo a la corrección automática de km (÷10 | ÷100 | ÷1000 validado contra vecinos), null si nunca se corrigió
+  sospechoso     Boolean @default(false)
+  motivoSospecha String? // litros_extremo | importe_invalido | precio_litro_fuera_de_rango | km_delta_invalido
+  litrosOriginal Float? // valor previo a la corrección automática de litros (regla ÷1000), null si nunca se corrigió
+  kmOriginal     Int? // valor previo a la corrección automática de km (÷10 | ÷100 | ÷1000 validado contra vecinos), null si nunca se corrigió
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
@@ -842,14 +879,14 @@ model ImportLog {
 // Nota: en desarrollo por otro integrante del equipo — no modificar la forma de este modelo,
 // solo se declara acá para que coincida con las tablas ya existentes en la base de QA.
 model TenantFieldConfig {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  modulo      String
-  formulario  String
-  campos      Json
-  updatedAt   DateTime
-  updatedBy   String
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  modulo     String
+  formulario String
+  campos     Json
+  updatedAt  DateTime
+  updatedBy  String
 
   @@unique([tenantId, modulo, formulario])
   @@index([tenantId])
@@ -882,31 +919,31 @@ model TenantFieldConfigAuditLog {
  * Configuración AFIP SDK por tenant. La API key viene de AFIP_SDK_API_KEY (env var).
  */
 model ArcaConfig {
-  tenantId           String   @id
-  tenant             Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenantId                 String   @id
+  tenant                   Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   // Datos del emisor para el comprobante PDF
-  cuitEmisor         String
-  razonSocial        String? // Razón social del emisor (ej: NyM Logística SRL)
-  domicilioEmisor    String? // Domicilio del emisor
-  condicionIvaEmisor String? // Condición IVA del emisor (ej: RESP. INSCRIPTO)
-  ingBrutos          String? // N° Ing. Brutos (suele coincidir con CUIT)
-  inicActEmisor      String? // Fecha de inicio de actividades (ej: 01/03/2015)
-  logoUrl            String? // Logo del emisor (Cloudinary), embebido en los PDF de comprobantes
+  cuitEmisor               String
+  razonSocial              String? // Razón social del emisor (ej: NyM Logística SRL)
+  domicilioEmisor          String? // Domicilio del emisor
+  condicionIvaEmisor       String? // Condición IVA del emisor (ej: RESP. INSCRIPTO)
+  ingBrutos                String? // N° Ing. Brutos (suele coincidir con CUIT)
+  inicActEmisor            String? // Fecha de inicio de actividades (ej: 01/03/2015)
+  logoUrl                  String? // Logo del emisor (Cloudinary), embebido en los PDF de comprobantes
   // Puntos de venta y ambiente
-  ptoVentaCvlp       Int // punto de venta para CVLP tipo 60
-  ptoVentaFactura    Int // punto de venta para Facturas A/B
-  ambiente           String   @default("homologacion") // homologacion | produccion
+  ptoVentaCvlp             Int // punto de venta para CVLP tipo 60
+  ptoVentaFactura          Int // punto de venta para Facturas A/B
+  ambiente                 String   @default("homologacion") // homologacion | produccion
   // Parámetros de liquidación
-  comisionPctDefault Float    @default(8)
-  ivaGastosAdmin     Float    @default(21)
+  comisionPctDefault       Float    @default(8)
+  ivaGastosAdmin           Float    @default(21)
   // Comprobante con que se anula un CVLP: 'nota_credito' (tipo 3/8) | 'nota_debito' (tipo 2/7)
-  anulacionTipoComprobante String @default("nota_credito")
+  anulacionTipoComprobante String   @default("nota_credito")
   // Certificado digital AFIP (PEM), nunca se expone en la API pública. Solo hace falta para
   // producción: en homologación se usa el CUIT de prueba de AFIP SDK sin certificado propio
   // (ver CUIT_TEST_HOMOLOGACION en arca.util.ts).
-  certPemProduccion String?
-  keyPemProduccion  String?
-  updatedAt         DateTime @updatedAt
+  certPemProduccion        String?
+  keyPemProduccion         String?
+  updatedAt                DateTime @updatedAt
 
   @@map("arca_configs")
 }
@@ -953,11 +990,11 @@ model Liquidacion {
   anulacionFecha       DateTime?
 
   // Estado de la integración ARCA
-  estado     String  @default("borrador")
+  estado           String  @default("borrador")
   // borrador | pendiente_cae | autorizado | error | anulado
   arcaError        String? // mensaje amigable del último error de ARCA
   arcaErrorDetalle String? // detalle técnico crudo de AFIP SDK (para "ver error completo")
-  reintentos Int     @default(0)
+  reintentos       Int     @default(0)
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
 

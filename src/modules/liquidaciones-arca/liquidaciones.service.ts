@@ -219,15 +219,14 @@ export class LiquidacionesService {
     }> = [];
 
     for (const v of viajesConMeta) {
-      const meta = (v as { metadata?: Record<string, unknown> }).metadata as Record<string, unknown> | null ?? {};
-      const tnDestino = (meta.tnDestino as number | null) ?? null;
-      const tnOrigen = (meta.tnOrigen as number | null) ?? null;
-      const tarifaTransportista = (meta.tarifaTransportista as number | null) ?? null;
+      const tnDestino = v.cantidadTransportista ?? null;
+      const tnOrigen = null;
+      const tarifaTransportista = v.precioUnitarioTransportista ?? null;
 
-      // Granel (NyM): tnDestino × tarifaTransportista. Viaje estándar: precioTransportistaExterno.
+      // Desglose: cantidadTransportista × precioUnitarioTransportista. Viaje estándar: precioTransportistaExterno.
       const subtotal = tnDestino != null && tarifaTransportista != null
         ? round2(tnDestino * tarifaTransportista)
-        : round2((v as { precioTransportistaExterno?: number | null }).precioTransportistaExterno ?? 0);
+        : round2(v.precioTransportistaExterno ?? 0);
 
       bruto += subtotal;
       viajesDetalle.push({

@@ -33,8 +33,13 @@ SET "facturacionEstado" = CASE
   WHEN v."estado" = 'cobrado' THEN 'cobrado'
   ELSE 'facturado'
 END
+-- Nota: la tabla objetivo del UPDATE ("v") no puede referenciarse dentro de un JOIN..ON
+-- de la cláusula FROM en Postgres (solo en SET/WHERE) — por eso el join a "tenants" usa
+-- f."tenantId" (garantizado igual a v."tenantId" por la relación facturaId) en vez de
+-- v."tenantId". Bug real detectado en el deploy a producción del 2026-08-10 (P3009):
+-- "invalid reference to FROM-clause entry for table v".
 FROM "facturas" f
-JOIN "tenants" t ON t."clerkOrgId" = v."tenantId"
+JOIN "tenants" t ON t."clerkOrgId" = f."tenantId"
 WHERE v."facturaId" = f."id";
 
 -- facturacionEstado, paso 3: red de seguridad para facturaId huérfano (factura borrada).
@@ -47,10 +52,12 @@ WHERE "facturaId" IS NOT NULL
 -- liquidaciones colgadas de datos de prueba o de un módulo desactivado después). Toma la
 -- liquidación más reciente (por updatedAt) entre las vinculadas al viaje; si no hay
 -- ninguna, sin_liquidar.
+-- Mismo bug de FROM/JOIN que arriba: "sub" ahora expone tenant_id (de la liquidación,
+-- garantizado igual al tenantId del viaje) para poder joinear "tenants" sin referenciar "v".
 UPDATE "viajes" v
 SET "liquidacionEstado" = sub.mapped
 FROM (
-  SELECT DISTINCT ON (lv."viajeId") lv."viajeId" AS viaje_id,
+  SELECT DISTINCT ON (lv."viajeId") lv."viajeId" AS viaje_id, l."tenantId" AS tenant_id,
     CASE
       WHEN l."estado" IN ('borrador', 'pendiente_cae') THEN 'esperando_afip'
       WHEN l."estado" = 'autorizado' THEN 'liquidado'
@@ -62,7 +69,7 @@ FROM (
   JOIN "liquidaciones" l ON l."id" = lv."liquidacionId"
   ORDER BY lv."viajeId", l."updatedAt" DESC
 ) sub
-JOIN "tenants" t ON t."clerkOrgId" = v."tenantId"
+JOIN "tenants" t ON t."clerkOrgId" = sub.tenant_id
 WHERE v."id" = sub.viaje_id
   AND v."transportistaId" IS NOT NULL
   AND 'integracion-arca' = ANY(t."modules");

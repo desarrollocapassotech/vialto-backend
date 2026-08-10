@@ -8,6 +8,7 @@ import {
   IsNotEmpty,
   IsDateString,
   Min,
+  ValidateIf,
   ValidateNested,
 } from "class-validator";
 import { Transform, Type } from "class-transformer";
@@ -103,7 +104,11 @@ export class CreateViajeDto {
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
-  @IsNumber() @Min(0.01) @Type(() => Number) monto: number;
+  @ValidateIf((o) => o.cantidadFactura == null && o.precioUnitarioFactura == null)
+  @IsNumber()
+  @Min(0.01)
+  @Type(() => Number)
+  monto?: number;
   /** ARS (default) o USD. */
   @IsOptional() @IsIn(["ARS", "USD"]) monedaMonto?: string;
   @IsOptional()
@@ -112,6 +117,19 @@ export class CreateViajeDto {
   precioTransportistaExterno?: number;
   /** ARS (default) o USD. */
   @IsOptional() @IsIn(["ARS", "USD"]) monedaPrecioTransportistaExterno?: string;
+
+  @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
+  @IsNumber({}, { message: 'La cantidad a facturar debe ser un número válido' }) @Type(() => Number) cantidadFactura?: number;
+
+  @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
+  @IsNumber({}, { message: 'El precio unitario a facturar debe ser un número válido' }) @Type(() => Number) precioUnitarioFactura?: number;
+
+  @ValidateIf((o) => o.cantidadTransportista != null || o.precioUnitarioTransportista != null)
+  @IsNumber({}, { message: 'La cantidad del transportista debe ser un número válido' }) @Type(() => Number) cantidadTransportista?: number;
+
+  @ValidateIf((o) => o.cantidadTransportista != null || o.precioUnitarioTransportista != null)
+  @IsNumber({}, { message: 'El precio unitario del transportista debe ser un número válido' }) @Type(() => Number) precioUnitarioTransportista?: number;
+
   /** Solo si monedaMonto ≠ monedaPrecioTransportistaExterno. */
   @IsOptional()
   @IsNumber()

@@ -43,6 +43,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "gananciaBrutaManual", label: "Ganancia bruta manual", obligatorioSistema: false },
           { campo: "otrosGastos", label: "Otros gastos", obligatorioSistema: false },
           { campo: "pagosTransportista", label: "Pagos al transportista", obligatorioSistema: false },
+          { campo: "desgloseMontos", label: "Desglose de montos (Cantidad × Precio)", obligatorioSistema: false },
         ],
       },
       edicion_viaje: {
@@ -70,6 +71,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "gananciaBrutaManual", label: "Ganancia bruta manual", obligatorioSistema: false },
           { campo: "otrosGastos", label: "Otros gastos", obligatorioSistema: false },
           { campo: "pagosTransportista", label: "Pagos al transportista", obligatorioSistema: false },
+          { campo: "desgloseMontos", label: "Desglose de montos (Cantidad × Precio)", obligatorioSistema: false },
         ],
       },
       detalle_viaje: {

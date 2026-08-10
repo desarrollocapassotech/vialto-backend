@@ -1072,12 +1072,21 @@ export class ViajesService {
         "Un viaje no puede crearse en etapa finalizado",
       );
     }
-    const precioTransportistaExterno = dto.precioTransportistaExterno;
+    let monto = dto.monto;
+    if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
+      monto = dto.cantidadFactura * dto.precioUnitarioFactura;
+    }
+
+    let precioTransportistaExterno = dto.precioTransportistaExterno;
+    if (dto.cantidadTransportista != null && dto.precioUnitarioTransportista != null) {
+      precioTransportistaExterno = dto.cantidadTransportista * dto.precioUnitarioTransportista;
+    }
+
     const numero =
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, tenantId));
     const gananciaPersist = this.applyGananciaBrutaFields(
       {
-        monto: dto.monto,
+        monto,
         monedaMonto: dto.monedaMonto,
         monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
         otrosGastos: dto.otrosGastos,
@@ -1114,11 +1123,15 @@ export class ViajesService {
         detalleCarga: dto.detalleCarga ?? null,
         kmRecorridos: dto.kmRecorridos ?? null,
         litrosConsumidos: dto.litrosConsumidos ?? null,
-        monto: dto.monto,
+        monto,
         monedaMonto: dto.monedaMonto === "USD" ? "USD" : "ARS",
         precioTransportistaExterno: precioTransportistaExterno ?? null,
         monedaPrecioTransportistaExterno:
           dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS",
+        cantidadFactura: dto.cantidadFactura ?? null,
+        precioUnitarioFactura: dto.precioUnitarioFactura ?? null,
+        cantidadTransportista: dto.cantidadTransportista ?? null,
+        precioUnitarioTransportista: dto.precioUnitarioTransportista ?? null,
         gananciaBrutaManual: gananciaPersist.gananciaBrutaManual,
         monedaGananciaBrutaManual: gananciaPersist.monedaGananciaBrutaManual,
         observaciones: dto.observaciones ?? null,
@@ -1283,7 +1296,16 @@ export class ViajesService {
       });
     }
 
-    const precioTransportistaExternoInput = dto.precioTransportistaExterno;
+    let precioTransportistaExternoInput = dto.precioTransportistaExterno;
+    if (dto.cantidadTransportista != null && dto.precioUnitarioTransportista != null) {
+      precioTransportistaExternoInput = dto.cantidadTransportista * dto.precioUnitarioTransportista;
+    }
+    
+    let montoInput = dto.monto;
+    if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
+      montoInput = dto.cantidadFactura * dto.precioUnitarioFactura;
+    }
+
     const precioTransportistaExternoResolved =
       precioTransportistaExternoInput !== undefined
         ? precioTransportistaExternoInput
@@ -1307,7 +1329,7 @@ export class ViajesService {
 
     const data: Prisma.ViajeUpdateInput = {
       ...dto,
-      monto: dto.monto !== undefined ? dto.monto : (current.monto ?? undefined),
+      monto: montoInput !== undefined ? montoInput : (current.monto ?? undefined),
       fechaCarga:
         dto.fechaCarga === undefined
           ? undefined

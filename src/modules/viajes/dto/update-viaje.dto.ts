@@ -7,6 +7,7 @@ import {
   IsString,
   IsDateString,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -69,6 +70,19 @@ export class UpdateViajeDto {
   @IsOptional() @IsIn(['ARS', 'USD']) monedaMonto?: string;
   @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
+
+  @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
+  @IsNumber({}, { message: 'La cantidad a facturar debe ser un número válido' }) @Type(() => Number) cantidadFactura?: number;
+
+  @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
+  @IsNumber({}, { message: 'El precio unitario a facturar debe ser un número válido' }) @Type(() => Number) precioUnitarioFactura?: number;
+
+  @ValidateIf((o) => o.cantidadTransportista != null || o.precioUnitarioTransportista != null)
+  @IsNumber({}, { message: 'La cantidad del transportista debe ser un número válido' }) @Type(() => Number) cantidadTransportista?: number;
+
+  @ValidateIf((o) => o.cantidadTransportista != null || o.precioUnitarioTransportista != null)
+  @IsNumber({}, { message: 'El precio unitario del transportista debe ser un número válido' }) @Type(() => Number) precioUnitarioTransportista?: number;
+
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) gananciaBrutaManual?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaGananciaBrutaManual?: string;
   @IsOptional() @IsString() observaciones?: string;

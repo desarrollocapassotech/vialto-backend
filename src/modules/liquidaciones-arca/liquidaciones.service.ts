@@ -43,6 +43,7 @@ import {
   defaultFacturaLineas,
   type FacturaLineaInput,
 } from './factura-conceptos.util';
+import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { assertFacturaEmitDatosCompletos } from './factura-emit-validation.util';
 import { resolveIvaPct } from './arca-iva.util';
 import { FacturaPdfService } from './factura-pdf.service';
@@ -912,6 +913,7 @@ export class LiquidacionesService {
           select: {
             id: true,
             numero: true,
+            numeroIdentificacionPersonalizado: true,
             monto: true,
             origen: true,
             destino: true,
@@ -1315,6 +1317,7 @@ export class LiquidacionesService {
               select: {
                 id: true,
                 numero: true,
+                numeroIdentificacionPersonalizado: true,
                 fechaCarga: true,
                 fechaDescarga: true,
                 origen: true,
@@ -1346,6 +1349,7 @@ export class LiquidacionesService {
           select: {
             id: true,
             numero: true,
+            numeroIdentificacionPersonalizado: true,
             monto: true,
             origen: true,
             destino: true,
@@ -1674,13 +1678,13 @@ export class LiquidacionesService {
       },
       select: {
         viajeId: true,
-        viaje: { select: { numero: true } },
+        viaje: { select: { numero: true, numeroIdentificacionPersonalizado: true } },
       },
     });
     if (!existentes.length) return;
 
     const numeros = existentes
-      .map((lv) => lv.viaje?.numero)
+      .map((lv) => (lv.viaje ? numeroVisibleViaje(lv.viaje) : undefined))
       .filter((n): n is string => Boolean(n?.trim()));
     if (numeros.length === 1) {
       throw new ConflictException(

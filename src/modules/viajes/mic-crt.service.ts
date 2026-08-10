@@ -34,6 +34,7 @@ import {
   readStoredMicCrtExport,
   todayIsoDateLocal,
 } from './mic-crt-export.util';
+import { numeroVisibleViaje } from './viaje-numero-visible.util';
 
 type MissingGroup = { fields: string[]; entityId?: string };
 
@@ -53,6 +54,7 @@ type MicVehiculo = {
 type MicViajeRow = {
   id: string;
   numero: string;
+  numeroIdentificacionPersonalizado: string | null;
   origen: string | null;
   destino: string | null;
   fechaCarga: Date | null;
@@ -148,7 +150,7 @@ export class MicCrtService {
     const camion = sorted[0]?.vehiculo ?? null;
     return {
       viajeId: viaje.id,
-      viajeNumero: viaje.numero,
+      viajeNumero: numeroVisibleViaje(viaje),
       tiposBultos: MIC_CRT_TIPOS_BULTOS,
       prefill: this.buildPrefill(viaje),
       operativo: {

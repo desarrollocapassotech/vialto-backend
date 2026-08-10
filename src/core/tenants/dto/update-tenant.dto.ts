@@ -9,4 +9,5 @@ export class UpdateTenantDto {
   @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;
   @IsOptional() @IsDateString() billingRenewsAt?: string;
   @IsOptional() @IsString() whiteLabelDomain?: string;
+  @IsOptional() @IsString() labelIdentificacionPersonalizadaViajes?: string;
 }

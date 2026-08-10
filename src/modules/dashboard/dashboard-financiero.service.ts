@@ -5,6 +5,7 @@ import {
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
 import { importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
+import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 
 export type Money = { ARS: number; USD: number };
 
@@ -146,6 +147,7 @@ function endOfDayLocal(ymd: string): Date {
 type ViajeMargenRow = {
   id: string;
   numero: string | null;
+  numeroIdentificacionPersonalizado: string | null;
   clienteId: string;
   transportistaId: string | null;
   monto: number | null;
@@ -228,6 +230,7 @@ export class DashboardFinancieroService {
       select: {
         id: true,
         numero: true,
+        numeroIdentificacionPersonalizado: true,
         clienteId: true,
         transportistaId: true,
         monto: true,
@@ -367,7 +370,7 @@ export class DashboardFinancieroService {
         if (esAlerta) {
           alertas.push({
             viajeId: v.id,
-            numero: v.numero ?? '',
+            numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }),
             clienteNombre,
             transportistaNombre: v.transportistaId
               ? (nombreTransportista.get(v.transportistaId) ?? 'Transportista')
@@ -444,6 +447,7 @@ export class DashboardFinancieroService {
       select: {
         id: true,
         numero: true,
+        numeroIdentificacionPersonalizado: true,
         etapa: true,
         facturacionEstado: true,
         clienteId: true,
@@ -486,7 +490,7 @@ export class DashboardFinancieroService {
       }
       addMoney(montoPendiente, moneda, roundMoney(acordado - pagado));
       if (v.transportistaId) transportistaIds.add(v.transportistaId);
-      sinLiquidarItems.push({ id: v.id, numero: v.numero ?? '', transportistaNombre: null });
+      sinLiquidarItems.push({ id: v.id, numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }), transportistaNombre: null });
     }
     const transportistas = transportistaIds.size
       ? await this.prisma.transportista.findMany({
@@ -516,7 +520,7 @@ export class DashboardFinancieroService {
     const nombreCliente = new Map(clientes.map((c) => [c.id, c.nombre]));
     const sinFacturarDetalle = await this.prisma.viaje.findMany({
       where: { tenantId, id: { in: sinFacturarViajes.map((v) => v.id) } },
-      select: { id: true, numero: true, monto: true, monedaMonto: true, clienteId: true },
+      select: { id: true, numero: true, numeroIdentificacionPersonalizado: true, monto: true, monedaMonto: true, clienteId: true },
     });
     const montoSinFacturar = emptyMoney();
     for (const v of sinFacturarDetalle) {
@@ -539,7 +543,7 @@ export class DashboardFinancieroService {
         montoTotal: montoSinFacturar,
         items: sinFacturarDetalle.slice(0, 30).map((v) => ({
           id: v.id,
-          numero: v.numero ?? '',
+          numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }),
           clienteNombre: nombreCliente.get(v.clienteId) ?? 'Cliente',
         })),
       },
@@ -759,7 +763,7 @@ export class DashboardFinancieroService {
 
     const pendientesEmitir = await this.prisma.viaje.findMany({
       where: { tenantId, etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
-      select: { id: true, numero: true, monto: true, monedaMonto: true, clienteId: true },
+      select: { id: true, numero: true, numeroIdentificacionPersonalizado: true, monto: true, monedaMonto: true, clienteId: true },
     });
     const clienteIdsPendientes = [...new Set(pendientesEmitir.map((v) => v.clienteId))];
     const clientesPendientes = clienteIdsPendientes.length
@@ -796,7 +800,7 @@ export class DashboardFinancieroService {
         montoTotal: montoPendienteEmitir,
         items: pendientesEmitir.slice(0, 30).map((v) => ({
           id: v.id,
-          numero: v.numero ?? '',
+          numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }),
           clienteNombre: nombreClientePendiente.get(v.clienteId) ?? 'Cliente',
         })),
       },

@@ -44,6 +44,7 @@ import {
   buildViajeExportacionesResponse,
   enrichViajeConExportaciones,
 } from "./viaje-exportaciones.util";
+import { numeroVisibleViaje } from "./viaje-numero-visible.util";
 import {
   GananciaBrutaValidationError,
   buildGananciaBrutaResumen,
@@ -459,6 +460,27 @@ export class ViajesService {
     }
   }
 
+  /** Traduce un P2002 de `Viaje` (numero / numeroIdentificacionPersonalizado únicos por tenant) a un 409 legible; relanza cualquier otro error tal cual. */
+  private assertNoUniqueConstraintViolation(e: unknown): never {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      const target = e.meta?.target;
+      const targetStr = Array.isArray(target)
+        ? target.join(",")
+        : String(target ?? "");
+      if (targetStr.includes("numeroIdentificacionPersonalizado")) {
+        throw new ConflictException(
+          "Ya existe otro viaje con ese ID personalizado en esta empresa. Usá un valor distinto.",
+        );
+      }
+      if (targetStr.includes("numero")) {
+        throw new ConflictException(
+          "Ya existe un viaje con ese número en esta empresa.",
+        );
+      }
+    }
+    throw e;
+  }
+
   private async upsertCargoFinalizacion(
     tx: Prisma.TransactionClient,
     viaje: {
@@ -466,6 +488,7 @@ export class ViajesService {
       tenantId: string;
       clienteId: string;
       numero: string;
+      numeroIdentificacionPersonalizado?: string | null;
       monto: number | null;
       monedaMonto?: string | null;
       otrosGastos?: unknown;
@@ -474,7 +497,8 @@ export class ViajesService {
   ) {
     const monto = this.getMontoFinal(viaje);
     const fecha = viaje.fechaFinalizado ?? new Date();
-    const concepto = `Cargo automático por viaje ${viaje.numero}`;
+    const numeroVisible = numeroVisibleViaje(viaje);
+    const concepto = `Cargo automático por viaje ${numeroVisible}`;
 
     await tx.movimientoCuentaCorriente.upsert({
       where: {
@@ -490,7 +514,7 @@ export class ViajesService {
         concepto,
         importe: monto,
         fecha,
-        referencia: viaje.numero,
+        referencia: numeroVisible,
       },
       create: {
         tenantId: viaje.tenantId,
@@ -501,7 +525,7 @@ export class ViajesService {
         concepto,
         importe: monto,
         fecha,
-        referencia: viaje.numero,
+        referencia: numeroVisible,
       },
     });
   }
@@ -1071,10 +1095,13 @@ export class ViajesService {
     const destinosNorm = resolveDestinosParaCreate(dto);
     const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
 
-    return this.prisma.$transaction(async (tx) => {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
       const data: Prisma.ViajeUncheckedCreateInput = {
         tenantId,
         numero,
+        numeroIdentificacionPersonalizado:
+          dto.numeroIdentificacionPersonalizado?.trim() || null,
         etapa,
         clienteId: dto.clienteId,
         transportistaId: refs.transportistaId,
@@ -1124,7 +1151,10 @@ export class ViajesService {
       return enrichViajeConGananciaBruta(
         calcularMontosReales(out) as unknown as ViajeConVehiculosViaje,
       ) as ViajeConVehiculosViaje;
-    }, VIAJE_INTERACTIVE_TX);
+      }, VIAJE_INTERACTIVE_TX);
+    } catch (e) {
+      this.assertNoUniqueConstraintViolation(e);
+    }
   }
 
   /**
@@ -1298,6 +1328,10 @@ export class ViajesService {
       .contratanteRealizaFlete;
     delete (data as { transportistaEfectivoId?: unknown })
       .transportistaEfectivoId;
+    if (dto.numeroIdentificacionPersonalizado !== undefined) {
+      (data as any).numeroIdentificacionPersonalizado =
+        dto.numeroIdentificacionPersonalizado?.trim() || null;
+    }
     if (dto.otrosGastos !== undefined) {
       (data as any).otrosGastos =
         dto.otrosGastos as unknown as Prisma.InputJsonValue;
@@ -1381,34 +1415,38 @@ export class ViajesService {
       (data as any).destino = ultimoDestinoEtiqueta(destinosUpdate);
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.viaje.update({
-        where: { id },
-        data: data as Prisma.ViajeUncheckedUpdateInput,
-      });
-      await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
-      if (dto.productoItems !== undefined) {
-        await reemplazarProductosDelViaje(
-          tx,
-          id,
-          normalizarProductoItems(dto.productoItems),
-          tenantId,
-        );
-      }
-      if (destinosUpdate !== undefined) {
-        await reemplazarDestinosDelViaje(tx, id, destinosUpdate, tenantId);
-      }
-      const full = (await tx.viaje.findFirstOrThrow({
-        where: { id, tenantId },
-        include: VIAJE_INCLUDE_FULL,
-      })) as unknown as ViajeConVehiculosViaje;
-      if (esEtapaFinal(full.etapa)) {
-        await this.upsertCargoFinalizacion(tx, full);
-      }
-      return enrichViajeConGananciaBruta(
-        calcularMontosReales(full) as any,
-      ) as ViajeConVehiculosViaje;
-    }, VIAJE_INTERACTIVE_TX);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.viaje.update({
+          where: { id },
+          data: data as Prisma.ViajeUncheckedUpdateInput,
+        });
+        await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
+        if (dto.productoItems !== undefined) {
+          await reemplazarProductosDelViaje(
+            tx,
+            id,
+            normalizarProductoItems(dto.productoItems),
+            tenantId,
+          );
+        }
+        if (destinosUpdate !== undefined) {
+          await reemplazarDestinosDelViaje(tx, id, destinosUpdate, tenantId);
+        }
+        const full = (await tx.viaje.findFirstOrThrow({
+          where: { id, tenantId },
+          include: VIAJE_INCLUDE_FULL,
+        })) as unknown as ViajeConVehiculosViaje;
+        if (esEtapaFinal(full.etapa)) {
+          await this.upsertCargoFinalizacion(tx, full);
+        }
+        return enrichViajeConGananciaBruta(
+          calcularMontosReales(full) as any,
+        ) as ViajeConVehiculosViaje;
+      }, VIAJE_INTERACTIVE_TX);
+    } catch (e) {
+      this.assertNoUniqueConstraintViolation(e);
+    }
   }
 
   async addGasto(

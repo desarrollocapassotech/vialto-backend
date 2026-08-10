@@ -19,6 +19,7 @@ import {
   buildGananciaBrutaResumen,
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
+import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 
 export type MetricCompare = {
   current: number;
@@ -719,6 +720,7 @@ export class DashboardService {
       select: {
         id: true,
         numero: true,
+        numeroIdentificacionPersonalizado: true,
         monto: true,
         monedaMonto: true,
         clienteId: true,
@@ -750,7 +752,7 @@ export class DashboardService {
 
     const itemsSinFactura = sinFactura.map((v) => ({
       id: v.id,
-      numero: v.numero ?? '',
+      numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }),
       clienteNombre: nombreClienteSinFactura.get(v.clienteId) ?? 'Cliente',
       fecha: (v.fechaCarga ?? v.fechaDescarga)?.toISOString() ?? null,
       origen: v.origen,

@@ -22,6 +22,8 @@ model Tenant {
   billingStatus    String    @default("trial") // trial | active | suspended | expired
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
+  /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
+  labelIdentificacionPersonalizadaViajes String? @default("ID propio")
   createdAt        DateTime  @default(now())
 
   clientes                Cliente[]
@@ -255,6 +257,8 @@ model Viaje {
   tenantId                         String
   tenant                           Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero                           String
+  /** ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna. */
+  numeroIdentificacionPersonalizado String?
   /** @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura. */
   estado                           String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
   /** Etapa operativa del viaje, editable a mano y por fecha (ver ViajesAutoEstadoService). */
@@ -311,6 +315,7 @@ model Viaje {
   liquidacionesViaje         LiquidacionViaje[]
 
   @@unique([tenantId, numero])
+  @@unique([tenantId, numeroIdentificacionPersonalizado])
   @@index([tenantId])
   @@index([tenantId, estado])
   @@index([tenantId, etapa])

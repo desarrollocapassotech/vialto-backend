@@ -15,6 +15,7 @@ import { CombustibleService } from './combustible.service';
  * Endpoints del módulo combustible accesibles por choferes de la app vialto-combustible.
  * Usan el JWT propio del backend (ChoferAuthGuard), no Clerk.
  */
+
 @ApiTags('Auth — App Combustible (chofer)')
 @Controller('combustible/chofer')
 @UseGuards(ChoferAuthGuard)

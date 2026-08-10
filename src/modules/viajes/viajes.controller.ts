@@ -51,12 +51,12 @@ export class ViajesController {
     private readonly paut: PautService,
   ) {}
 
-  @ApiOperation({ summary: "Listar viajes (opcionalmente filtrar por estado)" })
+  @ApiOperation({ summary: "Listar viajes (opcionalmente filtrar por etapa)" })
   @Get()
   @Roles("admin", "member", "superadmin")
-  list(@CurrentAuth() auth: AuthPayload, @Query("estado") estado?: string) {
+  list(@CurrentAuth() auth: AuthPayload, @Query("etapa") etapa?: string) {
     assertTenantId(auth.tenantId);
-    return this.service.findAll(auth.tenantId, estado);
+    return this.service.findAll(auth.tenantId, etapa);
   }
 
   @ApiOperation({
@@ -83,6 +83,7 @@ export class ViajesController {
       queryParamFromRequest(req, "clienteId") ?? query.clienteId;
     const transportistaId =
       queryParamFromRequest(req, "transportistaId") ?? query.transportistaId;
+    const choferId = queryParamFromRequest(req, "choferId") ?? query.choferId;
     const tipoUbicacionRaw =
       queryParamFromRequest(req, "tipoUbicacion") ?? query.tipoUbicacion;
     const tipoUbicacion =
@@ -122,12 +123,21 @@ export class ViajesController {
       sinLiqRaw?.toLowerCase() === "true" ||
       query.sinLiquidacionActiva === true;
 
+    const etapa = queryParamFromRequest(req, "etapa") ?? query.etapa;
+    const facturacionEstado =
+      queryParamFromRequest(req, "facturacionEstado") ?? query.facturacionEstado;
+    const liquidacionEstado =
+      queryParamFromRequest(req, "liquidacionEstado") ?? query.liquidacionEstado;
+
     return this.service.findAllPaginated(auth.tenantId, {
       page: query.page,
       pageSize: query.pageSize,
-      estado: query.estado,
+      etapa,
+      facturacionEstado,
+      liquidacionEstado,
       clienteId,
       transportistaId,
+      choferId,
       sinLiquidacionActiva: sinLiquidacionActiva || undefined,
       tipoFecha,
       fechaDesde,

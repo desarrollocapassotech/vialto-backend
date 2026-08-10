@@ -39,9 +39,20 @@ export class ViajesPaginatedQueryDto {
   @Max(100)
   pageSize?: number = 10;
 
+  /** Etapa del viaje: pendiente | en_curso | finalizado | cancelado. */
   @IsOptional()
   @IsString()
-  estado?: string;
+  etapa?: string;
+
+  /** Estado de facturación al cliente (derivado, ver `viaje-estados.ts`). */
+  @IsOptional()
+  @IsString()
+  facturacionEstado?: string;
+
+  /** Estado de liquidación al transportista (derivado, solo tenants con ARCA). */
+  @IsOptional()
+  @IsString()
+  liquidacionEstado?: string;
 
   @IsOptional()
   @Transform(({ value }) => firstQueryString(value))
@@ -53,6 +64,12 @@ export class ViajesPaginatedQueryDto {
   @Transform(({ value }) => firstQueryString(value))
   @IsString()
   transportistaId?: string;
+
+  /** Chofer asignado al viaje (`viaje.choferId`). */
+  @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
+  @IsString()
+  choferId?: string;
 
   /**
    * Si es true, excluye viajes que ya tienen una liquidación activa

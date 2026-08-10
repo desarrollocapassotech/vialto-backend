@@ -9,8 +9,9 @@ export class ViajesAutoEstadoService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Actualiza estados de viajes según fechas de carga y descarga.
-   * Solo afecta viajes en estado 'pendiente' o 'en_curso'.
+   * Actualiza `etapa` según fechas de carga y descarga. Facturación y liquidación
+   * ya no dependen de la etapa — se sincronizan por su cuenta desde los
+   * comprobantes (ver `viaje-estado-financiero.ts`).
    *
    * Si se pasa `tenantId`, solo actualiza ese tenant (lazy update al listar).
    * Sin `tenantId`, actualiza todos los tenants (cron nocturno).
@@ -20,47 +21,34 @@ export class ViajesAutoEstadoService {
 
     const base = tenantId ? { tenantId } : {};
 
-    const [finalizados, facturados, enCurso] = await Promise.all([
-      // pendiente/en_curso + fechaDescarga <= ahora + sin factura → finalizado_sin_facturar
+    const [finalizados, enCurso] = await Promise.all([
+      // pendiente/en_curso + fechaDescarga <= ahora → finalizado
       this.prisma.viaje.updateMany({
         where: {
           ...base,
-          estado: { in: ['pendiente', 'en_curso'] },
+          etapa: { in: ['pendiente', 'en_curso'] },
           fechaDescarga: { lte: ahora },
-          facturaId: null,
         },
-        data: { estado: 'finalizado_sin_facturar', fechaFinalizado: new Date() },
-      }),
-
-      // pendiente/en_curso + fechaDescarga <= ahora + con factura → facturado_sin_cobrar
-      this.prisma.viaje.updateMany({
-        where: {
-          ...base,
-          estado: { in: ['pendiente', 'en_curso'] },
-          fechaDescarga: { lte: ahora },
-          facturaId: { not: null },
-        },
-        data: { estado: 'facturado_sin_cobrar', fechaFinalizado: new Date() },
+        data: { etapa: 'finalizado', fechaFinalizado: new Date() },
       }),
 
       // pendiente + fechaCarga <= ahora + fechaDescarga no pasada → en_curso
       this.prisma.viaje.updateMany({
         where: {
           ...base,
-          estado: 'pendiente',
+          etapa: 'pendiente',
           fechaCarga: { lte: ahora },
           OR: [{ fechaDescarga: null }, { fechaDescarga: { gt: ahora } }],
         },
-        data: { estado: 'en_curso' },
+        data: { etapa: 'en_curso' },
       }),
     ]);
 
-    const total = finalizados.count + facturados.count + enCurso.count;
+    const total = finalizados.count + enCurso.count;
     if (total > 0) {
       this.logger.log(
-        `Auto-estado${tenantId ? ` [${tenantId}]` : ''}: ` +
-        `${enCurso.count} → en_curso, ${finalizados.count} → finalizado_sin_facturar, ` +
-        `${facturados.count} → facturado_sin_cobrar`,
+        `Auto-etapa${tenantId ? ` [${tenantId}]` : ''}: ` +
+        `${enCurso.count} → en_curso, ${finalizados.count} → finalizado`,
       );
     }
   }
@@ -68,7 +56,7 @@ export class ViajesAutoEstadoService {
   /** Cron diario a medianoche (hora Argentina, UTC-3). */
   @Cron('0 3 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
   async cronNocturno(): Promise<void> {
-    this.logger.log('Ejecutando cron de auto-estado de viajes...');
+    this.logger.log('Ejecutando cron de auto-etapa de viajes...');
     await this.actualizarEstadosPorFecha();
   }
 }

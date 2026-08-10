@@ -31,6 +31,21 @@ function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Normaliza `formaPago` a un formato único (trim + minúsculas) antes de persistir.
+ * Sin esto, clientes distintos (ej. la app del chofer manda "EFECTIVO" en mayúsculas,
+ * el admin "efectivo") terminan guardando la misma forma de pago con distinta
+ * capitalización, y la distribución del dashboard las cuenta como categorías separadas.
+ * `undefined` se preserva tal cual (en un update, así Prisma sabe que ese campo no
+ * vino en el DTO y no debe tocarlo).
+ */
+function normalizeFormaPago(
+  v: string | null | undefined,
+): string | null | undefined {
+  if (v === undefined || v === null) return v;
+  return v.trim().toLowerCase() || null;
+}
+
 function avg(arr: number[]): number {
   return arr.length > 0 ? arr.reduce((s, n) => s + n, 0) / arr.length : 0;
 }
@@ -145,9 +160,12 @@ export class CombustibleService {
   private async getLimitesCronologicos(
     tenantId: string,
     vehiculoId: string,
-    fecha: Date,
+    fechaIn: Date,
     excludeId?: string,
   ) {
+    const fecha = new Date(fechaIn.getTime());
+    fecha.setUTCHours(0, 0, 0, 0);
+
     let targetCreatedAt = new Date();
     if (excludeId) {
       const edited = await this.prisma.cargaCombustible.findUnique({
@@ -305,7 +323,7 @@ export class CombustibleService {
       this.prisma.cargaCombustible.count({ where }),
       this.prisma.cargaCombustible.findMany({
         where,
-        orderBy: { fecha: "desc" },
+        orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
         skip: (safePage - 1) * safeLimit,
         take: safeLimit,
         include: {
@@ -372,6 +390,7 @@ export class CombustibleService {
       dto.choferId,
     );
     const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
+    fechaCarga.setUTCHours(0, 0, 0, 0);
     await this.assertKmNoRetroceso(
       auth.tenantId,
       dto.vehiculoId,
@@ -388,7 +407,7 @@ export class CombustibleService {
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
-        formaPago: dto.formaPago ?? null,
+        formaPago: normalizeFormaPago(dto.formaPago) ?? null,
         fecha: fechaCarga,
         createdBy: auth.userId,
         fotoTacometro: dto.fotoTacometro ?? null,
@@ -412,7 +431,7 @@ export class CombustibleService {
     if (!vehiculoId) return;
     const ultima = await this.prisma.cargaCombustible.findFirst({
       where: { tenantId, vehiculoId },
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
       select: { km: true },
     });
     if (!ultima) return;
@@ -433,6 +452,9 @@ export class CombustibleService {
 
     const nextKm = dto.km !== undefined ? dto.km : carga.km;
     const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
+    if (dto.fecha) {
+      efectivaFecha.setUTCHours(0, 0, 0, 0);
+    }
     if (nextVehiculo) {
       await this.assertKmNoRetroceso(
         auth.tenantId,
@@ -480,13 +502,8 @@ export class CombustibleService {
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
-        formaPago: dto.formaPago,
-        fecha:
-          dto.fecha === undefined
-            ? undefined
-            : dto.fecha
-              ? new Date(dto.fecha)
-              : undefined,
+        formaPago: normalizeFormaPago(dto.formaPago),
+        fecha: dto.fecha === undefined ? undefined : efectivaFecha,
         fotoTacometro: dto.fotoTacometro,
         fotoTicket: dto.fotoTicket,
       },
@@ -525,7 +542,7 @@ export class CombustibleService {
 
     const cargas = await this.prisma.cargaCombustible.findMany({
       where,
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
       take: 200,
       include: {
         vehiculo: { select: { patente: true } },
@@ -554,6 +571,7 @@ export class CombustibleService {
       );
     }
     const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
+    fechaCarga.setUTCHours(0, 0, 0, 0);
     await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km);
     this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
     const carga = await this.prisma.cargaCombustible.create({
@@ -566,8 +584,8 @@ export class CombustibleService {
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
-        formaPago: dto.formaPago ?? null,
-        fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
+        formaPago: normalizeFormaPago(dto.formaPago) ?? null,
+        fecha: fechaCarga,
         createdBy: choferId,
         fotoTacometro: dto.fotoTacometro ?? null,
         fotoTicket: dto.fotoTicket ?? null,
@@ -657,7 +675,7 @@ export class CombustibleService {
   async getUltimaCargaChofer(choferId: string, tenantId: string) {
     const ultima = await this.prisma.cargaCombustible.findFirst({
       where: { tenantId, choferId },
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
       include: { vehiculo: { select: { patente: true } } },
     });
     if (!ultima) return null;
@@ -696,7 +714,7 @@ export class CombustibleService {
         vehiculoId: vehiculo.id,
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
       select: { km: true, fecha: true },
     });
     if (!ultima) return null;
@@ -742,6 +760,9 @@ export class CombustibleService {
 
     const nextKm = dto.km !== undefined ? dto.km : carga.km;
     const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
+    if (dto.fecha) {
+      efectivaFecha.setUTCHours(0, 0, 0, 0);
+    }
     const efectivoVehiculoId = vehiculoId ?? carga.vehiculoId;
     if (efectivoVehiculoId) {
       await this.assertKmNoRetroceso(
@@ -791,8 +812,10 @@ export class CombustibleService {
         }),
         ...(dto.importe !== undefined && { importe: dto.importe }),
         ...(dto.km !== undefined && { km: dto.km }),
-        ...(dto.formaPago !== undefined && { formaPago: dto.formaPago }),
-        ...(dto.fecha !== undefined && { fecha: new Date(dto.fecha) }),
+        ...(dto.formaPago !== undefined && {
+          formaPago: normalizeFormaPago(dto.formaPago),
+        }),
+        ...(dto.fecha !== undefined && { fecha: efectivaFecha }),
         ...(dto.fotoTacometro !== undefined && {
           fotoTacometro: dto.fotoTacometro,
         }),
@@ -847,7 +870,7 @@ export class CombustibleService {
       }),
       this.prisma.cargaCombustible.findMany({
         where,
-        orderBy: { fecha: "desc" },
+        orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
         take: 10,
         select: {
           id: true,
@@ -886,7 +909,7 @@ export class CombustibleService {
     );
     const distribucionFormaPago = this.buildDistribucion(
       todasCargas,
-      (c) => c.formaPago ?? "sin_especificar",
+      (c) => c.formaPago?.trim().toLowerCase() || "sin_especificar",
     );
 
     const vehiculoIds = Array.from(
@@ -1114,7 +1137,7 @@ export class CombustibleService {
   ): Promise<Alerta[]> {
     const cargas = await this.prisma.cargaCombustible.findMany({
       where: { ...where, sospechoso: true },
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
       select: {
         id: true,
         vehiculoId: true,
@@ -1589,7 +1612,7 @@ export class CombustibleService {
 
     const cargas = await this.prisma.cargaCombustible.findMany({
       where,
-      orderBy: { fecha: "desc" },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
       take: 5000,
       select: {
         id: true,

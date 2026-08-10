@@ -10,6 +10,7 @@ import * as crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
+import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
@@ -21,7 +22,10 @@ import {
 } from './arca-iva.util';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
-import { syncViajeEstadoTrasComprobante } from '../viajes/viaje-estado-financiero';
+import {
+  syncFacturacionEstadoViajes,
+  syncLiquidacionEstadoViajes,
+} from '../viajes/viaje-estado-financiero';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import {
@@ -39,6 +43,7 @@ import {
   defaultFacturaLineas,
   type FacturaLineaInput,
 } from './factura-conceptos.util';
+import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { assertFacturaEmitDatosCompletos } from './factura-emit-validation.util';
 import { resolveIvaPct } from './arca-iva.util';
 import { FacturaPdfService } from './factura-pdf.service';
@@ -316,9 +321,7 @@ export class LiquidacionesService {
       throw e;
     }
 
-    for (const viajeId of dto.viajeIds) {
-      await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
-    }
+    await syncLiquidacionEstadoViajes(this.db, tenantId, dto.viajeIds);
 
     return this.findById(tenantId, liquidacion.id);
   }
@@ -537,6 +540,9 @@ export class LiquidacionesService {
       );
     }
 
+    const viajeIdsLiquidacion = liquidacion.viajes.map((v) => v.viajeId);
+    await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsLiquidacion);
+
     try {
 
       // Obtener el próximo número de comprobante
@@ -651,6 +657,7 @@ export class LiquidacionesService {
           updatedAt: new Date(),
         },
       });
+      await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsLiquidacion);
 
       return this.findById(tenantId, liquidacionId);
     } catch (err) {
@@ -675,6 +682,7 @@ export class LiquidacionesService {
           updatedAt: new Date(),
         } as PrismaAny,
       });
+      await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsLiquidacion);
 
       if (isConectividad) {
         // No lanzar excepción HTTP: el frontend recibe la entidad en pendiente_cae
@@ -861,10 +869,8 @@ export class LiquidacionesService {
       });
 
       // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada,
-      // assertViajesSinLiquidacionActiva y syncViajeEstado liberan los viajes.
-      for (const viajeId of viajeIds) {
-        await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
-      }
+      // el sync recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
+      await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
 
       const updated = await this.findById(tenantId, liquidacionId);
       // Asegura nombre en la respuesta inmediata (findById también lo resuelve).
@@ -907,6 +913,7 @@ export class LiquidacionesService {
           select: {
             id: true,
             numero: true,
+            numeroIdentificacionPersonalizado: true,
             monto: true,
             origen: true,
             destino: true,
@@ -1103,6 +1110,13 @@ export class LiquidacionesService {
           anuladoAt,
         },
       });
+      // Fix del bug histórico: sin este sync, `facturacionEstado` quedaba pisado
+      // como "facturado" para siempre y el viaje nunca volvía a ser re-facturable.
+      await syncFacturacionEstadoViajes(
+        this.db,
+        tenantId,
+        facturaRaw.viajes.map((v) => v.id),
+      );
 
       let notaCreditoUrl: string | null = null;
       try {
@@ -1166,6 +1180,11 @@ export class LiquidacionesService {
           arcaError: errMsg,
         },
       });
+      await syncFacturacionEstadoViajes(
+        this.db,
+        tenantId,
+        facturaRaw.viajes.map((v) => v.id),
+      );
 
       if (isConectividad) {
         this.logger.warn(
@@ -1269,9 +1288,7 @@ export class LiquidacionesService {
     const viajeIds = liq.viajes.map((v) => v.viajeId);
     await this.prisma.liquidacionViaje.deleteMany({ where: { liquidacionId: id } });
     await this.prisma.liquidacion.delete({ where: { id } });
-    for (const viajeId of viajeIds) {
-      await syncViajeEstadoTrasComprobante(this.db, tenantId, viajeId);
-    }
+    await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
   }
 
   async findAll(tenantId: string, estado?: string) {
@@ -1284,7 +1301,7 @@ export class LiquidacionesService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return this.attachAnuladoPorNombres(rows);
+    return attachAnuladoPorNombres(this.clerkUsers, rows);
   }
 
   async findById(tenantId: string, id: string) {
@@ -1300,6 +1317,7 @@ export class LiquidacionesService {
               select: {
                 id: true,
                 numero: true,
+                numeroIdentificacionPersonalizado: true,
                 fechaCarga: true,
                 fechaDescarga: true,
                 origen: true,
@@ -1317,36 +1335,8 @@ export class LiquidacionesService {
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    const [withNombre] = await this.attachAnuladoPorNombres([liq]);
+    const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [liq]);
     return withNombre;
-  }
-
-  /** Resuelve Clerk userId → nombre legible para UI (campo virtual `anuladoPorNombre`). */
-  private async attachAnuladoPorNombres<T>(
-    rows: T[],
-  ): Promise<Array<T & { anuladoPorNombre: string | null }>> {
-    // anuladoPor puede no estar tipado en el client aún → cast local
-    const getAnuladoPor = (r: T) =>
-      (r as { anuladoPor?: string | null }).anuladoPor?.trim() || null;
-    const ids = [
-      ...new Set(rows.map(getAnuladoPor).filter((id): id is string => Boolean(id))),
-    ];
-    const labels = new Map<string, string | null>();
-    await Promise.all(
-      ids.map(async (id) => {
-        if (id.startsWith('user_')) {
-          labels.set(id, await this.clerkUsers.getUserDisplayLabel(id));
-        } else {
-          // Ya era un label persistido o valor no-Clerk
-          labels.set(id, id);
-        }
-      }),
-    );
-    return rows.map((r) => {
-      const id = getAnuladoPor(r);
-      const nombre = id ? labels.get(id) || id : null;
-      return { ...r, anuladoPorNombre: nombre };
-    });
   }
 
   // ── Facturas A/B via ARCA ──────────────────────────────────────────────────
@@ -1359,6 +1349,7 @@ export class LiquidacionesService {
           select: {
             id: true,
             numero: true,
+            numeroIdentificacionPersonalizado: true,
             monto: true,
             origen: true,
             destino: true,
@@ -1450,6 +1441,8 @@ export class LiquidacionesService {
         importe: importeNeto,
       },
     });
+    const viajeIdsFactura = facturaRaw.viajes.map((v) => v.id);
+    await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
 
     try {
       let cbteNro: number;
@@ -1573,10 +1566,12 @@ export class LiquidacionesService {
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaEstado: 'autorizado',
+          ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           importe: comprobanteFinal.impNeto,
         },
       });
+      await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
 
       // Generar PDF y subir a Cloudinary
       let comprobanteUrl: string | null = null;
@@ -1632,6 +1627,7 @@ export class LiquidacionesService {
           arcaError: errMsg,
         },
       });
+      await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
 
       if (isConectividad) {
         this.logger.warn(
@@ -1682,13 +1678,13 @@ export class LiquidacionesService {
       },
       select: {
         viajeId: true,
-        viaje: { select: { numero: true } },
+        viaje: { select: { numero: true, numeroIdentificacionPersonalizado: true } },
       },
     });
     if (!existentes.length) return;
 
     const numeros = existentes
-      .map((lv) => lv.viaje?.numero)
+      .map((lv) => (lv.viaje ? numeroVisibleViaje(lv.viaje) : undefined))
       .filter((n): n is string => Boolean(n?.trim()));
     if (numeros.length === 1) {
       throw new ConflictException(

@@ -4,8 +4,8 @@ import {
   buildGananciaBrutaResumen,
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
-import { VIAJE_ESTADOS_FINALES } from '../viajes/viaje-estados';
 import { importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
+import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 
 export type Money = { ARS: number; USD: number };
 
@@ -53,7 +53,7 @@ export type FinancieroDashboardResponse = {
     alertas: FinancieroMargenAlerta[];
   };
   viajesFunnel?: {
-    porEstado: Array<{ estado: string; cantidad: number }>;
+    porEtapa: Array<{ etapa: string; cantidad: number }>;
     /** Viajes finalizados con transportista y costo cargado, ya pagados por completo. */
     liquidados: {
       cantidad: number;
@@ -147,6 +147,7 @@ function endOfDayLocal(ymd: string): Date {
 type ViajeMargenRow = {
   id: string;
   numero: string | null;
+  numeroIdentificacionPersonalizado: string | null;
   clienteId: string;
   transportistaId: string | null;
   monto: number | null;
@@ -223,12 +224,13 @@ export class DashboardFinancieroService {
     const viajes = await this.prisma.viaje.findMany({
       where: {
         tenantId,
-        estado: { not: 'cancelado' },
+        etapa: { not: 'cancelado' },
         ...whereViajeAtribuido(start, end),
       },
       select: {
         id: true,
         numero: true,
+        numeroIdentificacionPersonalizado: true,
         clienteId: true,
         transportistaId: true,
         monto: true,
@@ -368,7 +370,7 @@ export class DashboardFinancieroService {
         if (esAlerta) {
           alertas.push({
             viajeId: v.id,
-            numero: v.numero ?? '',
+            numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }),
             clienteNombre,
             transportistaNombre: v.transportistaId
               ? (nombreTransportista.get(v.transportistaId) ?? 'Transportista')
@@ -445,7 +447,9 @@ export class DashboardFinancieroService {
       select: {
         id: true,
         numero: true,
-        estado: true,
+        numeroIdentificacionPersonalizado: true,
+        etapa: true,
+        facturacionEstado: true,
         clienteId: true,
         transportistaId: true,
         precioTransportistaExterno: true,
@@ -454,15 +458,14 @@ export class DashboardFinancieroService {
       },
     });
 
-    const porEstadoMap = new Map<string, number>();
+    const porEtapaMap = new Map<string, number>();
     for (const v of viajes) {
-      porEstadoMap.set(v.estado, (porEstadoMap.get(v.estado) ?? 0) + 1);
+      porEtapaMap.set(v.etapa, (porEtapaMap.get(v.etapa) ?? 0) + 1);
     }
 
-    const finales = new Set<string>(VIAJE_ESTADOS_FINALES as unknown as string[]);
     const sinLiquidarCandidatos = viajes.filter(
       (v) =>
-        finales.has(v.estado) &&
+        v.etapa === 'finalizado' &&
         !!v.transportistaId &&
         (v.precioTransportistaExterno ?? 0) > 0,
     );
@@ -487,7 +490,7 @@ export class DashboardFinancieroService {
       }
       addMoney(montoPendiente, moneda, roundMoney(acordado - pagado));
       if (v.transportistaId) transportistaIds.add(v.transportistaId);
-      sinLiquidarItems.push({ id: v.id, numero: v.numero ?? '', transportistaNombre: null });
+      sinLiquidarItems.push({ id: v.id, numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }), transportistaNombre: null });
     }
     const transportistas = transportistaIds.size
       ? await this.prisma.transportista.findMany({
@@ -504,7 +507,9 @@ export class DashboardFinancieroService {
         : null;
     }
 
-    const sinFacturarViajes = viajes.filter((v) => v.estado === 'finalizado_sin_facturar');
+    const sinFacturarViajes = viajes.filter(
+      (v) => v.etapa === 'finalizado' && v.facturacionEstado === 'sin_facturar',
+    );
     const clienteIds = [...new Set(sinFacturarViajes.map((v) => v.clienteId))];
     const clientes = clienteIds.length
       ? await this.prisma.cliente.findMany({
@@ -515,7 +520,7 @@ export class DashboardFinancieroService {
     const nombreCliente = new Map(clientes.map((c) => [c.id, c.nombre]));
     const sinFacturarDetalle = await this.prisma.viaje.findMany({
       where: { tenantId, id: { in: sinFacturarViajes.map((v) => v.id) } },
-      select: { id: true, numero: true, monto: true, monedaMonto: true, clienteId: true },
+      select: { id: true, numero: true, numeroIdentificacionPersonalizado: true, monto: true, monedaMonto: true, clienteId: true },
     });
     const montoSinFacturar = emptyMoney();
     for (const v of sinFacturarDetalle) {
@@ -523,7 +528,7 @@ export class DashboardFinancieroService {
     }
 
     return {
-      porEstado: [...porEstadoMap.entries()].map(([estado, cantidad]) => ({ estado, cantidad })),
+      porEtapa: [...porEtapaMap.entries()].map(([etapa, cantidad]) => ({ etapa, cantidad })),
       liquidados: {
         cantidad: cantidadLiquidados,
         montoTotal: montoLiquidado,
@@ -538,7 +543,7 @@ export class DashboardFinancieroService {
         montoTotal: montoSinFacturar,
         items: sinFacturarDetalle.slice(0, 30).map((v) => ({
           id: v.id,
-          numero: v.numero ?? '',
+          numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }),
           clienteNombre: nombreCliente.get(v.clienteId) ?? 'Cliente',
         })),
       },
@@ -694,7 +699,7 @@ export class DashboardFinancieroService {
         cbteTipo: true,
         fechaVencimiento: true,
         pagos: { select: { importe: true, fecha: true } },
-        viajes: { select: { estado: true, monto: true } },
+        viajes: { select: { monto: true } },
       },
     });
 
@@ -757,8 +762,8 @@ export class DashboardFinancieroService {
       .slice(0, 20);
 
     const pendientesEmitir = await this.prisma.viaje.findMany({
-      where: { tenantId, estado: 'finalizado_sin_facturar' },
-      select: { id: true, numero: true, monto: true, monedaMonto: true, clienteId: true },
+      where: { tenantId, etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
+      select: { id: true, numero: true, numeroIdentificacionPersonalizado: true, monto: true, monedaMonto: true, clienteId: true },
     });
     const clienteIdsPendientes = [...new Set(pendientesEmitir.map((v) => v.clienteId))];
     const clientesPendientes = clienteIdsPendientes.length
@@ -776,7 +781,7 @@ export class DashboardFinancieroService {
         importe: true,
         moneda: true,
         pagos: { select: { importe: true } },
-        viajes: { select: { estado: true, monto: true } },
+        viajes: { select: { monto: true } },
       },
     });
     const pendienteCobroTotal = emptyMoney();
@@ -795,7 +800,7 @@ export class DashboardFinancieroService {
         montoTotal: montoPendienteEmitir,
         items: pendientesEmitir.slice(0, 30).map((v) => ({
           id: v.id,
-          numero: v.numero ?? '',
+          numero: numeroVisibleViaje({ numero: v.numero ?? '', numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado }),
           clienteNombre: nombreClientePendiente.get(v.clienteId) ?? 'Cliente',
         })),
       },

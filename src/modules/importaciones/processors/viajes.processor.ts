@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client"; // Importante: necesario para capturar errores específicos
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { generateNumeroViaje } from "../../viajes/generate-viaje-numero";
+import { syncLiquidacionEstadoViaje } from "../../viajes/viaje-estado-financiero";
 import type { IImportProcessor } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 
@@ -95,22 +96,20 @@ export class ViajesProcessor implements IImportProcessor {
           facturaClienteId = factura.id;
         }
 
-        const estado = (() => {
-          if (fechaDescarga && fechaDescarga <= hoy) {
-            return facturaClienteId
-              ? "facturado_sin_cobrar"
-              : "finalizado_sin_facturar";
-          }
+        const etapa = (() => {
+          if (fechaDescarga && fechaDescarga <= hoy) return "finalizado";
           if (fechaCarga && fechaCarga <= hoy) return "en_curso";
           return "pendiente";
         })();
+        const facturacionEstado = facturaClienteId ? "facturado" : "sin_facturar";
 
         // Usamos tx para el viaje
         const viaje = await tx.viaje.create({
           data: {
             tenantId,
             numero,
-            estado,
+            etapa,
+            facturacionEstado,
             clienteId,
             transportistaId,
             choferId: (row.choferId as string | null) ?? null,
@@ -133,6 +132,9 @@ export class ViajesProcessor implements IImportProcessor {
           },
           select: { id: true },
         });
+        // Igual que en la creación manual: sin esto, un viaje con transportista en un
+        // tenant con ARCA queda en liquidacionEstado null en vez de "sin_liquidar".
+        await syncLiquidacionEstadoViaje(tx, tenantId, viaje.id);
 
         if (row.vehiculoId) {
           // Usamos tx para el vehículo

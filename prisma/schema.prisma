@@ -22,6 +22,8 @@ model Tenant {
   billingStatus    String    @default("trial") // trial | active | suspended | expired
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
+  /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
+  labelIdentificacionPersonalizadaViajes String? @default("ID propio")
   createdAt        DateTime  @default(now())
 
   clientes                Cliente[]
@@ -255,7 +257,16 @@ model Viaje {
   tenantId                         String
   tenant                           Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   numero                           String
+  /** ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna. */
+  numeroIdentificacionPersonalizado String?
+  /** @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura. */
   estado                           String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
+  /** Etapa operativa del viaje, editable a mano y por fecha (ver ViajesAutoEstadoService). */
+  etapa                            String          @default("pendiente") // pendiente | en_curso | finalizado | cancelado
+  /** Estado de facturación al cliente, sincronizado automáticamente — no editable a mano. */
+  facturacionEstado                String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  /** Estado de liquidación al transportista externo (null si no aplica: sin transportista externo o tenant sin integracion-arca). */
+  liquidacionEstado                String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
   clienteId                        String
   cliente                          Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   transportistaId                  String?
@@ -304,8 +315,12 @@ model Viaje {
   liquidacionesViaje         LiquidacionViaje[]
 
   @@unique([tenantId, numero])
+  @@unique([tenantId, numeroIdentificacionPersonalizado])
   @@index([tenantId])
   @@index([tenantId, estado])
+  @@index([tenantId, etapa])
+  @@index([tenantId, facturacionEstado])
+  @@index([tenantId, liquidacionEstado])
   @@index([tenantId, clienteId])
   @@index([tenantId, transportistaId])
   @@index([tenantId, transportistaEfectivoId])
@@ -348,6 +363,9 @@ model Factura {
   caeFechaVto      DateTime?
   arcaEstado       String? // pendiente_cae | autorizado | error | anulado
   arcaError        String?
+  // Ambiente ARCA con el que se emitió (snapshot al autorizar; homologacion | produccion).
+  // No se re-escribe en la anulación. Lo usa el frontend para el badge "Prueba".
+  ambiente         String?
 
   // Nota de Crédito A/B (03/08) emitida al anular; la factura original se conserva arriba
   anulacionCbteTipo    Int?

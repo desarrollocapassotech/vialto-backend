@@ -14,14 +14,13 @@ import {
   computeEstadoFacturaLectura,
   importeOperativoFactura,
 } from "./factura-estado-lectura";
-import {
-  syncViajeEstadoTrasComprobante,
-  syncViajesEstadoTrasComprobante,
-} from "../viajes/viaje-estado-financiero";
+import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
+import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
+import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
 
 type ViajeSnap = {
   id: string;
-  estado: string;
+  facturacionEstado: string;
   monto: number | null;
   monedaMonto: string;
 };
@@ -31,42 +30,83 @@ export class FacturacionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly clerkUsers: ClerkVialtoRoleService,
   ) {}
 
   private computeImporte(viajes: { monto: number | null }[]): number {
     return viajes.reduce((sum, v) => sum + (v.monto ?? 0), 0);
   }
 
-  private toShape(row: {
-    id: string;
-    tenantId: string;
-    numero: string;
-    tipo: string;
-    clienteId: string | null;
-    transportistaId: string | null;
-    importe: number;
-    moneda: string;
-    fechaEmision: Date;
-    fechaVencimiento: Date | null;
-    estado: string;
-    diferencia: number | null;
-    createdAt: Date;
-    viajes: ViajeSnap[];
-    pagos?: { importe: number }[];
-  }) {
+  private async tieneArca(tenantId: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    return tenant?.modules.includes("integracion-arca") ?? false;
+  }
+
+  private toShape(
+    row: {
+      id: string;
+      tenantId: string;
+      numero: string;
+      tipo: string;
+      clienteId: string | null;
+      transportistaId: string | null;
+      importe: number;
+      moneda: string;
+      fechaEmision: Date;
+      fechaVencimiento: Date | null;
+      estado: string;
+      arcaEstado: string | null;
+      ambiente: string | null;
+      anuladoPor: string | null;
+      diferencia: number | null;
+      createdAt: Date;
+      viajes: ViajeSnap[];
+      pagos?: { importe: number }[];
+    },
+    tieneArca: boolean,
+  ) {
     const { viajes, pagos = [], ...f } = row;
     const importe = importeOperativoFactura(f.importe, viajes);
+    const { estado, cobrado, vencida } = computeEstadoFacturaLectura({
+      viajes,
+      fechaVencimiento: f.fechaVencimiento,
+      importeGuardado: f.importe,
+      pagos,
+      arcaEstado: f.arcaEstado,
+      tieneArca,
+    });
     return {
       ...f,
       viajeIds: viajes.map((v) => v.id),
       importe,
-      estado: computeEstadoFacturaLectura({
-        viajes,
-        fechaVencimiento: f.fechaVencimiento,
-        importeGuardado: f.importe,
-        pagos,
-      }),
+      estado,
+      cobrado,
+      vencida,
     };
+  }
+
+  /** `toShape` + resolución de `anuladoPorNombre` (Clerk userId → nombre legible). */
+  private async shapeConNombre(
+    row: Parameters<FacturacionService["toShape"]>[0],
+    tieneArca: boolean,
+  ) {
+    const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [
+      this.toShape(row, tieneArca),
+    ]);
+    return withNombre;
+  }
+
+  private async shapeManyConNombre(
+    rows: Parameters<FacturacionService["toShape"]>[0][],
+    tieneArca: boolean,
+  ) {
+    return attachAnuladoPorNombres(
+      this.clerkUsers,
+      rows.map((r) => this.toShape(r, tieneArca)),
+    );
   }
 
   private async assertClienteCtx(tenantId: string, clienteId?: string | null) {
@@ -118,7 +158,7 @@ export class FacturacionService {
     if (viajeIds.length === 0) return [];
     const rows = await this.prisma.viaje.findMany({
       where: { id: { in: viajeIds }, tenantId },
-      select: { id: true, estado: true, monto: true, monedaMonto: true },
+      select: { id: true, facturacionEstado: true, monto: true, monedaMonto: true },
     });
     if (rows.length !== viajeIds.length) {
       throw new BadRequestException(
@@ -141,7 +181,7 @@ export class FacturacionService {
 
   private readonly VIAJE_SELECT = {
     id: true,
-    estado: true,
+    facturacionEstado: true,
     monto: true,
     monedaMonto: true,
   } as const;
@@ -235,6 +275,7 @@ export class FacturacionService {
   }
 
   async listFacturas(tenantId: string, clienteId?: string) {
+    const tieneArca = await this.tieneArca(tenantId);
     const rows = await this.prisma.factura.findMany({
       where: { tenantId, ...(clienteId ? { clienteId } : {}) },
       orderBy: { fechaEmision: "desc" },
@@ -244,13 +285,14 @@ export class FacturacionService {
       },
       take: 200,
     });
-    return rows.map((r) => this.toShape(r));
+    return this.shapeManyConNombre(rows, tieneArca);
   }
 
   async findAllPaginated(tenantId: string, query: FacturasPaginatedQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const where = this.buildFacturasWhere(tenantId, query);
+    const tieneArca = await this.tieneArca(tenantId);
     const include = {
       viajes: { select: this.VIAJE_SELECT },
       pagos: { select: this.PAGO_SELECT },
@@ -262,11 +304,16 @@ export class FacturacionService {
         orderBy: { fechaEmision: "desc" },
         include,
       });
-      const filtered = rows
-        .map((r) => this.toShape(r))
-        .filter((f) => f.estado === query.estado);
+      const filtered = rows.map((r) => this.toShape(r, tieneArca)).filter((f) => {
+        if (query.estado === "cobrado") return f.cobrado;
+        if (query.estado === "vencida") return f.vencida;
+        return f.estado === query.estado;
+      });
       const total = filtered.length;
-      const items = filtered.slice((page - 1) * pageSize, page * pageSize);
+      const items = await attachAnuladoPorNombres(
+        this.clerkUsers,
+        filtered.slice((page - 1) * pageSize, page * pageSize),
+      );
       return { items, meta: this.paginatedMeta(page, pageSize, total) };
     }
 
@@ -282,7 +329,7 @@ export class FacturacionService {
     ]);
 
     return {
-      items: rows.map((r) => this.toShape(r)),
+      items: await this.shapeManyConNombre(rows, tieneArca),
       meta: this.paginatedMeta(page, pageSize, total),
     };
   }
@@ -296,7 +343,8 @@ export class FacturacionService {
       },
     });
     if (!row) throw new NotFoundException("Factura no encontrada");
-    return this.toShape(row);
+    const tieneArca = await this.tieneArca(tenantId);
+    return this.shapeConNombre(row, tieneArca);
   }
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
@@ -310,6 +358,7 @@ export class FacturacionService {
     const viajes = await this.resolveViajes(tenantId, viajeIds);
     const moneda = this.assertMonedaUnica(viajes);
     const importe = this.computeImporte(viajes);
+    const tieneArca = await this.tieneArca(tenantId);
 
     try {
       // Retornamos el resultado de la transacción esperando su resolución con 'await'
@@ -341,7 +390,7 @@ export class FacturacionService {
             where: { id: { in: viajeIds }, tenantId },
             data: { facturaId: factura.id },
           });
-          await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
+          await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
         }
 
         const updated = await tx.factura.findFirst({
@@ -352,7 +401,7 @@ export class FacturacionService {
           },
         });
 
-        return this.toShape(updated!);
+        return this.toShape(updated!, tieneArca);
       });
     } catch (error) {
       // Capturamos el error P2002 de Prisma (Unique constraint failed)
@@ -392,6 +441,7 @@ export class FacturacionService {
       monedaNueva = this.assertMonedaUnica(viajesNuevos);
     }
 
+    const tieneArca = await this.tieneArca(tenantId);
     return this.prisma.$transaction(async (tx) => {
       // Actualizar campos de la factura
       const facturaActualizada = await tx.factura.update({
@@ -442,7 +492,7 @@ export class FacturacionService {
             where: { id: { in: idsDesvinculados }, tenantId },
             data: { facturaId: null },
           });
-          await syncViajesEstadoTrasComprobante(tx, tenantId, idsDesvinculados);
+          await syncFacturacionEstadoViajes(tx, tenantId, idsDesvinculados);
         }
 
         if (newIds.length > 0) {
@@ -450,7 +500,7 @@ export class FacturacionService {
             where: { id: { in: newIds }, tenantId },
             data: { facturaId: id },
           });
-          await syncViajesEstadoTrasComprobante(tx, tenantId, newIds);
+          await syncFacturacionEstadoViajes(tx, tenantId, newIds);
         }
       }
 
@@ -471,7 +521,7 @@ export class FacturacionService {
           pagos: { select: this.PAGO_SELECT },
         },
       });
-      return this.toShape(updated);
+      return this.toShape(updated, tieneArca);
     });
   }
 
@@ -487,7 +537,7 @@ export class FacturacionService {
         where: { facturaId: id, tenantId },
         data: { facturaId: null },
       });
-      await syncViajesEstadoTrasComprobante(tx, tenantId, viajeIds);
+      await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
       return tx.factura.delete({ where: { id } });
     });
   }
@@ -515,6 +565,55 @@ export class FacturacionService {
     return pago;
   }
 
+  /**
+   * Registra un pago por el saldo pendiente de la factura (importe operativo menos
+   * lo ya cobrado) con fecha de hoy, y deja que `syncViajesEstadoTrasPago` pase
+   * automáticamente todos los viajes vinculados a `facturacionEstado: "cobrado"`.
+   * Si ya no queda saldo, no crea un pago duplicado — devuelve `yaCobrada: true`.
+   */
+  async marcarComoCobrada(tenantId: string, id: string) {
+    const factura = await this.prisma.factura.findFirst({
+      where: { id, tenantId },
+      include: {
+        viajes: { select: this.VIAJE_SELECT },
+        pagos: { select: this.PAGO_SELECT },
+      },
+    });
+    if (!factura) throw new NotFoundException("Factura no encontrada");
+    const tieneArca = await this.tieneArca(tenantId);
+
+    const importeOperativo = importeOperativoFactura(
+      factura.importe,
+      factura.viajes,
+    );
+    const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
+    const saldo = Math.round((importeOperativo - totalPagado) * 100) / 100;
+
+    if (saldo <= 0.005) {
+      return { yaCobrada: true, factura: await this.shapeConNombre(factura, tieneArca) };
+    }
+
+    await this.prisma.pago.create({
+      data: {
+        tenantId,
+        facturaId: id,
+        importe: saldo,
+        fecha: new Date(),
+        formaPago: null,
+      },
+    });
+    await this.syncViajesEstadoTrasPago(id, tenantId);
+
+    const updated = await this.prisma.factura.findFirst({
+      where: { id, tenantId },
+      include: {
+        viajes: { select: this.VIAJE_SELECT },
+        pagos: { select: this.PAGO_SELECT },
+      },
+    });
+    return { yaCobrada: false, factura: await this.shapeConNombre(updated!, tieneArca) };
+  }
+
   async removePago(id: string, tenantId: string) {
     const row = await this.prisma.pago.findFirst({ where: { id, tenantId } });
     if (!row) throw new NotFoundException("Pago no encontrado");
@@ -537,28 +636,21 @@ export class FacturacionService {
     });
     if (!factura) return;
 
-    const estadoLectura = computeEstadoFacturaLectura({
+    const tieneArca = await this.tieneArca(tenantId);
+    const { cobrado } = computeEstadoFacturaLectura({
       viajes: factura.viajes,
       fechaVencimiento: factura.fechaVencimiento,
       importeGuardado: factura.importe,
       pagos: factura.pagos,
+      arcaEstado: factura.arcaEstado,
+      tieneArca,
     });
 
-    if (estadoLectura === "cobrada") {
-      await this.prisma.viaje.updateMany({
-        where: {
-          facturaId,
-          tenantId,
-          estado: { in: ["facturado_sin_cobrar", "finalizado_facturado"] },
-        },
-        data: { estado: "cobrado" },
-      });
-      return;
-    }
-
-    await this.prisma.viaje.updateMany({
-      where: { facturaId, tenantId, estado: "cobrado" },
-      data: { estado: "facturado_sin_cobrar" },
-    });
+    await syncFacturacionEstadoViajes(
+      this.prisma,
+      tenantId,
+      factura.viajes.map((v) => v.id),
+      { cobrado },
+    );
   }
 }

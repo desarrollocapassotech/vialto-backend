@@ -114,6 +114,7 @@ export class PlatformController {
       queryParamFromRequest(req, "clienteId") ?? query.clienteId;
     const transportistaId =
       queryParamFromRequest(req, "transportistaId") ?? query.transportistaId;
+    const choferId = queryParamFromRequest(req, "choferId") ?? query.choferId;
     const tipoUbicacionRaw =
       queryParamFromRequest(req, "tipoUbicacion") ?? query.tipoUbicacion;
     const tipoUbicacion =
@@ -145,9 +146,12 @@ export class PlatformController {
     return this.service.viajesPaginated(tenantId, {
       page: query.page,
       pageSize: query.pageSize,
-      estado: query.estado,
+      etapa: query.etapa,
+      facturacionEstado: query.facturacionEstado,
+      liquidacionEstado: query.liquidacionEstado,
       clienteId,
       transportistaId,
+      choferId,
       tipoFecha,
       fechaDesde,
       fechaHasta,
@@ -596,6 +600,14 @@ export class PlatformController {
   @Delete("facturas/:id")
   removeFactura(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.removeFactura(tenantId, id);
+  }
+
+  @Post("facturas/:id/marcar-cobrada")
+  marcarFacturaComoCobrada(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    return this.service.marcarFacturaComoCobrada(tenantId, id);
   }
 
   @Patch("facturas/:id")

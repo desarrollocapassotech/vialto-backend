@@ -11,7 +11,7 @@ import {
   ValidateNested,
 } from "class-validator";
 import { Transform, Type } from "class-transformer";
-import { normalizarEstadoViaje, VIAJE_ESTADOS } from "../viaje-estados";
+import { normalizarEtapaViaje, VIAJE_ETAPAS } from "../viaje-estados";
 import { ViajeProductoItemDto } from "./viaje-producto-item.dto";
 import { ViajeDestinoItemDto } from "./viaje-destino-item.dto";
 
@@ -48,12 +48,14 @@ export class PagoTransportistaDto {
 export class CreateViajeDto {
   /** Si no se envía, el servidor asigna un correlativo (AAAA-NNNNNN). */
   @IsOptional() @IsString() numero?: string;
+  /** ID propio del cliente para identificar el viaje (ej. CTG). Reemplaza a `numero` en toda vista/documento humano cuando está cargado. */
+  @IsOptional() @IsString() numeroIdentificacionPersonalizado?: string;
 
   @Transform(({ value }) =>
-    typeof value === "string" ? normalizarEstadoViaje(value) : value,
+    typeof value === "string" ? normalizarEtapaViaje(value) : value,
   )
-  @IsIn(VIAJE_ESTADOS as unknown as [string, ...string[]])
-  estado: string;
+  @IsIn(VIAJE_ETAPAS as unknown as [string, ...string[]])
+  etapa: string;
 
   @IsString() @IsNotEmpty() clienteId: string;
   @IsOptional() @IsString() transportistaId?: string;

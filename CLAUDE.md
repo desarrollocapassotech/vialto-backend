@@ -326,7 +326,12 @@ model Viaje {
   id                               String    @id @default(cuid())
   tenantId                         String
   numero                           String
-  estado                           String    @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
+  // 3 indicadores independientes (reemplazan al viejo `estado` combinado — ver
+  // "Estados de un viaje" más abajo). `estado` ya no se lee ni se escribe desde
+  // código nuevo; queda deprecado en la tabla hasta una migración de limpieza futura.
+  etapa                            String    @default("pendiente") // pendiente | en_curso | finalizado | cancelado
+  facturacionEstado                String    @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  liquidacionEstado                String?   // null si no aplica (sin transportista externo o tenant sin integracion-arca); sino: sin_liquidar | esperando_afip | liquidado | error_afip | anulado
   clienteId                        String
   transportistaId                  String?   // transportista contratante
   transportistaEfectivoId          String?   // quien realmente hace el flete, si difiere del contratante
@@ -362,7 +367,9 @@ model Viaje {
 
   @@unique([tenantId, numero])
   @@index([tenantId])
-  @@index([tenantId, estado])
+  @@index([tenantId, etapa])
+  @@index([tenantId, facturacionEstado])
+  @@index([tenantId, liquidacionEstado])
   @@index([tenantId, clienteId])
   @@index([tenantId, transportistaId])
   @@index([tenantId, fechaCarga])
@@ -404,6 +411,24 @@ model ViajeDestino {
 }
 ```
 
+#### Estados de un viaje: etapa, facturación y liquidación (independientes) — jul-ago 2026
+
+El viejo campo único `Viaje.estado` mezclaba tres preguntas distintas (en qué etapa va el viaje, si está facturado, si está cobrado) y no permitía combinaciones reales (viaje en curso ya liquidado, viaje finalizado sin facturar), ni mostraba errores de AFIP o anulaciones. Se reemplazó por 3 indicadores 100% independientes — ninguno espera a otro ni lo pisa:
+
+- **`etapa`**: `pendiente | en_curso | finalizado | cancelado`. Se mueve solo por fechas (`viajes-auto-estado.service.ts`) o edición manual; nunca la tocan los flujos de facturación/liquidación.
+- **`facturacionEstado`**: `sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado`.
+- **`liquidacionEstado`**: `null` (no aplica: sin transportista externo o tenant sin `integracion-arca`) | `sin_liquidar | esperando_afip | liquidado | error_afip | anulado`.
+
+**Sync**: `modules/viajes/viaje-estado-financiero.ts` expone las funciones puras `mapFacturacionEstado`/`mapLiquidacionEstado` (calculan el indicador a partir de `Factura.arcaEstado` / `Liquidacion.estado` + si el tenant tiene ARCA) y las funciones que tocan DB `syncFacturacionEstadoViaje(s)`/`syncLiquidacionEstadoViaje(s)`. **Toda** operación que crea, vincula, desvincula, emite, anula o elimina una Factura o Liquidación debe llamar al sync correspondiente para los viajes afectados — ya está wired en `facturacion.service.ts` (create/update/removeFactura/pagos/marcarComoCobrada) y `liquidaciones.service.ts` (create/emitir/anular/deleteLiquidacion, emitir/anularFacturaArca). Un bug histórico real (re-facturar tras anular quedaba bloqueado) fue justamente un `anularFacturaArca` que no llamaba al sync — si se agrega un nuevo punto de mutación de Factura/Liquidación, hay que sumar la llamada ahí también.
+
+**También hay que llamar `syncLiquidacionEstadoViaje` al CREAR un viaje** (`viajes.service.ts#create` y `importaciones/processors/viajes.processor.ts#insert`), aunque todavía no tenga ninguna Liquidación — `liquidacionEstado` no tiene `@default` en el schema (a propósito, porque su valor correcto depende de si aplica o no), así que sin esa llamada un viaje con transportista externo en un tenant con ARCA queda en `null` en vez de `sin_liquidar` hasta el primer evento de liquidación. Bug real encontrado y corregido en ago 2026 (afectaba viajes recién creados de NyM, bloqueando el flujo de liquidación).
+
+**Tenant sin `integracion-arca`**: `liquidacionEstado` es `null` únicamente si el viaje no tiene transportista externo — **no** por falta de ARCA. `CrearLiquidacionManualModal` con `hasArca=false` sigue creando una `Liquidacion` real (registro manual, queda en `estado: 'borrador'` para siempre porque no hay paso de "emitir" sin ARCA), así que estos tenants sí tienen liquidaciones genuinas que hay que reflejar. `mapLiquidacionEstado(estado, tieneArca)` maneja esto: con `tieneArca=false`, cualquier registro no-anulado (`borrador`, y por herencia `pendiente_cae`/`autorizado`/`error` si quedaron de datos viejos) mapea directo a `liquidado` — nunca a vocabulario de AFIP (`esperando_afip`/`error_afip`). Bug real encontrado y corregido en ago 2026: la versión anterior forzaba `liquidacionEstado = null` para todo tenant sin ARCA (confundiendo "no aplica AFIP" con "no aplica liquidación"), lo que hacía que `FacturarSelectorModal` mostrara "Liquidación a transportista" como **siempre completada** ("Ya registrado") incluso en viajes sin ninguna liquidación real — bloqueando de hecho la creación de liquidaciones manuales nuevas. `facturacionEstado` sigue el mismo criterio y no tiene este problema porque nunca dependió de si existía o no un registro: nunca expone valores AFIP (`esperando_afip`/`error_afip`) para tenants sin ARCA — cae directo a `facturado`/`cobrado`/`anulado`.
+
+**Edit-lock por campo, no todo-o-nada**: `viajes.service.ts` define `CAMPOS_FISCALES_VIAJE` (cliente, transportista, montos, gastos, pagos a transportista) — bloqueados con `ConflictException` mientras `facturacionEstado ∉ {sin_facturar, anulado}` o `liquidacionEstado ∉ {null, sin_liquidar, anulado}`. Los campos operativos (fechas, km, litros, chofer, vehículos, observaciones, **incluida `etapa`**) siempre son editables, esté o no facturado/liquidado.
+
+**Frontend** (`vialto-frontend/src/lib/viajesIndicadores.ts`): centraliza labels/clases/tooltips de los 3 indicadores y `facturacionPermiteVincular`/`liquidacionPermiteVincular` (`sin_facturar`/`anulado` cuentan como "disponible para vincular una factura/liquidación nueva"). Los badges de la grilla de Viajes (`ViajeFacturacionIndicador`/`ViajeLiquidacionIndicador`) son clickeables: si el viaje ya tiene factura/liquidación vinculada, el click trae el registro completo (fetch on click) y abre directo `FacturaViewModal`/`LiquidacionViewModal` — sin modal intermedio; si todavía no hay nada vinculado, muestra un modal de detalle liviano (`ViajeFacturacionDetalleModal`/`ViajeLiquidacionDetalleModal`) que solo informa el estado. **Estos badges nunca agregan acciones de mutación** (ej. "marcar como cobrada", emitir, anular) — eso vive únicamente en las pantallas de Facturas/Liquidaciones; desde Viajes es solo lectura/navegación.
+
 ---
 
 ### `facturacion` — Facturación y cobranzas
@@ -422,7 +447,7 @@ model Factura {
   moneda           String         @default("ARS") // ARS | USD
   fechaEmision     DateTime
   fechaVencimiento DateTime?
-  estado           String         @default("pendiente") // pendiente | cobrada | vencida
+  estado           String         @default("pendiente") // valor crudo en BD, no autoritativo — ver "Estado de una Factura en lectura" abajo
   diferencia       Float?
   ivaPct           Float?         @default(21)
   comprobanteUrl   String?        // PDF/imagen en Cloudinary
@@ -432,8 +457,11 @@ model Factura {
   ptoVenta         Int?
   cae              String?
   caeFechaVto      DateTime?
-  arcaEstado       String?        // pendiente_cae | autorizado | error
+  arcaEstado       String?        // pendiente_cae | autorizado | error | anulado
   arcaError        String?
+  // Ambiente ARCA con el que se autorizó (snapshot al emitir; homologacion | produccion).
+  // No se re-escribe en la anulación. Mismo patrón que Liquidacion.ambiente (ver abajo).
+  ambiente         String?
   createdAt        DateTime       @default(now())
   pagos            Pago[]
 
@@ -457,6 +485,19 @@ model Pago {
   @@index([tenantId, facturaId])
 }
 ```
+
+#### Estado de una Factura en lectura — dos ejes independientes, badges aditivos (ago 2026)
+
+`computeEstadoFacturaLectura` (`shared/util/factura-estado-lectura.ts`) es la única fuente de verdad del estado de una Factura al leerla (el valor crudo en la columna `estado` no se mantiene). Separa dos preguntas que antes se mezclaban en un solo campo:
+
+- **`estado`** (ciclo de vida del comprobante): `borrador | esperando_afip | facturado | error_afip | anulado`. Sigue el mismo orden de prioridad que `mapFacturacionEstado` en `viaje-estado-financiero.ts` — mantener ambos sincronizados si cambia la regla. Para tenants sin `integracion-arca` siempre es `facturado` (no hay borrador ni error AFIP fuera de ese módulo).
+- **`cobrado`** / **`vencida`** (booleanos, eje de cobro, independiente del ciclo de vida): se puede estar cobrado en cualquier `estado` (ej. cobrado antes de anular); `vencida` solo puede ser `true` si no está cobrada y ya se llegó a `facturado`.
+
+**Regla de UI obligatoria**: el badge de `cobrado`/`vencida` es **aditivo** — se muestra junto al badge de `estado`, nunca lo reemplaza (mismo criterio para `AmbienteTestBadge`, ver frontend). Implementado en `FacturacionTenantPage.tsx` (`renderEstadoBadges`), `FacturaViewModal.tsx` y `FacturaEditModal.tsx` — reusar ese patrón en pantallas nuevas en vez de volver a un único badge combinado. Los labels de estos badges van en **MAYÚSCULA** (`BORRADOR`, `ESPERANDO AFIP`, `FACTURADO`, `ERROR DE AFIP`, `ANULADO`, `COBRADO`, `VENCIDA`), y el badge `ANULADO` usa `line-through` — mismo estilo gris que usa `Liquidacion.estado === 'anulado'`.
+
+`tieneArca` se resuelve siempre consultando `Tenant.modules` (nunca infiriendo por presencia de `arcaEstado`), igual que en `viaje-estado-financiero.ts` — ver `FacturacionService.tieneArca()`. El filtro `?estado=` de `facturas-paginated-query.dto.ts` sigue aceptando los 7 valores conceptuales (incluye `cobrado`/`vencida`); el service los resuelve contra los campos booleanos, no contra `estado`.
+
+`Liquidacion.estado` sigue siendo un solo eje (`borrador|pendiente_cae|autorizado|error|anulado`, ver más abajo) porque no tiene una noción de "cobro" separada del comprobante — no se dividió en dos.
 
 ---
 
@@ -761,12 +802,14 @@ Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) +
 
 **Errores de ARCA — mensaje amigable + detalle técnico:** todo error de emisión/anulación viaja como `{ message, detalle }`: `message` es amigable (para el usuario), `detalle` es la respuesta cruda de AFIP SDK (para "ver error completo"). `ArcaException` deriva `detalle` de su `raw` en el constructor; los `catch` del service lo devuelven en el body del `UnprocessableEntityException` (422). En la liquidación se persisten los dos (`arcaError` = amigable, `arcaErrorDetalle` = crudo), así el modal de vista muestra el detalle incluso tiempo después. En el frontend: componente `ArcaErrorMessage` (mensaje + botón "Ver error completo" + copiar) y helper `getArcaErrorDetalle(err)` (lo saca de `ApiError.body.detalle`), usados en los modales de emisión (`EmitirLiquidacionModal`, `EmitirCvlpModal`), la grilla y el `LiquidacionViewModal`. Para sumar el patrón a un flujo nuevo, reusar esos dos en vez de mostrar el error pelado.
 
-**UI de "esto es de prueba" — reusar, no reinventar (jul 2026):** para cualquier pantalla nueva que muestre o emita un comprobante ARCA, reusar los dos componentes ya construidos en `vialto-frontend/src/components/liquidaciones/`:
+**UI de "esto es de prueba" — reusar, no reinventar (jul-ago 2026):** para cualquier pantalla nueva que muestre o emita un comprobante ARCA, reusar los dos componentes ya construidos en `vialto-frontend/src/components/liquidaciones/`:
 
-- `AmbienteTestBadge` — badge ámbar "Prueba" que se renderiza solo si `ambiente === 'homologacion'`; usado hoy en las columnas Estado de la grilla de Liquidaciones (tenant y superadmin) y en el título del `LiquidacionViewModal`.
-- `AmbienteHomologacionWarning` — banner ámbar de advertencia ("el comprobante no va a tener validez fiscal") que se muestra antes de confirmar la emisión cuando `config.ambiente === 'homologacion'`; ubicado al final del cuerpo del modal, justo antes de los botones de acción. Usado en `EmitirLiquidacionModal`, `EmitirCvlpModal` y `CrearLiquidacionManualModal`.
+- `AmbienteTestBadge` — badge ámbar "Ambiente de pruebas" que se renderiza solo si `ambiente === 'homologacion'`. Dos familias de uso, no confundir:
+  - **Snapshot por comprobante** (informativo, nunca clickeable): `Liquidacion.ambiente` (grilla y título de `LiquidacionViewModal`) y `Factura.ambiente` (grilla, `FacturaViewModal`, `FacturaEditModal` — campo agregado en ago 2026, migración `20260808120000_add_factura_ambiente`, seteado en `emitirFacturaArca` igual que ya hacía `emitirLiquidacion`).
+  - **Config actual del tenant** (accionable): `ArcaConfig.ambiente`, en los banners de página tipo "Emisión electrónica vía ARCA" (`FacturacionTenantPage.tsx`, `LiquidacionesTenantPage.tsx`) y en los modales de emisión. Estas instancias pasan `to="/configuracion/arca?tab=ambiente"` al badge — el componente acepta un `to?: string` opcional que lo vuelve un `<Link>` clickeable; sin `to` sigue siendo un `<span>` estático. Solo wirear `to` en vistas de tenant (no en las variantes `embeddedInSuperadmin`, que no tienen una ruta de config alcanzable para un tenant elegido). `ArcaConfigTenantPage.tsx` lee `?tab=` de la URL para abrir directo en la pestaña pedida (`general | ambiente | conceptos`).
+- `AmbienteHomologacionWarning` — banner ámbar de advertencia ("el comprobante no va a tener validez fiscal") que se muestra antes de confirmar la emisión cuando `config.ambiente === 'homologacion'`; ubicado al final del cuerpo del modal, justo antes de los botones de acción. Usado en `EmitirLiquidacionModal`, `EmitirCvlpModal`, `CrearLiquidacionManualModal` y `EmitirFacturaModal`.
 
-Ambos leen el string `ambiente` (de `ArcaConfig.ambiente` para el warning antes de emitir, de `Liquidacion.ambiente` para el badge post-emisión) y no renderizan nada si es `'produccion'`. Cuando el flujo de Facturas A/B tenga UI propia, debe usar los mismos dos componentes en vez de crear un patrón nuevo.
+Ninguno de los dos renderiza nada si el ambiente es `'produccion'`.
 
 Además, cada emisión exitosa (CVLP o su reintento) debe mostrar un toast de confirmación vía `useToast()` (`@/lib/toast`) — antes no había ningún feedback visible al terminar de emitir; ahora `onEmitirSuccess`/equivalentes en `LiquidacionesTenantPage.tsx`, `SuperadminArcaPage.tsx` y `CrearLiquidacionManualModal.tsx` llaman `showToast('Comprobante emitido correctamente...')` (incluye el CAE si está disponible). Mantener este toast al tocar esos flujos.
 
@@ -817,9 +860,12 @@ model Liquidacion {
   cae         String?
   caeFechaVto DateTime?
   // Ambiente ARCA con el que se emitió (snapshot al autorizar; homologacion | produccion).
-  // No se re-escribe en la anulación. Lo usa el frontend para el badge "Prueba".
+  // No se re-escribe en la anulación. Lo usa el frontend para el badge "Ambiente de pruebas".
   ambiente    String?
 
+  // Labels en UI (todas en MAYÚSCULA, ver "Estado de una Factura en lectura" arriba para
+  // el mismo criterio del lado de Facturas): borrador→BORRADOR, pendiente_cae→ESPERANDO AFIP,
+  // autorizado→LIQUIDADO, error→ERROR DE AFIP, anulado→ANULADO (gris + line-through).
   estado     String  @default("borrador") // borrador | pendiente_cae | autorizado | error | anulado
   arcaError  String?
   reintentos Int     @default(0)
@@ -1088,5 +1134,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: julio 2026 (resync de estructura de módulos y esquema Prisma contra el código real)*
+*Última actualización: agosto 2026 (rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

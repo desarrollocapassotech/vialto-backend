@@ -1,9 +1,10 @@
 import 'reflect-metadata';
 import * as Sentry from '@sentry/node';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { flattenValidationErrors } from './shared/util/validation-error.util';
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -55,7 +56,26 @@ async function bootstrap() {
   });
 
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, transform: true }),
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      /**
+       * Sin esto, class-validator devuelve sus mensajes en inglés y sin indicar a qué
+       * campo del formulario corresponden. `fieldErrors` deja que el frontend resalte
+       * el input puntual; `message` sigue siendo la lista de mensajes (ya en español,
+       * definidos en cada DTO) para no romper el manejo de errores existente.
+       */
+      exceptionFactory: (errors) => {
+        const fieldErrors = flattenValidationErrors(errors);
+        const message = Object.values(fieldErrors);
+        return new BadRequestException({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: message.length ? message : ['Los datos enviados no son válidos.'],
+          fieldErrors,
+        });
+      },
+    }),
   );
 
   app.setGlobalPrefix('api');

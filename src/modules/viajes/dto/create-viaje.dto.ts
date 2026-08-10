@@ -30,7 +30,10 @@ export function normalizeOptionalId({
 
 export class OtroGastoDto {
   @IsString() @IsNotEmpty() descripcion: string;
-  @IsNumber() @Min(0) @Type(() => Number) monto: number;
+  @IsNumber({}, { message: "El monto del gasto debe ser un número válido." })
+  @Min(0, { message: "El monto del gasto no puede ser negativo." })
+  @Type(() => Number)
+  monto: number;
   @IsIn(["ARS", "USD"]) moneda: string;
   @IsOptional() @IsDateString() fecha?: string;
   // Agrego createdBy en el dto
@@ -38,7 +41,10 @@ export class OtroGastoDto {
 }
 
 export class PagoTransportistaDto {
-  @IsNumber() @Min(0) @Type(() => Number) monto: number;
+  @IsNumber({}, { message: "El monto del pago al transportista debe ser un número válido." })
+  @Min(0, { message: "El monto del pago al transportista no puede ser negativo." })
+  @Type(() => Number)
+  monto: number;
   @IsIn(["ARS", "USD"]) moneda: string;
   @IsDateString() fecha: string;
   @IsOptional() @IsString() observaciones?: string;
@@ -105,14 +111,14 @@ export class CreateViajeDto {
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
   @ValidateIf((o) => o.cantidadFactura == null && o.precioUnitarioFactura == null)
-  @IsNumber()
-  @Min(0.01)
+  @IsNumber({}, { message: "El monto a facturar debe ser un número válido." })
+  @Min(0.01, { message: "El monto a facturar debe ser mayor a $0,01." })
   @Type(() => Number)
   monto?: number;
   /** ARS (default) o USD. */
   @IsOptional() @IsIn(["ARS", "USD"]) monedaMonto?: string;
   @IsOptional()
-  @IsNumber()
+  @IsNumber({}, { message: "El precio del transporte debe ser un número válido." })
   @Type(() => Number)
   precioTransportistaExterno?: number;
   /** ARS (default) o USD. */
@@ -132,8 +138,8 @@ export class CreateViajeDto {
 
   /** Solo si monedaMonto ≠ monedaPrecioTransportistaExterno. */
   @IsOptional()
-  @IsNumber()
-  @Min(0)
+  @IsNumber({}, { message: "La ganancia bruta manual debe ser un número válido." })
+  @Min(0, { message: "La ganancia bruta manual no puede ser negativa." })
   @Type(() => Number)
   gananciaBrutaManual?: number;
   @IsOptional() @IsIn(["ARS", "USD"]) monedaGananciaBrutaManual?: string;

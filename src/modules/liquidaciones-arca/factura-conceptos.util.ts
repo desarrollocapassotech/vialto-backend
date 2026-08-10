@@ -1,5 +1,6 @@
 import type { ConceptoFacturable } from './arca-cvlp.util';
 import { resolveIvaPct } from './arca-iva.util';
+import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 
 export interface FacturaLineaInput {
   descripcion: string;
@@ -23,6 +24,7 @@ export function buildFacturaConceptosList(
 
 type ViajeSnap = {
   numero: string;
+  numeroIdentificacionPersonalizado?: string | null;
   monto: number | null;
   origen?: string | null;
   destino?: string | null;
@@ -39,7 +41,7 @@ export function defaultFacturaLineas(
       const ruta =
         v.origen && v.destino ? ` ${v.origen} — ${v.destino}` : '';
       return {
-        descripcion: `Viaje #${v.numero}${ruta}`,
+        descripcion: `Viaje #${numeroVisibleViaje(v)}${ruta}`,
         importe: v.monto ?? 0,
         ivaPct,
       };

@@ -15,6 +15,8 @@ import {
   importeOperativoFactura,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
+import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
+import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
 
 type ViajeSnap = {
   id: string;
@@ -28,6 +30,7 @@ export class FacturacionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly clerkUsers: ClerkVialtoRoleService,
   ) {}
 
   private computeImporte(viajes: { monto: number | null }[]): number {
@@ -57,6 +60,7 @@ export class FacturacionService {
       estado: string;
       arcaEstado: string | null;
       ambiente: string | null;
+      anuladoPor: string | null;
       diferencia: number | null;
       createdAt: Date;
       viajes: ViajeSnap[];
@@ -82,6 +86,27 @@ export class FacturacionService {
       cobrado,
       vencida,
     };
+  }
+
+  /** `toShape` + resolución de `anuladoPorNombre` (Clerk userId → nombre legible). */
+  private async shapeConNombre(
+    row: Parameters<FacturacionService["toShape"]>[0],
+    tieneArca: boolean,
+  ) {
+    const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [
+      this.toShape(row, tieneArca),
+    ]);
+    return withNombre;
+  }
+
+  private async shapeManyConNombre(
+    rows: Parameters<FacturacionService["toShape"]>[0][],
+    tieneArca: boolean,
+  ) {
+    return attachAnuladoPorNombres(
+      this.clerkUsers,
+      rows.map((r) => this.toShape(r, tieneArca)),
+    );
   }
 
   private async assertClienteCtx(tenantId: string, clienteId?: string | null) {
@@ -260,7 +285,7 @@ export class FacturacionService {
       },
       take: 200,
     });
-    return rows.map((r) => this.toShape(r, tieneArca));
+    return this.shapeManyConNombre(rows, tieneArca);
   }
 
   async findAllPaginated(tenantId: string, query: FacturasPaginatedQueryDto) {
@@ -285,7 +310,10 @@ export class FacturacionService {
         return f.estado === query.estado;
       });
       const total = filtered.length;
-      const items = filtered.slice((page - 1) * pageSize, page * pageSize);
+      const items = await attachAnuladoPorNombres(
+        this.clerkUsers,
+        filtered.slice((page - 1) * pageSize, page * pageSize),
+      );
       return { items, meta: this.paginatedMeta(page, pageSize, total) };
     }
 
@@ -301,7 +329,7 @@ export class FacturacionService {
     ]);
 
     return {
-      items: rows.map((r) => this.toShape(r, tieneArca)),
+      items: await this.shapeManyConNombre(rows, tieneArca),
       meta: this.paginatedMeta(page, pageSize, total),
     };
   }
@@ -316,7 +344,7 @@ export class FacturacionService {
     });
     if (!row) throw new NotFoundException("Factura no encontrada");
     const tieneArca = await this.tieneArca(tenantId);
-    return this.toShape(row, tieneArca);
+    return this.shapeConNombre(row, tieneArca);
   }
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
@@ -562,7 +590,7 @@ export class FacturacionService {
     const saldo = Math.round((importeOperativo - totalPagado) * 100) / 100;
 
     if (saldo <= 0.005) {
-      return { yaCobrada: true, factura: this.toShape(factura, tieneArca) };
+      return { yaCobrada: true, factura: await this.shapeConNombre(factura, tieneArca) };
     }
 
     await this.prisma.pago.create({
@@ -583,7 +611,7 @@ export class FacturacionService {
         pagos: { select: this.PAGO_SELECT },
       },
     });
-    return { yaCobrada: false, factura: this.toShape(updated!, tieneArca) };
+    return { yaCobrada: false, factura: await this.shapeConNombre(updated!, tieneArca) };
   }
 
   async removePago(id: string, tenantId: string) {

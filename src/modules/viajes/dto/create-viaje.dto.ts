@@ -49,6 +49,8 @@ export class PagoTransportistaDto {
 export class CreateViajeDto {
   /** Si no se envía, el servidor asigna un correlativo (AAAA-NNNNNN). */
   @IsOptional() @IsString() numero?: string;
+  /** ID propio del cliente para identificar el viaje (ej. CTG). Reemplaza a `numero` en toda vista/documento humano cuando está cargado. */
+  @IsOptional() @IsString() numeroIdentificacionPersonalizado?: string;
 
   @Transform(({ value }) =>
     typeof value === "string" ? normalizarEtapaViaje(value) : value,

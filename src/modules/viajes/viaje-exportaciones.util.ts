@@ -1,3 +1,5 @@
+import { numeroVisibleViaje } from './viaje-numero-visible.util';
+
 export type ModalidadOperacionViaje = 'flota_propia' | 'transporte_externo';
 
 export type ViajeExportacionTipo = 'mic-crt' | 'paut';
@@ -34,12 +36,13 @@ export function exportacionesDisponiblesViaje(viaje: {
 export function buildViajeExportacionesResponse(viaje: {
   id: string;
   numero: string;
+  numeroIdentificacionPersonalizado?: string | null;
   transportistaId?: string | null;
 }): ViajeExportacionesResponse {
   const modalidadOperacion = modalidadOperacionViaje(viaje);
   return {
     viajeId: viaje.id,
-    viajeNumero: viaje.numero,
+    viajeNumero: numeroVisibleViaje(viaje),
     modalidadOperacion,
     puedeExportarPaut: modalidadOperacion === 'transporte_externo',
     exportacionesDisponibles: exportacionesDisponiblesViaje(viaje),

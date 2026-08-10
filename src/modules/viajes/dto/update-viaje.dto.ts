@@ -20,6 +20,8 @@ export { PagoTransportistaDto };
 
 export class UpdateViajeDto {
   @IsOptional() @IsString() numero?: string;
+  /** ID propio del cliente para identificar el viaje (ej. CTG). Reemplaza a `numero` en toda vista/documento humano cuando está cargado. */
+  @IsOptional() @IsString() numeroIdentificacionPersonalizado?: string;
   @IsOptional()
   @Transform(({ value }) => {
     if (value === undefined || value === null) return undefined;

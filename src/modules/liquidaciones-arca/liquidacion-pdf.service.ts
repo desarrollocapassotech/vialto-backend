@@ -278,10 +278,7 @@ export class LiquidacionPdfService {
           cbteTipo: drawOpts.cbteTipo,
           cbteNro: drawOpts.cbteNro ?? metadata.cbteNro,
           ptoVenta: drawOpts.ptoVenta ?? metadata.ptoVenta,
-          items: metadata.items.filter(
-            (it: { descripcion?: string }) =>
-              it?.descripcion !== 'Gastos Administrativos',
-          ),
+          items: metadata.items,
         };
         break;
       }
@@ -542,8 +539,7 @@ export class LiquidacionPdfService {
       const rx = M + CW / 2 + 4;
       doc.fontSize(7.5).font('Helvetica').fillColor('#333')
         .text('Condición de Venta: CTA CTE', rx, y + 5, { width: colW })
-        .text('Moneda: Pesos', rx, y + 17, { width: colW })
-        .text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, rx, y + 28, { width: colW });
+        .text('Moneda: Pesos', rx, y + 17, { width: colW });
 
       y += rcpH + 2;
     }

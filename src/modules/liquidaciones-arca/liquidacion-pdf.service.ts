@@ -177,6 +177,9 @@ export class LiquidacionPdfService {
                 id: true, numero: true, fechaCarga: true, fechaDescarga: true,
                 origen: true, destino: true,
                 cliente: { select: { id: true, nombre: true, idFiscal: true, direccion: true } },
+                chofer: { select: { nombre: true } },
+                numeroIdentificacionPersonalizado: true,
+                productosViaje: { select: { producto: { select: { nombre: true } } } },
               },
             },
           },
@@ -546,9 +549,10 @@ export class LiquidacionPdfService {
 
     // ── Sección 3: receptor (cliente del viaje) + origen/destino ─────────────
     {
+      const isSingleTrip = liq.viajes?.length === 1;
       const firstViaje = liq.viajes?.[0]?.viaje;
       const cliente = firstViaje?.cliente;
-      if (cliente || firstViaje?.origen || firstViaje?.destino) {
+      if (isSingleTrip && (cliente || firstViaje?.origen || firstViaje?.destino)) {
         const colW = CW / 2 - 8;
         const clienteNameText = `Sr.(es): ${cliente?.nombre ?? ''}`;
         const clienteDomText = `Domicilio: ${cliente?.direccion ?? ''}`;
@@ -582,40 +586,126 @@ export class LiquidacionPdfService {
       }
     }
 
-    // ── Tabla de ítems ────────────────────────────────────────────────────────
-    const colWidths = [100, 157.28, 40, 65, 65, 42, 70]; // total = 539.28 (CW)
-    const colX: number[] = [];
-    let cx = M;
-    for (const w of colWidths) { colX.push(cx); cx += w; }
-    const tableW = CW;
-    const rowH = 16;
+    // ── Tabla 1: Detalle de Viajes ────────────────────────────────────────────
+    const footerY = PAGE_H - MARGIN - 90;
+    
+    if (liq.viajes?.length > 0) {
+      y += 5;
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000').text('Detalle de Viajes', M, y, { width: CW });
+      y += 12;
 
-    // Header
-    const tHeaders = ['Producto', 'Descripción', 'Cantidad', 'Precio', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
-    doc.rect(M, y, tableW, rowH).fill('#e8e8e8').stroke('#aaa');
-    tHeaders.forEach((h, i) => {
-      doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
-        .text(h, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: i >= 2 ? 'right' : 'left' });
-    });
-    y += rowH;
+      const colWidths1 = [75, 55, 184.28, 60, 40, 60, 65];
+      const colX1: number[] = [];
+      let cx1 = M;
+      for (const w of colWidths1) { colX1.push(cx1); cx1 += w; }
+      
+      const tHeaders1 = ['Chofer', 'CP / CTG', 'Origen - Destino', 'Producto', 'Cantidad', 'Tarifa', 'SubTotal'];
+      const align1 = ['left', 'left', 'left', 'left', 'right', 'right', 'right'];
 
-    // Rows dinámicas desde el dominio (alícuota = config del emisor vía buildComprobanteCvlp)
-    for (const item of cvlp.items) {
-      doc.rect(M, y, tableW, rowH).stroke('#ddd');
-      const cells = [
-        { v: item.descripcion.toUpperCase(), align: 'left' },
-        { v: item.descripcion.toUpperCase(), align: 'left' },
-        { v: '1,00', align: 'right' },
-        { v: fmtNum(item.importeBase), align: 'right' },
-        { v: fmtNum(item.importeBase), align: 'right' },
-        { v: fmtNum(item.ivaPct), align: 'right' },
-        { v: fmtNum(item.subtotal), align: 'right' },
-      ];
-      cells.forEach((cell, i) => {
-        doc.fontSize(7).font('Helvetica').fillColor('#000')
-          .text(cell.v, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: cell.align as 'left' | 'right' });
-      });
-      y += rowH;
+      const drawHeader1 = () => {
+        doc.rect(M, y, CW, 16).fill('#e8e8e8').stroke('#aaa');
+        tHeaders1.forEach((h, i) => {
+          doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
+            .text(h, colX1[i] + 2, y + 4, { width: colWidths1[i] - 4, align: align1[i] as any });
+        });
+        y += 16;
+      };
+
+      drawHeader1();
+
+      for (const lViaje of liq.viajes) {
+        const v = lViaje.viaje;
+        const choferText = v.chofer ? v.chofer.nombre.toUpperCase() : 'S/I';
+        const ctgText = v.numeroIdentificacionPersonalizado ? v.numeroIdentificacionPersonalizado.toUpperCase() : 'S/I';
+        const rutaText = ([v.origen, v.destino].filter(Boolean).join(' - ') || 'S/I').toUpperCase();
+        const prodText = (v.productosViaje?.[0]?.producto?.nombre ?? 'S/I').toUpperCase();
+        const qty = lViaje.tnDestino != null ? fmtNum(lViaje.tnDestino) : '1,00';
+        const precio = lViaje.tarifaTransportista ?? (lViaje.subtotal ?? 0);
+        const base = lViaje.subtotal ?? 0;
+
+        // Calcular altura dinámica
+        doc.fontSize(6.5).font('Helvetica');
+        const hChofer = doc.heightOfString(choferText, { width: colWidths1[0] - 4 });
+        const hCtg = doc.heightOfString(ctgText, { width: colWidths1[1] - 4 });
+        const hRuta = doc.heightOfString(rutaText, { width: colWidths1[2] - 4 });
+        const hProd = doc.heightOfString(prodText, { width: colWidths1[3] - 4 });
+        const rowH = Math.max(16, hChofer + 8, hCtg + 8, hRuta + 8, hProd + 8);
+
+        if (y + rowH > footerY - 5) {
+          doc.addPage();
+          if (showTestWatermark) drawHomologacionWatermark(doc);
+          y = M;
+          drawHeader1();
+        }
+
+        doc.rect(M, y, CW, rowH).stroke('#ddd');
+        const cells = [
+          choferText, ctgText, rutaText, prodText, qty, fmtNum(precio), fmtNum(base)
+        ];
+        cells.forEach((text, i) => {
+          doc.fontSize(6.5).font('Helvetica').fillColor('#000')
+            .text(text, colX1[i] + 2, y + 4, { width: colWidths1[i] - 4, align: align1[i] as any });
+        });
+        y += rowH;
+      }
+    }
+
+    // ── Tabla 2: Conceptos Fiscales Adicionales ───────────────────────────────
+    const conceptosExtra = cvlp.items.filter(item => item.descripcion.toUpperCase() !== 'FLETES');
+    
+    if (conceptosExtra.length > 0) {
+      y += 10;
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000').text('Conceptos Fiscales Adicionales', M, y, { width: CW });
+      y += 12;
+
+      const colWidths2 = [339.28, 75, 50, 75];
+      const colX2: number[] = [];
+      let cx2 = M;
+      for (const w of colWidths2) { colX2.push(cx2); cx2 += w; }
+
+      const tHeaders2 = ['Concepto', 'Base', 'IVA %', 'SubTotal c/IVA'];
+      const align2 = ['left', 'right', 'right', 'right'];
+
+      const drawHeader2 = () => {
+        doc.rect(M, y, CW, 16).fill('#e8e8e8').stroke('#aaa');
+        tHeaders2.forEach((h, i) => {
+          doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
+            .text(h, colX2[i] + 2, y + 4, { width: colWidths2[i] - 4, align: align2[i] as any });
+        });
+        y += 16;
+      };
+
+      // Si el header ni siquiera entra, paginamos antes de dibujarlo
+      if (y + 16 + 16 > footerY - 5) {
+        doc.addPage();
+        if (showTestWatermark) drawHomologacionWatermark(doc);
+        y = M;
+      }
+      drawHeader2();
+
+      for (const item of conceptosExtra) {
+        const desc = item.descripcion.toUpperCase();
+        doc.fontSize(6.5).font('Helvetica');
+        const hDesc = doc.heightOfString(desc, { width: colWidths2[0] - 4 });
+        const rowH = Math.max(16, hDesc + 8);
+
+        if (y + rowH > footerY - 5) {
+          doc.addPage();
+          if (showTestWatermark) drawHomologacionWatermark(doc);
+          y = M;
+          drawHeader2();
+        }
+
+        doc.rect(M, y, CW, rowH).stroke('#ddd');
+        const cells = [
+          desc, fmtNum(item.importeBase), fmtNum(item.ivaPct), fmtNum(item.subtotal)
+        ];
+        cells.forEach((text, i) => {
+          doc.fontSize(6.5).font('Helvetica').fillColor('#000')
+            .text(text, colX2[i] + 2, y + 4, { width: colWidths2[i] - 4, align: align2[i] as any });
+        });
+        y += rowH;
+      }
     }
 
     // Comprobantes asociados (comprobante de anulación → CVLP original)
@@ -634,7 +724,6 @@ export class LiquidacionPdfService {
     }
 
     // ── Footer ────────────────────────────────────────────────────────────────
-    const footerY = PAGE_H - MARGIN - 90;
     // Línea divisora
     doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke('#aaa');
 

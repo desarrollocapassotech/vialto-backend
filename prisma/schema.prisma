@@ -975,7 +975,7 @@ model Liquidacion {
   gastosAdminIva Float // IVA total del comprobante (impIva)
   liquido        Float // neto + IVA (total al transportista)
 
-  // Campos del comprobante AFIP (cbteTipo 60/61 para CVLP)
+  // Campos del comprobante AFIP (cbteTipo 60 para CVLP)
   cbteTipo    Int       @default(60)
   cbteNro     Int?
   ptoVenta    Int?

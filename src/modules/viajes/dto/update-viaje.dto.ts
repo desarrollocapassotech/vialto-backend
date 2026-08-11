@@ -66,9 +66,15 @@ export class UpdateViajeDto {
   @IsOptional() @IsString() detalleCarga?: string;
   @IsOptional() @IsNumber() @Type(() => Number) kmRecorridos?: number;
   @IsOptional() @IsNumber() @Type(() => Number) litrosConsumidos?: number;
-  @IsOptional() @IsNumber() @Type(() => Number) monto?: number;
+  @IsOptional()
+  @IsNumber({}, { message: 'El monto a facturar debe ser un número válido.' })
+  @Type(() => Number)
+  monto?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaMonto?: string;
-  @IsOptional() @IsNumber() @Type(() => Number) precioTransportistaExterno?: number;
+  @IsOptional()
+  @IsNumber({}, { message: 'El precio del transporte debe ser un número válido.' })
+  @Type(() => Number)
+  precioTransportistaExterno?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
 
   @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
@@ -83,7 +89,11 @@ export class UpdateViajeDto {
   @ValidateIf((o) => o.cantidadTransportista != null || o.precioUnitarioTransportista != null)
   @IsNumber({}, { message: 'El precio unitario del transportista debe ser un número válido' }) @Type(() => Number) precioUnitarioTransportista?: number;
 
-  @IsOptional() @IsNumber() @Min(0) @Type(() => Number) gananciaBrutaManual?: number;
+  @IsOptional()
+  @IsNumber({}, { message: 'La ganancia bruta manual debe ser un número válido.' })
+  @Min(0, { message: 'La ganancia bruta manual no puede ser negativa.' })
+  @Type(() => Number)
+  gananciaBrutaManual?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaGananciaBrutaManual?: string;
   @IsOptional() @IsString() observaciones?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];

@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNotEmpty,
@@ -7,8 +8,10 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { FacturaTramoDto } from './factura-tramo.dto';
 
 export class CreateFacturaDto {
   @IsString() @IsNotEmpty() numero: string;
@@ -21,4 +24,11 @@ export class CreateFacturaDto {
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
   @IsOptional() @IsNumber() @Type(() => Number) ivaPct?: number;
   @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
+  /** Si true, el importe se arma con tramos (+ viajes no divididos). */
+  @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FacturaTramoDto)
+  tramos?: FacturaTramoDto[];
 }

@@ -29,6 +29,7 @@ import { IntegracionArcaModule } from './modules/liquidaciones-arca/liquidacione
 import { HealthController } from './health.controller';
 import { PlatformModule } from './core/platform/platform.module';
 import { TenantFieldConfigModule } from './core/tenant-field-config/tenant-field-config.module';
+import { PaisesModule } from './core/paises/paises.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { TenantFieldConfigModule } from './core/tenant-field-config/tenant-field
     IntegracionArcaModule,
     PlatformModule,
     TenantFieldConfigModule,
+    PaisesModule,
   ],
   controllers: [HealthController],
 })

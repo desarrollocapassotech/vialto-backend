@@ -29,6 +29,7 @@ model Tenant {
   clientes                   Cliente[]
   transportistas             Transportista[]
   choferes                   Chofer[]
+  paises                     Pais[]
   destinatarios              Destinatario[]
   direccionesEntrega         DireccionEntrega[]
   vehiculos                  Vehiculo[]
@@ -152,6 +153,21 @@ model Chofer {
   @@index([tenantId])
   @@index([tenantId, activo])
   @@map("choferes")
+}
+
+model Pais {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre        String
+  codigo        String?
+  esPredefinido Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  createdBy     String?
+
+  @@unique([tenantId, nombre])
+  @@index([tenantId])
+  @@map("paises")
 }
 
 model Destinatario {

@@ -637,8 +637,8 @@ export class FacturaPdfService {
       const cells = [
         { v: item.descripcion.toUpperCase(), align: 'left' as const },
         { v: item.descripcion.toUpperCase(), align: 'left' as const },
-        { v: '1,00', align: 'right' as const },
-        { v: fmtNum(item.importeBase), align: 'right' as const },
+        { v: item.cantidad != null ? fmtNum(item.cantidad) : '1,00', align: 'right' as const },
+        { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },
         { v: fmtNum(item.importeBase), align: 'right' as const },
         { v: fmtNum(item.ivaPct), align: 'right' as const },
         { v: fmtNum(item.subtotal), align: 'right' as const },

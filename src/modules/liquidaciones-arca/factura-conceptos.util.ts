@@ -4,6 +4,8 @@ import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 
 export interface FacturaLineaInput {
   descripcion: string;
+  cantidad?: number;
+  precioUnitario?: number;
   /** Importe neto (sin IVA) de la línea. */
   importe: number;
   ivaPct?: number;
@@ -17,6 +19,8 @@ export function buildFacturaConceptosList(
     .filter((l) => l.descripcion.trim() && l.importe !== 0)
     .map((l) => ({
       descripcion: l.descripcion.trim(),
+      cantidad: l.cantidad,
+      precioUnitario: l.precioUnitario,
       importe: l.importe,
       ivaPct: l.ivaPct ?? ivaPctDefault,
     }));
@@ -26,6 +30,8 @@ type ViajeSnap = {
   numero: string;
   numeroIdentificacionPersonalizado?: string | null;
   monto: number | null;
+  cantidadFactura?: number | null;
+  precioUnitarioFactura?: number | null;
   origen?: string | null;
   destino?: string | null;
 };
@@ -42,6 +48,8 @@ export function defaultFacturaLineas(
         v.origen && v.destino ? ` ${v.origen} — ${v.destino}` : '';
       return {
         descripcion: `Viaje #${numeroVisibleViaje(v)}${ruta}`,
+        cantidad: v.cantidadFactura ?? undefined,
+        precioUnitario: v.precioUnitarioFactura ?? undefined,
         importe: v.monto ?? 0,
         ivaPct,
       };

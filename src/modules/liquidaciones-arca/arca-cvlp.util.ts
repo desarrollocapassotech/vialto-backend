@@ -3,6 +3,8 @@ import { ArcaAutorizarRequest, ArcaComprobanteCvlp, ArcaComprobanteItem } from '
 
 export interface ConceptoFacturable {
   descripcion: string;
+  cantidad?: number;
+  precioUnitario?: number;
   importe: number; // Positivo (ingreso) o negativo (descuento)
   /** Si se omite, se usa el `ivaPct` global pasado a buildComprobanteCvlp. */
   ivaPct?: number;
@@ -27,6 +29,8 @@ export function buildComprobanteCvlp(
 
     items.push({
       descripcion: c.descripcion,
+      cantidad: c.cantidad,
+      precioUnitario: c.precioUnitario,
       importeBase: montos.impNeto,
       ivaPct: pct,
       importeIva: montos.impIva,

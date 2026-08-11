@@ -1308,7 +1308,15 @@ export class LiquidacionesService {
       where: { id },
       include: {
         transportista: {
-          select: { id: true, nombre: true, idFiscal: true, condicionIva: true, domicilio: true, pais: true },
+          select: {
+            id: true,
+            nombre: true,
+            idFiscal: true,
+            condicionIva: true,
+            condicionTributaria: true,
+            domicilio: true,
+            pais: true,
+          },
         },
         viajes: {
           include: {
@@ -1322,7 +1330,14 @@ export class LiquidacionesService {
                 origen: true,
                 destino: true,
                 cliente: {
-                  select: { id: true, nombre: true, idFiscal: true, direccion: true },
+                  select: {
+                    id: true,
+                    nombre: true,
+                    idFiscal: true,
+                    direccion: true,
+                    pais: true,
+                    condicionTributaria: true,
+                  },
                 },
               },
             },

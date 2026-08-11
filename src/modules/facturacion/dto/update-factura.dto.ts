@@ -1,13 +1,16 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
   IsOptional,
   IsString,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { FacturaTramoDto } from './factura-tramo.dto';
 
 export class UpdateFacturaDto {
   @IsOptional() @IsString() numero?: string;
@@ -20,4 +23,10 @@ export class UpdateFacturaDto {
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
   @IsOptional() @IsNumber() @Type(() => Number) ivaPct?: number;
   @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
+  @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FacturaTramoDto)
+  tramos?: FacturaTramoDto[];
 }

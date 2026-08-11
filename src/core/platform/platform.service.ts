@@ -9,6 +9,7 @@ import { UpdateClienteDto } from "../clientes/dto/update-cliente.dto";
 import { ChoferesService } from "../choferes/choferes.service";
 import { CreateChoferDto } from "../choferes/dto/create-chofer.dto";
 import { UpdateChoferDto } from "../choferes/dto/update-chofer.dto";
+import { PaisesService } from "../paises/paises.service";
 import { DestinatariosService } from "../destinatarios/destinatarios.service";
 import { CreateDestinatarioDto } from "../destinatarios/dto/create-destinatario.dto";
 import { UpdateDestinatarioDto } from "../destinatarios/dto/update-destinatario.dto";
@@ -99,6 +100,7 @@ export class PlatformService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly choferesService: ChoferesService,
+    private readonly paisesService: PaisesService,
     private readonly destinatariosService: DestinatariosService,
     private readonly direccionesEntregaService: DireccionesEntregaService,
     private readonly vehiculosService: VehiculosService,
@@ -443,6 +445,23 @@ export class PlatformService {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.getChoferById(scopedTenantId, id);
     return this.prisma.chofer.delete({ where: { id } });
+  }
+
+  listPaises(tenantId?: string) {
+    if (!tenantId?.trim()) {
+      return Promise.resolve([]);
+    }
+    return this.paisesService.findAll(tenantId.trim());
+  }
+
+  async createPais(
+    tenantId: string | undefined,
+    dto: import("../paises/dto/create-pais.dto").CreatePaisDto,
+    userId?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.assertTenantExists(scopedTenantId);
+    return this.paisesService.create(scopedTenantId, dto, userId);
   }
 
   listDestinatarios(tenantId?: string) {

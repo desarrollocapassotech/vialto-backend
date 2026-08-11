@@ -6,7 +6,11 @@ export class CreatePaisDto {
   @ApiProperty({ example: 'Paraguay' })
   @IsString()
   @IsNotEmpty()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const t = value.trim();
+    return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+  })
   nombre: string;
 
   @ApiProperty({ example: 'PY', minLength: 2, maxLength: 2 })

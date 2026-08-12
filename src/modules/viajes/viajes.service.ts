@@ -462,7 +462,10 @@ export class ViajesService {
 
   /** Traduce un P2002 de `Viaje` (numero / numeroIdentificacionPersonalizado únicos por tenant) a un 409 legible; relanza cualquier otro error tal cual. */
   private assertNoUniqueConstraintViolation(e: unknown): never {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002"
+    ) {
       const target = e.meta?.target;
       const targetStr = Array.isArray(target)
         ? target.join(",")
@@ -614,7 +617,11 @@ export class ViajesService {
         _count: { _all: true },
       }),
       this.prisma.viaje.count({
-        where: { tenantId, etapa: "finalizado", facturacionEstado: "sin_facturar" },
+        where: {
+          tenantId,
+          etapa: "finalizado",
+          facturacionEstado: "sin_facturar",
+        },
       }),
       this.prisma.viaje.count({
         where: { tenantId, facturacionEstado: "facturado" },
@@ -1078,8 +1085,12 @@ export class ViajesService {
     }
 
     let precioTransportistaExterno = dto.precioTransportistaExterno;
-    if (dto.cantidadTransportista != null && dto.precioUnitarioTransportista != null) {
-      precioTransportistaExterno = dto.cantidadTransportista * dto.precioUnitarioTransportista;
+    if (
+      dto.cantidadTransportista != null &&
+      dto.precioUnitarioTransportista != null
+    ) {
+      precioTransportistaExterno =
+        dto.cantidadTransportista * dto.precioUnitarioTransportista;
     }
 
     const numero =
@@ -1106,64 +1117,64 @@ export class ViajesService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-      const data: Prisma.ViajeUncheckedCreateInput = {
-        tenantId,
-        numero,
-        numeroIdentificacionPersonalizado:
-          dto.numeroIdentificacionPersonalizado?.trim() || null,
-        etapa,
-        clienteId: dto.clienteId,
-        transportistaId: refs.transportistaId,
-        transportistaEfectivoId: refs.transportistaEfectivoId,
-        choferId: refs.choferId,
-        origen: dto.origen ?? null,
-        destino: destinoFinal,
-        fechaCarga: new Date(dto.fechaCarga),
-        fechaDescarga: new Date(dto.fechaDescarga),
-        detalleCarga: dto.detalleCarga ?? null,
-        kmRecorridos: dto.kmRecorridos ?? null,
-        litrosConsumidos: dto.litrosConsumidos ?? null,
-        monto,
-        monedaMonto: dto.monedaMonto === "USD" ? "USD" : "ARS",
-        precioTransportistaExterno: precioTransportistaExterno ?? null,
-        monedaPrecioTransportistaExterno:
-          dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS",
-        cantidadFactura: dto.cantidadFactura ?? null,
-        precioUnitarioFactura: dto.precioUnitarioFactura ?? null,
-        cantidadTransportista: dto.cantidadTransportista ?? null,
-        precioUnitarioTransportista: dto.precioUnitarioTransportista ?? null,
-        gananciaBrutaManual: gananciaPersist.gananciaBrutaManual,
-        monedaGananciaBrutaManual: gananciaPersist.monedaGananciaBrutaManual,
-        observaciones: dto.observaciones ?? null,
-        otrosGastos: dto.otrosGastos
-          ? (dto.otrosGastos as unknown as Prisma.InputJsonValue)
-          : [],
-        pagosTransportista: dto.pagosTransportista
-          ? (dto.pagosTransportista as unknown as Prisma.InputJsonValue)
-          : [],
-        createdBy: userId,
-      };
-      const viaje = await tx.viaje.create({ data });
-      // Inicializa liquidacionEstado (sin_liquidar | null) según transportista + ARCA del
-      // tenant — la columna no tiene default propio porque su valor depende de eso, y sin
-      // esta llamada un viaje recién creado queda en null hasta el primer evento de
-      // liquidación, lo que bloquea a los selectores que exigen "sin_liquidar" explícito.
-      await syncLiquidacionEstadoViaje(tx, tenantId, viaje.id);
-      await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
-      await reemplazarProductosDelViaje(
-        tx,
-        viaje.id,
-        productoItemsNorm,
-        tenantId,
-      );
-      await reemplazarDestinosDelViaje(tx, viaje.id, destinosNorm, tenantId);
-      const out = await tx.viaje.findFirstOrThrow({
-        where: { id: viaje.id, tenantId },
-        include: VIAJE_INCLUDE_FULL,
-      });
-      return enrichViajeConGananciaBruta(
-        calcularMontosReales(out) as unknown as ViajeConVehiculosViaje,
-      ) as ViajeConVehiculosViaje;
+        const data: Prisma.ViajeUncheckedCreateInput = {
+          tenantId,
+          numero,
+          numeroIdentificacionPersonalizado:
+            dto.numeroIdentificacionPersonalizado?.trim() || null,
+          etapa,
+          clienteId: dto.clienteId,
+          transportistaId: refs.transportistaId,
+          transportistaEfectivoId: refs.transportistaEfectivoId,
+          choferId: refs.choferId,
+          origen: dto.origen ?? null,
+          destino: destinoFinal,
+          fechaCarga: new Date(dto.fechaCarga),
+          fechaDescarga: new Date(dto.fechaDescarga),
+          detalleCarga: dto.detalleCarga ?? null,
+          kmRecorridos: dto.kmRecorridos ?? null,
+          litrosConsumidos: dto.litrosConsumidos ?? null,
+          monto,
+          monedaMonto: dto.monedaMonto === "USD" ? "USD" : "ARS",
+          precioTransportistaExterno: precioTransportistaExterno ?? null,
+          monedaPrecioTransportistaExterno:
+            dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS",
+          cantidadFactura: dto.cantidadFactura ?? null,
+          precioUnitarioFactura: dto.precioUnitarioFactura ?? null,
+          cantidadTransportista: dto.cantidadTransportista ?? null,
+          precioUnitarioTransportista: dto.precioUnitarioTransportista ?? null,
+          gananciaBrutaManual: gananciaPersist.gananciaBrutaManual,
+          monedaGananciaBrutaManual: gananciaPersist.monedaGananciaBrutaManual,
+          observaciones: dto.observaciones ?? null,
+          otrosGastos: dto.otrosGastos
+            ? (dto.otrosGastos as unknown as Prisma.InputJsonValue)
+            : [],
+          pagosTransportista: dto.pagosTransportista
+            ? (dto.pagosTransportista as unknown as Prisma.InputJsonValue)
+            : [],
+          createdBy: userId,
+        };
+        const viaje = await tx.viaje.create({ data });
+        // Inicializa liquidacionEstado (sin_liquidar | null) según transportista + ARCA del
+        // tenant — la columna no tiene default propio porque su valor depende de eso, y sin
+        // esta llamada un viaje recién creado queda en null hasta el primer evento de
+        // liquidación, lo que bloquea a los selectores que exigen "sin_liquidar" explícito.
+        await syncLiquidacionEstadoViaje(tx, tenantId, viaje.id);
+        await reemplazarVehiculosDelViaje(tx, viaje.id, vehiculoIds, tenantId);
+        await reemplazarProductosDelViaje(
+          tx,
+          viaje.id,
+          productoItemsNorm,
+          tenantId,
+        );
+        await reemplazarDestinosDelViaje(tx, viaje.id, destinosNorm, tenantId);
+        const out = await tx.viaje.findFirstOrThrow({
+          where: { id: viaje.id, tenantId },
+          include: VIAJE_INCLUDE_FULL,
+        });
+        return enrichViajeConGananciaBruta(
+          calcularMontosReales(out) as unknown as ViajeConVehiculosViaje,
+        ) as ViajeConVehiculosViaje;
       }, VIAJE_INTERACTIVE_TX);
     } catch (e) {
       this.assertNoUniqueConstraintViolation(e);
@@ -1183,8 +1194,12 @@ export class ViajesService {
     "contratanteRealizaFlete",
     "monto",
     "monedaMonto",
+    "cantidadFactura",
+    "precioUnitarioFactura",
     "precioTransportistaExterno",
     "monedaPrecioTransportistaExterno",
+    "cantidadTransportista",
+    "precioUnitarioTransportista",
     "gananciaBrutaManual",
     "monedaGananciaBrutaManual",
     "otrosGastos",
@@ -1219,8 +1234,8 @@ export class ViajesService {
               ? "facturado"
               : "liquidado";
         throw new ConflictException(
-          `No se puede editar ${camposTocados.join(", ")}: el viaje ya fue ${motivo}. ` +
-          "Los datos operativos (fechas, km, litros, observaciones) sí se pueden seguir editando.",
+          `No se puede editar los datos comerciales porque el viaje ya fue ${motivo}. ` +
+            "Los datos operativos (fechas, km, litros, observaciones) sí se pueden seguir editando.",
         );
       }
     }
@@ -1297,10 +1312,14 @@ export class ViajesService {
     }
 
     let precioTransportistaExternoInput = dto.precioTransportistaExterno;
-    if (dto.cantidadTransportista != null && dto.precioUnitarioTransportista != null) {
-      precioTransportistaExternoInput = dto.cantidadTransportista * dto.precioUnitarioTransportista;
+    if (
+      dto.cantidadTransportista != null &&
+      dto.precioUnitarioTransportista != null
+    ) {
+      precioTransportistaExternoInput =
+        dto.cantidadTransportista * dto.precioUnitarioTransportista;
     }
-    
+
     let montoInput = dto.monto;
     if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
       montoInput = dto.cantidadFactura * dto.precioUnitarioFactura;
@@ -1329,7 +1348,8 @@ export class ViajesService {
 
     const data: Prisma.ViajeUpdateInput = {
       ...dto,
-      monto: montoInput !== undefined ? montoInput : (current.monto ?? undefined),
+      monto:
+        montoInput !== undefined ? montoInput : (current.monto ?? undefined),
       fechaCarga:
         dto.fechaCarga === undefined
           ? undefined
@@ -1702,7 +1722,10 @@ export class ViajesService {
 
     const liquidaciones = [
       ...new Map(
-        viaje.liquidacionesViaje.map((lv) => [lv.liquidacion.id, lv.liquidacion]),
+        viaje.liquidacionesViaje.map((lv) => [
+          lv.liquidacion.id,
+          lv.liquidacion,
+        ]),
       ).values(),
     ];
 

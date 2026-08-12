@@ -1105,6 +1105,8 @@ model LiquidacionConceptoLinea {
   /// Monto absoluto (> 0). El signo determina si suma o resta.
   monto                 Float
   orden                 Int                  @default(0)
+  modoAplicacion        String               @default("GENERAL") // "GENERAL", "VIAJE_PUNTUAL", "TODOS_LOS_VIAJES"
+  viajeId               String?
   createdAt             DateTime             @default(now())
 
   @@index([liquidacionId])

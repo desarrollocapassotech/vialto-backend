@@ -23,7 +23,7 @@ model Tenant {
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
   /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
-  labelIdentificacionPersonalizadaViajes String? @default("ID propio")
+  labelIdentificacionPersonalizadaViajes String? @default("ID de viaje personalizado")
   createdAt        DateTime  @default(now())
 
   clientes                   Cliente[]
@@ -1079,6 +1079,8 @@ model ConceptoLiquidacion {
   signo     String
   ivaPct    Float    @default(21)
   activo    Boolean  @default(true)
+  monto     Float?
+  bloqueado Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

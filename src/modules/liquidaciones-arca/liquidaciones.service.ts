@@ -103,6 +103,8 @@ export class LiquidacionesService {
         ivaPct: c.ivaPct,
         monto: round2(dto.monto),
         orden: orden++,
+        modoAplicacion: dto.modoAplicacion ?? 'GENERAL',
+        viajeId: dto.viajeId ?? null,
       });
     }
     return out;
@@ -115,6 +117,8 @@ export class LiquidacionesService {
       ivaPct: number;
       monto: number;
       orden?: number;
+      modoAplicacion?: string;
+      viajeId?: string | null;
     }> | null | undefined,
   ): ConceptoLineaInput[] {
     return (rows ?? []).map((r) => ({
@@ -123,6 +127,8 @@ export class LiquidacionesService {
       ivaPct: r.ivaPct,
       monto: r.monto,
       orden: r.orden,
+      modoAplicacion: r.modoAplicacion,
+      viajeId: r.viajeId,
     }));
   }
 
@@ -256,6 +262,7 @@ export class LiquidacionesService {
       comision,
       ivaPctDefault: ivaPct,
       lineas: lineasResueltas,
+      viajes,
     });
     const gastosAdminIva = montos.impIva;
     const liquido = montos.liquido;
@@ -308,6 +315,8 @@ export class LiquidacionesService {
             ivaPct: l.ivaPct,
             monto: l.monto,
             orden: l.orden ?? 0,
+            modoAplicacion: l.modoAplicacion ?? 'GENERAL',
+            viajeId: l.viajeId ?? null,
           })),
         });
       }
@@ -330,7 +339,12 @@ export class LiquidacionesService {
     id: string,
     dto: UpdateLiquidacionDto,
   ) {
-    const liq = await this.prisma.liquidacion.findUnique({ where: { id } });
+    const liq = await this.prisma.liquidacion.findUnique({
+      where: { id },
+      include: {
+        viajes: { select: { viajeId: true, viaje: { select: { numero: true } } } },
+      },
+    });
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
@@ -410,6 +424,7 @@ export class LiquidacionesService {
         comision,
         ivaPctDefault: ivaPct,
         lineas: lineasResueltas,
+        viajes: liq.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
       });
       data.comisionPct = comisionPct;
       data.comision = comision;
@@ -436,6 +451,8 @@ export class LiquidacionesService {
               ivaPct: l.ivaPct,
               monto: l.monto,
               orden: l.orden ?? 0,
+              modoAplicacion: l.modoAplicacion ?? 'GENERAL',
+              viajeId: l.viajeId ?? null,
             })),
           });
         }
@@ -467,6 +484,7 @@ export class LiquidacionesService {
             viaje: {
               select: {
                 id: true,
+                numero: true,
                 cliente: {
                   select: { nombre: true, idFiscal: true, direccion: true },
                 },
@@ -591,6 +609,7 @@ export class LiquidacionesService {
         comision: liquidacion.comision,
         ivaPctDefault: ivaPct,
         lineas,
+        viajes: liquidacion.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
       });
       // Autocuración: si se editaron conceptos y el líquido quedó desfasado, alinear antes de AFIP.
       const montos = computeLiquidacionTotales({
@@ -598,6 +617,7 @@ export class LiquidacionesService {
         comision: liquidacion.comision,
         ivaPctDefault: ivaPct,
         lineas,
+        viajes: liquidacion.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
       });
       if (
         montos.liquido !== liquidacion.liquido ||
@@ -719,7 +739,7 @@ export class LiquidacionesService {
 
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
-      include: { viajes: { select: { viajeId: true } } },
+      include: { viajes: { select: { viajeId: true, viaje: { select: { numero: true } } } } },
     });
     if (!liquidacion || liquidacion.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
@@ -791,6 +811,7 @@ export class LiquidacionesService {
         comision: Number(liquidacion.comision || 0),
         ivaPctDefault: ivaPct,
         lineas: this.lineasFromStored(lineasDb),
+        viajes: liquidacion.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
       });
 
       const fechaNc = formatFechaCbte(new Date());

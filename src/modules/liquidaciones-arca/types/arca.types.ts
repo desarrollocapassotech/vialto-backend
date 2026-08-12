@@ -61,6 +61,8 @@ export interface ArcaAutorizarResponse {
  */
 export interface ArcaComprobanteItem {
   descripcion: string;
+  cantidad?: number;
+  precioUnitario?: number;
   importeBase: number;
   ivaPct: number;
   importeIva: number;

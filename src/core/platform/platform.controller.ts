@@ -385,6 +385,20 @@ export class PlatformController {
     return this.service.removeChofer(tenantId, id);
   }
 
+  @Get("paises")
+  paises(@Query("tenantId") tenantId?: string) {
+    return this.service.listPaises(tenantId);
+  }
+
+  @Post("paises")
+  createPais(
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: import("../paises/dto/create-pais.dto").CreatePaisDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.createPais(tenantId, dto, auth.userId);
+  }
+
   @Get("destinatarios")
   destinatarios(@Query("tenantId") tenantId?: string) {
     return this.service.listDestinatarios(tenantId);

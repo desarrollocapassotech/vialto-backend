@@ -29,11 +29,13 @@ model Tenant {
   clientes                   Cliente[]
   transportistas             Transportista[]
   choferes                   Chofer[]
+  paises                     Pais[]
   destinatarios              Destinatario[]
   direccionesEntrega         DireccionEntrega[]
   vehiculos                  Vehiculo[]
   viajes                     Viaje[]
   facturas                   Factura[]
+  facturaTramos              FacturaTramo[]
   pagos                      Pago[]
   movimientosCc              MovimientoCuentaCorriente[]
   productos                  Producto[]
@@ -151,6 +153,21 @@ model Chofer {
   @@index([tenantId])
   @@index([tenantId, activo])
   @@map("choferes")
+}
+
+model Pais {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre        String
+  codigo        String?
+  esPredefinido Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  createdBy     String?
+
+  @@unique([tenantId, nombre])
+  @@index([tenantId])
+  @@map("paises")
 }
 
 model Destinatario {
@@ -325,6 +342,7 @@ model Viaje {
 
   facturaId                  String?
   factura                    Factura?                    @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  facturaTramos              FacturaTramo[]
   nroFactura                 String?
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
   liquidacionesViaje         LiquidacionViaje[]
@@ -369,6 +387,8 @@ model Factura {
   estado           String         @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
   ivaPct           Float?         @default(21)
+  /** Si true, el importe se arma con tramos (+ monto de viajes sin tramos). */
+  facturarPorTramo Boolean        @default(false)
   comprobanteUrl   String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
   // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
   cbteTipo         Int? // 1=Factura A, 6=Factura B
@@ -396,6 +416,7 @@ model Factura {
 
   createdAt DateTime @default(now())
   pagos     Pago[]
+  tramos    FacturaTramo[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])
@@ -404,6 +425,27 @@ model Factura {
   @@index([tenantId, estado])
   @@index([tenantId, fechaEmision])
   @@map("facturas")
+}
+
+/** Línea de tramo cuando la factura se arma “por tramo” (varios montos/IVA por viaje). */
+model FacturaTramo {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  facturaId String
+  factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  viajeId   String
+  viaje     Viaje    @relation(fields: [viajeId], references: [id], onDelete: Restrict)
+  detalle   String
+  monto     Float
+  ivaPct    Float
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([facturaId])
+  @@index([tenantId])
+  @@index([viajeId])
+  @@map("factura_tramos")
 }
 
 model Pago {

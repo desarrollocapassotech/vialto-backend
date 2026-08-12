@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PlatformController } from './platform.controller';
 import { PlatformService } from './platform.service';
 import { ChoferesModule } from '../choferes/choferes.module';
+import { PaisesModule } from '../paises/paises.module';
 import { DestinatariosModule } from '../destinatarios/destinatarios.module';
 import { DireccionesEntregaModule } from '../direcciones-entrega/direcciones-entrega.module';
 import { VehiculosModule } from '../vehiculos/vehiculos.module';
@@ -14,6 +15,7 @@ import { TenantFieldConfigModule } from '../tenant-field-config/tenant-field-con
 @Module({
   imports: [
     ChoferesModule,
+    PaisesModule,
     DestinatariosModule,
     DireccionesEntregaModule,
     VehiculosModule,

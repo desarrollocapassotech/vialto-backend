@@ -192,8 +192,9 @@ export function enrichAfipRejectionMessage(message: string): string {
       lower.includes('cuit pais'))
   ) {
     return (
-      `${message} En homologación AFIP no reconoce CUITs reales de clientes: el sistema usa datos de prueba ` +
-      'al emitir (Factura B → consumidor final; Factura A → CUIT de prueba del sandbox).'
+      `${message} El CUIT/identificación del cliente no está en el padrón de AFIP. ` +
+      'Si el cliente es Consumidor Final, dejá vacío su CUIT (se emite como Consumidor Final, sin identificación); ' +
+      'si no, cargá un CUIT/DNI válido. En homologación, AFIP no reconoce CUITs reales y el sistema usa datos de prueba automáticamente.'
     );
   }
   return message;

@@ -165,8 +165,8 @@ export function enrichAfipRejectionMessage(message: string): string {
   if (lower.includes('11002') || lower.includes('feParamGetPtosVenta'.toLowerCase())) {
     return (
       `${message} El punto de venta configurado en "Pto. venta Factura A/B" no está habilitado en AFIP ` +
-      'homologación para Factura electrónica (WSFE). En AFIP, dá de alta o habilitá un punto de venta ' +
-      'para Facturas A/B y actualizá ese número en Superadmin → ARCA / AFIP.'
+      'para Factura electrónica (WSFE). En AFIP, dá de alta o habilitá un punto de venta ' +
+      'para Facturas A/B (o usá el mismo punto de venta Web Services del CVLP) y actualizá ese número en Superadmin → ARCA / AFIP.'
     );
   }
   if (lower.includes('10016')) {

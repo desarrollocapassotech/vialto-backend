@@ -14,6 +14,14 @@ export class CreateConceptoLiquidacionDto {
   @Min(0)
   @Max(100)
   ivaPct: number;
+
+  @IsOptional()
+  @IsNumber()
+  monto?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  bloqueado?: boolean;
 }
 
 export class UpdateConceptoLiquidacionDto {
@@ -36,4 +44,12 @@ export class UpdateConceptoLiquidacionDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  monto?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  bloqueado?: boolean;
 }

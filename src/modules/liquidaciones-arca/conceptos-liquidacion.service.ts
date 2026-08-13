@@ -39,6 +39,8 @@ export class ConceptosLiquidacionService {
         nombre,
         signo: dto.signo,
         ivaPct: dto.ivaPct,
+        monto: dto.monto ?? null,
+        bloqueado: dto.bloqueado ?? false,
         activo: true,
         updatedAt: new Date(),
       },
@@ -60,6 +62,8 @@ export class ConceptosLiquidacionService {
     if (dto.signo !== undefined) data.signo = dto.signo;
     if (dto.ivaPct !== undefined) data.ivaPct = dto.ivaPct;
     if (dto.activo !== undefined) data.activo = dto.activo;
+    if (dto.monto !== undefined) data.monto = dto.monto;
+    if (dto.bloqueado !== undefined) data.bloqueado = dto.bloqueado;
 
     return this.db.conceptoLiquidacion.update({ where: { id }, data });
   }
@@ -78,6 +82,8 @@ export class ConceptosLiquidacionService {
       nombre: string;
       signo: 'favor' | 'contra';
       ivaPct: number;
+      monto: number | null;
+      bloqueado: boolean;
     };
   }
 }

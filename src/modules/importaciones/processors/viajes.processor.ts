@@ -3,6 +3,10 @@ import { Prisma } from "@prisma/client"; // Importante: necesario para capturar 
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { generateNumeroViaje } from "../../viajes/generate-viaje-numero";
 import { syncLiquidacionEstadoViaje } from "../../viajes/viaje-estado-financiero";
+import {
+  FACTURACION_ESTADOS_DISPONIBLES,
+  LIQUIDACION_ESTADOS_DISPONIBLES,
+} from "../../viajes/viaje-estados";
 import type { IImportProcessor } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 
@@ -113,6 +117,35 @@ export class ViajesProcessor implements IImportProcessor {
     row: ValidatedRow,
     tenantId: string,
   ): Promise<string> {
+    // Mismo criterio que el alta manual (ViajesService.update): una vez que
+    // el viaje tiene una factura o liquidación vigente, sus datos fiscales
+    // quedan protegidos. El import siempre reescribe esos campos de punta a
+    // punta (no es un patch parcial), así que si está bloqueado se corta la
+    // fila entera en vez de arriesgarse a pisar un comprobante ya emitido.
+    const current = await this.prisma.viaje.findUniqueOrThrow({
+      where: { id: viajeId },
+      select: { facturacionEstado: true, liquidacionEstado: true },
+    });
+    const bloqueadoPorFactura = !(
+      FACTURACION_ESTADOS_DISPONIBLES as readonly string[]
+    ).includes(current.facturacionEstado);
+    const bloqueadoPorLiquidacion =
+      current.liquidacionEstado != null &&
+      !(LIQUIDACION_ESTADOS_DISPONIBLES as readonly string[]).includes(
+        current.liquidacionEstado,
+      );
+    if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {
+      const motivo =
+        bloqueadoPorFactura && bloqueadoPorLiquidacion
+          ? "facturado y liquidado"
+          : bloqueadoPorFactura
+            ? "facturado"
+            : "liquidado";
+      throw new Error(
+        `No se puede reimportar este viaje: ya está ${motivo}. Los datos fiscales quedan protegidos una vez facturado o liquidado — editalo manualmente desde la ficha del viaje si hace falta.`,
+      );
+    }
+
     const clienteId = row.clienteId as string;
     const fechaCarga = (row.fechaCarga as Date | null) ?? undefined;
     const fechaDescarga = (row.fechaDescarga as Date | null) ?? undefined;

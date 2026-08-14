@@ -110,6 +110,16 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
       createIfNotFoundSoportado: true,
     },
     {
+      field: "transportistaEfectivoId",
+      campoLabel: "Transporte subcontratado",
+      type: "lookup",
+      systemRequired: false,
+      defaultExcelHeader: "Transporte subcontratado",
+      lookupModel: "transportistas",
+      lookupFields: ["nombre", "idFiscal"],
+      createIfNotFoundSoportado: true,
+    },
+    {
       field: "choferId",
       campoLabel: "Chofer",
       type: "lookup",
@@ -138,6 +148,17 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
     { field: "cantidadTransportista", campoLabel: "Cantidad transportista", type: "number", systemRequired: false, defaultExcelHeader: "Cantidad transportista" },
     { field: "precioUnitarioTransportista", campoLabel: "Precio unitario transportista", type: "number", systemRequired: false, defaultExcelHeader: "Precio unitario transportista" },
     { field: "monedaMonto", campoLabel: "Moneda", type: "string", systemRequired: false, defaultExcelHeader: "Moneda" },
+    {
+      field: "productoId",
+      campoLabel: "Producto",
+      type: "lookup",
+      systemRequired: false,
+      defaultExcelHeader: "Producto",
+      lookupModel: "productos",
+      lookupFields: ["nombre", "codigo"],
+      createIfNotFoundSoportado: false,
+    },
+    { field: "cantidadProducto", campoLabel: "Cantidad de producto", type: "number", systemRequired: false, defaultExcelHeader: "Cantidad de producto" },
   ],
 };
 

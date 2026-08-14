@@ -4,6 +4,7 @@ import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { generateNumeroViaje } from "../../viajes/generate-viaje-numero";
 import { syncLiquidacionEstadoViaje } from "../../viajes/viaje-estado-financiero";
 import { assertFechaDescargaValida } from "../../viajes/viajes.service";
+import { assertTransportistaEfectivoSubcontratacion } from "../../viajes/viaje-operacion-exclusiva";
 import {
   FACTURACION_ESTADOS_DISPONIBLES,
   LIQUIDACION_ESTADOS_DISPONIBLES,
@@ -27,6 +28,29 @@ export class ViajesProcessor implements IImportProcessor {
       return cantidad * precioUnit;
     }
     return row.monto != null ? Number(row.monto) : null;
+  }
+
+  /**
+   * Vincula (o actualiza la cantidad de) un único producto por viaje —
+   * alcance reducido a propósito: el modelo soporta varios productos por
+   * viaje, pero el import solo cubre uno. Si la fila no trae Producto, no
+   * toca nada (ni en alta ni en reimport).
+   */
+  private async upsertProductoViaje(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    viajeId: string,
+    row: ValidatedRow,
+  ): Promise<void> {
+    if (!row.productoId) return;
+    const productoId = row.productoId as string;
+    const cantidad =
+      row.cantidadProducto != null ? Number(row.cantidadProducto) : undefined;
+    await tx.viajeProducto.upsert({
+      where: { viajeId_productoId: { viajeId, productoId } },
+      create: { tenantId, viajeId, productoId, cantidad: cantidad ?? null },
+      update: { cantidad },
+    });
   }
 
   /**
@@ -153,6 +177,15 @@ export class ViajesProcessor implements IImportProcessor {
     if (fechaCarga && fechaDescarga) {
       assertFechaDescargaValida(fechaCarga, fechaDescarga);
     }
+    const transportistaEfectivoId =
+      (row.transportistaEfectivoId as string | null) ?? undefined;
+    if (transportistaEfectivoId) {
+      assertTransportistaEfectivoSubcontratacion({
+        transportistaId: row.transportistaId as string,
+        transportistaEfectivoId,
+        contratanteRealizaFlete: false,
+      });
+    }
 
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que reimportar el mismo ID Personalizado con un Excel más acotado
@@ -163,6 +196,7 @@ export class ViajesProcessor implements IImportProcessor {
         data: {
           clienteId,
           transportistaId: (row.transportistaId as string | null) ?? undefined,
+          transportistaEfectivoId,
           choferId: (row.choferId as string | null) ?? undefined,
           origen: (row.origen as string | null) ?? undefined,
           destino: (row.destino as string | null) ?? undefined,
@@ -200,6 +234,7 @@ export class ViajesProcessor implements IImportProcessor {
       });
       // El transportista puede haber cambiado — resincronizar.
       await syncLiquidacionEstadoViaje(tx, tenantId, viajeId);
+      await this.upsertProductoViaje(tx, tenantId, viajeId, row);
     });
 
     return viajeId;
@@ -243,6 +278,15 @@ export class ViajesProcessor implements IImportProcessor {
           ? row.tipoFlota.toUpperCase()
           : null;
       const transportistaId = (row.transportistaId as string | null) ?? null;
+      const transportistaEfectivoId =
+        (row.transportistaEfectivoId as string | null) ?? null;
+      if (transportistaEfectivoId) {
+        assertTransportistaEfectivoSubcontratacion({
+          transportistaId,
+          transportistaEfectivoId,
+          contratanteRealizaFlete: false,
+        });
+      }
       const precioFlete =
         row.precioTransportistaExterno != null
           ? Number(row.precioTransportistaExterno)
@@ -311,6 +355,7 @@ export class ViajesProcessor implements IImportProcessor {
           facturacionEstado,
           clienteId,
           transportistaId,
+          transportistaEfectivoId,
           choferId: (row.choferId as string | null) ?? null,
           origen: (row.origen as string | null) ?? null,
           destino: (row.destino as string | null) ?? null,
@@ -360,6 +405,8 @@ export class ViajesProcessor implements IImportProcessor {
           },
         });
       }
+
+      await this.upsertProductoViaje(tx, tenantId, viaje.id, row);
 
       if (row.nroFacturaTransporte) {
         const fechaEmision =

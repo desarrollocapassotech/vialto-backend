@@ -400,19 +400,25 @@ export class ValidatorService {
     fields: string[],
     tenantId: string,
   ): Promise<Record<string, unknown>[]> {
-    const where = { tenantId };
     const select: Record<string, boolean> = { id: true };
     for (const f of fields) select[f] = true;
 
     switch (model) {
       case "clientes":
-        return this.prisma.cliente.findMany({ where, select });
+        return this.prisma.cliente.findMany({ where: { tenantId }, select });
       case "choferes":
-        return this.prisma.chofer.findMany({ where, select });
+        return this.prisma.chofer.findMany({ where: { tenantId }, select });
       case "vehiculos":
-        return this.prisma.vehiculo.findMany({ where, select });
+        return this.prisma.vehiculo.findMany({ where: { tenantId }, select });
       case "transportistas":
-        return this.prisma.transportista.findMany({ where, select });
+        return this.prisma.transportista.findMany({ where: { tenantId }, select });
+      case "productos":
+        // Solo activos: un producto inactivo no debe poder vincularse desde el
+        // import, mismo criterio que el alta manual (assertProductosAsignables).
+        return this.prisma.producto.findMany({
+          where: { tenantId, activo: true },
+          select,
+        });
       default:
         return [];
     }

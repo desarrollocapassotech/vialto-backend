@@ -2,7 +2,8 @@ export type LookupModel =
   | 'clientes'
   | 'choferes'
   | 'vehiculos'
-  | 'transportistas';
+  | 'transportistas'
+  | 'productos';
 
 export type ColumnType = 'string' | 'number' | 'date' | 'boolean' | 'lookup' | 'enum';
 

@@ -88,7 +88,7 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
     },
   ],
   viajes: [
-    { field: "numeroIdentificacionPersonalizado", campoLabel: "ID Personalizado", type: "string", systemRequired: true, defaultExcelHeader: "ID Personalizado" },
+    { field: "numeroIdentificacionPersonalizado", campoLabel: "ID Personalizado", type: "string", systemRequired: false, defaultExcelHeader: "ID Personalizado" },
     {
       field: "clienteId",
       campoLabel: "Cliente",
@@ -103,7 +103,7 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
       field: "transportistaId",
       campoLabel: "Transporte",
       type: "lookup",
-      systemRequired: false,
+      systemRequired: true,
       defaultExcelHeader: "Transporte",
       lookupModel: "transportistas",
       lookupFields: ["nombre", "idFiscal"],
@@ -129,8 +129,8 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
       lookupFields: ["patente"],
       createIfNotFoundSoportado: false,
     },
-    { field: "origen", campoLabel: "Origen", type: "string", systemRequired: false, defaultExcelHeader: "Origen" },
-    { field: "destino", campoLabel: "Destino", type: "string", systemRequired: false, defaultExcelHeader: "Destino" },
+    { field: "origen", campoLabel: "Origen", type: "string", systemRequired: true, defaultExcelHeader: "Origen" },
+    { field: "destino", campoLabel: "Destino", type: "string", systemRequired: true, defaultExcelHeader: "Destino" },
     { field: "fechaCarga", campoLabel: "Fecha de carga", type: "date", systemRequired: true, defaultExcelHeader: "Fecha carga" },
     { field: "fechaDescarga", campoLabel: "Fecha de descarga", type: "date", systemRequired: true, defaultExcelHeader: "Fecha descarga" },
     { field: "cantidadFactura", campoLabel: "Cantidad a facturar", type: "number", systemRequired: false, defaultExcelHeader: "Cantidad a facturar" },

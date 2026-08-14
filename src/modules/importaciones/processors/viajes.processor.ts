@@ -24,36 +24,56 @@ export class ViajesProcessor implements IImportProcessor {
     return row.monto != null ? Number(row.monto) : null;
   }
 
+  /**
+   * Busca un viaje ya importado que corresponda a esta fila. Prioridad:
+   * 1) ID Personalizado, si la fila lo trae (match exacto e inequívoco).
+   * 2) Si no, la combinación cliente + transporte + origen + destino +
+   *    fecha de carga + fecha de descarga — todos obligatorios en el
+   *    import, así que siempre están disponibles. No es infalible: dos
+   *    viajes reales distintos con esos mismos datos (mismo cliente y
+   *    transporte, misma ruta, mismo día) se tratarían como el mismo.
+   */
+  private async findExisting(
+    row: ValidatedRow,
+    tenantId: string,
+  ): Promise<string | null> {
+    const numeroIdentificacionPersonalizado =
+      (row.numeroIdentificacionPersonalizado as string | null)
+        ?.toString()
+        .trim() || null;
+
+    if (numeroIdentificacionPersonalizado) {
+      const existing = await this.prisma.viaje.findFirst({
+        where: { tenantId, numeroIdentificacionPersonalizado },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+    }
+
+    const existing = await this.prisma.viaje.findFirst({
+      where: {
+        tenantId,
+        clienteId: row.clienteId as string,
+        transportistaId: row.transportistaId as string,
+        origen: { equals: (row.origen as string).trim(), mode: "insensitive" },
+        destino: { equals: (row.destino as string).trim(), mode: "insensitive" },
+        fechaCarga: row.fechaCarga as Date,
+        fechaDescarga: row.fechaDescarga as Date,
+      },
+      select: { id: true },
+    });
+    return existing?.id ?? null;
+  }
+
   async insert(
     row: ValidatedRow,
     tenantId: string,
     createdBy: string,
   ): Promise<string> {
     try {
-      const numeroIdentificacionPersonalizado =
-        (row.numeroIdentificacionPersonalizado as string | null)
-          ?.toString()
-          .trim() || null;
-
-      // Sin ID Personalizado no hay forma de detectar que una fila ya se
-      // importó antes: reimportar el mismo archivo duplicaría el viaje. Se
-      // valida acá además de en el template (defensa en profundidad, por si
-      // un template viejo lo tiene guardado como no obligatorio).
-      if (!numeroIdentificacionPersonalizado) {
-        throw new Error(
-          "El ID Personalizado es obligatorio: sin él no se puede detectar si el viaje ya fue importado antes, y reimportar el archivo lo duplicaría.",
-        );
-      }
-
-      // ── Upsert por ID Personalizado ───────────────────────────────────
-      // Reimportar el mismo ID Personalizado actualiza el viaje existente
-      // en vez de duplicarlo (uso recurrente esperado, no solo carga única).
-      const existing = await this.prisma.viaje.findFirst({
-        where: { tenantId, numeroIdentificacionPersonalizado },
-        select: { id: true },
-      });
-      if (existing) {
-        return await this.update(existing.id, row, tenantId);
+      const existingId = await this.findExisting(row, tenantId);
+      if (existingId) {
+        return await this.update(existingId, row, tenantId);
       }
 
       return await this.create(row, tenantId, createdBy);

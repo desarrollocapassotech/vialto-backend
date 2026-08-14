@@ -464,6 +464,20 @@ export class PlatformService {
     return this.paisesService.create(scopedTenantId, dto, userId);
   }
 
+  async updatePais(
+    tenantId: string | undefined,
+    id: string,
+    dto: import("../paises/dto/update-pais.dto").UpdatePaisDto,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.paisesService.update(scopedTenantId, id, dto);
+  }
+
+  async removePais(tenantId: string | undefined, id: string) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.paisesService.remove(scopedTenantId, id);
+  }
+
   listDestinatarios(tenantId?: string) {
     if (!tenantId?.trim()) {
       return Promise.resolve([]);

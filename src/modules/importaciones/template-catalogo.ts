@@ -26,6 +26,10 @@ export interface CatalogoColumn {
   lookupFields?: string[];
   /** true = tiene sentido mostrar el toggle "Crear automáticamente si no existe". */
   createIfNotFoundSoportado?: boolean;
+  /** true = la celda puede traer varios valores separados (ej. patente de tractor + semirremolque). */
+  multiple?: boolean;
+  /** Separador para `multiple` (default: "/"). */
+  separador?: string;
   allowedValues?: string[];
   format?: string;
 }
@@ -138,15 +142,39 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
       lookupModel: "vehiculos",
       lookupFields: ["patente"],
       createIfNotFoundSoportado: false,
+      // Soporta traer más de una patente en la misma celda separadas por "/"
+      // (tractor + semirremolque) — se vinculan ambos vehículos al viaje.
+      multiple: true,
+      separador: "/",
     },
     { field: "origen", campoLabel: "Origen", type: "string", systemRequired: true, defaultExcelHeader: "Origen" },
     { field: "destino", campoLabel: "Destino", type: "string", systemRequired: true, defaultExcelHeader: "Destino" },
     { field: "fechaCarga", campoLabel: "Fecha de carga", type: "date", systemRequired: true, defaultExcelHeader: "Fecha carga" },
     { field: "fechaDescarga", campoLabel: "Fecha de descarga", type: "date", systemRequired: true, defaultExcelHeader: "Fecha descarga" },
+    { field: "detalleCarga", campoLabel: "Detalle de carga", type: "string", systemRequired: false, defaultExcelHeader: "Detalle de carga" },
+    { field: "kmRecorridos", campoLabel: "Km recorridos", type: "number", systemRequired: false, defaultExcelHeader: "Km recorridos" },
+    {
+      field: "tipoFlota",
+      campoLabel: "Tipo de flota",
+      type: "enum",
+      systemRequired: false,
+      defaultExcelHeader: "Tipo de flota",
+      allowedValues: ["PROPIA", "TERCERO"],
+    },
+    { field: "monto", campoLabel: "Monto total a cliente", type: "number", systemRequired: false, defaultExcelHeader: "Monto total a cliente" },
     { field: "cantidadFactura", campoLabel: "Cantidad a facturar", type: "number", systemRequired: false, defaultExcelHeader: "Cantidad a facturar" },
     { field: "precioUnitarioFactura", campoLabel: "Precio unitario a facturar", type: "number", systemRequired: false, defaultExcelHeader: "Precio unitario a facturar" },
+    { field: "nroFactura", campoLabel: "N° factura a cliente", type: "string", systemRequired: false, defaultExcelHeader: "N° factura a cliente" },
+    { field: "fechaEmisionFactura", campoLabel: "Fecha emisión factura cliente", type: "date", systemRequired: false, defaultExcelHeader: "Fecha emisión factura cliente" },
+    { field: "fechaVencimientoFactura", campoLabel: "Fecha vencimiento factura cliente", type: "date", systemRequired: false, defaultExcelHeader: "Fecha vencimiento factura cliente" },
     { field: "cantidadTransportista", campoLabel: "Cantidad transportista", type: "number", systemRequired: false, defaultExcelHeader: "Cantidad transportista" },
     { field: "precioUnitarioTransportista", campoLabel: "Precio unitario transportista", type: "number", systemRequired: false, defaultExcelHeader: "Precio unitario transportista" },
+    { field: "precioTransportistaExterno", campoLabel: "Monto total a transportista (flete)", type: "number", systemRequired: false, defaultExcelHeader: "Monto total a transportista (flete)" },
+    { field: "monedaPrecioTransportistaExterno", campoLabel: "Moneda flete", type: "string", systemRequired: false, defaultExcelHeader: "Moneda flete" },
+    { field: "nroFacturaTransporte", campoLabel: "N° factura transportista", type: "string", systemRequired: false, defaultExcelHeader: "N° factura transportista" },
+    { field: "fechaEmisionFacturaTransp", campoLabel: "Fecha emisión factura transportista", type: "date", systemRequired: false, defaultExcelHeader: "Fecha emisión factura transportista" },
+    { field: "fechaVencimientoFacturaTransp", campoLabel: "Fecha vencimiento factura transportista", type: "date", systemRequired: false, defaultExcelHeader: "Fecha vencimiento factura transportista" },
+    { field: "observaciones", campoLabel: "Observaciones", type: "string", systemRequired: false, defaultExcelHeader: "Observaciones" },
     { field: "monedaMonto", campoLabel: "Moneda", type: "string", systemRequired: false, defaultExcelHeader: "Moneda" },
     {
       field: "productoId",
@@ -156,7 +184,7 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
       defaultExcelHeader: "Producto",
       lookupModel: "productos",
       lookupFields: ["nombre", "codigo"],
-      createIfNotFoundSoportado: false,
+      createIfNotFoundSoportado: true,
     },
     { field: "cantidadProducto", campoLabel: "Cantidad de producto", type: "number", systemRequired: false, defaultExcelHeader: "Cantidad de producto" },
   ],

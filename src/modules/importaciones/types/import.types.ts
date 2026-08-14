@@ -28,6 +28,16 @@ export interface ColumnConfig {
   lookupFields?: string[];
   /** Para type='lookup': si no se encuentra, crear el registro automáticamente */
   createIfNotFound?: boolean;
+  /**
+   * Para type='lookup': la celda trae varios valores separados por
+   * `separador` (ej. "NPY239/KGA38" = tractor + semirremolque) — se busca
+   * cada uno por separado y el resultado es un array de ids en vez de uno
+   * solo. Si alguno no matchea, la fila entera se rechaza igual que un
+   * lookup simple fallido.
+   */
+  multiple?: boolean;
+  /** Separador para `multiple` (default: "/"). */
+  separador?: string;
   required?: boolean;
   allowedValues?: string[];
   /**
@@ -58,7 +68,7 @@ export interface ParsedRow {
 /** Fila validada y lista para insertar */
 export interface ValidatedRow {
   _rowNum: number;
-  [key: string]: string | number | Date | null | undefined;
+  [key: string]: string | number | Date | string[] | null | undefined;
 }
 
 export interface RowError {

@@ -316,6 +316,7 @@ export class ImportacionesService {
         modulo: true,
         nombre: true,
         activo: true,
+        config: true,
         updatedAt: true,
       },
     });

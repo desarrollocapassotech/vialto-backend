@@ -12,9 +12,10 @@ import { VehiculosProcessor } from './processors/vehiculos.processor';
 import { VehiculosModule } from '../../core/vehiculos/vehiculos.module';
 import { IntegracionArcaModule } from '../liquidaciones-arca/liquidaciones-arca.module';
 import { FacturacionModule } from '../facturacion/facturacion.module';
+import { StockModule } from '../stock/stock.module';
 
 @Module({
-  imports: [VehiculosModule, IntegracionArcaModule, FacturacionModule],
+  imports: [VehiculosModule, IntegracionArcaModule, FacturacionModule, StockModule],
   controllers: [ImportacionesController],
   providers: [
     ImportacionesService,

@@ -394,14 +394,21 @@ export class ViajesProcessor implements IImportProcessor {
       // tenant con ARCA queda en liquidacionEstado null en vez de "sin_liquidar".
       await syncLiquidacionEstadoViaje(tx, tenantId, viaje.id);
 
-      if (row.vehiculoId) {
-        // Usamos tx para el vehículo
+      // `vehiculoId` puede ser un solo id o, con columnas "multiple" (ej.
+      // patente de tractor + semirremolque separadas por "/"), un array —
+      // se vincula uno por uno, respetando el orden en que vinieron.
+      const vehiculoIds = Array.isArray(row.vehiculoId)
+        ? row.vehiculoId
+        : row.vehiculoId
+          ? [row.vehiculoId as string]
+          : [];
+      for (let i = 0; i < vehiculoIds.length; i++) {
         await tx.viajeVehiculo.create({
           data: {
             tenantId,
             viajeId: viaje.id,
-            vehiculoId: row.vehiculoId as string,
-            orden: 0,
+            vehiculoId: vehiculoIds[i],
+            orden: i,
           },
         });
       }

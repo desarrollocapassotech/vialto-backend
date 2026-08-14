@@ -4,10 +4,12 @@ import type { TemplateConfig, ParsedRow } from "../types/import.types";
 
 @Injectable()
 export class ParserService {
-  parse(
+  /** Lee la hoja completa como array de arrays + la fila de encabezados ya resuelta. */
+  private readSheetRows(
     buffer: Buffer,
-    config: TemplateConfig,
-  ): { rows: ParsedRow[]; headers: string[] } {
+    sheet?: string | number,
+    headerRow?: number,
+  ): { headers: string[]; allRows: unknown[][]; headerRowIndex: number } {
     let workbook: XLSX.WorkBook;
     try {
       workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
@@ -17,28 +19,56 @@ export class ParserService {
       );
     }
 
-    const sheetName = this.resolveSheetName(workbook, config.sheet);
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) {
+    const sheetName = this.resolveSheetName(workbook, sheet);
+    const sheetObj = workbook.Sheets[sheetName];
+    if (!sheetObj) {
       throw new BadRequestException(
         `Hoja "${sheetName}" no encontrada en el archivo`,
       );
     }
 
-    // Convertir la hoja a array de arrays (raw)
-    const allRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, {
+    const allRows: unknown[][] = XLSX.utils.sheet_to_json(sheetObj, {
       header: 1,
       defval: null,
       raw: true, // devuelve fechas como string formateado; usamos cellDates=true para objetos Date
     });
 
-    const headerRowIndex = (config.headerRow ?? 1) - 1;
+    const headerRowIndex = (headerRow ?? 1) - 1;
     if (allRows.length <= headerRowIndex) {
       throw new BadRequestException("El archivo no contiene filas de datos");
     }
 
     const headers = (allRows[headerRowIndex] as unknown[]).map((h) =>
       h != null ? String(h).trim() : "",
+    );
+
+    return { headers, allRows, headerRowIndex };
+  }
+
+  /**
+   * Encabezados + un puñado de filas de ejemplo, sin necesitar un template
+   * todavía — lo usa la sugerencia de mapeo con IA (ver ia-template-suggestion).
+   */
+  sample(
+    buffer: Buffer,
+    maxRows = 5,
+  ): { headers: string[]; sampleRows: unknown[][] } {
+    const { headers, allRows, headerRowIndex } = this.readSheetRows(buffer);
+    const sampleRows = allRows.slice(
+      headerRowIndex + 1,
+      headerRowIndex + 1 + maxRows,
+    ) as unknown[][];
+    return { headers: headers.filter((h) => h !== ""), sampleRows };
+  }
+
+  parse(
+    buffer: Buffer,
+    config: TemplateConfig,
+  ): { rows: ParsedRow[]; headers: string[] } {
+    const { headers, allRows, headerRowIndex } = this.readSheetRows(
+      buffer,
+      config.sheet,
+      config.headerRow,
     );
 
     const dataRows = allRows.slice(headerRowIndex + 1);

@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
+import { StockService } from "../../stock/stock.service";
 import type {
   ColumnConfig,
   ParsedRow,
@@ -19,7 +20,10 @@ export interface ValidationResult {
 
 @Injectable()
 export class ValidatorService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly stockService: StockService,
+  ) {}
 
   async validate(
     rows: ParsedRow[],
@@ -97,6 +101,21 @@ export class ValidatorService {
   private lookupFieldsOf(col: ColumnConfig): string[] {
     if (col.lookupFields?.length) return col.lookupFields;
     return [col.lookupField ?? "nombre"];
+  }
+
+  /** Prueba un valor contra cada campo candidato (nombre, después CUIT, etc.) en orden. */
+  private lookupOne(
+    valor: string,
+    model: string,
+    fields: string[],
+    caches: LookupCaches,
+  ): string | null {
+    for (const field of fields) {
+      const cache = caches[`${model}:${field}`] ?? {};
+      const id = cache[valor.toLowerCase()];
+      if (id) return id;
+    }
+    return null;
   }
 
   private coerce(
@@ -189,14 +208,39 @@ export class ValidatorService {
           return { value: str };
         }
 
-        // Probamos cada campo candidato en orden (ej. nombre, después CUIT) —
-        // el mismo valor tipeado puede matchear por cualquiera de los dos.
         const fields = this.lookupFieldsOf(col);
-        for (const field of fields) {
-          const cache = caches[`${model}:${field}`] ?? {};
-          const id = cache[str.toLowerCase()];
-          if (id) return { value: id };
+
+        // multiple: la celda trae varios valores separados (ej. patente de
+        // tractor + semirremolido "NPY239/KGA38") — se busca cada uno por
+        // separado y el resultado es un array de ids, no uno solo.
+        if (col.multiple) {
+          const separador = col.separador ?? "/";
+          const partes = str
+            .split(separador)
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
+          const ids: string[] = [];
+          const noEncontrados: string[] = [];
+          for (const parte of partes) {
+            const id = this.lookupOne(parte, model, fields, caches);
+            if (id) ids.push(id);
+            else noEncontrados.push(parte);
+          }
+          if (noEncontrados.length > 0) {
+            return {
+              error: {
+                fila: rowNum,
+                campo: col.excelHeader,
+                error: `No se encontró "${noEncontrados.join(`", "`)}" en ${model}`,
+                valor: raw,
+              },
+            };
+          }
+          return { value: ids };
         }
+
+        const id = this.lookupOne(str, model, fields, caches);
+        if (id) return { value: id };
 
         return {
           error: {
@@ -376,6 +420,10 @@ export class ValidatorService {
           select: { id: true },
         });
         return r.id;
+      }
+      case "productos": {
+        const { id } = await this.stockService.crearProductoSimple(tenantId, nombre);
+        return id;
       }
       // 'vehiculos' NO se autocrea: Vehiculo exige patente + tipo, e inventar un
       // tipo por defecto sería exactamente la suposición silenciosa que queremos

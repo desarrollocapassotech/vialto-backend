@@ -65,7 +65,13 @@ export class ImportacionesController {
   ) {
     if (!file) throw new BadRequestException('Se requiere un archivo Excel');
     const tenantId = this.resolveTenantId(auth, query.tenantId);
-    return this.service.preview(tenantId, query.modulo, file.buffer, file.originalname);
+    return this.service.preview(
+      tenantId,
+      query.modulo,
+      file.buffer,
+      file.originalname,
+      auth.role === 'superadmin',
+    );
   }
 
   /**
@@ -76,7 +82,13 @@ export class ImportacionesController {
   @Roles('admin', 'superadmin')
   confirm(@Body() dto: ConfirmImportDto, @CurrentAuth() auth: AuthPayload) {
     const tenantId = this.resolveTenantId(auth, dto.tenantId);
-    return this.service.confirm(tenantId, dto.sessionId, auth.userId, dto.ciudadesNormalizadas);
+    return this.service.confirm(
+      tenantId,
+      dto.sessionId,
+      auth.userId,
+      auth.role === 'superadmin',
+      dto.ciudadesNormalizadas,
+    );
   }
 
   /** Historial de importaciones del tenant */

@@ -47,6 +47,29 @@ export class ImportacionesService {
     };
   }
 
+  /**
+   * Defensa en profundidad: el frontend ya oculta la pantalla si
+   * `Tenant.importacionesOcultas`, pero un admin de tenant no debería poder
+   * saltearlo pegándole directo al endpoint. El superadmin nunca queda
+   * bloqueado por este flag — es una restricción sobre el tenant, no sobre
+   * la herramienta.
+   */
+  private async assertImportacionesVisible(
+    tenantId: string,
+    isSuperadmin: boolean,
+  ) {
+    if (isSuperadmin) return;
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { importacionesOcultas: true },
+    });
+    if (tenant?.importacionesOcultas) {
+      throw new BadRequestException(
+        "La importación masiva no está disponible para esta empresa.",
+      );
+    }
+  }
+
   // ── Preview ──────────────────────────────────────────────────────────────
 
   async preview(
@@ -54,7 +77,9 @@ export class ImportacionesService {
     modulo: string,
     buffer: Buffer,
     originalname: string,
+    isSuperadmin: boolean,
   ): Promise<PreviewResult> {
+    await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const template = await this.getActiveTemplate(tenantId, modulo);
     const config = template.config as unknown as TemplateConfig;
 
@@ -108,12 +133,14 @@ export class ImportacionesService {
     tenantId: string,
     sessionId: string,
     createdBy: string,
+    isSuperadmin: boolean,
     ciudadesNormalizadas?: {
       fila: number;
       origen?: string | null;
       destino?: string | null;
     }[],
   ) {
+    await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, tenantId },
       include: { template: { select: { modulo: true } } },

@@ -24,6 +24,8 @@ model Tenant {
   whiteLabelDomain String?
   /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
   labelIdentificacionPersonalizadaViajes String? @default("ID de viaje personalizado")
+  /** true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla). */
+  importacionesOcultas Boolean @default(false)
   createdAt        DateTime  @default(now())
 
   clientes                   Cliente[]

@@ -17,21 +17,24 @@ export class TransportistasProcessor implements IImportProcessor {
       throw new Error("El nombre del transportista es obligatorio.");
     }
 
+    // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
+    // para que un reimport no borre datos ya cargados que ese Excel no trae.
     const data = {
-      idFiscal: (row.idFiscal as string | null)?.toString().trim() || null,
-      email: (row.email as string | null)?.toString().trim() || null,
-      telefono: (row.telefono as string | null)?.toString().trim() || null,
-      pais: (row.pais as string | null)?.toString().trim() || null,
-      domicilio: (row.domicilio as string | null)?.toString().trim() || null,
+      idFiscal: (row.idFiscal as string | null)?.toString().trim() || undefined,
+      email: (row.email as string | null)?.toString().trim() || undefined,
+      telefono: (row.telefono as string | null)?.toString().trim() || undefined,
+      pais: (row.pais as string | null)?.toString().trim() || undefined,
+      domicilio: (row.domicilio as string | null)?.toString().trim() || undefined,
       condicionIva:
-        row.condicionIva != null ? Number(row.condicionIva) : null,
-      comisionPct: row.comisionPct != null ? Number(row.comisionPct) : null,
-      paut: (row.paut as string | null)?.toString().trim() || null,
+        row.condicionIva != null ? Number(row.condicionIva) : undefined,
+      comisionPct:
+        row.comisionPct != null ? Number(row.comisionPct) : undefined,
+      paut: (row.paut as string | null)?.toString().trim() || undefined,
       permisoInternacional:
         (row.permisoInternacional as string | null)?.toString().trim() ||
-        null,
+        undefined,
       fechaVencimientoPermiso:
-        (row.fechaVencimientoPermiso as Date | null) ?? null,
+        (row.fechaVencimientoPermiso as Date | null) ?? undefined,
     };
 
     const existing = await this.prisma.transportista.findFirst({

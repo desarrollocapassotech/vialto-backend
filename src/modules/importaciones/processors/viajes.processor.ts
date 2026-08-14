@@ -35,17 +35,25 @@ export class ViajesProcessor implements IImportProcessor {
           ?.toString()
           .trim() || null;
 
+      // Sin ID Personalizado no hay forma de detectar que una fila ya se
+      // importó antes: reimportar el mismo archivo duplicaría el viaje. Se
+      // valida acá además de en el template (defensa en profundidad, por si
+      // un template viejo lo tiene guardado como no obligatorio).
+      if (!numeroIdentificacionPersonalizado) {
+        throw new Error(
+          "El ID Personalizado es obligatorio: sin él no se puede detectar si el viaje ya fue importado antes, y reimportar el archivo lo duplicaría.",
+        );
+      }
+
       // ── Upsert por ID Personalizado ───────────────────────────────────
       // Reimportar el mismo ID Personalizado actualiza el viaje existente
       // en vez de duplicarlo (uso recurrente esperado, no solo carga única).
-      if (numeroIdentificacionPersonalizado) {
-        const existing = await this.prisma.viaje.findFirst({
-          where: { tenantId, numeroIdentificacionPersonalizado },
-          select: { id: true },
-        });
-        if (existing) {
-          return await this.update(existing.id, row, tenantId);
-        }
+      const existing = await this.prisma.viaje.findFirst({
+        where: { tenantId, numeroIdentificacionPersonalizado },
+        select: { id: true },
+      });
+      if (existing) {
+        return await this.update(existing.id, row, tenantId);
       }
 
       return await this.create(row, tenantId, createdBy);
@@ -86,46 +94,51 @@ export class ViajesProcessor implements IImportProcessor {
     tenantId: string,
   ): Promise<string> {
     const clienteId = row.clienteId as string;
-    const fechaCarga = (row.fechaCarga as Date | null) ?? null;
-    const fechaDescarga = (row.fechaDescarga as Date | null) ?? null;
-    const transportistaId = (row.transportistaId as string | null) ?? null;
+    const fechaCarga = (row.fechaCarga as Date | null) ?? undefined;
+    const fechaDescarga = (row.fechaDescarga as Date | null) ?? undefined;
 
+    // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
+    // para que reimportar el mismo ID Personalizado con un Excel más acotado
+    // no borre datos ya cargados que esa fila no trae.
     await this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id: viajeId },
         data: {
           clienteId,
-          transportistaId,
-          choferId: (row.choferId as string | null) ?? null,
-          origen: (row.origen as string | null) ?? null,
-          destino: (row.destino as string | null) ?? null,
-          fechaCarga: fechaCarga ?? undefined,
-          fechaDescarga: fechaDescarga ?? undefined,
-          detalleCarga: (row.detalleCarga as string | null) ?? null,
+          transportistaId: (row.transportistaId as string | null) ?? undefined,
+          choferId: (row.choferId as string | null) ?? undefined,
+          origen: (row.origen as string | null) ?? undefined,
+          destino: (row.destino as string | null) ?? undefined,
+          fechaCarga,
+          fechaDescarga,
+          detalleCarga: (row.detalleCarga as string | null) ?? undefined,
           kmRecorridos:
-            row.kmRecorridos != null ? Number(row.kmRecorridos) : null,
-          monto: this.resolveMonto(row),
-          monedaMonto: (row.monedaMonto as string | null) ?? "ARS",
+            row.kmRecorridos != null ? Number(row.kmRecorridos) : undefined,
+          monto: this.resolveMonto(row) ?? undefined,
+          monedaMonto: (row.monedaMonto as string | null) ?? undefined,
           cantidadFactura:
-            row.cantidadFactura != null ? Number(row.cantidadFactura) : null,
+            row.cantidadFactura != null
+              ? Number(row.cantidadFactura)
+              : undefined,
           precioUnitarioFactura:
             row.precioUnitarioFactura != null
               ? Number(row.precioUnitarioFactura)
-              : null,
+              : undefined,
           cantidadTransportista:
             row.cantidadTransportista != null
               ? Number(row.cantidadTransportista)
-              : null,
+              : undefined,
           precioUnitarioTransportista:
             row.precioUnitarioTransportista != null
               ? Number(row.precioUnitarioTransportista)
-              : null,
+              : undefined,
           precioTransportistaExterno:
             row.precioTransportistaExterno != null
               ? Number(row.precioTransportistaExterno)
-              : null,
+              : undefined,
           monedaPrecioTransportistaExterno:
-            (row.monedaPrecioTransportistaExterno as string | null) ?? "ARS",
+            (row.monedaPrecioTransportistaExterno as string | null) ??
+            undefined,
         },
       });
       // El transportista puede haber cambiado — resincronizar.

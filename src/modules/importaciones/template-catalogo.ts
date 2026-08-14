@@ -88,7 +88,7 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
     },
   ],
   viajes: [
-    { field: "numeroIdentificacionPersonalizado", campoLabel: "ID Personalizado", type: "string", systemRequired: false, defaultExcelHeader: "ID Personalizado" },
+    { field: "numeroIdentificacionPersonalizado", campoLabel: "ID Personalizado", type: "string", systemRequired: true, defaultExcelHeader: "ID Personalizado" },
     {
       field: "clienteId",
       campoLabel: "Cliente",

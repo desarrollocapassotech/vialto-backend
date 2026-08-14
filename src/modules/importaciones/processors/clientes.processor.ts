@@ -17,16 +17,28 @@ export class ClientesProcessor implements IImportProcessor {
       );
     }
 
+    // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
+    // para que un reimport no borre datos ya cargados que ese Excel no trae.
+    const data = {
+      idFiscal,
+      pais,
+      email: (row.email as string | null)?.trim() || undefined,
+      telefono: (row.telefono as string | null)?.trim() || undefined,
+      direccion: (row.direccion as string | null)?.trim() || undefined,
+    };
+
+    const existing = await this.prisma.cliente.findFirst({
+      where: { tenantId, nombre: { equals: nombre, mode: 'insensitive' } },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await this.prisma.cliente.update({ where: { id: existing.id }, data });
+      return existing.id;
+    }
+
     const cliente = await this.prisma.cliente.create({
-      data: {
-        tenantId,
-        nombre,
-        idFiscal,
-        pais,
-        email: (row.email as string | null)?.trim() || null,
-        telefono: (row.telefono as string | null)?.trim() || null,
-        direccion: (row.direccion as string | null)?.trim() || null,
-      },
+      data: { tenantId, nombre, ...data },
       select: { id: true },
     });
 

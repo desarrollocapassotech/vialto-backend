@@ -174,4 +174,12 @@ export class ImportacionesController {
     const tenantId = this.resolveTenantId(auth, queryTenantId);
     return this.service.getTemplates(tenantId);
   }
+
+  /** Catálogo fijo de campos importables de un módulo — arma el dropdown de la UI de templates. */
+  @ApiOperation({ summary: 'Catálogo de campos importables de un módulo' })
+  @Get('templates/catalogo')
+  @Roles('superadmin')
+  getCatalogoCampos(@Query('modulo') modulo: string) {
+    return this.service.getCatalogoCampos(modulo);
+  }
 }

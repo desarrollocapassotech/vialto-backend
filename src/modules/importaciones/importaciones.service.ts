@@ -23,6 +23,7 @@ import type {
   PreviewEntidad,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
+import { TEMPLATE_CATALOGO, construirConfigPorDefecto } from "./template-catalogo";
 
 @Injectable()
 export class ImportacionesService {
@@ -300,6 +301,11 @@ export class ImportacionesService {
     });
   }
 
+  /** Catálogo fijo de campos importables de un módulo — fuente de verdad para la UI de configuración de templates. */
+  getCatalogoCampos(modulo: string) {
+    return TEMPLATE_CATALOGO[modulo] ?? [];
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   private buildViajesPreview(
@@ -417,11 +423,29 @@ export class ImportacionesService {
     const template = await this.prisma.importTemplate.findFirst({
       where: { tenantId, modulo, activo: true },
     });
-    if (!template) {
+    if (template) return template;
+
+    // Sin template propio todavía: se genera uno por defecto a partir del
+    // catálogo fijo (mismos encabezados sugeridos que ve el superadmin), para
+    // que ningún módulo quede bloqueado por falta de configuración. Queda
+    // guardado como un ImportTemplate real, editable después desde la pestaña
+    // Templates igual que cualquier otro.
+    const config = construirConfigPorDefecto(modulo);
+    if (!config) {
       throw new NotFoundException(
         `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
       );
     }
-    return template;
+    return this.prisma.importTemplate.upsert({
+      where: { tenantId_modulo: { tenantId, modulo } },
+      create: {
+        tenantId,
+        modulo,
+        nombre: `Template ${modulo} (por defecto)`,
+        config: config as unknown as object,
+        activo: true,
+      },
+      update: {},
+    });
   }
 }

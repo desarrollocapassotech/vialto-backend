@@ -41,8 +41,8 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
   ],
   transportistas: [
     { field: "nombre", campoLabel: "Nombre", type: "string", systemRequired: true, defaultExcelHeader: "Nombre" },
-    { field: "idFiscal", campoLabel: "CUIT", type: "string", systemRequired: false, defaultExcelHeader: "CUIT" },
-    { field: "pais", campoLabel: "País", type: "string", systemRequired: false, defaultExcelHeader: "País" },
+    { field: "idFiscal", campoLabel: "CUIT", type: "string", systemRequired: true, defaultExcelHeader: "CUIT" },
+    { field: "pais", campoLabel: "País", type: "string", systemRequired: true, defaultExcelHeader: "País" },
     { field: "domicilio", campoLabel: "Domicilio", type: "string", systemRequired: false, defaultExcelHeader: "Domicilio" },
     { field: "condicionIva", campoLabel: "Condición IVA", type: "number", systemRequired: false, defaultExcelHeader: "Cond. IVA" },
     { field: "comisionPct", campoLabel: "% Comisión", type: "number", systemRequired: false, defaultExcelHeader: "% Comisión" },

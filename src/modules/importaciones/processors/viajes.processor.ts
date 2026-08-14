@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client"; // Importante: necesario para capturar 
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { generateNumeroViaje } from "../../viajes/generate-viaje-numero";
 import { syncLiquidacionEstadoViaje } from "../../viajes/viaje-estado-financiero";
+import { assertFechaDescargaValida } from "../../viajes/viajes.service";
 import {
   FACTURACION_ESTADOS_DISPONIBLES,
   LIQUIDACION_ESTADOS_DISPONIBLES,
@@ -149,6 +150,9 @@ export class ViajesProcessor implements IImportProcessor {
     const clienteId = row.clienteId as string;
     const fechaCarga = (row.fechaCarga as Date | null) ?? undefined;
     const fechaDescarga = (row.fechaDescarga as Date | null) ?? undefined;
+    if (fechaCarga && fechaDescarga) {
+      assertFechaDescargaValida(fechaCarga, fechaDescarga);
+    }
 
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que reimportar el mismo ID Personalizado con un Excel más acotado
@@ -226,6 +230,7 @@ export class ViajesProcessor implements IImportProcessor {
       if (!fechaCarga) throw new Error("La fecha de carga es requerida.");
       if (!fechaDescarga)
         throw new Error("La fecha de descarga es requerida.");
+      assertFechaDescargaValida(fechaCarga, fechaDescarga);
 
       // ── Clasificación explícita de flota ──────────────────────────────
       // No se infiere nada destructivo. Si la columna TIPO DE FLOTA no viene

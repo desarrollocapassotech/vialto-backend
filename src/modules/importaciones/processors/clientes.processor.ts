@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { validarIdFiscal } from '../../../shared/util/validar-id-fiscal';
 import type { IImportProcessor } from './import-processor.interface';
 import type { ValidatedRow } from '../types/import.types';
 
@@ -16,6 +17,7 @@ export class ClientesProcessor implements IImportProcessor {
         'Cada cliente importado requiere nombre, ID Fiscal y país',
       );
     }
+    validarIdFiscal(pais, idFiscal);
 
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que un reimport no borre datos ya cargados que ese Excel no trae.

@@ -11,9 +11,46 @@ import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
 import { VehiculosPaginatedQueryDto } from './dto/vehiculos-paginated-query.dto';
 
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
 @Injectable()
 export class VehiculosService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Genera y persiste un vehículo con patente placeholder (PENDIENTE-xxxxxx) cuando
+   * no se conoce la patente real todavía. Único punto de creación de placeholders —
+   * usado tanto por el alta manual (patente vacía) como por el import de Excel, para
+   * que ambos caminos no diverjan. Reintenta ante una colisión de `@@unique([tenantId, patente])`
+   * (altamente improbable, pero posible).
+   */
+  private async createConPatentePendiente(
+    tenantId: string,
+    data: Omit<Prisma.VehiculoUncheckedCreateInput, 'tenantId' | 'patente' | 'patentePendiente'>,
+  ) {
+    for (let intento = 0; intento < 5; intento++) {
+      try {
+        return await this.prisma.vehiculo.create({
+          data: {
+            ...data,
+            tenantId,
+            patente: `PENDIENTE-${randomSuffix()}`,
+            patentePendiente: true,
+          },
+        });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          continue; // colisión de patente placeholder — reintentar con otro sufijo
+        }
+        throw e;
+      }
+    }
+    throw new ConflictException(
+      'No se pudo generar una patente provisoria única. Reintentá.',
+    );
+  }
 
   findAll(tenantId: string) {
     return this.prisma.vehiculo.findMany({
@@ -86,22 +123,25 @@ export class VehiculosService {
 
   async create(tenantId: string, dto: CreateVehiculoDto) {
     await this.assertTransportista(tenantId, dto.transportistaId);
+    const patente = dto.patente?.trim();
+    const base = {
+      tipo: dto.tipo,
+      marca: dto.marca ?? null,
+      modelo: dto.modelo ?? null,
+      anio: dto.anio ?? null,
+      kmActual: dto.kmActual ?? 0,
+      nroChasis: dto.nroChasis?.trim() || null,
+      poliza: dto.poliza?.trim() || null,
+      vencimientoPoliza: dto.vencimientoPoliza ? new Date(dto.vencimientoPoliza) : null,
+      tara: dto.tara ?? null,
+      precinto: dto.precinto?.trim() || null,
+      transportistaId: dto.transportistaId ?? null,
+    };
+    if (!patente) {
+      return this.createConPatentePendiente(tenantId, base);
+    }
     return this.prisma.vehiculo.create({
-      data: {
-        tenantId,
-        patente: dto.patente.toUpperCase(),
-        tipo: dto.tipo,
-        marca: dto.marca ?? null,
-        modelo: dto.modelo ?? null,
-        anio: dto.anio ?? null,
-        kmActual: dto.kmActual ?? 0,
-        nroChasis: dto.nroChasis?.trim() || null,
-        poliza: dto.poliza?.trim() || null,
-        vencimientoPoliza: dto.vencimientoPoliza ? new Date(dto.vencimientoPoliza) : null,
-        tara: dto.tara ?? null,
-        precinto: dto.precinto?.trim() || null,
-        transportistaId: dto.transportistaId ?? null,
-      },
+      data: { ...base, tenantId, patente: patente.toUpperCase(), patentePendiente: false },
     });
   }
 
@@ -115,6 +155,8 @@ export class VehiculosService {
         where: { id },
         data: {
           patente: dto.patente ? dto.patente.toUpperCase() : undefined,
+          // Si se carga una patente real, deja de estar pendiente.
+          patentePendiente: dto.patente ? false : undefined,
           tipo: dto.tipo,
           marca: dto.marca,
           modelo: dto.modelo,

@@ -1,8 +1,9 @@
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsNotEmpty, IsDateString, Min } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsDateString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateVehiculoDto {
-  @IsString() @IsNotEmpty() patente: string;
+  /** Opcional: si no se envía, se genera un placeholder (PENDIENTE-xxxxxx) y queda marcado `patentePendiente`. */
+  @IsOptional() @IsString() patente?: string;
 
   @IsIn(['tractor', 'semirremolque', 'camion', 'utilitario', 'otro'])
   tipo: string;

@@ -86,6 +86,19 @@ export class ValidatorService {
     };
   }
 
+  /**
+   * Campos candidatos para un lookup, en orden de prioridad. `lookupFields`
+   * (plural) permite matchear contra más de un campo con el mismo valor
+   * tipeado (ej. nombre o CUIT) — así un typo en uno no bloquea la fila si
+   * el otro campo sí matchea, sin depender de un ID inventado que obligue a
+   * saltar entre hojas. Retrocompatible: si solo viene `lookupField`
+   * (singular), se usa como único campo.
+   */
+  private lookupFieldsOf(col: ColumnConfig): string[] {
+    if (col.lookupFields?.length) return col.lookupFields;
+    return [col.lookupField ?? "nombre"];
+  }
+
   private coerce(
     raw: unknown,
     col: ColumnConfig,
@@ -105,6 +118,11 @@ export class ValidatorService {
             error: `Campo obligatorio vacío`,
           },
         };
+      }
+      if (col.defaultValue != null) {
+        // Recursamos con el default como si fuera el valor crudo de la celda,
+        // así pasa por la misma coerción/validación de tipo que un valor real.
+        return this.coerce(col.defaultValue, { ...col, defaultValue: undefined }, caches, rowNum);
       }
       return { value: null };
     }
@@ -171,21 +189,26 @@ export class ValidatorService {
           return { value: str };
         }
 
-        const field = col.lookupField ?? "nombre";
-        const cacheKey = `${model}:${field}`;
-        const cache = caches[cacheKey] ?? {};
-        const id = cache[str.toLowerCase()];
-        if (!id) {
-          return {
-            error: {
-              fila: rowNum,
-              campo: col.excelHeader,
-              error: `No se encontró "${str}" en ${model}`,
-              valor: raw,
-            },
-          };
+        // Probamos cada campo candidato en orden (ej. nombre, después CUIT) —
+        // el mismo valor tipeado puede matchear por cualquiera de los dos.
+        const fields = this.lookupFieldsOf(col);
+        for (const field of fields) {
+          const cache = caches[`${model}:${field}`] ?? {};
+          const id = cache[str.toLowerCase()];
+          if (id) return { value: id };
         }
-        return { value: id };
+
+        return {
+          error: {
+            fila: rowNum,
+            campo: col.excelHeader,
+            error:
+              fields.length > 1
+                ? `No se encontró "${str}" en ${model} (buscado por ${fields.join(" o ")})`
+                : `No se encontró "${str}" en ${model}`,
+            valor: raw,
+          },
+        };
       }
 
       case "enum": {
@@ -254,69 +277,72 @@ export class ValidatorService {
     const created: Record<string, string[]> = {};
 
     const lookupCols = columns.filter(
-      (c) => c.type === "lookup" && c.lookupModel,
+      (c) => c.type === "lookup" && c.lookupModel && (c.lookupModel as string) !== "ciudades",
     );
 
+    // Agrupamos por modelo para consultar una sola vez aunque se busque por
+    // varios campos distintos (ej. nombre y CUIT) en la misma entidad.
+    const colsByModel = new Map<string, ColumnConfig[]>();
     for (const col of lookupCols) {
       const model = col.lookupModel!;
+      const list = colsByModel.get(model) ?? [];
+      list.push(col);
+      colsByModel.set(model, list);
+    }
 
-      // Si el modelo es "ciudades", no necesitamos hacer un query a la base de datos
-      if ((model as string) === "ciudades") continue;
+    for (const [model, cols] of colsByModel) {
+      const fieldsSet = new Set<string>();
+      for (const col of cols) {
+        for (const f of this.lookupFieldsOf(col)) fieldsSet.add(f);
+      }
+      const fields = [...fieldsSet];
 
-      const field = col.lookupField ?? "nombre";
-      const cacheKey = `${model}:${field}`;
+      const records = await this.queryLookup(model, fields, tenantId);
 
-      if (caches[cacheKey]) continue;
-
-      // Recolectar valores únicos preservando el texto original (casing del Excel)
-      const valuesMap = new Map<string, string>(); // lowercase → original
-      for (const row of rows) {
-        const v = row[col.field];
-        if (v != null && String(v).trim()) {
-          const original = String(v).trim();
-          valuesMap.set(original.toLowerCase(), original);
+      for (const field of fields) {
+        const map: Record<string, string> = {};
+        for (const r of records) {
+          const v = (r as Record<string, unknown>)[field];
+          if (v == null) continue;
+          const key = String(v).trim().toLowerCase();
+          if (!key) continue;
+          map[key] = (r as { id: string }).id;
         }
+        caches[`${model}:${field}`] = map;
       }
 
-      if (valuesMap.size === 0) {
-        caches[cacheKey] = {};
-        continue;
-      }
+      // Crear entidades faltantes si alguna columna de este modelo lo permite.
+      for (const col of cols) {
+        if (!col.createIfNotFound) continue;
+        const colFields = this.lookupFieldsOf(col);
+        const primaryField = colFields[0];
 
-      // Consultar la entidad correspondiente
-      const records = await this.queryLookup(model, field, tenantId);
-      const map: Record<string, string> = {};
-      for (const r of records) {
-        const key = String(
-          (r as Record<string, unknown>)[field] ?? "",
-        ).toLowerCase();
-        map[key] = (r as { id: string }).id;
-      }
+        const valuesMap = new Map<string, string>(); // lowercase → original
+        for (const row of rows) {
+          const v = row[col.field];
+          if (v != null && String(v).trim()) {
+            const original = String(v).trim();
+            valuesMap.set(original.toLowerCase(), original);
+          }
+        }
 
-      // Crear entidades faltantes si el campo lo permite
-      if (col.createIfNotFound) {
         for (const [lower, original] of valuesMap) {
-          if (!map[lower]) {
-            if (readOnly) {
+          const yaExiste = colFields.some((f) => caches[`${model}:${f}`]?.[lower]);
+          if (yaExiste) continue;
+
+          if (readOnly) {
+            (created[model] ??= []).push(original);
+            (caches[`${model}:${primaryField}`] ??= {})[lower] =
+              `__pending__${model}__${original}`;
+          } else {
+            const id = await this.createLookup(model, primaryField, original, tenantId);
+            if (id) {
+              (caches[`${model}:${primaryField}`] ??= {})[lower] = id;
               (created[model] ??= []).push(original);
-              map[lower] = `__pending__${model}__${original}`;
-            } else {
-              const id = await this.createLookup(
-                model,
-                field,
-                original,
-                tenantId,
-              );
-              if (id) {
-                map[lower] = id;
-                (created[model] ??= []).push(original);
-              }
             }
           }
         }
       }
-
-      caches[cacheKey] = map;
     }
 
     return { caches, created };
@@ -368,32 +394,28 @@ export class ValidatorService {
     }
   }
 
+  /** Consulta un modelo trayendo `id` + todos los campos que hace falta poder matchear. */
   private async queryLookup(
     model: string,
-    field: string,
+    fields: string[],
     tenantId: string,
-  ): Promise<{ id: string }[]> {
+  ): Promise<Record<string, unknown>[]> {
     const where = { tenantId };
-    const select = { id: true, [field]: true };
+    const select: Record<string, boolean> = { id: true };
+    for (const f of fields) select[f] = true;
 
-    let raw: unknown;
     switch (model) {
       case "clientes":
-        raw = await this.prisma.cliente.findMany({ where, select });
-        break;
+        return this.prisma.cliente.findMany({ where, select });
       case "choferes":
-        raw = await this.prisma.chofer.findMany({ where, select });
-        break;
+        return this.prisma.chofer.findMany({ where, select });
       case "vehiculos":
-        raw = await this.prisma.vehiculo.findMany({ where, select });
-        break;
+        return this.prisma.vehiculo.findMany({ where, select });
       case "transportistas":
-        raw = await this.prisma.transportista.findMany({ where, select });
-        break;
+        return this.prisma.transportista.findMany({ where, select });
       default:
         return [];
     }
-    return raw as { id: string }[];
   }
 }
 

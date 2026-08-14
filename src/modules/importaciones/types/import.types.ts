@@ -16,12 +16,26 @@ export interface ColumnConfig {
   format?: string;
   /** Para type='lookup': entidad a buscar */
   lookupModel?: LookupModel;
-  /** Para type='lookup': campo por el que se busca (default: 'nombre') */
+  /** Para type='lookup': campo por el que se busca (default: 'nombre'). Ignorado si `lookupFields` está presente. */
   lookupField?: string;
+  /**
+   * Para type='lookup': lista de campos candidatos a probar en orden con el
+   * mismo valor tipeado (ej. `['nombre', 'idFiscal']`) — así un typo en el
+   * nombre no bloquea la fila si el CUIT sí matchea, sin depender de un ID
+   * inventado que obligue a saltar entre hojas para copiarlo.
+   */
+  lookupFields?: string[];
   /** Para type='lookup': si no se encuentra, crear el registro automáticamente */
   createIfNotFound?: boolean;
   required?: boolean;
   allowedValues?: string[];
+  /**
+   * Valor a usar cuando la celda viene vacía y la columna no es `required`.
+   * Solo tiene sentido para campos sin restricción de unicidad (ej. TIPO de
+   * vehículo) — nunca usar para un campo único, porque todas las filas vacías
+   * chocarían con el mismo valor.
+   */
+  defaultValue?: string;
 }
 
 export interface TemplateConfig {

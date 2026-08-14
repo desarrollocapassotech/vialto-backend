@@ -9,6 +9,7 @@ import {
   Max,
   MaxLength,
   ValidateNested,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -20,6 +21,15 @@ export class LiquidacionConceptoLineaDto {
   @Type(() => Number)
   @Min(0.01)
   monto: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['GENERAL', 'VIAJE_PUNTUAL', 'TODOS_LOS_VIAJES'])
+  modoAplicacion?: string;
+
+  @IsOptional()
+  @IsString()
+  viajeId?: string;
 }
 
 export class CreateLiquidacionDto {

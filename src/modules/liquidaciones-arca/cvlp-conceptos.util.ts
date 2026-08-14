@@ -9,6 +9,8 @@ export type ConceptoLineaInput = {
   ivaPct: number;
   monto: number;
   orden?: number;
+  modoAplicacion?: string;
+  viajeId?: string | null;
 };
 
 export function signedImporte(signo: ConceptoSigno, monto: number): number {
@@ -25,6 +27,7 @@ export function buildCvlpConceptosList(args: {
   comision: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
+  viajes?: { id: string; numero: string | number }[];
 }): ConceptoFacturable[] {
   const conceptos: ConceptoFacturable[] = [
     { descripcion: 'Fletes', importe: args.bruto, ivaPct: args.ivaPctDefault },
@@ -32,11 +35,27 @@ export function buildCvlpConceptosList(args: {
   ];
   for (const l of args.lineas ?? []) {
     if (!l.monto || l.monto === 0) continue;
-    conceptos.push({
-      descripcion: l.nombreSnapshot,
-      importe: signedImporte(l.signo, l.monto),
-      ivaPct: l.ivaPct,
-    });
+    
+    if (l.modoAplicacion === 'TODOS_LOS_VIAJES' && args.viajes && args.viajes.length > 0) {
+      for (const v of args.viajes) {
+        conceptos.push({
+          descripcion: `${l.nombreSnapshot} (Viaje #${v.numero})`,
+          importe: signedImporte(l.signo, l.monto),
+          ivaPct: l.ivaPct,
+        });
+      }
+    } else {
+      let desc = l.nombreSnapshot;
+      if (l.modoAplicacion === 'VIAJE_PUNTUAL' && l.viajeId && args.viajes) {
+        const viaje = args.viajes.find((v) => v.id === l.viajeId);
+        if (viaje) desc = `${l.nombreSnapshot} (Viaje #${viaje.numero})`;
+      }
+      conceptos.push({
+        descripcion: desc,
+        importe: signedImporte(l.signo, l.monto),
+        ivaPct: l.ivaPct,
+      });
+    }
   }
   return conceptos;
 }
@@ -52,6 +71,7 @@ export function computeLiquidacionTotales(args: {
   comision: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
+  viajes?: { id: string; numero: string | number }[];
 }): { impNeto: number; impIva: number; liquido: number } {
   const pct = Number(args.ivaPctDefault);
   const rate = Number.isFinite(pct) ? pct : 0;

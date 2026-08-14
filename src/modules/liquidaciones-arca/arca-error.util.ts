@@ -165,8 +165,8 @@ export function enrichAfipRejectionMessage(message: string): string {
   if (lower.includes('11002') || lower.includes('feParamGetPtosVenta'.toLowerCase())) {
     return (
       `${message} El punto de venta configurado en "Pto. venta Factura A/B" no está habilitado en AFIP ` +
-      'homologación para Factura electrónica (WSFE). En AFIP, dá de alta o habilitá un punto de venta ' +
-      'para Facturas A/B y actualizá ese número en Superadmin → ARCA / AFIP.'
+      'para Factura electrónica (WSFE). En AFIP, dá de alta o habilitá un punto de venta ' +
+      'para Facturas A/B (o usá el mismo punto de venta Web Services del CVLP) y actualizá ese número en Superadmin → ARCA / AFIP.'
     );
   }
   if (lower.includes('10016')) {
@@ -192,8 +192,9 @@ export function enrichAfipRejectionMessage(message: string): string {
       lower.includes('cuit pais'))
   ) {
     return (
-      `${message} En homologación AFIP no reconoce CUITs reales de clientes: el sistema usa datos de prueba ` +
-      'al emitir (Factura B → consumidor final; Factura A → CUIT de prueba del sandbox).'
+      `${message} El CUIT/identificación del cliente no está en el padrón de AFIP. ` +
+      'Si el cliente es Consumidor Final, dejá vacío su CUIT (se emite como Consumidor Final, sin identificación); ' +
+      'si no, cargá un CUIT/DNI válido. En homologación, AFIP no reconoce CUITs reales y el sistema usa datos de prueba automáticamente.'
     );
   }
   return message;

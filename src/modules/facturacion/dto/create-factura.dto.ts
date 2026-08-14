@@ -3,7 +3,6 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
-  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -14,7 +13,8 @@ import { Type } from 'class-transformer';
 import { FacturaTramoDto } from './factura-tramo.dto';
 
 export class CreateFacturaDto {
-  @IsString() @IsNotEmpty() numero: string;
+  /** Obligatorio salvo para tenants con integracion-arca (ahí el número lo asigna AFIP al emitir) — validado en el service, no acá, porque depende del tenant. */
+  @IsOptional() @IsString() numero?: string;
   @IsIn(['cliente', 'transportista_externo']) tipo: string;
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() transportistaId?: string;

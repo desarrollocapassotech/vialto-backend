@@ -452,8 +452,24 @@ export class FacturacionService {
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 
-    // Validación previa para atrapar el 99% de los casos antes de abrir transacción
-    await this.assertNumeroFacturaUnico(tenantId, dto.numero);
+    const tieneArca = await this.tieneArca(tenantId);
+
+    // El número de comprobante solo es obligatorio para tenants sin ARCA: ahí
+    // representa un comprobante ya numerado externamente. Para tenants con
+    // integracion-arca el número real lo asigna AFIP al emitir (cbteTipo/
+    // ptoVenta/cbteNro) — la factura borrador se crea sin numero.
+    // Normalizamos acá (no solo confiar en el frontend) para que un string
+    // vacío/solo-espacios nunca llegue a guardarse como numero="" — eso
+    // rompería la unicidad real (NULL sí admite múltiples filas, "" no).
+    const numero = dto.numero?.trim() || null;
+    if (numero) {
+      // Validación previa para atrapar el 99% de los casos antes de abrir transacción
+      await this.assertNumeroFacturaUnico(tenantId, numero);
+    } else if (!tieneArca) {
+      throw new BadRequestException(
+        "El número de comprobante es obligatorio.",
+      );
+    }
 
     const viajeIds = dto.viajeIds ?? [];
     const viajes = await this.resolveViajes(tenantId, viajeIds);
@@ -467,7 +483,6 @@ export class FacturacionService {
     const importe = facturarPorTramo
       ? this.computeImporteConTramos(viajes, tramosValidos)
       : this.computeImporte(viajes);
-    const tieneArca = await this.tieneArca(tenantId);
 
     try {
       // Retornamos el resultado de la transacción esperando su resolución con 'await'
@@ -475,7 +490,7 @@ export class FacturacionService {
         const factura = await tx.factura.create({
           data: {
             tenantId,
-            numero: dto.numero,
+            numero,
             tipo: dto.tipo,
             clienteId: dto.clienteId ?? null,
             transportistaId: dto.transportistaId ?? null,
@@ -568,7 +583,9 @@ export class FacturacionService {
       await tx.factura.update({
         where: { id },
         data: {
-          ...(dto.numero !== undefined ? { numero: dto.numero } : {}),
+          ...(dto.numero !== undefined
+            ? { numero: dto.numero.trim() || null }
+            : {}),
           ...(dto.tipo !== undefined ? { tipo: dto.tipo } : {}),
           ...(dto.clienteId !== undefined
             ? { clienteId: dto.clienteId || null }

@@ -23,7 +23,7 @@ model Tenant {
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
   /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
-  labelIdentificacionPersonalizadaViajes String? @default("ID propio")
+  labelIdentificacionPersonalizadaViajes String? @default("ID de viaje personalizado")
   createdAt        DateTime  @default(now())
 
   clientes                   Cliente[]
@@ -373,7 +373,8 @@ model Factura {
   id               String         @id @default(cuid())
   tenantId         String
   tenant           Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero           String
+  /** Número de comprobante. Obligatorio para tenants sin ARCA (registran un comprobante ya numerado externamente). Para tenants con integracion-arca queda null hasta que no aplica — el número real vive en cbteTipo/ptoVenta/cbteNro, asignados por AFIP al emitir. */
+  numero           String?
   tipo             String // cliente | transportista_externo
   clienteId        String?
   cliente          Cliente?       @relation(fields: [clienteId], references: [id], onDelete: SetNull)
@@ -1079,6 +1080,8 @@ model ConceptoLiquidacion {
   signo     String
   ivaPct    Float    @default(21)
   activo    Boolean  @default(true)
+  monto     Float?
+  bloqueado Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1105,6 +1108,8 @@ model LiquidacionConceptoLinea {
   /// Monto absoluto (> 0). El signo determina si suma o resta.
   monto                 Float
   orden                 Int                  @default(0)
+  modoAplicacion        String               @default("GENERAL") // "GENERAL", "VIAJE_PUNTUAL", "TODOS_LOS_VIAJES"
+  viajeId               String?
   createdAt             DateTime             @default(now())
 
   @@index([liquidacionId])

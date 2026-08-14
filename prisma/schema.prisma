@@ -373,7 +373,8 @@ model Factura {
   id               String         @id @default(cuid())
   tenantId         String
   tenant           Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero           String
+  /** Número de comprobante. Obligatorio para tenants sin ARCA (registran un comprobante ya numerado externamente). Para tenants con integracion-arca queda null hasta que no aplica — el número real vive en cbteTipo/ptoVenta/cbteNro, asignados por AFIP al emitir. */
+  numero           String?
   tipo             String // cliente | transportista_externo
   clienteId        String?
   cliente          Cliente?       @relation(fields: [clienteId], references: [id], onDelete: SetNull)

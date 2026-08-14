@@ -22,6 +22,13 @@ export interface ColumnConfig {
   createIfNotFound?: boolean;
   required?: boolean;
   allowedValues?: string[];
+  /**
+   * Valor a usar cuando la celda viene vacía y la columna no es `required`.
+   * Solo tiene sentido para campos sin restricción de unicidad (ej. TIPO de
+   * vehículo) — nunca usar para un campo único, porque todas las filas vacías
+   * chocarían con el mismo valor.
+   */
+  defaultValue?: string;
 }
 
 export interface TemplateConfig {

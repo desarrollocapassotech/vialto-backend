@@ -9,6 +9,9 @@ import { ParserService } from "./engine/parser.service";
 import { ValidatorService } from "./engine/validator.service";
 import { ViajesProcessor } from "./processors/viajes.processor";
 import { ClientesProcessor } from "./processors/clientes.processor";
+import { TransportistasProcessor } from "./processors/transportistas.processor";
+import { ChoferesProcessor } from "./processors/choferes.processor";
+import { VehiculosProcessor } from "./processors/vehiculos.processor";
 import type { IImportProcessor } from "./processors/import-processor.interface";
 import type {
   TemplateConfig,
@@ -31,10 +34,16 @@ export class ImportacionesService {
     private readonly validator: ValidatorService,
     private readonly viajesProcessor: ViajesProcessor,
     private readonly clientesProcessor: ClientesProcessor,
+    private readonly transportistasProcessor: TransportistasProcessor,
+    private readonly choferesProcessor: ChoferesProcessor,
+    private readonly vehiculosProcessor: VehiculosProcessor,
   ) {
     this.processors = {
       viajes: this.viajesProcessor,
       clientes: this.clientesProcessor,
+      transportistas: this.transportistasProcessor,
+      choferes: this.choferesProcessor,
+      vehiculos: this.vehiculosProcessor,
     };
   }
 

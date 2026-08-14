@@ -4,7 +4,10 @@ import type { TemplateConfig, ParsedRow } from "../types/import.types";
 
 @Injectable()
 export class ParserService {
-  parse(buffer: Buffer, config: TemplateConfig): ParsedRow[] {
+  parse(
+    buffer: Buffer,
+    config: TemplateConfig,
+  ): { rows: ParsedRow[]; headers: string[] } {
     let workbook: XLSX.WorkBook;
     try {
       workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
@@ -81,7 +84,7 @@ export class ParserService {
       parsed.push(row);
     }
 
-    return parsed;
+    return { rows: parsed, headers: headers.filter((h) => h !== "") };
   }
 
   private resolveSheetName(

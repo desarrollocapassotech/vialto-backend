@@ -84,7 +84,10 @@ export class ImportacionesService {
     const template = await this.getActiveTemplate(tenantId, modulo);
     const config = template.config as unknown as TemplateConfig;
 
-    const parsed = this.parser.parse(buffer, config);
+    const { rows: parsed, headers: headersExcel } = this.parser.parse(
+      buffer,
+      config,
+    );
     if (parsed.length === 0) {
       throw new BadRequestException("El archivo no contiene filas de datos");
     }
@@ -95,6 +98,21 @@ export class ImportacionesService {
       tenantId,
       true,
     );
+
+    const headersExcelLower = new Set(
+      headersExcel.map((h) => h.toLowerCase()),
+    );
+    const headersNoMapeados = headersExcel.filter(
+      (h) =>
+        !config.columns.some(
+          (c) => c.excelHeader.toLowerCase() === h.toLowerCase(),
+        ),
+    );
+    const columnasOpcionalesFaltantes = config.columns
+      .filter(
+        (c) => !c.required && !headersExcelLower.has(c.excelHeader.toLowerCase()),
+      )
+      .map((c) => c.excelHeader);
 
     // Guardar sesión (expira en 30 minutos)
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -119,6 +137,8 @@ export class ImportacionesService {
       exitosas: valid.length,
       errores: errors.length,
       detalleErrores: errors,
+      headersNoMapeados,
+      columnasOpcionalesFaltantes,
     };
 
     if (modulo === "viajes") {

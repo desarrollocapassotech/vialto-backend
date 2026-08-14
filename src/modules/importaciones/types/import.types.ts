@@ -108,6 +108,10 @@ export interface PreviewResult {
   exitosas: number;
   errores: number;
   detalleErrores: RowError[];
+  /** Columnas del Excel que no matchean ningún campo del template — van a texto libre en Observaciones. */
+  headersNoMapeados: string[];
+  /** Columnas del template (no obligatorias) que no se encontraron en el Excel. */
+  columnasOpcionalesFaltantes: string[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

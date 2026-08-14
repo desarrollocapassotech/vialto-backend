@@ -210,6 +210,8 @@ model Vehiculo {
   transportistaId   String?
   transportista     Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   activo            Boolean        @default(true)
+  /** true si `patente` es un placeholder autogenerado (PENDIENTE-xxxxxx) porque todavía no se cargó la patente real. */
+  patentePendiente  Boolean        @default(false)
   createdAt         DateTime       @default(now())
 
   vehiculosViaje           ViajeVehiculo[]

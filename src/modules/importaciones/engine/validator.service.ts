@@ -106,6 +106,11 @@ export class ValidatorService {
           },
         };
       }
+      if (col.defaultValue != null) {
+        // Recursamos con el default como si fuera el valor crudo de la celda,
+        // así pasa por la misma coerción/validación de tipo que un valor real.
+        return this.coerce(col.defaultValue, { ...col, defaultValue: undefined }, caches, rowNum);
+      }
       return { value: null };
     }
 

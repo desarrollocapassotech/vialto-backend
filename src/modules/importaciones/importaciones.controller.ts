@@ -14,9 +14,12 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nes
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ImportacionesService } from './importaciones.service';
+import { ImportacionesPostViajesService } from './importaciones-post-viajes.service';
 import { PreviewImportDto } from './dto/preview-import.dto';
 import { ConfirmImportDto } from './dto/confirm-import.dto';
 import { CreateTemplateDto } from './dto/create-template.dto';
+import { ViajeIdsDto } from './dto/viaje-ids.dto';
+import { ConfirmarFacturasClientesDto } from './dto/confirmar-facturas-clientes.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -30,7 +33,10 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 @Controller('importaciones')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class ImportacionesController {
-  constructor(private readonly service: ImportacionesService) {}
+  constructor(
+    private readonly service: ImportacionesService,
+    private readonly postViajes: ImportacionesPostViajesService,
+  ) {}
 
   /** Resuelve el tenantId efectivo: superadmin puede operar sobre cualquier tenant. */
   private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
@@ -89,6 +95,50 @@ export class ImportacionesController {
   getLog(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getLog(auth.tenantId, id);
+  }
+
+  // ── Etapas opcionales posteriores a Viajes ──────────────────────────────
+  // Ninguna corre automáticamente ni queda mezclada con la confirmación de
+  // Viajes: reciben los IDs de los viajes ya creados/guardados y muestran su
+  // propio preview antes de crear nada. Nunca emiten nada a AFIP.
+
+  @ApiOperation({ summary: 'Preview de liquidaciones borrador a generar (agrupadas por transportista)' })
+  @Post('liquidaciones/preview')
+  @Roles('admin', 'superadmin')
+  previewLiquidaciones(@Body() dto: ViajeIdsDto, @CurrentAuth() auth: AuthPayload) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.postViajes.previewLiquidaciones(tenantId, dto.viajeIds);
+  }
+
+  @ApiOperation({ summary: 'Confirmar generación de liquidaciones borrador (sin emitir a AFIP)' })
+  @Post('liquidaciones/confirm')
+  @Roles('admin', 'superadmin')
+  confirmarLiquidaciones(@Body() dto: ViajeIdsDto, @CurrentAuth() auth: AuthPayload) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.postViajes.confirmarLiquidaciones(tenantId, auth.userId, dto.viajeIds);
+  }
+
+  @ApiOperation({ summary: 'Preview de facturas a clientes a generar (agrupadas por cliente)' })
+  @Post('facturas-clientes/preview')
+  @Roles('admin', 'superadmin')
+  previewFacturasClientes(@Body() dto: ViajeIdsDto, @CurrentAuth() auth: AuthPayload) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.postViajes.previewFacturasClientes(tenantId, dto.viajeIds);
+  }
+
+  @ApiOperation({ summary: 'Confirmar facturación a clientes' })
+  @Post('facturas-clientes/confirm')
+  @Roles('admin', 'superadmin')
+  confirmarFacturasClientes(
+    @Body() dto: ConfirmarFacturasClientesDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.postViajes.confirmarFacturasClientes(
+      tenantId,
+      dto.viajeIds,
+      dto.numerosPorCliente,
+    );
   }
 
   // ── Admin (superadmin): gestión de templates ───────────────────────────

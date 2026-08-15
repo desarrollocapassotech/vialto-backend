@@ -37,4 +37,10 @@ export class ConfirmImportDto {
   @ValidateNested({ each: true })
   @Type(() => CiudadNormalizadaImportDto)
   ciudadesNormalizadas?: CiudadNormalizadaImportDto[];
+
+  /** Filas que el usuario decidió no importar (ej. ciudad multidestino sin resolver). */
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  filasExcluidas?: number[];
 }

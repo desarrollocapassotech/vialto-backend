@@ -21,6 +21,7 @@ import { CreateTemplateDto } from './dto/create-template.dto';
 import { ViajeIdsDto } from './dto/viaje-ids.dto';
 import { ConfirmarFacturasClientesDto } from './dto/confirmar-facturas-clientes.dto';
 import { CrearVehiculosFaltantesDto } from './dto/crear-vehiculos-faltantes.dto';
+import { CrearEntidadesFaltantesDto } from './dto/crear-entidades-faltantes.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -89,6 +90,7 @@ export class ImportacionesController {
       auth.userId,
       auth.role === 'superadmin',
       dto.ciudadesNormalizadas,
+      dto.filasExcluidas,
     );
   }
 
@@ -217,5 +219,23 @@ export class ImportacionesController {
   ) {
     const tenantId = this.resolveTenantId(auth, dto.tenantId);
     return this.service.crearVehiculosFaltantes(tenantId, dto.items);
+  }
+
+  /**
+   * Crea entidades faltantes que solo necesitan un nombre (clientes,
+   * transportistas, choferes, productos), confirmadas desde el panel de
+   * previsualización. Vehículos usa el endpoint dedicado de arriba porque
+   * además necesita el tipo.
+   */
+  @ApiOperation({ summary: 'Crear entidades faltantes (clientes/transportistas/choferes/productos) detectadas en la previsualización' })
+  @Post('entidades-faltantes/:modelo')
+  @Roles('admin', 'superadmin')
+  crearEntidadesFaltantesSimple(
+    @Param('modelo') modelo: string,
+    @Body() dto: CrearEntidadesFaltantesDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.service.crearEntidadesFaltantesSimple(tenantId, modelo, dto.valores);
   }
 }

@@ -169,6 +169,7 @@ export class ImportacionesService {
       origen?: string | null;
       destino?: string | null;
     }[],
+    filasExcluidas?: number[],
   ) {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
@@ -192,7 +193,22 @@ export class ImportacionesService {
       );
     }
 
-    const filasValidas = session.filasValidas as unknown as ValidatedRow[];
+    const todasLasFilas = session.filasValidas as unknown as ValidatedRow[];
+
+    // Filas que el usuario decidió no importar (ej. destino multidestino que
+    // nunca va a resolver a una sola ciudad) — no se procesan ni se cuentan
+    // como error, quedan registradas aparte en el log.
+    const excluidas = new Set(filasExcluidas ?? []);
+    const filasValidas = todasLasFilas.filter(
+      (f) => !excluidas.has(f._rowNum),
+    );
+    const detallesOmitidas = todasLasFilas
+      .filter((f) => excluidas.has(f._rowNum))
+      .map((f) => ({
+        fila: f._rowNum,
+        estado: "omitida",
+        mensaje: "Fila omitida por el usuario antes de confirmar.",
+      }));
 
     if (ciudadesNormalizadas?.length) {
       const byFila = new Map(ciudadesNormalizadas.map((c) => [c.fila, c]));
@@ -227,7 +243,7 @@ export class ImportacionesService {
       }
     }
 
-    const detalles: object[] = [];
+    const detalles: object[] = [...detallesOmitidas];
     let exitosas = 0;
     let errores = 0;
 

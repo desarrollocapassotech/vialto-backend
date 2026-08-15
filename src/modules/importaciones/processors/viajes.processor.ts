@@ -16,6 +16,21 @@ import type { ValidatedRow } from "../types/import.types";
 export class ViajesProcessor implements IImportProcessor {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * `ValidatedRow` declara `fechaCarga`/`fechaDescarga` como `Date`, pero en
+   * `confirm()` la fila viene de `ImportSession.filasValidas` (columna Json)
+   * — Prisma serializa los Date a string al guardar y NO los rehidrata al
+   * leer, así que en la práctica llegan como string. Normaliza siempre a un
+   * Date real antes de usarlas (ej. `assertFechaDescargaValida` llama
+   * `.toISOString()` y explota si le llega un string).
+   */
+  private toDate(value: unknown): Date | null {
+    if (value == null) return null;
+    if (value instanceof Date) return value;
+    const d = new Date(value as string);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
   /** cantidadFactura × precioUnitarioFactura tiene prioridad sobre `monto` directo (retrocompatible con templates viejos que solo mandan MONTO). */
   private resolveMonto(row: ValidatedRow): number | null {
     const cantidad =
@@ -172,8 +187,8 @@ export class ViajesProcessor implements IImportProcessor {
     }
 
     const clienteId = row.clienteId as string;
-    const fechaCarga = (row.fechaCarga as Date | null) ?? undefined;
-    const fechaDescarga = (row.fechaDescarga as Date | null) ?? undefined;
+    const fechaCarga = this.toDate(row.fechaCarga) ?? undefined;
+    const fechaDescarga = this.toDate(row.fechaDescarga) ?? undefined;
     if (fechaCarga && fechaDescarga) {
       assertFechaDescargaValida(fechaCarga, fechaDescarga);
     }
@@ -259,8 +274,8 @@ export class ViajesProcessor implements IImportProcessor {
       const observaciones = observacionesParts.join("\n") || null;
 
       const clienteId = row.clienteId as string;
-      const fechaCarga = (row.fechaCarga as Date | null) ?? null;
-      const fechaDescarga = (row.fechaDescarga as Date | null) ?? null;
+      const fechaCarga = this.toDate(row.fechaCarga);
+      const fechaDescarga = this.toDate(row.fechaDescarga);
 
       if (!fechaCarga) throw new Error("La fecha de carga es requerida.");
       if (!fechaDescarga)

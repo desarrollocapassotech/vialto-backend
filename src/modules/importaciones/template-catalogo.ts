@@ -171,9 +171,6 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
     { field: "precioUnitarioTransportista", campoLabel: "Precio unitario transportista", type: "number", systemRequired: false, defaultExcelHeader: "Precio unitario transportista" },
     { field: "precioTransportistaExterno", campoLabel: "Monto total a transportista (flete)", type: "number", systemRequired: false, defaultExcelHeader: "Monto total a transportista (flete)" },
     { field: "monedaPrecioTransportistaExterno", campoLabel: "Moneda flete", type: "string", systemRequired: false, defaultExcelHeader: "Moneda flete" },
-    { field: "nroFacturaTransporte", campoLabel: "N° factura transportista", type: "string", systemRequired: false, defaultExcelHeader: "N° factura transportista" },
-    { field: "fechaEmisionFacturaTransp", campoLabel: "Fecha emisión factura transportista", type: "date", systemRequired: false, defaultExcelHeader: "Fecha emisión factura transportista" },
-    { field: "fechaVencimientoFacturaTransp", campoLabel: "Fecha vencimiento factura transportista", type: "date", systemRequired: false, defaultExcelHeader: "Fecha vencimiento factura transportista" },
     { field: "observaciones", campoLabel: "Observaciones", type: "string", systemRequired: false, defaultExcelHeader: "Observaciones" },
     { field: "monedaMonto", campoLabel: "Moneda", type: "string", systemRequired: false, defaultExcelHeader: "Moneda" },
     {

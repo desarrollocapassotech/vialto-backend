@@ -415,31 +415,11 @@ export class ViajesProcessor implements IImportProcessor {
 
       await this.upsertProductoViaje(tx, tenantId, viaje.id, row);
 
-      if (row.nroFacturaTransporte) {
-        const fechaEmision =
-          (row.fechaEmisionFacturaTransp as Date | null) ??
-          fechaCarga ??
-          new Date();
-        // Usamos tx para la factura externa.
-        // Vinculamos transportista y moneda para no perder la trazabilidad
-        // financiera del flete (antes la factura quedaba huérfana y en ARS).
-        await tx.factura.create({
-          data: {
-            tenantId,
-            numero: row.nroFacturaTransporte as string,
-            tipo: "transportista_externo",
-            transportistaId,
-            importe: precioFlete ?? 0,
-            moneda:
-              (row.monedaPrecioTransportistaExterno as string | null) ??
-              "ARS",
-            fechaEmision,
-            fechaVencimiento:
-              (row.fechaVencimientoFacturaTransp as Date | null) ?? null,
-            estado: "pendiente",
-          },
-        });
-      }
+      // El pago al transportista ya no se representa como una Factura
+      // tipo "transportista_externo" — ese camino se reemplazó por
+      // Liquidaciones (ver ImportacionesPostViajesService). Los campos
+      // financieros del flete (precioTransportistaExterno, moneda) quedan
+      // en el viaje igual, para que la liquidación borrador los tome.
 
       return viaje.id;
     });

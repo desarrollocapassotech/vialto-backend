@@ -527,7 +527,6 @@ export class ImportacionesService {
       const monto = toNum(p.monto);
       const precioTransp = toNum(p.precioTransportistaExterno);
       const nroFactura = toStr(p.nroFactura);
-      const nroFacturaTransporte = toStr(p.nroFacturaTransporte);
 
       viajes.push({
         fila: validRow._rowNum,
@@ -547,9 +546,11 @@ export class ImportacionesService {
         monedaPrecioTransportistaExterno: toStr(
           validRow.monedaPrecioTransportistaExterno,
         ),
-        nroFacturaTransporte,
       });
 
+      // Las facturas de este preview son siempre a cliente — el pago al
+      // transportista (precioTransportistaExterno) se liquida por afuera,
+      // vía Liquidaciones (post-viajes), no como una Factura propia.
       if (nroFactura) {
         facturas.push({
           tipo: "cliente",
@@ -558,17 +559,6 @@ export class ImportacionesService {
           importe: monto ?? 0,
           fechaEmision: toDateStr(p.fechaEmisionFactura),
           fechaVencimiento: toDateStr(p.fechaVencimientoFactura),
-        });
-      }
-
-      if (nroFacturaTransporte) {
-        facturas.push({
-          tipo: "transportista_externo",
-          numero: nroFacturaTransporte,
-          nombre: transporte,
-          importe: precioTransp ?? 0,
-          fechaEmision: toDateStr(p.fechaEmisionFacturaTransp),
-          fechaVencimiento: toDateStr(p.fechaVencimientoFacturaTransp),
         });
       }
     }

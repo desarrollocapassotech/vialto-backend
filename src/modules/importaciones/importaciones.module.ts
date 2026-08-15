@@ -9,6 +9,7 @@ import { ClientesProcessor } from './processors/clientes.processor';
 import { TransportistasProcessor } from './processors/transportistas.processor';
 import { ChoferesProcessor } from './processors/choferes.processor';
 import { VehiculosProcessor } from './processors/vehiculos.processor';
+import { IaTemplateSuggestionService } from './ia-template-suggestion.service';
 import { VehiculosModule } from '../../core/vehiculos/vehiculos.module';
 import { IntegracionArcaModule } from '../liquidaciones-arca/liquidaciones-arca.module';
 import { FacturacionModule } from '../facturacion/facturacion.module';
@@ -27,6 +28,7 @@ import { StockModule } from '../stock/stock.module';
     TransportistasProcessor,
     ChoferesProcessor,
     VehiculosProcessor,
+    IaTemplateSuggestionService,
   ],
 })
 export class ImportacionesModule {}

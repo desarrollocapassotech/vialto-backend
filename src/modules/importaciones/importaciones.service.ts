@@ -21,9 +21,13 @@ import type {
   PreviewViaje,
   PreviewFactura,
   PreviewEntidad,
+  RowError,
+  EntidadesFaltantesModelo,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
 import { TEMPLATE_CATALOGO, construirConfigPorDefecto } from "./template-catalogo";
+import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
+import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 
 @Injectable()
 export class ImportacionesService {
@@ -38,6 +42,8 @@ export class ImportacionesService {
     private readonly transportistasProcessor: TransportistasProcessor,
     private readonly choferesProcessor: ChoferesProcessor,
     private readonly vehiculosProcessor: VehiculosProcessor,
+    private readonly iaTemplateSuggestion: IaTemplateSuggestionService,
+    private readonly vehiculosService: VehiculosService,
   ) {
     this.processors = {
       viajes: this.viajesProcessor,
@@ -114,6 +120,8 @@ export class ImportacionesService {
       )
       .map((c) => c.excelHeader);
 
+    const entidadesFaltantes = this.agruparEntidadesFaltantes(errors);
+
     // Guardar sesión (expira en 30 minutos)
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
     const session = await this.prisma.importSession.create({
@@ -139,6 +147,7 @@ export class ImportacionesService {
       detalleErrores: errors,
       headersNoMapeados,
       columnasOpcionalesFaltantes,
+      entidadesFaltantes,
     };
 
     if (modulo === "viajes") {
@@ -325,6 +334,128 @@ export class ImportacionesService {
   /** Catálogo fijo de campos importables de un módulo — fuente de verdad para la UI de configuración de templates. */
   getCatalogoCampos(modulo: string) {
     return TEMPLATE_CATALOGO[modulo] ?? [];
+  }
+
+  /**
+   * Sugerencia de mapeo con IA a partir de un Excel de ejemplo — nunca
+   * guarda nada, el superadmin la revisa en el formulario antes de guardar.
+   */
+  async sugerirTemplate(
+    modulo: string,
+    buffer: Buffer,
+  ): Promise<SugerenciaTemplate> {
+    const catalogo = this.getCatalogoCampos(modulo);
+    if (catalogo.length === 0) {
+      throw new BadRequestException(
+        `No hay catálogo de campos definido para el módulo "${modulo}".`,
+      );
+    }
+    const { headers, sampleRows } = this.parser.sample(buffer);
+    if (headers.length === 0) {
+      throw new BadRequestException(
+        "No se encontraron encabezados en la primera fila del archivo.",
+      );
+    }
+    return this.iaTemplateSuggestion.sugerir(catalogo, headers, sampleRows);
+  }
+
+  /**
+   * Agrupa los errores de lookup ("no encontrado") por modelo y valor
+   * distinto, para poder ofrecer "crear estos N faltantes" en vez de que el
+   * superadmin tenga que leer fila por fila. Para vehículos, sugiere un tipo
+   * a partir de la posición dentro del par tractor/semirremolque — es una
+   * regla fija (no IA): si un valor SIEMPRE apareció en la posición 0,
+   * probablemente sea el tractor/chasis; si siempre en la 1, el
+   * semirremolque. Si aparece mezclado, no se sugiere nada y lo completa el
+   * usuario.
+   */
+  private agruparEntidadesFaltantes(errors: RowError[]): EntidadesFaltantesModelo[] {
+    const porModelo = new Map<string, Map<string, Set<number>>>();
+
+    for (const e of errors) {
+      if (!e.lookupModel || !e.valoresNoEncontrados) continue;
+      const porValor = porModelo.get(e.lookupModel) ?? new Map<string, Set<number>>();
+      for (const { valor, posicion } of e.valoresNoEncontrados) {
+        const posiciones = porValor.get(valor) ?? new Set<number>();
+        posiciones.add(posicion);
+        porValor.set(valor, posiciones);
+      }
+      porModelo.set(e.lookupModel, porValor);
+    }
+
+    return [...porModelo.entries()].map(([modelo, porValor]) => ({
+      modelo,
+      valores: [...porValor.entries()].map(([valor, posiciones]) => ({
+        valor,
+        tipoSugerido: this.sugerirTipoVehiculo(modelo, posiciones),
+      })),
+    }));
+  }
+
+  private sugerirTipoVehiculo(modelo: string, posiciones: Set<number>): string | null {
+    if (modelo !== "vehiculos") return null;
+    if (posiciones.size !== 1) return null; // apareció en más de una posición: ambiguo
+    const [posicion] = posiciones;
+    if (posicion === 0) return "tractor";
+    if (posicion === 1) return "semirremolque";
+    return null;
+  }
+
+  /**
+   * Crea los vehículos faltantes que el superadmin confirmó desde el panel
+   * de previsualización — mismo `VehiculosService.create()` que usa el alta
+   * manual, sin bypassear ninguna validación.
+   */
+  async crearVehiculosFaltantes(
+    tenantId: string,
+    items: { patente: string; tipo: string }[],
+  ): Promise<{ creados: number; errores: { patente: string; error: string }[] }> {
+    let creados = 0;
+    const errores: { patente: string; error: string }[] = [];
+    for (const item of items) {
+      try {
+        await this.vehiculosService.create(tenantId, {
+          patente: item.patente,
+          tipo: item.tipo,
+        });
+        creados++;
+      } catch (e) {
+        errores.push({
+          patente: item.patente,
+          error: e instanceof Error ? e.message : "Error desconocido",
+        });
+      }
+    }
+    return { creados, errores };
+  }
+
+  /**
+   * Crea entidades faltantes que solo necesitan un nombre (clientes,
+   * transportistas, choferes, productos) — confirmadas por el superadmin
+   * desde el mismo panel de previsualización. Reutiliza `createLookup`, el
+   * mismo alta mínima que ya usa "crear si no existe" durante el import, así
+   * que no hay dos caminos de creación distintos.
+   */
+  async crearEntidadesFaltantesSimple(
+    tenantId: string,
+    modelo: string,
+    valores: string[],
+  ): Promise<{ creados: number; errores: { valor: string; error: string }[] }> {
+    let creados = 0;
+    const errores: { valor: string; error: string }[] = [];
+    for (const valor of valores) {
+      try {
+        const id = await this.validator.createLookup(modelo, "nombre", valor, tenantId);
+        if (id) creados++;
+        else errores.push({ valor, error: "No se pudo crear." });
+      } catch (e) {
+        errores.push({
+          valor,
+          error: e instanceof Error ? e.message : "Error desconocido",
+        });
+      }
+    }
+    return { creados, errores };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

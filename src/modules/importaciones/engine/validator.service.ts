@@ -220,19 +220,21 @@ export class ValidatorService {
             .map((p) => p.trim())
             .filter((p) => p !== "");
           const ids: string[] = [];
-          const noEncontrados: string[] = [];
-          for (const parte of partes) {
+          const noEncontrados: { valor: string; posicion: number }[] = [];
+          partes.forEach((parte, posicion) => {
             const id = this.lookupOne(parte, model, fields, caches);
             if (id) ids.push(id);
-            else noEncontrados.push(parte);
-          }
+            else noEncontrados.push({ valor: parte, posicion });
+          });
           if (noEncontrados.length > 0) {
             return {
               error: {
                 fila: rowNum,
                 campo: col.excelHeader,
-                error: `No se encontró "${noEncontrados.join(`", "`)}" en ${model}`,
+                error: `No se encontró "${noEncontrados.map((n) => n.valor).join(`", "`)}" en ${model}`,
                 valor: raw,
+                lookupModel: model,
+                valoresNoEncontrados: noEncontrados,
               },
             };
           }
@@ -246,6 +248,8 @@ export class ValidatorService {
           error: {
             fila: rowNum,
             campo: col.excelHeader,
+            lookupModel: model,
+            valoresNoEncontrados: [{ valor: str, posicion: 0 }],
             error:
               fields.length > 1
                 ? `No se encontró "${str}" en ${model} (buscado por ${fields.join(" o ")})`

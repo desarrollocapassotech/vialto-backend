@@ -20,6 +20,7 @@ import { ConfirmImportDto } from './dto/confirm-import.dto';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { ViajeIdsDto } from './dto/viaje-ids.dto';
 import { ConfirmarFacturasClientesDto } from './dto/confirmar-facturas-clientes.dto';
+import { CrearVehiculosFaltantesDto } from './dto/crear-vehiculos-faltantes.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -181,5 +182,40 @@ export class ImportacionesController {
   @Roles('superadmin')
   getCatalogoCampos(@Query('modulo') modulo: string) {
     return this.service.getCatalogoCampos(modulo);
+  }
+
+  /**
+   * Sugerencia de mapeo de columnas con IA a partir de un Excel de ejemplo.
+   * No guarda nada — el resultado precarga el formulario para que el
+   * superadmin lo revise y confirme.
+   */
+  @ApiOperation({ summary: 'Sugerir mapeo de template con IA a partir de un Excel de ejemplo' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('templates/sugerir')
+  @Roles('superadmin')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  sugerirTemplate(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('modulo') modulo: string,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere un archivo Excel');
+    return this.service.sugerirTemplate(modulo, file.buffer);
+  }
+
+  /**
+   * Crea los vehículos que faltaban (confirmados por el usuario desde el
+   * panel de previsualización) y devuelve cuántos se crearon. Después de
+   * esto conviene volver a previsualizar el mismo archivo.
+   */
+  @ApiOperation({ summary: 'Crear vehículos faltantes detectados en la previsualización' })
+  @Post('entidades-faltantes/vehiculos')
+  @Roles('admin', 'superadmin')
+  crearVehiculosFaltantes(
+    @Body() dto: CrearVehiculosFaltantesDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.service.crearVehiculosFaltantes(tenantId, dto.items);
   }
 }

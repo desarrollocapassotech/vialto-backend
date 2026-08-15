@@ -76,6 +76,26 @@ export interface RowError {
   campo?: string;
   error: string;
   valor?: unknown;
+  /** Si el error es un lookup no encontrado: qué modelo se buscó. */
+  lookupModel?: string;
+  /**
+   * Valores puntuales que no matchearon, con su posición dentro de la celda
+   * (0 para lookup simple; 0/1/... para columnas `multiple`, ej. patente de
+   * tractor + semirremolque) — permite agrupar "faltantes" distintos entre
+   * filas y sugerir un valor por posición (ver `entidadesFaltantes`).
+   */
+  valoresNoEncontrados?: { valor: string; posicion: number }[];
+}
+
+export interface EntidadFaltante {
+  valor: string;
+  /** Sugerencia derivada de una regla simple (ej. posición en el par), no de IA. */
+  tipoSugerido?: string | null;
+}
+
+export interface EntidadesFaltantesModelo {
+  modelo: string;
+  valores: EntidadFaltante[];
 }
 
 export interface PreviewEntidad {
@@ -123,6 +143,8 @@ export interface PreviewResult {
   headersNoMapeados: string[];
   /** Columnas del template (no obligatorias) que no se encontraron en el Excel. */
   columnasOpcionalesFaltantes: string[];
+  /** Entidades referenciadas por lookup que no existen todavía, agrupadas por modelo. */
+  entidadesFaltantes: EntidadesFaltantesModelo[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

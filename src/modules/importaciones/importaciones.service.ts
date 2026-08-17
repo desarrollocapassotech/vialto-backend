@@ -366,13 +366,11 @@ export class ImportacionesService {
         `No hay catálogo de campos definido para el módulo "${modulo}".`,
       );
     }
-    const { headers, sampleRows } = this.parser.sample(buffer);
-    if (headers.length === 0) {
-      throw new BadRequestException(
-        "No se encontraron encabezados en la primera fila del archivo.",
-      );
+    const hojas = this.parser.sampleWorkbook(buffer);
+    if (hojas.length === 0 || hojas.every((h) => h.filas.length === 0)) {
+      throw new BadRequestException("El archivo no tiene datos para analizar.");
     }
-    return this.iaTemplateSuggestion.sugerir(catalogo, headers, sampleRows);
+    return this.iaTemplateSuggestion.sugerir(catalogo, hojas);
   }
 
   /**

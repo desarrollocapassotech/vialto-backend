@@ -46,19 +46,32 @@ export class ParserService {
   }
 
   /**
-   * Encabezados + un puñado de filas de ejemplo, sin necesitar un template
-   * todavía — lo usa la sugerencia de mapeo con IA (ver ia-template-suggestion).
+   * Primeras filas crudas de CADA hoja del archivo, sin asumir todavía cuál
+   * es la hoja correcta ni dónde está la fila de encabezados — lo usa la
+   * sugerencia de mapeo con IA (ver ia-template-suggestion) para elegir
+   * también la hoja y la fila de encabezados, no solo el mapeo de columnas.
    */
-  sample(
+  sampleWorkbook(
     buffer: Buffer,
-    maxRows = 5,
-  ): { headers: string[]; sampleRows: unknown[][] } {
-    const { headers, allRows, headerRowIndex } = this.readSheetRows(buffer);
-    const sampleRows = allRows.slice(
-      headerRowIndex + 1,
-      headerRowIndex + 1 + maxRows,
-    ) as unknown[][];
-    return { headers: headers.filter((h) => h !== ""), sampleRows };
+    maxRows = 10,
+  ): { nombre: string; filas: unknown[][] }[] {
+    let workbook: XLSX.WorkBook;
+    try {
+      workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    } catch {
+      throw new BadRequestException(
+        "El archivo no es un Excel válido (.xlsx / .xls)",
+      );
+    }
+    return workbook.SheetNames.map((nombre) => {
+      const sheetObj = workbook.Sheets[nombre];
+      const filas = XLSX.utils.sheet_to_json(sheetObj, {
+        header: 1,
+        defval: null,
+        raw: true,
+      }) as unknown[][];
+      return { nombre, filas: filas.slice(0, maxRows) };
+    });
   }
 
   parse(

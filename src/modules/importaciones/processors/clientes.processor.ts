@@ -1,14 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { validarIdFiscal } from '../../../shared/util/validar-id-fiscal';
-import type { IImportProcessor } from './import-processor.interface';
+import type { IImportProcessor, InsertResult } from './import-processor.interface';
 import type { ValidatedRow } from '../types/import.types';
 
 @Injectable()
 export class ClientesProcessor implements IImportProcessor {
   constructor(private readonly prisma: PrismaService) {}
 
-  async insert(row: ValidatedRow, tenantId: string, _createdBy: string): Promise<string> {
+  async insert(row: ValidatedRow, tenantId: string, _createdBy: string): Promise<InsertResult> {
     const nombre = String(row.nombre ?? '').trim();
     const idFiscal = String(row.idFiscal ?? '').trim();
     const pais = String(row.pais ?? '').trim();
@@ -40,7 +40,7 @@ export class ClientesProcessor implements IImportProcessor {
 
     if (existing) {
       await this.prisma.cliente.update({ where: { id: existing.id }, data });
-      return existing.id;
+      return { id: existing.id, creado: false };
     }
 
     const cliente = await this.prisma.cliente.create({
@@ -48,7 +48,7 @@ export class ClientesProcessor implements IImportProcessor {
       select: { id: true },
     });
 
-    return cliente.id;
+    return { id: cliente.id, creado: true };
   }
 
   async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {

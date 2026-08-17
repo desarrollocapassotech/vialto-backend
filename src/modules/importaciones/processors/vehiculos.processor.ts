@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { VehiculosService } from "../../../core/vehiculos/vehiculos.service";
-import type { IImportProcessor } from "./import-processor.interface";
+import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 
 type CamposComunes = {
@@ -39,7 +39,7 @@ export class VehiculosProcessor implements IImportProcessor {
     row: ValidatedRow,
     tenantId: string,
     _createdBy: string,
-  ): Promise<string> {
+  ): Promise<InsertResult> {
     const partes = this.partesPatente(row);
     const tipoFila = String(row.tipo ?? "").trim();
     const campos: CamposComunes = {
@@ -62,12 +62,21 @@ export class VehiculosProcessor implements IImportProcessor {
     // para sugerir el tipo de un vehículo faltante).
     if (partes.length >= 2) {
       const tiposPar = ["tractor", "semirremolque"];
-      let ultimoId = "";
+      let ultimo: InsertResult = { id: "", creado: false };
       for (let i = 0; i < partes.length; i++) {
         const tipo = tiposPar[i] ?? (tipoFila || "otro");
-        ultimoId = await this.upsertVehiculo(tenantId, partes[i], tipo, campos);
+        const resultado = await this.upsertVehiculo(
+          tenantId,
+          partes[i],
+          tipo,
+          campos,
+        );
+        // Si cualquiera de los dos es alta nueva, la fila cuenta como
+        // "creado" en el resumen — es una aproximación razonable para una
+        // fila que en realidad puede tocar dos vehículos distintos.
+        ultimo = { id: resultado.id, creado: ultimo.creado || resultado.creado };
       }
-      return ultimoId;
+      return ultimo;
     }
 
     if (!tipoFila) {
@@ -81,7 +90,7 @@ export class VehiculosProcessor implements IImportProcessor {
     patente: string | undefined,
     tipo: string,
     campos: CamposComunes,
-  ): Promise<string> {
+  ): Promise<InsertResult> {
     const dto = { patente, tipo, ...campos };
 
     if (patente) {
@@ -91,12 +100,12 @@ export class VehiculosProcessor implements IImportProcessor {
       });
       if (existing) {
         await this.vehiculosService.update(existing.id, tenantId, dto);
-        return existing.id;
+        return { id: existing.id, creado: false };
       }
     }
 
     const created = await this.vehiculosService.create(tenantId, dto);
-    return created.id;
+    return { id: created.id, creado: true };
   }
 
   async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {

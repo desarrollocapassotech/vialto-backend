@@ -8,6 +8,7 @@ import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ParserService } from "./engine/parser.service";
 import { ValidatorService } from "./engine/validator.service";
 import { ViajesProcessor } from "./processors/viajes.processor";
+import type { ViajeActual } from "./processors/viajes.processor";
 import { ClientesProcessor } from "./processors/clientes.processor";
 import { TransportistasProcessor } from "./processors/transportistas.processor";
 import { ChoferesProcessor } from "./processors/choferes.processor";
@@ -19,6 +20,7 @@ import type {
   ParsedRow,
   PreviewResult,
   PreviewViaje,
+  PreviewCambioCampo,
   PreviewFactura,
   PreviewEntidad,
   RowError,
@@ -169,7 +171,12 @@ export class ImportacionesService {
     };
 
     if (modulo === "viajes") {
-      Object.assign(result, this.buildViajesPreview(parsed, valid, created));
+      Object.assign(
+        result,
+        await this.buildViajesPreview(parsed, valid, created, tenantId),
+      );
+      result.advertenciasFacturasDuplicadas =
+        await this.viajesProcessor.detectarFacturasDuplicadas(valid, tenantId);
     }
 
     return result;
@@ -189,6 +196,7 @@ export class ImportacionesService {
     }[],
     filasExcluidas?: number[],
     confirmarCamposFaltantes?: boolean,
+    confirmarFacturasDuplicadas?: boolean,
   ) {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
@@ -251,6 +259,24 @@ export class ImportacionesService {
       }
     }
 
+    // Viajes: si varios viajes nuevos van a compartir número de factura (o
+    // ese número ya existe de otro import), confirm() los reutiliza y suma
+    // el importe en vez de duplicarlos — pero necesita confirmación
+    // explícita antes, mismo criterio que los campos recomendados.
+    if (session.template.modulo === "viajes" && !confirmarFacturasDuplicadas) {
+      const duplicadas = await this.viajesProcessor.detectarFacturasDuplicadas(
+        filasValidas,
+        tenantId,
+      );
+      if (duplicadas.length > 0) {
+        throw new BadRequestException(
+          "Hay números de factura repetidos entre varios viajes nuevos (" +
+            duplicadas.map((d) => d.numero).join(", ") +
+            ") — confirmá que querés unificarlos en una sola factura.",
+        );
+      }
+    }
+
     if (ciudadesNormalizadas?.length) {
       const byFila = new Map(ciudadesNormalizadas.map((c) => [c.fila, c]));
       for (const fila of filasValidas) {
@@ -290,8 +316,12 @@ export class ImportacionesService {
 
     for (const fila of filasValidas) {
       try {
-        const id = await processor.insert(fila, tenantId, createdBy);
-        detalles.push({ fila: fila._rowNum, estado: "ok", id });
+        const { id, creado, facturado } = await processor.insert(
+          fila,
+          tenantId,
+          createdBy,
+        );
+        detalles.push({ fila: fila._rowNum, estado: "ok", id, creado, facturado });
         exitosas++;
       } catch (err: unknown) {
         const mensaje = err instanceof Error ? err.message : "Error inesperado";
@@ -515,7 +545,7 @@ export class ImportacionesService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  private buildViajesPreview(
+  private async buildViajesPreview(
     parsed: ParsedRow[],
     valid: ValidatedRow[],
     created: {
@@ -523,12 +553,17 @@ export class ImportacionesService {
       transportistas: string[];
       choferes: string[];
     },
-  ): {
+    tenantId: string,
+  ): Promise<{
     viajes: PreviewViaje[];
     facturas: PreviewFactura[];
     clientes: PreviewEntidad[];
     transportistas: PreviewEntidad[];
-  } {
+  }> {
+    const estadoActual = await this.viajesProcessor.obtenerEstadoActual(
+      valid,
+      tenantId,
+    );
     const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
     const newClienteNames = new Set(
       created.clientes.map((n) => n.toLowerCase()),
@@ -567,8 +602,7 @@ export class ImportacionesService {
       const precioTransp = toNum(p.precioTransportistaExterno);
       const nroFactura = toStr(p.nroFactura);
 
-      viajes.push({
-        fila: validRow._rowNum,
+      const nuevoValor = {
         cliente,
         transporte,
         chofer: toStr(p.choferId),
@@ -585,6 +619,18 @@ export class ImportacionesService {
         monedaPrecioTransportistaExterno: toStr(
           validRow.monedaPrecioTransportistaExterno,
         ),
+      };
+
+      const actual = estadoActual.get(validRow._rowNum);
+      const cambios = actual
+        ? this.compararCamposViaje(actual, nuevoValor, toDateStr)
+        : undefined;
+
+      viajes.push({
+        fila: validRow._rowNum,
+        ...nuevoValor,
+        nuevo: !actual,
+        cambios,
       });
 
       // Las facturas de este preview son siempre a cliente — el pago al
@@ -614,6 +660,62 @@ export class ImportacionesService {
         esNuevo: newTransportistaNames.has(nombre.toLowerCase()),
       })),
     };
+  }
+
+  /** Compara el estado actual de un viaje (antes de este import) contra los valores nuevos, campo por campo — solo devuelve los que cambian. */
+  private compararCamposViaje(
+    actual: ViajeActual,
+    nuevo: {
+      cliente: string;
+      transporte: string | null;
+      chofer: string | null;
+      vehiculo: string | null;
+      origen: string | null;
+      destino: string | null;
+      fechaCarga: string | null;
+      fechaDescarga: string | null;
+      detalleCarga: string | null;
+      monto: number | null;
+      monedaMonto: string | null;
+      nroFactura: string | null;
+      precioTransportistaExterno: number | null;
+      monedaPrecioTransportistaExterno: string | null;
+    },
+    toDateStr: (v: unknown) => string | null,
+  ): PreviewCambioCampo[] {
+    const pares: PreviewCambioCampo[] = [
+      { campo: "Cliente", antes: actual.cliente, despues: nuevo.cliente || null },
+      { campo: "Transporte", antes: actual.transporte, despues: nuevo.transporte },
+      { campo: "Chofer", antes: actual.chofer, despues: nuevo.chofer },
+      { campo: "Vehículo", antes: actual.vehiculo, despues: nuevo.vehiculo },
+      { campo: "Origen", antes: actual.origen, despues: nuevo.origen },
+      { campo: "Destino", antes: actual.destino, despues: nuevo.destino },
+      {
+        campo: "F. Carga",
+        antes: toDateStr(actual.fechaCarga),
+        despues: nuevo.fechaCarga,
+      },
+      {
+        campo: "F. Descarga",
+        antes: toDateStr(actual.fechaDescarga),
+        despues: nuevo.fechaDescarga,
+      },
+      { campo: "Carga", antes: actual.detalleCarga, despues: nuevo.detalleCarga },
+      { campo: "Monto", antes: actual.monto, despues: nuevo.monto },
+      { campo: "Moneda", antes: actual.monedaMonto, despues: nuevo.monedaMonto },
+      { campo: "Nro FC", antes: actual.nroFactura, despues: nuevo.nroFactura },
+      {
+        campo: "Flete",
+        antes: actual.precioTransportistaExterno,
+        despues: nuevo.precioTransportistaExterno,
+      },
+      {
+        campo: "Moneda Flete",
+        antes: actual.monedaPrecioTransportistaExterno,
+        despues: nuevo.monedaPrecioTransportistaExterno,
+      },
+    ];
+    return pares.filter((p) => p.antes !== p.despues);
   }
 
   private async getActiveTemplate(tenantId: string, modulo: string) {

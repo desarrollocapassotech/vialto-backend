@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
-import type { IImportProcessor } from "./import-processor.interface";
+import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 
 @Injectable()
@@ -11,7 +11,7 @@ export class ChoferesProcessor implements IImportProcessor {
     row: ValidatedRow,
     tenantId: string,
     _createdBy: string,
-  ): Promise<string> {
+  ): Promise<InsertResult> {
     const nombre = String(row.nombre ?? "").trim();
     if (!nombre) {
       throw new Error("El nombre del chofer es obligatorio.");
@@ -38,14 +38,14 @@ export class ChoferesProcessor implements IImportProcessor {
         where: { id: existing.id },
         data,
       });
-      return existing.id;
+      return { id: existing.id, creado: false };
     }
 
     const created = await this.prisma.chofer.create({
       data: { tenantId, nombre, ...data },
       select: { id: true },
     });
-    return created.id;
+    return { id: created.id, creado: true };
   }
 
   async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {

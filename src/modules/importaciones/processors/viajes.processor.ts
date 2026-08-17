@@ -9,7 +9,7 @@ import {
   FACTURACION_ESTADOS_DISPONIBLES,
   LIQUIDACION_ESTADOS_DISPONIBLES,
 } from "../../viajes/viaje-estados";
-import type { IImportProcessor } from "./import-processor.interface";
+import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 
 @Injectable()
@@ -113,14 +113,19 @@ export class ViajesProcessor implements IImportProcessor {
     row: ValidatedRow,
     tenantId: string,
     createdBy: string,
-  ): Promise<string> {
+  ): Promise<InsertResult> {
     try {
       const existingId = await this.findExisting(row, tenantId);
       if (existingId) {
-        return await this.update(existingId, row, tenantId);
+        const id = await this.update(existingId, row, tenantId);
+        // update() nunca adjunta una factura nueva — y si el viaje ya
+        // estaba facturado, ni siquiera llega hasta acá (corta antes con
+        // error). Si llegamos, no está facturado.
+        return { id, creado: false, facturado: false };
       }
 
-      return await this.create(row, tenantId, createdBy);
+      const { id, facturado } = await this.create(row, tenantId, createdBy);
+      return { id, creado: true, facturado };
     } catch (error) {
       // Limpiamos los errores y los lanzamos nuevamente como Error estándar
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -259,7 +264,7 @@ export class ViajesProcessor implements IImportProcessor {
     row: ValidatedRow,
     tenantId: string,
     createdBy: string,
-  ): Promise<string> {
+  ): Promise<{ id: string; facturado: boolean }> {
     // Envolvemos todas las operaciones de la fila en una transacción interactiva
     return await this.prisma.$transaction(async (tx) => {
       // Pasamos 'tx' (el cliente transaccional) a tu generador para mantener la consistencia
@@ -327,25 +332,45 @@ export class ViajesProcessor implements IImportProcessor {
 
       let facturaClienteId: string | null = null;
       if (row.nroFactura) {
-        const fechaEmision =
-          (row.fechaEmisionFactura as Date | null) ?? fechaCarga ?? new Date();
+        const numeroFactura = row.nroFactura as string;
+        const montoFila = row.monto != null ? Number(row.monto) : 0;
 
-        // 2. Cambiamos this.prisma por tx
-        const factura = await tx.factura.create({
-          data: {
-            tenantId,
-            numero: row.nroFactura as string,
-            tipo: "cliente",
-            clienteId,
-            importe: row.monto != null ? Number(row.monto) : 0,
-            fechaEmision,
-            fechaVencimiento:
-              (row.fechaVencimientoFactura as Date | null) ?? null,
-            estado: "pendiente",
-          },
-          select: { id: true },
+        // Si ya existe una factura con el mismo número para este cliente
+        // (de una fila anterior de este mismo import, o de un import
+        // previo), no se crea una duplicada: se reutiliza y se le suma el
+        // importe de este viaje — el usuario ya confirmó este
+        // comportamiento antes de llegar acá (ver ImportacionesService
+        // .confirm / detectarFacturasDuplicadas).
+        const existente = await tx.factura.findFirst({
+          where: { tenantId, tipo: "cliente", numero: numeroFactura, clienteId },
+          select: { id: true, importe: true },
         });
-        facturaClienteId = factura.id;
+
+        if (existente) {
+          await tx.factura.update({
+            where: { id: existente.id },
+            data: { importe: existente.importe + montoFila },
+          });
+          facturaClienteId = existente.id;
+        } else {
+          const fechaEmision =
+            (row.fechaEmisionFactura as Date | null) ?? fechaCarga ?? new Date();
+          const factura = await tx.factura.create({
+            data: {
+              tenantId,
+              numero: numeroFactura,
+              tipo: "cliente",
+              clienteId,
+              importe: montoFila,
+              fechaEmision,
+              fechaVencimiento:
+                (row.fechaVencimientoFactura as Date | null) ?? null,
+              estado: "pendiente",
+            },
+            select: { id: true },
+          });
+          facturaClienteId = factura.id;
+        }
       }
 
       const etapa = (() => {
@@ -436,7 +461,7 @@ export class ViajesProcessor implements IImportProcessor {
       // financieros del flete (precioTransportistaExterno, moneda) quedan
       // en el viaje igual, para que la liquidación borrador los tome.
 
-      return viaje.id;
+      return { id: viaje.id, facturado: facturaClienteId != null };
     });
   }
 
@@ -487,12 +512,17 @@ export class ViajesProcessor implements IImportProcessor {
   }
 
   /**
-   * Versión batcheada de `findExisting` para el preview: en vez de una
-   * query por fila, resuelve todas las filas con ID Personalizado en una
-   * sola consulta, y el resto (fallback compuesto) en otra — mismo criterio
-   * de matcheo, sin N+1.
+   * Versión batcheada de `findExisting`: en vez de una query por fila,
+   * resuelve todas las filas con ID Personalizado en una sola consulta, y
+   * el resto (fallback compuesto) en otra — mismo criterio de matcheo que
+   * `findExisting`, sin N+1. Devuelve, por número de fila (`_rowNum`), el id
+   * del viaje YA EXISTENTE que le corresponde (se actualizaría) — las filas
+   * que no aparecen acá son altas nuevas.
    */
-  async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {
+  private async resolverFilasExistentes(
+    rows: ValidatedRow[],
+    tenantId: string,
+  ): Promise<Map<number, string>> {
     const numerosId = rows
       .map((r) =>
         (r.numeroIdentificacionPersonalizado as string | null)
@@ -504,28 +534,29 @@ export class ViajesProcessor implements IImportProcessor {
     const existentesPorNumero = numerosId.length
       ? await this.prisma.viaje.findMany({
           where: { tenantId, numeroIdentificacionPersonalizado: { in: numerosId } },
-          select: { numeroIdentificacionPersonalizado: true },
+          select: { id: true, numeroIdentificacionPersonalizado: true },
         })
       : [];
-    const numerosExistentes = new Set(
+    const idPorNumero = new Map(
       existentesPorNumero
-        .map((v) => v.numeroIdentificacionPersonalizado)
-        .filter((n): n is string => !!n),
+        .filter((v) => v.numeroIdentificacionPersonalizado)
+        .map((v) => [v.numeroIdentificacionPersonalizado as string, v.id]),
     );
 
-    let count = 0;
+    const filasExistentes = new Map<number, string>();
     const pendientes: ValidatedRow[] = [];
     for (const r of rows) {
       const numero = (r.numeroIdentificacionPersonalizado as string | null)
         ?.toString()
         .trim();
-      if (numero && numerosExistentes.has(numero)) {
-        count++;
+      const id = numero ? idPorNumero.get(numero) : undefined;
+      if (id) {
+        filasExistentes.set(r._rowNum, id);
       } else {
         pendientes.push(r);
       }
     }
-    if (pendientes.length === 0) return count;
+    if (pendientes.length === 0) return filasExistentes;
 
     // Fallback compuesto (cliente + transporte + origen + destino + fechas)
     // para las filas que no matchearon por ID Personalizado — mismos campos
@@ -566,7 +597,7 @@ export class ViajesProcessor implements IImportProcessor {
         });
       }
     }
-    if (conDatosCompuestos.length === 0) return count;
+    if (conDatosCompuestos.length === 0) return filasExistentes;
 
     const existentesCompuesto = await this.prisma.viaje.findMany({
       where: {
@@ -581,6 +612,7 @@ export class ViajesProcessor implements IImportProcessor {
         })),
       },
       select: {
+        id: true,
         clienteId: true,
         transportistaId: true,
         origen: true,
@@ -589,8 +621,8 @@ export class ViajesProcessor implements IImportProcessor {
         fechaDescarga: true,
       },
     });
-    const clavesExistentes = new Set(
-      existentesCompuesto.map((v) =>
+    const idPorClave = new Map(
+      existentesCompuesto.map((v) => [
         this.claveCompuesta(
           v.clienteId,
           v.transportistaId,
@@ -599,7 +631,8 @@ export class ViajesProcessor implements IImportProcessor {
           v.fechaCarga,
           v.fechaDescarga,
         ),
-      ),
+        v.id,
+      ]),
     );
 
     for (const f of conDatosCompuestos) {
@@ -611,9 +644,160 @@ export class ViajesProcessor implements IImportProcessor {
         f.fechaCarga,
         f.fechaDescarga,
       );
-      if (clavesExistentes.has(clave)) count++;
+      const id = idPorClave.get(clave);
+      if (id) filasExistentes.set(f.row._rowNum, id);
     }
 
-    return count;
+    return filasExistentes;
   }
+
+  async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {
+    const filasExistentes = await this.resolverFilasExistentes(rows, tenantId);
+    return filasExistentes.size;
+  }
+
+  /**
+   * Detecta números de factura que van a terminar compartidos por más de
+   * un viaje NUEVO de este archivo (o que ya existen como Factura de otro
+   * import) — en esos casos `insert()` reutiliza la factura existente y le
+   * suma el importe en vez de crear un duplicado, así que el usuario tiene
+   * que confirmarlo antes de poder importar (ver `ConfirmImportDto.
+   * confirmarFacturasDuplicadas`). Solo mira filas que van a ser altas
+   * nuevas — una fila que actualiza un viaje existente no toca su factura.
+   */
+  async detectarFacturasDuplicadas(
+    rows: ValidatedRow[],
+    tenantId: string,
+  ): Promise<{ numero: string; filas: number[] }[]> {
+    const filasExistentes = await this.resolverFilasExistentes(rows, tenantId);
+    const nuevas = rows.filter((r) => !filasExistentes.has(r._rowNum));
+
+    const porClave = new Map<
+      string,
+      { numero: string; clienteId: string; filas: number[] }
+    >();
+    for (const r of nuevas) {
+      const numero = (r.nroFactura as string | null)?.toString().trim();
+      const clienteId = r.clienteId as string | undefined;
+      if (!numero || !clienteId) continue;
+      const clave = `${clienteId}::${numero.toLowerCase()}`;
+      const grupo = porClave.get(clave);
+      if (grupo) {
+        grupo.filas.push(r._rowNum);
+      } else {
+        porClave.set(clave, { numero, clienteId, filas: [r._rowNum] });
+      }
+    }
+    if (porClave.size === 0) return [];
+
+    const numerosUnicos = [...new Set([...porClave.values()].map((g) => g.numero))];
+    const existentesEnBd = await this.prisma.factura.findMany({
+      where: { tenantId, tipo: "cliente", numero: { in: numerosUnicos } },
+      select: { numero: true, clienteId: true },
+    });
+    const clavesEnBd = new Set(
+      existentesEnBd
+        .filter((f) => f.clienteId)
+        .map((f) => `${f.clienteId}::${(f.numero as string).toLowerCase()}`),
+    );
+
+    const resultado: { numero: string; filas: number[] }[] = [];
+    for (const [clave, grupo] of porClave) {
+      if (grupo.filas.length > 1 || clavesEnBd.has(clave)) {
+        resultado.push({ numero: grupo.numero, filas: grupo.filas });
+      }
+    }
+    return resultado;
+  }
+
+  /**
+   * Estado actual (antes de este import) de los viajes que ya existen entre
+   * `rows` — para que el preview pueda mostrar un antes/después por campo
+   * en vez de solo los valores nuevos. Los nombres/patentes ya vienen
+   * resueltos a texto (no ids), igual que se muestran en el preview.
+   */
+  async obtenerEstadoActual(
+    rows: ValidatedRow[],
+    tenantId: string,
+  ): Promise<Map<number, ViajeActual>> {
+    const filasExistentes = await this.resolverFilasExistentes(rows, tenantId);
+    if (filasExistentes.size === 0) return new Map();
+
+    const ids = [...new Set(filasExistentes.values())];
+    const viajes = await this.prisma.viaje.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        cliente: { select: { nombre: true } },
+        transportista: { select: { nombre: true } },
+        chofer: { select: { nombre: true } },
+        vehiculosViaje: {
+          select: { vehiculo: { select: { patente: true } } },
+          orderBy: { orden: "asc" },
+        },
+        origen: true,
+        destino: true,
+        fechaCarga: true,
+        fechaDescarga: true,
+        detalleCarga: true,
+        monto: true,
+        monedaMonto: true,
+        nroFactura: true,
+        precioTransportistaExterno: true,
+        monedaPrecioTransportistaExterno: true,
+      },
+    });
+
+    const porId = new Map<string, ViajeActual>(
+      viajes.map((v) => {
+        const patentes = v.vehiculosViaje
+          .map((vv) => vv.vehiculo.patente)
+          .filter((p): p is string => !!p);
+        return [
+          v.id,
+          {
+            cliente: v.cliente?.nombre ?? null,
+            transporte: v.transportista?.nombre ?? null,
+            chofer: v.chofer?.nombre ?? null,
+            vehiculo: patentes.length > 0 ? patentes.join("/") : null,
+            origen: v.origen,
+            destino: v.destino,
+            fechaCarga: v.fechaCarga,
+            fechaDescarga: v.fechaDescarga,
+            detalleCarga: v.detalleCarga,
+            monto: v.monto,
+            monedaMonto: v.monedaMonto,
+            nroFactura: v.nroFactura,
+            precioTransportistaExterno: v.precioTransportistaExterno,
+            monedaPrecioTransportistaExterno: v.monedaPrecioTransportistaExterno,
+          },
+        ];
+      }),
+    );
+
+    const resultado = new Map<number, ViajeActual>();
+    for (const [fila, viajeId] of filasExistentes) {
+      const actual = porId.get(viajeId);
+      if (actual) resultado.set(fila, actual);
+    }
+    return resultado;
+  }
+}
+
+export interface ViajeActual {
+  cliente: string | null;
+  transporte: string | null;
+  chofer: string | null;
+  /** Patentes ya unidas con "/" si el viaje tiene más de un vehículo vinculado. */
+  vehiculo: string | null;
+  origen: string | null;
+  destino: string | null;
+  fechaCarga: Date | null;
+  fechaDescarga: Date | null;
+  detalleCarga: string | null;
+  monto: number | null;
+  monedaMonto: string | null;
+  nroFactura: string | null;
+  precioTransportistaExterno: number | null;
+  monedaPrecioTransportistaExterno: string | null;
 }

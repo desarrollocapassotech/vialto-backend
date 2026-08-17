@@ -111,6 +111,12 @@ export interface PreviewEntidad {
   esNuevo: boolean;
 }
 
+export interface PreviewCambioCampo {
+  campo: string;
+  antes: string | number | null;
+  despues: string | number | null;
+}
+
 export interface PreviewViaje {
   fila: number;
   cliente: string;
@@ -118,7 +124,7 @@ export interface PreviewViaje {
   origen: string | null;
   destino: string | null;
   chofer: string | null;
-  vehiculo: string | null;  
+  vehiculo: string | null;
   fechaCarga: string | null;
   fechaDescarga: string | null;
   detalleCarga: string | null;
@@ -127,6 +133,10 @@ export interface PreviewViaje {
   nroFactura: string | null;
   precioTransportistaExterno: number | null;
   monedaPrecioTransportistaExterno: string | null;
+  /** true = este viaje no existe todavía (alta nueva). false = actualiza uno existente. */
+  nuevo: boolean;
+  /** Solo si `nuevo` es false: campos que cambian respecto al valor actual, con su antes/después. */
+  cambios?: PreviewCambioCampo[];
 }
 
 export interface PreviewFactura {
@@ -167,6 +177,13 @@ export interface PreviewResult {
    */
   entidadesNuevas?: number;
   entidadesActualizadas?: number;
+  /**
+   * Solo viajes: números de factura que van a terminar compartidos por más
+   * de un viaje nuevo (o que ya existen de otro import) — `confirm()` los
+   * reutiliza y suma el importe en vez de duplicarlos, pero necesita
+   * confirmación explícita antes (`ConfirmImportDto.confirmarFacturasDuplicadas`).
+   */
+  advertenciasFacturasDuplicadas?: { numero: string; filas: number[] }[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

@@ -49,4 +49,9 @@ export class ConfirmImportDto {
   @IsOptional()
   @IsBoolean()
   confirmarCamposFaltantes?: boolean;
+
+  /** Solo viajes: el usuario confirmó que varios viajes nuevos comparten número de factura (se reutiliza y suma en vez de duplicar). */
+  @IsOptional()
+  @IsBoolean()
+  confirmarFacturasDuplicadas?: boolean;
 }

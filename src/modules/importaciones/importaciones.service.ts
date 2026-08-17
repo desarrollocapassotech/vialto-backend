@@ -79,6 +79,31 @@ export class ImportacionesService {
     }
   }
 
+  /**
+   * Si el tenant ya tiene algún cliente/transportista/chofer/vehículo
+   * cargado, el wizard le ofrece elegir qué módulos importar en vez de
+   * forzar la secuencia completa de siempre (pensada para altas nuevas).
+   */
+  async tenantTieneDatos(tenantId: string): Promise<{
+    clientes: boolean;
+    transportistas: boolean;
+    choferes: boolean;
+    vehiculos: boolean;
+  }> {
+    const [clientes, transportistas, choferes, vehiculos] = await Promise.all([
+      this.prisma.cliente.count({ where: { tenantId } }),
+      this.prisma.transportista.count({ where: { tenantId } }),
+      this.prisma.chofer.count({ where: { tenantId } }),
+      this.prisma.vehiculo.count({ where: { tenantId } }),
+    ]);
+    return {
+      clientes: clientes > 0,
+      transportistas: transportistas > 0,
+      choferes: choferes > 0,
+      vehiculos: vehiculos > 0,
+    };
+  }
+
   // ── Preview ──────────────────────────────────────────────────────────────
 
   async preview(

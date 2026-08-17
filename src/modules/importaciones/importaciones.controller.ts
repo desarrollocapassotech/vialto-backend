@@ -51,6 +51,22 @@ export class ImportacionesController {
   }
 
   /**
+   * Si el tenant ya tiene clientes/transportistas/choferes/vehículos
+   * cargados, el wizard ofrece elegir qué módulos importar en vez de forzar
+   * la secuencia completa (pensada para un tenant nuevo, sin datos todavía).
+   */
+  @ApiOperation({ summary: 'Indica si el tenant ya tiene datos cargados por módulo' })
+  @Get('tenant-tiene-datos')
+  @Roles('admin', 'superadmin')
+  tenantTieneDatos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') queryTenantId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(auth, queryTenantId);
+    return this.service.tenantTieneDatos(tenantId);
+  }
+
+  /**
    * Sube un archivo Excel, lo valida y devuelve una previsualización.
    * No guarda nada en las tablas de negocio.
    */

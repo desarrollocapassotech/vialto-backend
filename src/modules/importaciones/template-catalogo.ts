@@ -32,21 +32,23 @@ export interface CatalogoColumn {
   separador?: string;
   allowedValues?: string[];
   format?: string;
+  /** true = recomendado pero no bloqueante: ver `ColumnConfig.warnIfEmpty`. */
+  warnIfEmpty?: boolean;
 }
 
 export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
   clientes: [
     { field: "nombre", campoLabel: "Nombre", type: "string", systemRequired: true, defaultExcelHeader: "Nombre" },
-    { field: "idFiscal", campoLabel: "CUIT", type: "string", systemRequired: true, defaultExcelHeader: "CUIT" },
-    { field: "pais", campoLabel: "País", type: "string", systemRequired: true, defaultExcelHeader: "País" },
+    { field: "idFiscal", campoLabel: "CUIT", type: "string", systemRequired: false, warnIfEmpty: true, defaultExcelHeader: "CUIT" },
+    { field: "pais", campoLabel: "País", type: "string", systemRequired: false, warnIfEmpty: true, defaultExcelHeader: "País" },
     { field: "email", campoLabel: "Email", type: "string", systemRequired: false, defaultExcelHeader: "Email" },
     { field: "telefono", campoLabel: "Teléfono", type: "string", systemRequired: false, defaultExcelHeader: "Teléfono" },
     { field: "direccion", campoLabel: "Dirección", type: "string", systemRequired: false, defaultExcelHeader: "Dirección" },
   ],
   transportistas: [
     { field: "nombre", campoLabel: "Nombre", type: "string", systemRequired: true, defaultExcelHeader: "Nombre" },
-    { field: "idFiscal", campoLabel: "CUIT", type: "string", systemRequired: true, defaultExcelHeader: "CUIT" },
-    { field: "pais", campoLabel: "País", type: "string", systemRequired: true, defaultExcelHeader: "País" },
+    { field: "idFiscal", campoLabel: "CUIT", type: "string", systemRequired: false, warnIfEmpty: true, defaultExcelHeader: "CUIT" },
+    { field: "pais", campoLabel: "País", type: "string", systemRequired: false, warnIfEmpty: true, defaultExcelHeader: "País" },
     { field: "domicilio", campoLabel: "Domicilio", type: "string", systemRequired: false, defaultExcelHeader: "Domicilio" },
     { field: "condicionIva", campoLabel: "Condición IVA", type: "number", systemRequired: false, defaultExcelHeader: "Cond. IVA" },
     { field: "comisionPct", campoLabel: "% Comisión", type: "number", systemRequired: false, defaultExcelHeader: "% Comisión" },

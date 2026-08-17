@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -43,4 +44,9 @@ export class ConfirmImportDto {
   @IsArray()
   @IsNumber({}, { each: true })
   filasExcluidas?: number[];
+
+  /** El usuario confirmó que quiere importar igual filas con campos `warnIfEmpty` vacíos (ej. cliente sin CUIT/país). */
+  @IsOptional()
+  @IsBoolean()
+  confirmarCamposFaltantes?: boolean;
 }

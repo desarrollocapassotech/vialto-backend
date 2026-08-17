@@ -11,6 +11,8 @@ import type {
 export interface ValidationResult {
   valid: ValidatedRow[];
   errors: RowError[];
+  /** Filas válidas con algún campo `warnIfEmpty` vacío (ver import.types.ts). */
+  advertencias: { fila: number; campos: string[] }[];
   created: {
     clientes: string[];
     transportistas: string[];
@@ -53,9 +55,11 @@ export class ValidatorService {
 
     const valid: ValidatedRow[] = [];
     const errors: RowError[] = [];
+    const advertencias: { fila: number; campos: string[] }[] = [];
 
     for (const row of rows) {
       const rowErrors: RowError[] = [];
+      const rowWarnings: string[] = [];
       const validated: ValidatedRow = {
         _rowNum: row._rowNum,
         _unmappedText: row._unmappedText ?? null,
@@ -69,6 +73,7 @@ export class ValidatorService {
           rowErrors.push(result.error);
         } else {
           validated[col.field] = result.value;
+          if (result.warning) rowWarnings.push(col.excelHeader);
         }
       }
 
@@ -76,12 +81,16 @@ export class ValidatorService {
         errors.push(...rowErrors);
       } else {
         valid.push(validated);
+        if (rowWarnings.length > 0) {
+          advertencias.push({ fila: row._rowNum, campos: rowWarnings });
+        }
       }
     }
 
     return {
       valid,
       errors,
+      advertencias,
       created: {
         clientes: created["clientes"] ?? [],
         transportistas: created["transportistas"] ?? [],
@@ -123,9 +132,7 @@ export class ValidatorService {
     col: ColumnConfig,
     caches: LookupCaches,
     rowNum: number,
-  ):
-    | { value: ValidatedRow[string]; error?: undefined }
-    | { value?: undefined; error: RowError } {
+  ): { value?: ValidatedRow[string]; error?: RowError; warning?: boolean } {
     const isEmpty = raw == null || String(raw).trim() === "";
 
     if (isEmpty) {
@@ -142,6 +149,9 @@ export class ValidatorService {
         // Recursamos con el default como si fuera el valor crudo de la celda,
         // así pasa por la misma coerción/validación de tipo que un valor real.
         return this.coerce(col.defaultValue, { ...col, defaultValue: undefined }, caches, rowNum);
+      }
+      if (col.warnIfEmpty) {
+        return { value: null, warning: true };
       }
       return { value: null };
     }

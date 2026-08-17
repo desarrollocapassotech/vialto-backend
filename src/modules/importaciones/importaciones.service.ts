@@ -98,7 +98,7 @@ export class ImportacionesService {
       throw new BadRequestException("El archivo no contiene filas de datos");
     }
 
-    const { valid, errors, created } = await this.validator.validate(
+    const { valid, errors, advertencias, created } = await this.validator.validate(
       parsed,
       config.columns,
       tenantId,
@@ -148,6 +148,7 @@ export class ImportacionesService {
       headersNoMapeados,
       columnasOpcionalesFaltantes,
       entidadesFaltantes,
+      advertenciasCamposFaltantes: advertencias,
     };
 
     if (modulo === "viajes") {
@@ -170,11 +171,12 @@ export class ImportacionesService {
       destino?: string | null;
     }[],
     filasExcluidas?: number[],
+    confirmarCamposFaltantes?: boolean,
   ) {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, tenantId },
-      include: { template: { select: { modulo: true } } },
+      include: { template: { select: { modulo: true, config: true } } },
     });
 
     if (!session)
@@ -209,6 +211,28 @@ export class ImportacionesService {
         estado: "omitida",
         mensaje: "Fila omitida por el usuario antes de confirmar.",
       }));
+
+    // Campos "recomendados pero no bloqueantes" (ej. CUIT/país de cliente):
+    // si alguna fila a importar los tiene vacíos, el usuario tiene que
+    // confirmarlo explícitamente — si no, no dejamos pasar el confirm
+    // (re-chequeo defensivo: la advertencia ya se mostró en el preview).
+    const columnasAdvertencia = (
+      session.template.config as unknown as TemplateConfig
+    ).columns.filter((c) => c.warnIfEmpty);
+    if (columnasAdvertencia.length > 0 && !confirmarCamposFaltantes) {
+      const faltan = filasValidas.some((f) =>
+        columnasAdvertencia.some(
+          (c) => f[c.field] == null || String(f[c.field]).trim() === "",
+        ),
+      );
+      if (faltan) {
+        throw new BadRequestException(
+          "Hay filas sin " +
+            columnasAdvertencia.map((c) => c.excelHeader).join("/") +
+            " — confirmá que querés importarlas igual.",
+        );
+      }
+    }
 
     if (ciudadesNormalizadas?.length) {
       const byFila = new Map(ciudadesNormalizadas.map((c) => [c.fila, c]));

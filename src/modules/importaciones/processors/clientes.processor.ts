@@ -12,18 +12,22 @@ export class ClientesProcessor implements IImportProcessor {
     const nombre = String(row.nombre ?? '').trim();
     const idFiscal = String(row.idFiscal ?? '').trim();
     const pais = String(row.pais ?? '').trim();
-    if (!nombre || !idFiscal || !pais) {
-      throw new BadRequestException(
-        'Cada cliente importado requiere nombre, ID Fiscal y país',
-      );
+    if (!nombre) {
+      throw new BadRequestException('Cada cliente importado requiere nombre');
     }
-    validarIdFiscal(pais, idFiscal);
+    // CUIT/país son recomendados (warnIfEmpty en el template), no obligatorios:
+    // el usuario ya confirmó explícitamente que quiere importar sin ellos si
+    // llegamos hasta acá (ver ImportacionesService.confirm). Solo validamos
+    // el formato del ID fiscal cuando ambos vienen completos.
+    if (idFiscal && pais) {
+      validarIdFiscal(pais, idFiscal);
+    }
 
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que un reimport no borre datos ya cargados que ese Excel no trae.
     const data = {
-      idFiscal,
-      pais,
+      idFiscal: idFiscal || undefined,
+      pais: pais || undefined,
       email: (row.email as string | null)?.trim() || undefined,
       telefono: (row.telefono as string | null)?.trim() || undefined,
       direccion: (row.direccion as string | null)?.trim() || undefined,

@@ -27,14 +27,10 @@ export class TransportistasProcessor implements IImportProcessor {
       select: { id: true },
     });
 
-    // Igual que el alta manual: un transportista nuevo necesita país e ID
-    // Fiscal sí o sí. En un reimport que solo actualiza otros campos, si ya
-    // los tenía cargados no hace falta repetirlos en la fila.
-    if (!existing && (!idFiscal || !pais)) {
-      throw new Error(
-        "Un transportista nuevo requiere país e ID Fiscal (igual que el alta manual).",
-      );
-    }
+    // País e ID Fiscal son recomendados (warnIfEmpty en el template), no
+    // obligatorios: si llegamos hasta acá con alguno vacío, el usuario ya
+    // confirmó explícitamente que quiere importar igual (ver
+    // ImportacionesService.confirm).
 
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que un reimport no borre datos ya cargados que ese Excel no trae.

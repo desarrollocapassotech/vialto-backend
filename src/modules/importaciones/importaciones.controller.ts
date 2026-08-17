@@ -91,6 +91,7 @@ export class ImportacionesController {
       auth.role === 'superadmin',
       dto.ciudadesNormalizadas,
       dto.filasExcluidas,
+      dto.confirmarCamposFaltantes,
     );
   }
 

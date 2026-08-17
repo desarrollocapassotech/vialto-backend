@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsEmail,
   IsInt,
@@ -19,15 +20,17 @@ export class CreateTransportistaDto {
   @IsNotEmpty({ message: 'El nombre es obligatorio' })
   nombre: string;
 
+  /** Recomendado, no obligatorio — ver `confirmarSinDatosFiscales`. */
+  @IsOptional()
   @Transform(trimString)
   @IsString()
-  @IsNotEmpty({ message: 'El país es obligatorio' })
-  pais: string;
+  pais?: string;
 
+  /** Recomendado, no obligatorio — ver `confirmarSinDatosFiscales`. */
+  @IsOptional()
   @Transform(trimString)
   @IsString()
-  @IsNotEmpty({ message: 'El ID Fiscal es obligatorio' })
-  idFiscal: string;
+  idFiscal?: string;
 
   @IsOptional() @IsEmail({}, { message: 'Email inválido' }) email?: string;
   @IsOptional() @IsString() telefono?: string;
@@ -38,4 +41,7 @@ export class CreateTransportistaDto {
   @IsOptional() @IsString() paut?: string;
   @IsOptional() @IsString() permisoInternacional?: string;
   @IsOptional() @IsDateString() fechaVencimientoPermiso?: string;
+
+  /** El usuario confirmó explícitamente que quiere guardar sin ID Fiscal y/o país. */
+  @IsOptional() @IsBoolean() confirmarSinDatosFiscales?: boolean;
 }

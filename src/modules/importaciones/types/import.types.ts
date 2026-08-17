@@ -47,6 +47,14 @@ export interface ColumnConfig {
    * chocarían con el mismo valor.
    */
   defaultValue?: string;
+  /**
+   * Campo recomendado pero no bloqueante: si la celda viene vacía, la fila
+   * se importa igual (no es un error), pero se junta en
+   * `PreviewResult.advertenciasCamposFaltantes` y el usuario tiene que
+   * confirmar explícitamente antes de poder importar (ver `confirm()` /
+   * `ConfirmImportDto.confirmarCamposFaltantes`).
+   */
+  warnIfEmpty?: boolean;
 }
 
 export interface TemplateConfig {
@@ -145,6 +153,13 @@ export interface PreviewResult {
   columnasOpcionalesFaltantes: string[];
   /** Entidades referenciadas por lookup que no existen todavía, agrupadas por modelo. */
   entidadesFaltantes: EntidadesFaltantesModelo[];
+  /**
+   * Filas que van a importarse igual pero con algún campo recomendado
+   * (`warnIfEmpty`) vacío — ej. cliente sin CUIT/país. No bloquean el
+   * preview, pero `confirm()` los rechaza salvo que el usuario los
+   * confirme explícitamente (`ConfirmImportDto.confirmarCamposFaltantes`).
+   */
+  advertenciasCamposFaltantes: { fila: number; campos: string[] }[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

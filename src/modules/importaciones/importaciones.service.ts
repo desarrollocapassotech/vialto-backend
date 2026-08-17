@@ -122,6 +122,21 @@ export class ImportacionesService {
 
     const entidadesFaltantes = this.agruparEntidadesFaltantes(errors);
 
+    // Desglose altas/actualizaciones — solo para módulos cuyo processor lo
+    // soporta (todos: Clientes/Transportistas/Choferes/Vehículos por
+    // nombre/patente, Viajes por ID Personalizado o el mismo fallback
+    // compuesto que usa `findExisting` al confirmar).
+    const processorModulo = this.processors[modulo];
+    let entidadesNuevas: number | undefined;
+    let entidadesActualizadas: number | undefined;
+    if (processorModulo?.contarExistentes) {
+      entidadesActualizadas = await processorModulo.contarExistentes(
+        valid,
+        tenantId,
+      );
+      entidadesNuevas = valid.length - entidadesActualizadas;
+    }
+
     // Guardar sesión (expira en 30 minutos)
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
     const session = await this.prisma.importSession.create({
@@ -149,6 +164,8 @@ export class ImportacionesService {
       columnasOpcionalesFaltantes,
       entidadesFaltantes,
       advertenciasCamposFaltantes: advertencias,
+      entidadesNuevas,
+      entidadesActualizadas,
     };
 
     if (modulo === "viajes") {

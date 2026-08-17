@@ -50,4 +50,17 @@ export class ClientesProcessor implements IImportProcessor {
 
     return cliente.id;
   }
+
+  async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {
+    const existentes = await this.prisma.cliente.findMany({
+      where: { tenantId },
+      select: { nombre: true },
+    });
+    const nombresExistentes = new Set(
+      existentes.map((c) => c.nombre.trim().toLowerCase()),
+    );
+    return rows.filter((r) =>
+      nombresExistentes.has(String(r.nombre ?? '').trim().toLowerCase()),
+    ).length;
+  }
 }

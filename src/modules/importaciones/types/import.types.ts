@@ -160,6 +160,13 @@ export interface PreviewResult {
    * confirme explícitamente (`ConfirmImportDto.confirmarCamposFaltantes`).
    */
   advertenciasCamposFaltantes: { fila: number; campos: string[] }[];
+  /**
+   * Desglose de `exitosas` entre altas y actualizaciones (el processor ya
+   * hace upsert por nombre/patente) — solo presente si el módulo lo
+   * soporta (`IImportProcessor.contarExistentes`).
+   */
+  entidadesNuevas?: number;
+  entidadesActualizadas?: number;
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

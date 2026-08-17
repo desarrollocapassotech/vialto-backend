@@ -466,4 +466,154 @@ export class ViajesProcessor implements IImportProcessor {
     }
     return gastos;
   }
+
+  /** Clave normalizada para el fallback compuesto de `findExisting` — misma combinación de campos, para poder comparar en memoria sin una query por fila. */
+  private claveCompuesta(
+    clienteId: string,
+    transportistaId: string,
+    origen: string,
+    destino: string,
+    fechaCarga: Date,
+    fechaDescarga: Date,
+  ): string {
+    return [
+      clienteId,
+      transportistaId,
+      origen.trim().toLowerCase(),
+      destino.trim().toLowerCase(),
+      fechaCarga.toISOString(),
+      fechaDescarga.toISOString(),
+    ].join("|");
+  }
+
+  /**
+   * Versión batcheada de `findExisting` para el preview: en vez de una
+   * query por fila, resuelve todas las filas con ID Personalizado en una
+   * sola consulta, y el resto (fallback compuesto) en otra — mismo criterio
+   * de matcheo, sin N+1.
+   */
+  async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {
+    const numerosId = rows
+      .map((r) =>
+        (r.numeroIdentificacionPersonalizado as string | null)
+          ?.toString()
+          .trim(),
+      )
+      .filter((n): n is string => !!n);
+
+    const existentesPorNumero = numerosId.length
+      ? await this.prisma.viaje.findMany({
+          where: { tenantId, numeroIdentificacionPersonalizado: { in: numerosId } },
+          select: { numeroIdentificacionPersonalizado: true },
+        })
+      : [];
+    const numerosExistentes = new Set(
+      existentesPorNumero
+        .map((v) => v.numeroIdentificacionPersonalizado)
+        .filter((n): n is string => !!n),
+    );
+
+    let count = 0;
+    const pendientes: ValidatedRow[] = [];
+    for (const r of rows) {
+      const numero = (r.numeroIdentificacionPersonalizado as string | null)
+        ?.toString()
+        .trim();
+      if (numero && numerosExistentes.has(numero)) {
+        count++;
+      } else {
+        pendientes.push(r);
+      }
+    }
+    if (pendientes.length === 0) return count;
+
+    // Fallback compuesto (cliente + transporte + origen + destino + fechas)
+    // para las filas que no matchearon por ID Personalizado — mismos campos
+    // que `findExisting`, todos obligatorios en el template de Viajes.
+    type FilaCompuesta = {
+      row: ValidatedRow;
+      clienteId: string;
+      transportistaId: string;
+      origen: string;
+      destino: string;
+      fechaCarga: Date;
+      fechaDescarga: Date;
+    };
+    const conDatosCompuestos: FilaCompuesta[] = [];
+    for (const r of pendientes) {
+      const clienteId = r.clienteId as string | undefined;
+      const transportistaId = r.transportistaId as string | undefined;
+      const origen = r.origen as string | undefined;
+      const destino = r.destino as string | undefined;
+      const fechaCarga = this.toDate(r.fechaCarga);
+      const fechaDescarga = this.toDate(r.fechaDescarga);
+      if (
+        clienteId &&
+        transportistaId &&
+        origen &&
+        destino &&
+        fechaCarga &&
+        fechaDescarga
+      ) {
+        conDatosCompuestos.push({
+          row: r,
+          clienteId,
+          transportistaId,
+          origen,
+          destino,
+          fechaCarga,
+          fechaDescarga,
+        });
+      }
+    }
+    if (conDatosCompuestos.length === 0) return count;
+
+    const existentesCompuesto = await this.prisma.viaje.findMany({
+      where: {
+        OR: conDatosCompuestos.map((f) => ({
+          tenantId,
+          clienteId: f.clienteId,
+          transportistaId: f.transportistaId,
+          origen: { equals: f.origen.trim(), mode: "insensitive" as const },
+          destino: { equals: f.destino.trim(), mode: "insensitive" as const },
+          fechaCarga: f.fechaCarga,
+          fechaDescarga: f.fechaDescarga,
+        })),
+      },
+      select: {
+        clienteId: true,
+        transportistaId: true,
+        origen: true,
+        destino: true,
+        fechaCarga: true,
+        fechaDescarga: true,
+      },
+    });
+    const clavesExistentes = new Set(
+      existentesCompuesto.map((v) =>
+        this.claveCompuesta(
+          v.clienteId,
+          v.transportistaId,
+          v.origen,
+          v.destino,
+          v.fechaCarga,
+          v.fechaDescarga,
+        ),
+      ),
+    );
+
+    for (const f of conDatosCompuestos) {
+      const clave = this.claveCompuesta(
+        f.clienteId,
+        f.transportistaId,
+        f.origen,
+        f.destino,
+        f.fechaCarga,
+        f.fechaDescarga,
+      );
+      if (clavesExistentes.has(clave)) count++;
+    }
+
+    return count;
+  }
 }

@@ -66,4 +66,17 @@ export class TransportistasProcessor implements IImportProcessor {
     });
     return created.id;
   }
+
+  async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {
+    const existentes = await this.prisma.transportista.findMany({
+      where: { tenantId },
+      select: { nombre: true },
+    });
+    const nombresExistentes = new Set(
+      existentes.map((t) => t.nombre.trim().toLowerCase()),
+    );
+    return rows.filter((r) =>
+      nombresExistentes.has(String(r.nombre ?? "").trim().toLowerCase()),
+    ).length;
+  }
 }

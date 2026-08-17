@@ -17,4 +17,8 @@ export class CreateCargaChoferDto {
   // alta viene de un reintento de sincronización — permite resolver automáticamente el
   // CombustibleSyncErrorLog que haya quedado registrado para ese mismo intento.
   @IsOptional() @IsString() localId?: string;
+
+  // Timestamp del dispositivo en el momento en que el chofer apretó Guardar.
+  // Es la fuente de la verdad para validar el orden cronológico en el modo offline.
+  @IsOptional() @IsDateString() createdAt?: string;
 }

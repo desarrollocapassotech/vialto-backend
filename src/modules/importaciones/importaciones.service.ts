@@ -8,6 +8,7 @@ import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ParserService } from "./engine/parser.service";
 import { ValidatorService } from "./engine/validator.service";
 import { ViajesProcessor } from "./processors/viajes.processor";
+import type { ViajeActual } from "./processors/viajes.processor";
 import { ClientesProcessor } from "./processors/clientes.processor";
 import { TransportistasProcessor } from "./processors/transportistas.processor";
 import { ChoferesProcessor } from "./processors/choferes.processor";
@@ -19,10 +20,16 @@ import type {
   ParsedRow,
   PreviewResult,
   PreviewViaje,
+  PreviewCambioCampo,
   PreviewFactura,
   PreviewEntidad,
+  RowError,
+  EntidadesFaltantesModelo,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
+import { TEMPLATE_CATALOGO, construirConfigPorDefecto } from "./template-catalogo";
+import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
+import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 
 @Injectable()
 export class ImportacionesService {
@@ -37,6 +44,8 @@ export class ImportacionesService {
     private readonly transportistasProcessor: TransportistasProcessor,
     private readonly choferesProcessor: ChoferesProcessor,
     private readonly vehiculosProcessor: VehiculosProcessor,
+    private readonly iaTemplateSuggestion: IaTemplateSuggestionService,
+    private readonly vehiculosService: VehiculosService,
   ) {
     this.processors = {
       viajes: this.viajesProcessor,
@@ -47,6 +56,54 @@ export class ImportacionesService {
     };
   }
 
+  /**
+   * Defensa en profundidad: el frontend ya oculta la pantalla si
+   * `Tenant.importacionesOcultas`, pero un admin de tenant no debería poder
+   * saltearlo pegándole directo al endpoint. El superadmin nunca queda
+   * bloqueado por este flag — es una restricción sobre el tenant, no sobre
+   * la herramienta.
+   */
+  private async assertImportacionesVisible(
+    tenantId: string,
+    isSuperadmin: boolean,
+  ) {
+    if (isSuperadmin) return;
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { importacionesOcultas: true },
+    });
+    if (tenant?.importacionesOcultas) {
+      throw new BadRequestException(
+        "La importación masiva no está disponible para esta empresa.",
+      );
+    }
+  }
+
+  /**
+   * Si el tenant ya tiene algún cliente/transportista/chofer/vehículo
+   * cargado, el wizard le ofrece elegir qué módulos importar en vez de
+   * forzar la secuencia completa de siempre (pensada para altas nuevas).
+   */
+  async tenantTieneDatos(tenantId: string): Promise<{
+    clientes: boolean;
+    transportistas: boolean;
+    choferes: boolean;
+    vehiculos: boolean;
+  }> {
+    const [clientes, transportistas, choferes, vehiculos] = await Promise.all([
+      this.prisma.cliente.count({ where: { tenantId } }),
+      this.prisma.transportista.count({ where: { tenantId } }),
+      this.prisma.chofer.count({ where: { tenantId } }),
+      this.prisma.vehiculo.count({ where: { tenantId } }),
+    ]);
+    return {
+      clientes: clientes > 0,
+      transportistas: transportistas > 0,
+      choferes: choferes > 0,
+      vehiculos: vehiculos > 0,
+    };
+  }
+
   // ── Preview ──────────────────────────────────────────────────────────────
 
   async preview(
@@ -54,21 +111,58 @@ export class ImportacionesService {
     modulo: string,
     buffer: Buffer,
     originalname: string,
+    isSuperadmin: boolean,
   ): Promise<PreviewResult> {
+    await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const template = await this.getActiveTemplate(tenantId, modulo);
     const config = template.config as unknown as TemplateConfig;
 
-    const parsed = this.parser.parse(buffer, config);
+    const { rows: parsed, headers: headersExcel } = this.parser.parse(
+      buffer,
+      config,
+    );
     if (parsed.length === 0) {
       throw new BadRequestException("El archivo no contiene filas de datos");
     }
 
-    const { valid, errors, created } = await this.validator.validate(
+    const { valid, errors, advertencias, created } = await this.validator.validate(
       parsed,
       config.columns,
       tenantId,
       true,
     );
+
+    const headersExcelLower = new Set(
+      headersExcel.map((h) => h.toLowerCase()),
+    );
+    const headersNoMapeados = headersExcel.filter(
+      (h) =>
+        !config.columns.some(
+          (c) => c.excelHeader.toLowerCase() === h.toLowerCase(),
+        ),
+    );
+    const columnasOpcionalesFaltantes = config.columns
+      .filter(
+        (c) => !c.required && !headersExcelLower.has(c.excelHeader.toLowerCase()),
+      )
+      .map((c) => c.excelHeader);
+
+    const entidadesFaltantes = this.agruparEntidadesFaltantes(errors);
+
+    // Desglose altas/actualizaciones — solo para módulos cuyo processor lo
+    // soporta (todos: Clientes/Transportistas/Choferes/Vehículos por
+    // nombre/patente, Viajes por ID Personalizado o el mismo fallback
+    // compuesto que usa `findExisting` al confirmar).
+    const processorModulo = this.processors[modulo];
+    let entidadesNuevas: number | undefined;
+    let entidadesActualizadas: number | undefined;
+    if (processorModulo?.contarExistentes) {
+      entidadesActualizadas = await processorModulo.contarExistentes(
+        valid,
+        tenantId,
+      );
+      entidadesNuevas = valid.length - entidadesActualizadas;
+    }
 
     // Guardar sesión (expira en 30 minutos)
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -93,10 +187,21 @@ export class ImportacionesService {
       exitosas: valid.length,
       errores: errors.length,
       detalleErrores: errors,
+      headersNoMapeados,
+      columnasOpcionalesFaltantes,
+      entidadesFaltantes,
+      advertenciasCamposFaltantes: advertencias,
+      entidadesNuevas,
+      entidadesActualizadas,
     };
 
     if (modulo === "viajes") {
-      Object.assign(result, this.buildViajesPreview(parsed, valid, created));
+      Object.assign(
+        result,
+        await this.buildViajesPreview(parsed, valid, created, tenantId),
+      );
+      result.advertenciasFacturasDuplicadas =
+        await this.viajesProcessor.detectarFacturasDuplicadas(valid, tenantId);
     }
 
     return result;
@@ -108,15 +213,20 @@ export class ImportacionesService {
     tenantId: string,
     sessionId: string,
     createdBy: string,
+    isSuperadmin: boolean,
     ciudadesNormalizadas?: {
       fila: number;
       origen?: string | null;
       destino?: string | null;
     }[],
+    filasExcluidas?: number[],
+    confirmarCamposFaltantes?: boolean,
+    confirmarFacturasDuplicadas?: boolean,
   ) {
+    await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, tenantId },
-      include: { template: { select: { modulo: true } } },
+      include: { template: { select: { modulo: true, config: true } } },
     });
 
     if (!session)
@@ -135,7 +245,62 @@ export class ImportacionesService {
       );
     }
 
-    const filasValidas = session.filasValidas as unknown as ValidatedRow[];
+    const todasLasFilas = session.filasValidas as unknown as ValidatedRow[];
+
+    // Filas que el usuario decidió no importar (ej. destino multidestino que
+    // nunca va a resolver a una sola ciudad) — no se procesan ni se cuentan
+    // como error, quedan registradas aparte en el log.
+    const excluidas = new Set(filasExcluidas ?? []);
+    const filasValidas = todasLasFilas.filter(
+      (f) => !excluidas.has(f._rowNum),
+    );
+    const detallesOmitidas = todasLasFilas
+      .filter((f) => excluidas.has(f._rowNum))
+      .map((f) => ({
+        fila: f._rowNum,
+        estado: "omitida",
+        mensaje: "Fila omitida por el usuario antes de confirmar.",
+      }));
+
+    // Campos "recomendados pero no bloqueantes" (ej. CUIT/país de cliente):
+    // si alguna fila a importar los tiene vacíos, el usuario tiene que
+    // confirmarlo explícitamente — si no, no dejamos pasar el confirm
+    // (re-chequeo defensivo: la advertencia ya se mostró en el preview).
+    const columnasAdvertencia = (
+      session.template.config as unknown as TemplateConfig
+    ).columns.filter((c) => c.warnIfEmpty);
+    if (columnasAdvertencia.length > 0 && !confirmarCamposFaltantes) {
+      const faltan = filasValidas.some((f) =>
+        columnasAdvertencia.some(
+          (c) => f[c.field] == null || String(f[c.field]).trim() === "",
+        ),
+      );
+      if (faltan) {
+        throw new BadRequestException(
+          "Hay filas sin " +
+            columnasAdvertencia.map((c) => c.excelHeader).join("/") +
+            " — confirmá que querés importarlas igual.",
+        );
+      }
+    }
+
+    // Viajes: si varios viajes nuevos van a compartir número de factura (o
+    // ese número ya existe de otro import), confirm() los reutiliza y suma
+    // el importe en vez de duplicarlos — pero necesita confirmación
+    // explícita antes, mismo criterio que los campos recomendados.
+    if (session.template.modulo === "viajes" && !confirmarFacturasDuplicadas) {
+      const duplicadas = await this.viajesProcessor.detectarFacturasDuplicadas(
+        filasValidas,
+        tenantId,
+      );
+      if (duplicadas.length > 0) {
+        throw new BadRequestException(
+          "Hay números de factura repetidos entre varios viajes nuevos (" +
+            duplicadas.map((d) => d.numero).join(", ") +
+            ") — confirmá que querés unificarlos en una sola factura.",
+        );
+      }
+    }
 
     if (ciudadesNormalizadas?.length) {
       const byFila = new Map(ciudadesNormalizadas.map((c) => [c.fila, c]));
@@ -170,14 +335,18 @@ export class ImportacionesService {
       }
     }
 
-    const detalles: object[] = [];
+    const detalles: object[] = [...detallesOmitidas];
     let exitosas = 0;
     let errores = 0;
 
     for (const fila of filasValidas) {
       try {
-        const id = await processor.insert(fila, tenantId, createdBy);
-        detalles.push({ fila: fila._rowNum, estado: "ok", id });
+        const { id, creado, facturado } = await processor.insert(
+          fila,
+          tenantId,
+          createdBy,
+        );
+        detalles.push({ fila: fila._rowNum, estado: "ok", id, creado, facturado });
         exitosas++;
       } catch (err: unknown) {
         const mensaje = err instanceof Error ? err.message : "Error inesperado";
@@ -268,14 +437,140 @@ export class ImportacionesService {
         modulo: true,
         nombre: true,
         activo: true,
+        config: true,
         updatedAt: true,
       },
     });
   }
 
+  /** Catálogo fijo de campos importables de un módulo — fuente de verdad para la UI de configuración de templates. */
+  getCatalogoCampos(modulo: string) {
+    return TEMPLATE_CATALOGO[modulo] ?? [];
+  }
+
+  /**
+   * Sugerencia de mapeo con IA a partir de un Excel de ejemplo — nunca
+   * guarda nada, el superadmin la revisa en el formulario antes de guardar.
+   */
+  async sugerirTemplate(
+    modulo: string,
+    buffer: Buffer,
+  ): Promise<SugerenciaTemplate> {
+    const catalogo = this.getCatalogoCampos(modulo);
+    if (catalogo.length === 0) {
+      throw new BadRequestException(
+        `No hay catálogo de campos definido para el módulo "${modulo}".`,
+      );
+    }
+    const hojas = this.parser.sampleWorkbook(buffer);
+    if (hojas.length === 0 || hojas.every((h) => h.filas.length === 0)) {
+      throw new BadRequestException("El archivo no tiene datos para analizar.");
+    }
+    return this.iaTemplateSuggestion.sugerir(catalogo, hojas);
+  }
+
+  /**
+   * Agrupa los errores de lookup ("no encontrado") por modelo y valor
+   * distinto, para poder ofrecer "crear estos N faltantes" en vez de que el
+   * superadmin tenga que leer fila por fila. Para vehículos, sugiere un tipo
+   * a partir de la posición dentro del par tractor/semirremolque — es una
+   * regla fija (no IA): si un valor SIEMPRE apareció en la posición 0,
+   * probablemente sea el tractor/chasis; si siempre en la 1, el
+   * semirremolque. Si aparece mezclado, no se sugiere nada y lo completa el
+   * usuario.
+   */
+  private agruparEntidadesFaltantes(errors: RowError[]): EntidadesFaltantesModelo[] {
+    const porModelo = new Map<string, Map<string, Set<number>>>();
+
+    for (const e of errors) {
+      if (!e.lookupModel || !e.valoresNoEncontrados) continue;
+      const porValor = porModelo.get(e.lookupModel) ?? new Map<string, Set<number>>();
+      for (const { valor, posicion } of e.valoresNoEncontrados) {
+        const posiciones = porValor.get(valor) ?? new Set<number>();
+        posiciones.add(posicion);
+        porValor.set(valor, posiciones);
+      }
+      porModelo.set(e.lookupModel, porValor);
+    }
+
+    return [...porModelo.entries()].map(([modelo, porValor]) => ({
+      modelo,
+      valores: [...porValor.entries()].map(([valor, posiciones]) => ({
+        valor,
+        tipoSugerido: this.sugerirTipoVehiculo(modelo, posiciones),
+      })),
+    }));
+  }
+
+  private sugerirTipoVehiculo(modelo: string, posiciones: Set<number>): string | null {
+    if (modelo !== "vehiculos") return null;
+    if (posiciones.size !== 1) return null; // apareció en más de una posición: ambiguo
+    const [posicion] = posiciones;
+    if (posicion === 0) return "tractor";
+    if (posicion === 1) return "semirremolque";
+    return null;
+  }
+
+  /**
+   * Crea los vehículos faltantes que el superadmin confirmó desde el panel
+   * de previsualización — mismo `VehiculosService.create()` que usa el alta
+   * manual, sin bypassear ninguna validación.
+   */
+  async crearVehiculosFaltantes(
+    tenantId: string,
+    items: { patente: string; tipo: string }[],
+  ): Promise<{ creados: number; errores: { patente: string; error: string }[] }> {
+    let creados = 0;
+    const errores: { patente: string; error: string }[] = [];
+    for (const item of items) {
+      try {
+        await this.vehiculosService.create(tenantId, {
+          patente: item.patente,
+          tipo: item.tipo,
+        });
+        creados++;
+      } catch (e) {
+        errores.push({
+          patente: item.patente,
+          error: e instanceof Error ? e.message : "Error desconocido",
+        });
+      }
+    }
+    return { creados, errores };
+  }
+
+  /**
+   * Crea entidades faltantes que solo necesitan un nombre (clientes,
+   * transportistas, choferes, productos) — confirmadas por el superadmin
+   * desde el mismo panel de previsualización. Reutiliza `createLookup`, el
+   * mismo alta mínima que ya usa "crear si no existe" durante el import, así
+   * que no hay dos caminos de creación distintos.
+   */
+  async crearEntidadesFaltantesSimple(
+    tenantId: string,
+    modelo: string,
+    valores: string[],
+  ): Promise<{ creados: number; errores: { valor: string; error: string }[] }> {
+    let creados = 0;
+    const errores: { valor: string; error: string }[] = [];
+    for (const valor of valores) {
+      try {
+        const id = await this.validator.createLookup(modelo, "nombre", valor, tenantId);
+        if (id) creados++;
+        else errores.push({ valor, error: "No se pudo crear." });
+      } catch (e) {
+        errores.push({
+          valor,
+          error: e instanceof Error ? e.message : "Error desconocido",
+        });
+      }
+    }
+    return { creados, errores };
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  private buildViajesPreview(
+  private async buildViajesPreview(
     parsed: ParsedRow[],
     valid: ValidatedRow[],
     created: {
@@ -283,12 +578,17 @@ export class ImportacionesService {
       transportistas: string[];
       choferes: string[];
     },
-  ): {
+    tenantId: string,
+  ): Promise<{
     viajes: PreviewViaje[];
     facturas: PreviewFactura[];
     clientes: PreviewEntidad[];
     transportistas: PreviewEntidad[];
-  } {
+  }> {
+    const estadoActual = await this.viajesProcessor.obtenerEstadoActual(
+      valid,
+      tenantId,
+    );
     const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
     const newClienteNames = new Set(
       created.clientes.map((n) => n.toLowerCase()),
@@ -326,10 +626,8 @@ export class ImportacionesService {
       const monto = toNum(p.monto);
       const precioTransp = toNum(p.precioTransportistaExterno);
       const nroFactura = toStr(p.nroFactura);
-      const nroFacturaTransporte = toStr(p.nroFacturaTransporte);
 
-      viajes.push({
-        fila: validRow._rowNum,
+      const nuevoValor = {
         cliente,
         transporte,
         chofer: toStr(p.choferId),
@@ -346,9 +644,23 @@ export class ImportacionesService {
         monedaPrecioTransportistaExterno: toStr(
           validRow.monedaPrecioTransportistaExterno,
         ),
-        nroFacturaTransporte,
+      };
+
+      const actual = estadoActual.get(validRow._rowNum);
+      const cambios = actual
+        ? this.compararCamposViaje(actual, nuevoValor, toDateStr)
+        : undefined;
+
+      viajes.push({
+        fila: validRow._rowNum,
+        ...nuevoValor,
+        nuevo: !actual,
+        cambios,
       });
 
+      // Las facturas de este preview son siempre a cliente — el pago al
+      // transportista (precioTransportistaExterno) se liquida por afuera,
+      // vía Liquidaciones (post-viajes), no como una Factura propia.
       if (nroFactura) {
         facturas.push({
           tipo: "cliente",
@@ -357,17 +669,6 @@ export class ImportacionesService {
           importe: monto ?? 0,
           fechaEmision: toDateStr(p.fechaEmisionFactura),
           fechaVencimiento: toDateStr(p.fechaVencimientoFactura),
-        });
-      }
-
-      if (nroFacturaTransporte) {
-        facturas.push({
-          tipo: "transportista_externo",
-          numero: nroFacturaTransporte,
-          nombre: transporte,
-          importe: precioTransp ?? 0,
-          fechaEmision: toDateStr(p.fechaEmisionFacturaTransp),
-          fechaVencimiento: toDateStr(p.fechaVencimientoFacturaTransp),
         });
       }
     }
@@ -386,15 +687,89 @@ export class ImportacionesService {
     };
   }
 
+  /** Compara el estado actual de un viaje (antes de este import) contra los valores nuevos, campo por campo — solo devuelve los que cambian. */
+  private compararCamposViaje(
+    actual: ViajeActual,
+    nuevo: {
+      cliente: string;
+      transporte: string | null;
+      chofer: string | null;
+      vehiculo: string | null;
+      origen: string | null;
+      destino: string | null;
+      fechaCarga: string | null;
+      fechaDescarga: string | null;
+      detalleCarga: string | null;
+      monto: number | null;
+      monedaMonto: string | null;
+      nroFactura: string | null;
+      precioTransportistaExterno: number | null;
+      monedaPrecioTransportistaExterno: string | null;
+    },
+    toDateStr: (v: unknown) => string | null,
+  ): PreviewCambioCampo[] {
+    const pares: PreviewCambioCampo[] = [
+      { campo: "Cliente", antes: actual.cliente, despues: nuevo.cliente || null },
+      { campo: "Transporte", antes: actual.transporte, despues: nuevo.transporte },
+      { campo: "Chofer", antes: actual.chofer, despues: nuevo.chofer },
+      { campo: "Vehículo", antes: actual.vehiculo, despues: nuevo.vehiculo },
+      { campo: "Origen", antes: actual.origen, despues: nuevo.origen },
+      { campo: "Destino", antes: actual.destino, despues: nuevo.destino },
+      {
+        campo: "F. Carga",
+        antes: toDateStr(actual.fechaCarga),
+        despues: nuevo.fechaCarga,
+      },
+      {
+        campo: "F. Descarga",
+        antes: toDateStr(actual.fechaDescarga),
+        despues: nuevo.fechaDescarga,
+      },
+      { campo: "Carga", antes: actual.detalleCarga, despues: nuevo.detalleCarga },
+      { campo: "Monto", antes: actual.monto, despues: nuevo.monto },
+      { campo: "Moneda", antes: actual.monedaMonto, despues: nuevo.monedaMonto },
+      { campo: "Nro FC", antes: actual.nroFactura, despues: nuevo.nroFactura },
+      {
+        campo: "Flete",
+        antes: actual.precioTransportistaExterno,
+        despues: nuevo.precioTransportistaExterno,
+      },
+      {
+        campo: "Moneda Flete",
+        antes: actual.monedaPrecioTransportistaExterno,
+        despues: nuevo.monedaPrecioTransportistaExterno,
+      },
+    ];
+    return pares.filter((p) => p.antes !== p.despues);
+  }
+
   private async getActiveTemplate(tenantId: string, modulo: string) {
     const template = await this.prisma.importTemplate.findFirst({
       where: { tenantId, modulo, activo: true },
     });
-    if (!template) {
+    if (template) return template;
+
+    // Sin template propio todavía: se genera uno por defecto a partir del
+    // catálogo fijo (mismos encabezados sugeridos que ve el superadmin), para
+    // que ningún módulo quede bloqueado por falta de configuración. Queda
+    // guardado como un ImportTemplate real, editable después desde la pestaña
+    // Templates igual que cualquier otro.
+    const config = construirConfigPorDefecto(modulo);
+    if (!config) {
       throw new NotFoundException(
         `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
       );
     }
-    return template;
+    return this.prisma.importTemplate.upsert({
+      where: { tenantId_modulo: { tenantId, modulo } },
+      create: {
+        tenantId,
+        modulo,
+        nombre: `Template ${modulo} (por defecto)`,
+        config: config as unknown as object,
+        activo: true,
+      },
+      update: {},
+    });
   }
 }

@@ -50,26 +50,31 @@ export class ClientesService {
     return row;
   }
 
-  private assertClienteRequiredFields(data: {
-    nombre: string;
-    idFiscal: string | null | undefined;
-    pais: string | null | undefined;
-  }) {
+  private assertClienteRequiredFields(
+    data: {
+      nombre: string;
+      idFiscal?: string | null;
+      pais?: string | null;
+    },
+    confirmarSinDatosFiscales?: boolean,
+  ) {
     if (!data.nombre?.trim()) {
       throw new BadRequestException('El nombre es obligatorio');
     }
-    if (!data.idFiscal?.trim()) {
-      throw new BadRequestException('El ID Fiscal es obligatorio');
-    }
-    if (!data.pais?.trim()) {
-      throw new BadRequestException('El país es obligatorio');
+    // ID Fiscal y país son recomendados (los necesita Facturación más
+    // adelante), no obligatorios — si faltan, hace falta que el usuario lo
+    // confirme explícitamente antes de guardar.
+    if ((!data.idFiscal?.trim() || !data.pais?.trim()) && !confirmarSinDatosFiscales) {
+      throw new BadRequestException(
+        'Falta el ID Fiscal y/o el país — confirmá que querés guardar igual sin esos datos.',
+      );
     }
   }
 
   create(tenantId: string, dto: CreateClienteDto) {
-    this.assertClienteRequiredFields(dto);
-    const pais = dto.pais.trim();
-    const idFiscal = dto.idFiscal.trim();
+    this.assertClienteRequiredFields(dto, dto.confirmarSinDatosFiscales);
+    const pais = dto.pais?.trim() || null;
+    const idFiscal = dto.idFiscal?.trim() || null;
     validarIdFiscal(pais, idFiscal);
     return this.prisma.cliente.create({
       data: {
@@ -94,15 +99,15 @@ export class ClientesService {
       dto.idFiscal !== undefined ? dto.idFiscal.trim() : (current.idFiscal ?? '');
     const next = {
       nombre: dto.nombre !== undefined ? dto.nombre.trim() : current.nombre,
-      idFiscal: idFiscalEfectivo,
-      pais: paisEfectivo,
+      idFiscal: idFiscalEfectivo || null,
+      pais: paisEfectivo || null,
       email: dto.email !== undefined ? dto.email?.trim() || null : current.email,
       telefono: dto.telefono !== undefined ? dto.telefono?.trim() || null : current.telefono,
       direccion:
         dto.direccion !== undefined ? dto.direccion?.trim() || null : current.direccion,
     };
-    this.assertClienteRequiredFields(next);
-    validarIdFiscal(paisEfectivo, idFiscalEfectivo);
+    this.assertClienteRequiredFields(next, dto.confirmarSinDatosFiscales);
+    validarIdFiscal(next.pais, next.idFiscal);
     return this.prisma.cliente.update({
       where: { id },
       data: {
@@ -112,8 +117,8 @@ export class ClientesService {
         email: next.email,
         telefono: next.telefono,
         direccion: next.direccion,
-        condicionIva: paisEfectivo === 'AR' ? dto.condicionIva : null,
-        condicionTributaria: paisEfectivo !== 'AR' ? dto.condicionTributaria : null,
+        condicionIva: next.pais === 'AR' ? dto.condicionIva : null,
+        condicionTributaria: next.pais !== 'AR' ? dto.condicionTributaria : null,
       },
     });
   }

@@ -169,6 +169,37 @@ export class StockService {
     return `P-${String(n).padStart(3, '0')}`;
   }
 
+  /**
+   * Alta mínima de producto (solo nombre + código autogenerado), usada por el
+   * import de Viajes cuando la columna Producto tiene "crear si no existe".
+   * En tenants con módulo Stock corta con error en vez de crear un producto
+   * incompleto: ahí el peso unitario y la presentación son obligatorios.
+   */
+  async crearProductoSimple(tenantId: string, nombreRaw: string): Promise<{ id: string }> {
+    const nombre = displayNombre(nombreRaw);
+    if (!nombre) throw new BadRequestException('El nombre del producto no puede quedar vacío.');
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    const hasStock = (tenant?.modules ?? []).some((m) => m.toLowerCase() === 'stock');
+    if (hasStock) {
+      throw new BadRequestException(
+        `No se puede crear el producto "${nombre}" automáticamente: este tenant usa el módulo Stock, que exige peso unitario y presentación. Cargalo primero desde Productos.`,
+      );
+    }
+
+    const nombreNormalizado = normalizarNombre(nombre);
+    return this.prisma.$transaction(async (tx) => {
+      const codigo = await this.nextProductoCodigoTx(tx, tenantId);
+      return tx.producto.create({
+        data: { tenantId, nombre, nombreNormalizado, codigo, activo: true },
+        select: { id: true },
+      });
+    });
+  }
+
   async createProducto(tenantId: string, dto: CreateProductoDto) {
     const nombre = displayNombre(dto.nombre);
     if (!nombre) throw new ConflictException('El nombre no puede quedar vacío.');

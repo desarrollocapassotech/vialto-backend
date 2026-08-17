@@ -242,7 +242,7 @@ async function assertProductosAsignables(
   }
 }
 
-function assertFechaDescargaValida(
+export function assertFechaDescargaValida(
   fechaCarga: Date,
   fechaDescarga: Date,
 ): void {

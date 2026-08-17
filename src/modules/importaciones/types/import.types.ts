@@ -2,7 +2,8 @@ export type LookupModel =
   | 'clientes'
   | 'choferes'
   | 'vehiculos'
-  | 'transportistas';
+  | 'transportistas'
+  | 'productos';
 
 export type ColumnType = 'string' | 'number' | 'date' | 'boolean' | 'lookup' | 'enum';
 
@@ -16,10 +17,27 @@ export interface ColumnConfig {
   format?: string;
   /** Para type='lookup': entidad a buscar */
   lookupModel?: LookupModel;
-  /** Para type='lookup': campo por el que se busca (default: 'nombre') */
+  /** Para type='lookup': campo por el que se busca (default: 'nombre'). Ignorado si `lookupFields` está presente. */
   lookupField?: string;
+  /**
+   * Para type='lookup': lista de campos candidatos a probar en orden con el
+   * mismo valor tipeado (ej. `['nombre', 'idFiscal']`) — así un typo en el
+   * nombre no bloquea la fila si el CUIT sí matchea, sin depender de un ID
+   * inventado que obligue a saltar entre hojas para copiarlo.
+   */
+  lookupFields?: string[];
   /** Para type='lookup': si no se encuentra, crear el registro automáticamente */
   createIfNotFound?: boolean;
+  /**
+   * Para type='lookup': la celda trae varios valores separados por
+   * `separador` (ej. "NPY239/KGA38" = tractor + semirremolque) — se busca
+   * cada uno por separado y el resultado es un array de ids en vez de uno
+   * solo. Si alguno no matchea, la fila entera se rechaza igual que un
+   * lookup simple fallido.
+   */
+  multiple?: boolean;
+  /** Separador para `multiple` (default: "/"). */
+  separador?: string;
   required?: boolean;
   allowedValues?: string[];
   /**
@@ -29,6 +47,14 @@ export interface ColumnConfig {
    * chocarían con el mismo valor.
    */
   defaultValue?: string;
+  /**
+   * Campo recomendado pero no bloqueante: si la celda viene vacía, la fila
+   * se importa igual (no es un error), pero se junta en
+   * `PreviewResult.advertenciasCamposFaltantes` y el usuario tiene que
+   * confirmar explícitamente antes de poder importar (ver `confirm()` /
+   * `ConfirmImportDto.confirmarCamposFaltantes`).
+   */
+  warnIfEmpty?: boolean;
 }
 
 export interface TemplateConfig {
@@ -50,7 +76,7 @@ export interface ParsedRow {
 /** Fila validada y lista para insertar */
 export interface ValidatedRow {
   _rowNum: number;
-  [key: string]: string | number | Date | null | undefined;
+  [key: string]: string | number | Date | string[] | null | undefined;
 }
 
 export interface RowError {
@@ -58,11 +84,37 @@ export interface RowError {
   campo?: string;
   error: string;
   valor?: unknown;
+  /** Si el error es un lookup no encontrado: qué modelo se buscó. */
+  lookupModel?: string;
+  /**
+   * Valores puntuales que no matchearon, con su posición dentro de la celda
+   * (0 para lookup simple; 0/1/... para columnas `multiple`, ej. patente de
+   * tractor + semirremolque) — permite agrupar "faltantes" distintos entre
+   * filas y sugerir un valor por posición (ver `entidadesFaltantes`).
+   */
+  valoresNoEncontrados?: { valor: string; posicion: number }[];
+}
+
+export interface EntidadFaltante {
+  valor: string;
+  /** Sugerencia derivada de una regla simple (ej. posición en el par), no de IA. */
+  tipoSugerido?: string | null;
+}
+
+export interface EntidadesFaltantesModelo {
+  modelo: string;
+  valores: EntidadFaltante[];
 }
 
 export interface PreviewEntidad {
   nombre: string;
   esNuevo: boolean;
+}
+
+export interface PreviewCambioCampo {
+  campo: string;
+  antes: string | number | null;
+  despues: string | number | null;
 }
 
 export interface PreviewViaje {
@@ -72,7 +124,7 @@ export interface PreviewViaje {
   origen: string | null;
   destino: string | null;
   chofer: string | null;
-  vehiculo: string | null;  
+  vehiculo: string | null;
   fechaCarga: string | null;
   fechaDescarga: string | null;
   detalleCarga: string | null;
@@ -81,11 +133,15 @@ export interface PreviewViaje {
   nroFactura: string | null;
   precioTransportistaExterno: number | null;
   monedaPrecioTransportistaExterno: string | null;
-  nroFacturaTransporte: string | null;
+  /** true = este viaje no existe todavía (alta nueva). false = actualiza uno existente. */
+  nuevo: boolean;
+  /** Solo si `nuevo` es false: campos que cambian respecto al valor actual, con su antes/después. */
+  cambios?: PreviewCambioCampo[];
 }
 
 export interface PreviewFactura {
-  tipo: 'cliente' | 'transportista_externo';
+  /** Siempre "cliente": el pago al transportista se liquida por afuera (Liquidaciones), no como Factura. */
+  tipo: 'cliente';
   numero: string;
   nombre: string | null;
   importe: number;
@@ -101,6 +157,33 @@ export interface PreviewResult {
   exitosas: number;
   errores: number;
   detalleErrores: RowError[];
+  /** Columnas del Excel que no matchean ningún campo del template — van a texto libre en Observaciones. */
+  headersNoMapeados: string[];
+  /** Columnas del template (no obligatorias) que no se encontraron en el Excel. */
+  columnasOpcionalesFaltantes: string[];
+  /** Entidades referenciadas por lookup que no existen todavía, agrupadas por modelo. */
+  entidadesFaltantes: EntidadesFaltantesModelo[];
+  /**
+   * Filas que van a importarse igual pero con algún campo recomendado
+   * (`warnIfEmpty`) vacío — ej. cliente sin CUIT/país. No bloquean el
+   * preview, pero `confirm()` los rechaza salvo que el usuario los
+   * confirme explícitamente (`ConfirmImportDto.confirmarCamposFaltantes`).
+   */
+  advertenciasCamposFaltantes: { fila: number; campos: string[] }[];
+  /**
+   * Desglose de `exitosas` entre altas y actualizaciones (el processor ya
+   * hace upsert por nombre/patente) — solo presente si el módulo lo
+   * soporta (`IImportProcessor.contarExistentes`).
+   */
+  entidadesNuevas?: number;
+  entidadesActualizadas?: number;
+  /**
+   * Solo viajes: números de factura que van a terminar compartidos por más
+   * de un viaje nuevo (o que ya existen de otro import) — `confirm()` los
+   * reutiliza y suma el importe en vez de duplicarlos, pero necesita
+   * confirmación explícita antes (`ConfirmImportDto.confirmarFacturasDuplicadas`).
+   */
+  advertenciasFacturasDuplicadas?: { numero: string; filas: number[] }[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

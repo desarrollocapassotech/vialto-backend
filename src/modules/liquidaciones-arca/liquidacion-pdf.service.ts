@@ -202,31 +202,31 @@ export class LiquidacionPdfService {
     const drawOpts: PdfDrawOpts =
       kind === 'nc'
         ? {
-            kind: 'nc',
-            title: esNotaDebitoAnulacion(liq.anulacionCbteTipo)
-              ? 'NOTA DE DEBITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO'
-              : 'NOTA DE CREDITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO',
-            cbteTipo: liq.anulacionCbteTipo ?? CBTE_TIPO_NC_CVLP,
-            cbteNro: liq.anulacionCbteNro,
-            ptoVenta: liq.anulacionPtoVenta ?? liq.ptoVenta,
-            cae: liq.anulacionCae,
-            caeFechaVto: liq.anulacionCaeFechaVto,
-            fecha: liq.anulacionFecha ?? liq.updatedAt,
-            asociados:
-              liq.cbteNro != null && liq.ptoVenta != null
-                ? [{ tipo: liq.cbteTipo, ptoVenta: liq.ptoVenta, nro: liq.cbteNro }]
-                : [],
-          }
+          kind: 'nc',
+          title: esNotaDebitoAnulacion(liq.anulacionCbteTipo)
+            ? 'NOTA DE DEBITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO'
+            : 'NOTA DE CREDITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO',
+          cbteTipo: liq.anulacionCbteTipo ?? CBTE_TIPO_NC_CVLP,
+          cbteNro: liq.anulacionCbteNro,
+          ptoVenta: liq.anulacionPtoVenta ?? liq.ptoVenta,
+          cae: liq.anulacionCae,
+          caeFechaVto: liq.anulacionCaeFechaVto,
+          fecha: liq.anulacionFecha ?? liq.updatedAt,
+          asociados:
+            liq.cbteNro != null && liq.ptoVenta != null
+              ? [{ tipo: liq.cbteTipo, ptoVenta: liq.ptoVenta, nro: liq.cbteNro }]
+              : [],
+        }
         : {
-            kind: 'cvlp',
-            title: 'CUENTA DE VENTA Y LIQUIDO PRODUCTO',
-            cbteTipo: liq.cbteTipo,
-            cbteNro: liq.cbteNro,
-            ptoVenta: liq.ptoVenta,
-            cae: liq.cae,
-            caeFechaVto: liq.caeFechaVto,
-            fecha: liq.createdAt,
-          };
+          kind: 'cvlp',
+          title: 'CUENTA DE VENTA Y LIQUIDO PRODUCTO',
+          cbteTipo: liq.cbteTipo,
+          cbteNro: liq.cbteNro,
+          ptoVenta: liq.ptoVenta,
+          cae: liq.cae,
+          caeFechaVto: liq.caeFechaVto,
+          fecha: liq.createdAt,
+        };
 
     const config = await this.arcaConfig.findPublic(tenantId);
 
@@ -259,7 +259,8 @@ export class LiquidacionPdfService {
       try {
         const fetched = await fetch(config.logoUrl);
         if (fetched.ok) logoBuffer = Buffer.from(await fetched.arrayBuffer());
-      } catch(e) { console.error("LOGO ERROR:", e);
+      } catch (e) {
+        console.error("LOGO ERROR:", e);
         // Si el logo no se puede descargar, el PDF se genera igual sin él.
       }
     }
@@ -432,7 +433,8 @@ export class LiquidacionPdfService {
           doc.fontSize(6).font('Helvetica-Oblique').fillColor('#555')
             .text('de', colX, cy, { width: colW, align: 'center' });
           cy += 9;
-        } catch(e) { console.error("LOGO ERROR:", e);
+        } catch (e) {
+          console.error("LOGO ERROR:", e);
           // Formato de imagen no soportado por pdfkit; se sigue sin logo.
         }
       }
@@ -586,126 +588,163 @@ export class LiquidacionPdfService {
       }
     }
 
-    // ── Tabla 1: Detalle de Viajes ────────────────────────────────────────────
+    // ── Tabla Principal ────────────────────────────────────────────
     const footerY = PAGE_H - MARGIN - 90;
-    
-    if (liq.viajes?.length > 0) {
-      y += 5;
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000').text('Detalle de Viajes', M, y, { width: CW });
-      y += 12;
+    const isSingleTrip = (liq.viajes?.length ?? 0) <= 1;
 
-      const colWidths1 = [75, 55, 184.28, 60, 40, 60, 65];
-      const colX1: number[] = [];
-      let cx1 = M;
-      for (const w of colWidths1) { colX1.push(cx1); cx1 += w; }
-      
-      const tHeaders1 = ['Chofer', 'CP / CTG', 'Origen - Destino', 'Producto', 'Cantidad', 'Tarifa', 'SubTotal'];
-      const align1 = ['left', 'left', 'left', 'left', 'right', 'right', 'right'];
+    let colWidths: number[];
+    let tHeaders: string[];
+    let aligns: string[];
 
-      const drawHeader1 = () => {
-        doc.rect(M, y, CW, 16).fill('#e8e8e8').stroke('#aaa');
-        tHeaders1.forEach((h, i) => {
-          doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
-            .text(h, colX1[i] + 2, y + 4, { width: colWidths1[i] - 4, align: align1[i] as any });
-        });
-        y += 16;
-      };
+    if (isSingleTrip) {
+      colWidths = [100, 157.28, 40, 65, 65, 42, 70];
+      tHeaders = ['Producto', 'Descripción', 'Cantidad', 'Precio', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+      aligns = ['left', 'left', 'right', 'right', 'right', 'right', 'right'];
+    } else {
+      colWidths = [60, 70, 127.28, 40, 60, 60, 42, 80];
+      tHeaders = ['ID de Viaje', 'Producto', 'Descripción', 'Cantidad', 'Precio', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+      aligns = ['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right'];
+    }
 
-      drawHeader1();
+    const colX: number[] = [];
+    let cx = M;
+    for (const w of colWidths) { colX.push(cx); cx += w; }
 
-      for (const lViaje of liq.viajes) {
-        const v = lViaje.viaje;
-        const choferText = v.chofer ? v.chofer.nombre.toUpperCase() : 'S/I';
-        const ctgText = v.numeroIdentificacionPersonalizado ? v.numeroIdentificacionPersonalizado.toUpperCase() : 'S/I';
-        const rutaText = ([v.origen, v.destino].filter(Boolean).join(' - ') || 'S/I').toUpperCase();
-        const prodText = (v.productosViaje?.[0]?.producto?.nombre ?? 'S/I').toUpperCase();
-        const qty = lViaje.tnDestino != null ? fmtNum(lViaje.tnDestino) : '1,00';
-        const precio = lViaje.tarifaTransportista ?? (lViaje.subtotal ?? 0);
-        const base = lViaje.subtotal ?? 0;
+    const drawHeader = () => {
+      doc.rect(M, y, CW, 16).fill('#e8e8e8').stroke('#aaa');
+      tHeaders.forEach((h, i) => {
+        doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
+          .text(h, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: aligns[i] as any });
+      });
+      y += 16;
+    };
 
-        // Calcular altura dinámica
-        doc.fontSize(6.5).font('Helvetica');
-        const hChofer = doc.heightOfString(choferText, { width: colWidths1[0] - 4 });
-        const hCtg = doc.heightOfString(ctgText, { width: colWidths1[1] - 4 });
-        const hRuta = doc.heightOfString(rutaText, { width: colWidths1[2] - 4 });
-        const hProd = doc.heightOfString(prodText, { width: colWidths1[3] - 4 });
-        const rowH = Math.max(16, hChofer + 8, hCtg + 8, hRuta + 8, hProd + 8);
+    y += 5;
+    drawHeader();
 
-        if (y + rowH > footerY - 5) {
-          doc.addPage();
-          if (showTestWatermark) drawHomologacionWatermark(doc);
-          y = M;
-          drawHeader1();
+    for (const item of cvlp.items) {
+      if (item.descripcion.toUpperCase() === 'FLETES' && liq.viajes?.length > 0) {
+        for (const lViaje of liq.viajes) {
+          const v = lViaje.viaje;
+
+          const idViajeText = (v.numeroIdentificacionPersonalizado ?? v.numero).toString().toUpperCase();
+          const prodText = 'SERVICIOS LOGISTICOS';
+
+          const descParts = [];
+          if (isSingleTrip) descParts.push(`ID: ${idViajeText}`);
+          const ruta = [v.origen, v.destino].filter(Boolean).join(' - ');
+          if (ruta) descParts.push(`${ruta}`);
+
+          const descText = descParts.join('\n').toUpperCase();
+
+          const qty = lViaje.tnDestino != null ? fmtNum(lViaje.tnDestino) : '1,00';
+          const precio = lViaje.tarifaTransportista ?? (lViaje.subtotal ?? 0);
+          const base = lViaje.subtotal ?? 0;
+          const subtotalCiva = base * (1 + item.ivaPct / 100);
+
+          doc.fontSize(6.5).font('Helvetica');
+
+          let rowH = 16;
+          if (isSingleTrip) {
+            const hProd = doc.heightOfString(prodText, { width: colWidths[0] - 4 });
+            const hDesc = doc.heightOfString(descText, { width: colWidths[1] - 4 });
+            rowH = Math.max(16, hProd + 8, hDesc + 8);
+          } else {
+            const hId = doc.heightOfString(idViajeText, { width: colWidths[0] - 4 });
+            const hProd = doc.heightOfString(prodText, { width: colWidths[1] - 4 });
+            const hDesc = doc.heightOfString(descText, { width: colWidths[2] - 4 });
+            rowH = Math.max(16, hId + 8, hProd + 8, hDesc + 8);
+          }
+
+          if (y + rowH > footerY - 5) {
+            doc.addPage();
+            if (showTestWatermark) drawHomologacionWatermark(doc);
+            y = M;
+            drawHeader();
+          }
+
+          doc.rect(M, y, CW, rowH).stroke('#ddd');
+
+          const cells = isSingleTrip
+            ? [prodText, descText, qty, fmtNum(precio), fmtNum(base), fmtNum(item.ivaPct), fmtNum(subtotalCiva)]
+            : [idViajeText, prodText, descText, qty, fmtNum(precio), fmtNum(base), fmtNum(item.ivaPct), fmtNum(subtotalCiva)];
+
+          cells.forEach((text, i) => {
+            doc.fontSize(6.5).font('Helvetica').fillColor('#000')
+              .text(text, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: aligns[i] as any });
+          });
+          y += rowH;
         }
-
-        doc.rect(M, y, CW, rowH).stroke('#ddd');
-        const cells = [
-          choferText, ctgText, rutaText, prodText, qty, fmtNum(precio), fmtNum(base)
-        ];
-        cells.forEach((text, i) => {
-          doc.fontSize(6.5).font('Helvetica').fillColor('#000')
-            .text(text, colX1[i] + 2, y + 4, { width: colWidths1[i] - 4, align: align1[i] as any });
-        });
-        y += rowH;
       }
     }
 
-    // ── Tabla 2: Conceptos Fiscales Adicionales ───────────────────────────────
-    const conceptosExtra = cvlp.items.filter(item => item.descripcion.toUpperCase() !== 'FLETES');
-    
-    if (conceptosExtra.length > 0) {
-      y += 10;
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000').text('Conceptos Fiscales Adicionales', M, y, { width: CW });
-      y += 12;
+    // Procesamiento de Conceptos Adicionales
+    const otrosItems = cvlp.items.filter(i => i.descripcion.toUpperCase() !== 'FLETES');
+    const gruposOtros: { [baseName: string]: typeof otrosItems } = {};
+    for (const item of otrosItems) {
+      const match = item.descripcion.match(/^(.*?)\s*\(Viaje #([^)]+)\)$/i);
+      const baseName = match ? match[1].trim().toUpperCase() : item.descripcion.toUpperCase();
+      if (!gruposOtros[baseName]) gruposOtros[baseName] = [];
+      gruposOtros[baseName].push(item);
+    }
 
-      const colWidths2 = [339.28, 75, 50, 75];
-      const colX2: number[] = [];
-      let cx2 = M;
-      for (const w of colWidths2) { colX2.push(cx2); cx2 += w; }
+    const conceptosProcesados: { desc: string; tripId: string; qty: number; precio: number; base: number; ivaPct: number; subtotal: number }[] = [];
+    for (const baseName in gruposOtros) {
+      const group = gruposOtros[baseName];
+      const allSameAmount = group.every(i => i.importeBase === group[0].importeBase);
+      // Si son varios viajes y tienen el mismo monto, se consolidan
+      if (group.length > 1 && allSameAmount) {
+        let totalBase = 0;
+        let totalSub = 0;
+        for (const i of group) { totalBase += i.importeBase; totalSub += i.subtotal; }
+        conceptosProcesados.push({ desc: baseName, tripId: '', qty: group.length, precio: group[0].importeBase, base: totalBase, ivaPct: group[0].ivaPct, subtotal: totalSub });
+      } else {
+        // Se desglosan
+        for (const item of group) {
+          const match = item.descripcion.match(/^(.*?)\s*\(Viaje #([^)]+)\)$/i);
+          let tripIdText = '';
+          if (match && !isSingleTrip) {
+            const internalId = match[2].trim();
+            const tripMatch = liq.viajes?.find(lv => String(lv.viaje.numero) === internalId);
+            tripIdText = (tripMatch?.viaje.numeroIdentificacionPersonalizado ?? internalId).toString().toUpperCase();
+          }
+          conceptosProcesados.push({ desc: baseName, tripId: tripIdText, qty: 1, precio: item.importeBase, base: item.importeBase, ivaPct: item.ivaPct, subtotal: item.subtotal });
+        }
+      }
+    }
 
-      const tHeaders2 = ['Concepto', 'Base', 'IVA %', 'SubTotal c/IVA'];
-      const align2 = ['left', 'right', 'right', 'right'];
+    for (const cp of conceptosProcesados) {
+      doc.fontSize(6.5).font('Helvetica');
+      let rowH = 16;
+      if (isSingleTrip) {
+        const hProd = doc.heightOfString(cp.desc, { width: colWidths[0] - 4 });
+        const hDesc = doc.heightOfString(cp.desc, { width: colWidths[1] - 4 });
+        rowH = Math.max(16, hProd + 8, hDesc + 8);
+      } else {
+        const hId = doc.heightOfString(cp.tripId, { width: colWidths[0] - 4 });
+        const hProd = doc.heightOfString(cp.desc, { width: colWidths[1] - 4 });
+        const hDesc = doc.heightOfString(cp.desc, { width: colWidths[2] - 4 });
+        rowH = Math.max(16, hId + 8, hProd + 8, hDesc + 8);
+      }
 
-      const drawHeader2 = () => {
-        doc.rect(M, y, CW, 16).fill('#e8e8e8').stroke('#aaa');
-        tHeaders2.forEach((h, i) => {
-          doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
-            .text(h, colX2[i] + 2, y + 4, { width: colWidths2[i] - 4, align: align2[i] as any });
-        });
-        y += 16;
-      };
-
-      // Si el header ni siquiera entra, paginamos antes de dibujarlo
-      if (y + 16 + 16 > footerY - 5) {
+      if (y + rowH > footerY - 5) {
         doc.addPage();
         if (showTestWatermark) drawHomologacionWatermark(doc);
         y = M;
+        drawHeader();
       }
-      drawHeader2();
 
-      for (const item of conceptosExtra) {
-        const desc = item.descripcion.toUpperCase();
-        doc.fontSize(6.5).font('Helvetica');
-        const hDesc = doc.heightOfString(desc, { width: colWidths2[0] - 4 });
-        const rowH = Math.max(16, hDesc + 8);
+      doc.rect(M, y, CW, rowH).stroke('#ddd');
 
-        if (y + rowH > footerY - 5) {
-          doc.addPage();
-          if (showTestWatermark) drawHomologacionWatermark(doc);
-          y = M;
-          drawHeader2();
-        }
+      const cells = isSingleTrip
+        ? [cp.desc, cp.desc, fmtNum(cp.qty), fmtNum(cp.precio), fmtNum(cp.base), fmtNum(cp.ivaPct), fmtNum(cp.subtotal)]
+        : [cp.tripId, cp.desc, cp.desc, fmtNum(cp.qty), fmtNum(cp.precio), fmtNum(cp.base), fmtNum(cp.ivaPct), fmtNum(cp.subtotal)];
 
-        doc.rect(M, y, CW, rowH).stroke('#ddd');
-        const cells = [
-          desc, fmtNum(item.importeBase), fmtNum(item.ivaPct), fmtNum(item.subtotal)
-        ];
-        cells.forEach((text, i) => {
-          doc.fontSize(6.5).font('Helvetica').fillColor('#000')
-            .text(text, colX2[i] + 2, y + 4, { width: colWidths2[i] - 4, align: align2[i] as any });
-        });
-        y += rowH;
-      }
+      cells.forEach((text, i) => {
+        doc.fontSize(6.5).font('Helvetica').fillColor('#000')
+          .text(text, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: aligns[i] as any });
+      });
+      y += rowH;
     }
 
     // Comprobantes asociados (comprobante de anulación → CVLP original)

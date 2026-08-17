@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -37,4 +38,20 @@ export class ConfirmImportDto {
   @ValidateNested({ each: true })
   @Type(() => CiudadNormalizadaImportDto)
   ciudadesNormalizadas?: CiudadNormalizadaImportDto[];
+
+  /** Filas que el usuario decidió no importar (ej. ciudad multidestino sin resolver). */
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  filasExcluidas?: number[];
+
+  /** El usuario confirmó que quiere importar igual filas con campos `warnIfEmpty` vacíos (ej. cliente sin CUIT/país). */
+  @IsOptional()
+  @IsBoolean()
+  confirmarCamposFaltantes?: boolean;
+
+  /** Solo viajes: el usuario confirmó que varios viajes nuevos comparten número de factura (se reutiliza y suma en vez de duplicar). */
+  @IsOptional()
+  @IsBoolean()
+  confirmarFacturasDuplicadas?: boolean;
 }

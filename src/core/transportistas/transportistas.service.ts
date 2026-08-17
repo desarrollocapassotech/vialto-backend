@@ -59,31 +59,38 @@ export class TransportistasService {
     return row;
   }
 
-  private assertTransportistaRequiredFields(data: {
-    nombre: string;
-    pais: string | null | undefined;
-    idFiscal: string | null | undefined;
-  }) {
+  private assertTransportistaRequiredFields(
+    data: {
+      nombre: string;
+      pais?: string | null;
+      idFiscal?: string | null;
+    },
+    confirmarSinDatosFiscales?: boolean,
+  ) {
     if (!data.nombre?.trim()) {
       throw new BadRequestException('El nombre es obligatorio');
     }
-    if (!data.pais?.trim()) {
-      throw new BadRequestException('El país es obligatorio');
-    }
-    if (!data.idFiscal?.trim()) {
-      throw new BadRequestException('El ID Fiscal es obligatorio');
+    // País e ID Fiscal son recomendados (los necesita Facturación/
+    // Liquidaciones más adelante), no obligatorios — si faltan, hace falta
+    // que el usuario lo confirme explícitamente antes de guardar.
+    if ((!data.pais?.trim() || !data.idFiscal?.trim()) && !confirmarSinDatosFiscales) {
+      throw new BadRequestException(
+        'Falta el país y/o el ID Fiscal — confirmá que querés guardar igual sin esos datos.',
+      );
     }
   }
 
   create(tenantId: string, dto: CreateTransportistaDto) {
-    this.assertTransportistaRequiredFields(dto);
-    validarIdFiscal(dto.pais, dto.idFiscal);
+    this.assertTransportistaRequiredFields(dto, dto.confirmarSinDatosFiscales);
+    const pais = dto.pais?.trim() || null;
+    const idFiscal = dto.idFiscal?.trim() || null;
+    validarIdFiscal(pais, idFiscal);
     return this.prisma.transportista.create({
       data: {
         tenantId,
         nombre: dto.nombre.trim(),
-        pais: dto.pais.trim(),
-        idFiscal: dto.idFiscal.trim(),
+        pais,
+        idFiscal,
         email: dto.email?.trim() || null,
         telefono: dto.telefono?.trim() || null,
         domicilio: dto.domicilio?.trim() || null,
@@ -102,9 +109,13 @@ export class TransportistasService {
     const current = await this.findOne(id, tenantId);
     const next = {
       nombre: dto.nombre !== undefined ? dto.nombre.trim() : current.nombre,
-      pais: dto.pais !== undefined ? dto.pais.trim() : (current.pais ?? ''),
+      pais:
+        (dto.pais !== undefined ? dto.pais.trim() : (current.pais ?? '')) ||
+        null,
       idFiscal:
-        dto.idFiscal !== undefined ? dto.idFiscal.trim() : (current.idFiscal ?? ''),
+        (dto.idFiscal !== undefined
+          ? dto.idFiscal.trim()
+          : (current.idFiscal ?? '')) || null,
       email: dto.email !== undefined ? dto.email?.trim() || null : current.email,
       telefono: dto.telefono !== undefined ? dto.telefono?.trim() || null : current.telefono,
       domicilio:
@@ -127,7 +138,7 @@ export class TransportistasService {
             ? new Date(dto.fechaVencimientoPermiso)
             : null,
     };
-    this.assertTransportistaRequiredFields(next);
+    this.assertTransportistaRequiredFields(next, dto.confirmarSinDatosFiscales);
     validarIdFiscal(next.pais, next.idFiscal);
     return this.prisma.transportista.update({
       where: { id },

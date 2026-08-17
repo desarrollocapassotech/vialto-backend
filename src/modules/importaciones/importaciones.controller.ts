@@ -20,6 +20,8 @@ import { ConfirmImportDto } from './dto/confirm-import.dto';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { ViajeIdsDto } from './dto/viaje-ids.dto';
 import { ConfirmarFacturasClientesDto } from './dto/confirmar-facturas-clientes.dto';
+import { CrearVehiculosFaltantesDto } from './dto/crear-vehiculos-faltantes.dto';
+import { CrearEntidadesFaltantesDto } from './dto/crear-entidades-faltantes.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -49,6 +51,22 @@ export class ImportacionesController {
   }
 
   /**
+   * Si el tenant ya tiene clientes/transportistas/choferes/vehículos
+   * cargados, el wizard ofrece elegir qué módulos importar en vez de forzar
+   * la secuencia completa (pensada para un tenant nuevo, sin datos todavía).
+   */
+  @ApiOperation({ summary: 'Indica si el tenant ya tiene datos cargados por módulo' })
+  @Get('tenant-tiene-datos')
+  @Roles('admin', 'superadmin')
+  tenantTieneDatos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') queryTenantId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(auth, queryTenantId);
+    return this.service.tenantTieneDatos(tenantId);
+  }
+
+  /**
    * Sube un archivo Excel, lo valida y devuelve una previsualización.
    * No guarda nada en las tablas de negocio.
    */
@@ -65,7 +83,13 @@ export class ImportacionesController {
   ) {
     if (!file) throw new BadRequestException('Se requiere un archivo Excel');
     const tenantId = this.resolveTenantId(auth, query.tenantId);
-    return this.service.preview(tenantId, query.modulo, file.buffer, file.originalname);
+    return this.service.preview(
+      tenantId,
+      query.modulo,
+      file.buffer,
+      file.originalname,
+      auth.role === 'superadmin',
+    );
   }
 
   /**
@@ -76,7 +100,16 @@ export class ImportacionesController {
   @Roles('admin', 'superadmin')
   confirm(@Body() dto: ConfirmImportDto, @CurrentAuth() auth: AuthPayload) {
     const tenantId = this.resolveTenantId(auth, dto.tenantId);
-    return this.service.confirm(tenantId, dto.sessionId, auth.userId, dto.ciudadesNormalizadas);
+    return this.service.confirm(
+      tenantId,
+      dto.sessionId,
+      auth.userId,
+      auth.role === 'superadmin',
+      dto.ciudadesNormalizadas,
+      dto.filasExcluidas,
+      dto.confirmarCamposFaltantes,
+      dto.confirmarFacturasDuplicadas,
+    );
   }
 
   /** Historial de importaciones del tenant */
@@ -161,5 +194,66 @@ export class ImportacionesController {
   ) {
     const tenantId = this.resolveTenantId(auth, queryTenantId);
     return this.service.getTemplates(tenantId);
+  }
+
+  /** Catálogo fijo de campos importables de un módulo — arma el dropdown de la UI de templates. */
+  @ApiOperation({ summary: 'Catálogo de campos importables de un módulo' })
+  @Get('templates/catalogo')
+  @Roles('superadmin')
+  getCatalogoCampos(@Query('modulo') modulo: string) {
+    return this.service.getCatalogoCampos(modulo);
+  }
+
+  /**
+   * Sugerencia de mapeo de columnas con IA a partir de un Excel de ejemplo.
+   * No guarda nada — el resultado precarga el formulario para que el
+   * superadmin lo revise y confirme.
+   */
+  @ApiOperation({ summary: 'Sugerir mapeo de template con IA a partir de un Excel de ejemplo' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('templates/sugerir')
+  @Roles('superadmin')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  sugerirTemplate(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('modulo') modulo: string,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere un archivo Excel');
+    return this.service.sugerirTemplate(modulo, file.buffer);
+  }
+
+  /**
+   * Crea los vehículos que faltaban (confirmados por el usuario desde el
+   * panel de previsualización) y devuelve cuántos se crearon. Después de
+   * esto conviene volver a previsualizar el mismo archivo.
+   */
+  @ApiOperation({ summary: 'Crear vehículos faltantes detectados en la previsualización' })
+  @Post('entidades-faltantes/vehiculos')
+  @Roles('admin', 'superadmin')
+  crearVehiculosFaltantes(
+    @Body() dto: CrearVehiculosFaltantesDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.service.crearVehiculosFaltantes(tenantId, dto.items);
+  }
+
+  /**
+   * Crea entidades faltantes que solo necesitan un nombre (clientes,
+   * transportistas, choferes, productos), confirmadas desde el panel de
+   * previsualización. Vehículos usa el endpoint dedicado de arriba porque
+   * además necesita el tipo.
+   */
+  @ApiOperation({ summary: 'Crear entidades faltantes (clientes/transportistas/choferes/productos) detectadas en la previsualización' })
+  @Post('entidades-faltantes/:modelo')
+  @Roles('admin', 'superadmin')
+  crearEntidadesFaltantesSimple(
+    @Param('modelo') modelo: string,
+    @Body() dto: CrearEntidadesFaltantesDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    const tenantId = this.resolveTenantId(auth, dto.tenantId);
+    return this.service.crearEntidadesFaltantesSimple(tenantId, modelo, dto.valores);
   }
 }

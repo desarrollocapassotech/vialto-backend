@@ -933,7 +933,7 @@ No está gateado por `RequireModule`; disponible para todos los tenants. `GET da
 ---
 
 ### `importaciones` — Carga masiva desde Excel (uso admin)
-Tampoco es un módulo vendible por tenant. Motor de importación con parser + validator + un `processor` por módulo destino (hoy: `clientes`, `viajes`), flujo de preview/confirm con sesión de staging temporal, y templates de columnas configurables por tenant/módulo.
+Tampoco es un módulo vendible por tenant. Motor de importación con parser + validator + un `processor` por módulo destino (`clientes`, `transportistas`, `choferes`, `vehiculos`, `viajes`), flujo de **preview/confirm en dos fases** con sesión de staging temporal, y templates de columnas configurables por tenant/módulo. Compartido entre tenant-admin y superadmin — el wizard del frontend (`vialto-frontend/CLAUDE.md`, sección "Importación masiva") es el mismo componente para ambos roles; el backend no tiene lógica distinta por rol salvo `resolveTenantId` (superadmin puede operar sobre cualquier tenant vía `?tenantId=`).
 
 ```prisma
 model ImportTemplate {
@@ -941,7 +941,7 @@ model ImportTemplate {
   tenantId  String
   modulo    String   // viajes | clientes | choferes | vehiculos | stock | etc.
   nombre    String
-  config    Json     // sheet, headerRow, columns[]
+  config    Json     // sheet, headerRow, columns[] — ver ColumnConfig abajo
   activo    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -971,7 +971,7 @@ model ImportLog {
   totalFilas    Int
   exitosas      Int      @default(0)
   errores       Int      @default(0)
-  detalles      Json
+  detalles      Json     // ImportLogDetalle[]: {fila, estado, id?, creado?, facturado?, mensaje?} — ver InsertResult abajo
   createdAt     DateTime @default(now())
   createdBy     String
 
@@ -980,6 +980,52 @@ model ImportLog {
 ```
 
 > **`TenantFieldConfig` / `TenantFieldConfigAuditLog`** también existen en el schema pero están **fuera del alcance de este documento**: el comentario en `prisma/schema.prisma` indica que otro integrante del equipo los está desarrollando y que no hay que modificar su forma — solo están declarados para que Prisma coincida con las tablas ya existentes en QA. No asumir comportamiento sobre ellos sin consultar.
+
+#### Arquitectura del motor (`src/modules/importaciones/`)
+
+- **`ParserService`** — lee el Excel (`sheet`/`headerRow` del template) y devuelve `ParsedRow[]`. `sampleWorkbook(buffer, maxRows=10)` expone una muestra cruda por hoja, usada solo por la sugerencia IA (no por el flujo de import normal).
+- **`ValidatorService`** — coerción de tipos, resolución de `lookup` (con `lookupFields` probando varios campos en orden, ej. `['nombre', 'idFiscal']`, y `multiple: true` para celdas con varios valores separados por `/`, ej. patente de tractor+semirremolque), y el mecanismo `warnIfEmpty` (ver abajo). Devuelve `ValidatedRow[]` + `RowError[]` + `advertencias: {fila, campos}[]`.
+- **`IImportProcessor`** (`processors/import-processor.interface.ts`) — un `insert()` por módulo, invocado fila a fila desde `confirm()`:
+
+  ```typescript
+  export interface InsertResult {
+    id: string;
+    /** true = alta nueva, false = actualizó un registro ya existente. */
+    creado: boolean;
+    /** Solo Viajes: true = esta fila quedó con una factura individual adjunta. */
+    facturado?: boolean;
+  }
+  export interface IImportProcessor {
+    insert(row: ValidatedRow, tenantId: string, createdBy: string): Promise<InsertResult>;
+    /** Opcional: cuenta cuántas de las filas ya existen en base (altas vs. actualizaciones), para el desglose del preview. */
+    contarExistentes?(rows: ValidatedRow[], tenantId: string): Promise<number>;
+  }
+  ```
+
+  Los 5 processors (`clientes`, `transportistas`, `choferes`, `vehiculos`, `viajes`) implementan ambos métodos — si se agrega un módulo nuevo, replicar el patrón (`insert()` nunca devuelve solo un `string`, siempre `InsertResult`, para que el resumen final tenga el desglose exacto de creados/actualizados).
+- **Flujo de dos fases**: `POST /importaciones/preview` (sube el Excel, valida, arma `PreviewResult`, no escribe nada de negocio — solo la `ImportSession` de staging) → `POST /importaciones/confirm` (recibe `sessionId` + confirmaciones pendientes, corre `processor.insert()` fila por fila, arma `ImportLog`). El frontend llama a estos dos endpoints **una vez por módulo**, en orden de dependencia (`clientes → transportistas → choferes → vehiculos → viajes`) — no hay una sesión "encadenada" en el backend, cada módulo es una `ImportSession` independiente.
+
+#### `warnIfEmpty` — campos recomendados pero no bloqueantes
+
+`ColumnConfig.warnIfEmpty` (hoy: `idFiscal`/`pais` en `clientes` y `transportistas`, ver `template-catalogo.ts`) marca un campo como "recomendado, no obligatorio": si la celda viene vacía, la fila se importa igual, pero se junta en `PreviewResult.advertenciasCamposFaltantes` y `confirm()` la rechaza salvo que el usuario confirme explícitamente (`ConfirmImportDto.confirmarCamposFaltantes`) — el frontend re-valida esto también server-side, no confía solo en el checkbox de UI. **El mismo criterio de "CUIT/país opcional con confirmación" aplica a la carga manual** (no solo import): `CreateClienteDto`/`UpdateClienteDto` y sus equivalentes de Transportista tienen `idFiscal`/`pais` como `@IsOptional()` + un flag `confirmarSinDatosFiscales?: boolean` que `ClientesService`/`TransportistasService` exigen en `assertXRequiredFields` cuando falta el dato fiscal — mismo patrón de "advertencia + checkbox de confirmación" en ambos lugares, no lo dupliques con una regla nueva si se agrega otro campo opcional-mostrado-como-advertencia.
+
+#### Sugerencia de template con IA — dos proveedores (`ia-template-suggestion.service.ts`)
+
+Gemini como proveedor primario, **Groq como fallback automático** si Gemini falla (ambos con retry+backoff, `fetchConReintentos`). Devuelve `{proveedor, modelo, sheet, headerRow, columnas, headersNoUsados}` — además del mapeo de columnas, detecta la hoja y la fila de encabezados a partir de `ParserService.sampleWorkbook()`. Requiere `GROQ_API_KEY` en `.env` (agregar a la lista de variables de entorno del proyecto si se documenta ahí formalmente). **Modelo Groq**: `openai/gpt-oss-120b` — `llama-3.3-70b-versatile` quedó deprecado por Groq el 16/08/26; si Groq vuelve a devolver 404 en el futuro, es señal de otro modelo deprecado, no un bug del código (verificar contra la doc de deprecaciones de Groq antes de tocar el service).
+
+#### Viajes — lo más particular del motor
+
+- **Matching de fila existente** (`ViajesProcessor.resolverFilasExistentes`, devuelve `Map<fila, viajeId>`): primero por `numeroIdentificacionPersonalizado` (único por tenant a nivel DB, `@@unique([tenantId, numeroIdentificacionPersonalizado])`); si no hay match, fallback a clave compuesta `(clienteId, transportistaId, origen, destino, fechaCarga, fechaDescarga)` (origen/destino comparados case-insensitive). **No hay constraint de DB que garantice unicidad de esta clave compuesta** — es solo el criterio que usa el import para decidir alta vs. actualización; si dos filas de Excel distintas coinciden en los 6 campos, la segunda actualiza a la primera en vez de crear un viaje nuevo (comportamiento esperado, no un bug).
+- **Normalización de ciudades**: el motor NO valida `origen`/`destino` contra un catálogo en el backend — la resolución de ciudad ambigua ocurre 100% en el frontend (`vialto-frontend/src/lib/importacionViajesCiudades.ts`) contra un catálogo externo, antes de llamar a `confirm()`. El backend solo recibe `ConfirmImportDto.ciudadesNormalizadas` (overrides de texto por fila) y `filasExcluidas` (filas que el usuario decidió no importar, ej. destino multidestino tipo "PARANA+RAFAELA+CORDOBA" que nunca va a resolver a una sola ciudad).
+- **Reutilización de Factura en vez de duplicarla** (`ViajesProcessor.create()`): si varias filas nuevas del mismo import comparten `nroFactura` para el mismo cliente, o si ya existe una `Factura` con ese `(tenantId, tipo:'cliente', numero, clienteId)`, el import **no crea una Factura nueva por cada viaje** — reutiliza la existente y suma el `importe`. Esto solo corre si el usuario confirmó explícitamente (`detectarFacturasDuplicadas()` + `ConfirmImportDto.confirmarFacturasDuplicadas`) — sin confirmación, `confirm()` rechaza con `BadRequestException`. Bug real corregido ago 2026: antes se creaba una `Factura` nueva por cada fila con `nroFactura`, aunque varias compartieran número.
+- **Guard de protección fiscal** (`ViajesProcessor.update()`, preexistente, **no es un bug**): si el viaje ya tiene `facturacionEstado`/`liquidacionEstado` que indica que ya fue facturado/liquidado, `update()` tira error en vez de pisar los datos en un reimport — protege comprobantes fiscales ya emitidos de sobrescritura silenciosa. Si un reimport masivo reporta "N con error" contra viajes de test previos, verificar primero `SELECT "facturacionEstado", count(*) FROM viajes WHERE "tenantId" = '...' GROUP BY 1` antes de asumir una regresión.
+- **Patente compuesta en Vehículos** (`VehiculosProcessor`): una celda tipo `"AC359ES/LHT523"` (tractor + semirremolque) se separa por `/` y crea/actualiza **dos** `Vehiculo` distintos (posición 0 = tractor, posición 1 = semirremolque) — antes se guardaba como un único vehículo inválido con la patente compuesta literal. Mismo criterio de split que ya usa el lookup `vehiculoId` de Viajes (`multiple: true, separador: "/"`).
+- **Diff "antes/después" para el preview** (`ViajesProcessor.obtenerEstadoActual()` + `ImportacionesService.compararCamposViaje()`): para cada fila que va a actualizar un viaje existente, el preview trae el estado actual de BD (con nombres de cliente/transportista/chofer/patente ya resueltos) y arma `PreviewViaje.cambios: PreviewCambioCampo[]` (`{campo, antes, despues}`), solo con los campos que realmente cambian. `PreviewViaje.nuevo` distingue alta vs. actualización. El frontend lo consume en el modal "Ver cambios" — ver `vialto-frontend/CLAUDE.md`.
+- **Desglose nuevas vs. actualizadas** (`PreviewResult.entidadesNuevas`/`entidadesActualizadas`, vía `IImportProcessor.contarExistentes()`): antes el preview siempre decía "N a crear" aunque la mayoría de las filas fueran a actualizar un registro ya existente (el processor hace upsert por nombre/patente/clave compuesta) — ahora se distingue.
+
+#### `GET /importaciones/tenant-tiene-datos` — para el selector de módulos del wizard
+
+`ImportacionesService.tenantTieneDatos(tenantId)` cuenta (`count()`, no trae filas) si el tenant ya tiene algún `Cliente`/`Transportista`/`Chofer`/`Vehiculo` cargado. El wizard del frontend lo usa para decidir si arranca directo con la secuencia completa (tenant nuevo, sin nada cargado) o si primero deja elegir qué módulos importar (tenant con datos existentes, para no forzar un recorrido completo). Endpoint liviano, sin relación con `preview`/`confirm`.
 
 ---
 
@@ -1136,5 +1182,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: agosto 2026 (rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
+*Última actualización: agosto 2026 (motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

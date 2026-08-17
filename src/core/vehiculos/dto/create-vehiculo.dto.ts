@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsNotEmpty, IsDateString, Min } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsDateString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateVehiculoDto {

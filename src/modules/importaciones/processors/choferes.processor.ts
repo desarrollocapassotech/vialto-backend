@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
-import type { IImportProcessor } from "./import-processor.interface";
+import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 
 @Injectable()
@@ -11,19 +11,21 @@ export class ChoferesProcessor implements IImportProcessor {
     row: ValidatedRow,
     tenantId: string,
     _createdBy: string,
-  ): Promise<string> {
+  ): Promise<InsertResult> {
     const nombre = String(row.nombre ?? "").trim();
     if (!nombre) {
       throw new Error("El nombre del chofer es obligatorio.");
     }
 
+    // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
+    // para que un reimport no borre datos ya cargados que ese Excel no trae.
     const data = {
-      dni: (row.dni as string | null)?.toString().trim() || null,
-      cuit: (row.cuit as string | null)?.toString().trim() || null,
-      licencia: (row.licencia as string | null)?.toString().trim() || null,
-      licenciaVence: (row.licenciaVence as Date | null) ?? null,
-      telefono: (row.telefono as string | null)?.toString().trim() || null,
-      transportistaId: (row.transportistaId as string | null) ?? null,
+      dni: (row.dni as string | null)?.toString().trim() || undefined,
+      cuit: (row.cuit as string | null)?.toString().trim() || undefined,
+      licencia: (row.licencia as string | null)?.toString().trim() || undefined,
+      licenciaVence: (row.licenciaVence as Date | null) ?? undefined,
+      telefono: (row.telefono as string | null)?.toString().trim() || undefined,
+      transportistaId: (row.transportistaId as string | null) ?? undefined,
     };
 
     const existing = await this.prisma.chofer.findFirst({
@@ -36,13 +38,26 @@ export class ChoferesProcessor implements IImportProcessor {
         where: { id: existing.id },
         data,
       });
-      return existing.id;
+      return { id: existing.id, creado: false };
     }
 
     const created = await this.prisma.chofer.create({
       data: { tenantId, nombre, ...data },
       select: { id: true },
     });
-    return created.id;
+    return { id: created.id, creado: true };
+  }
+
+  async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {
+    const existentes = await this.prisma.chofer.findMany({
+      where: { tenantId },
+      select: { nombre: true },
+    });
+    const nombresExistentes = new Set(
+      existentes.map((c) => c.nombre.trim().toLowerCase()),
+    );
+    return rows.filter((r) =>
+      nombresExistentes.has(String(r.nombre ?? "").trim().toLowerCase()),
+    ).length;
   }
 }

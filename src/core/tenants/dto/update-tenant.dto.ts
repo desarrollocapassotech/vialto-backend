@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, IsIn, IsInt, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsIn, IsInt, IsBoolean, IsDateString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateTenantDto {
@@ -10,4 +10,6 @@ export class UpdateTenantDto {
   @IsOptional() @IsDateString() billingRenewsAt?: string;
   @IsOptional() @IsString() whiteLabelDomain?: string;
   @IsOptional() @IsString() labelIdentificacionPersonalizadaViajes?: string;
+  /** true = el admin del tenant no ve la pantalla de import masivo (superadmin sigue pudiendo usarla). */
+  @IsOptional() @IsBoolean() importacionesOcultas?: boolean;
 }

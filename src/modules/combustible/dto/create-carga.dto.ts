@@ -13,4 +13,5 @@ export class CreateCargaDto {
   @IsOptional() @IsDateString() fecha?: string;
   @IsOptional() @IsString() fotoTacometro?: string;
   @IsOptional() @IsString() fotoTicket?: string;
+  @IsOptional() @IsDateString() createdAt?: string;
 }

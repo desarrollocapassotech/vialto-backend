@@ -2,6 +2,7 @@ import { computeAfipGravadoIva, groupAlicuotasIva, round2 } from './arca-iva.uti
 import { ArcaAutorizarRequest, ArcaComprobanteCvlp, ArcaComprobanteItem } from './types/arca.types';
 
 export interface ConceptoFacturable {
+  producto?: string;
   descripcion: string;
   cantidad?: number;
   precioUnitario?: number;
@@ -28,6 +29,7 @@ export function buildComprobanteCvlp(
     const montos = computeAfipGravadoIva(c.importe, 0, 0, pct);
 
     items.push({
+      producto: c.producto,
       descripcion: c.descripcion,
       cantidad: c.cantidad,
       precioUnitario: c.precioUnitario,

@@ -3,6 +3,7 @@ import { resolveIvaPct } from './arca-iva.util';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 
 export interface FacturaLineaInput {
+  producto?: string;
   descripcion: string;
   cantidad?: number;
   precioUnitario?: number;
@@ -18,6 +19,7 @@ export function buildFacturaConceptosList(
   return lineas
     .filter((l) => l.descripcion.trim() && l.importe !== 0)
     .map((l) => ({
+      producto: l.producto,
       descripcion: l.descripcion.trim(),
       cantidad: l.cantidad,
       precioUnitario: l.precioUnitario,
@@ -34,6 +36,7 @@ type ViajeSnap = {
   precioUnitarioFactura?: number | null;
   origen?: string | null;
   destino?: string | null;
+  fechaCarga?: Date | null;
 };
 
 /** Líneas por defecto a partir de la factura y sus viajes vinculados. */
@@ -44,10 +47,15 @@ export function defaultFacturaLineas(
   const ivaPct = resolveIvaPct(factura.ivaPct);
   if (viajes.length > 0) {
     return viajes.map((v) => {
-      const ruta =
-        v.origen && v.destino ? ` ${v.origen} — ${v.destino}` : '';
+      const ruta = [v.origen, v.destino].filter(Boolean).join(" — ");
+      const fechaTxt = v.fechaCarga ? new Intl.DateTimeFormat("es-AR", { timeZone: "UTC" }).format(v.fechaCarga) : "";
+      
+      const partesDesc = [ruta, fechaTxt].filter(Boolean).join(" - ");
+      const descripcion = partesDesc || `Viaje #${numeroVisibleViaje(v)}`;
+
       return {
-        descripcion: `Viaje #${numeroVisibleViaje(v)}${ruta}`,
+        producto: v.numeroIdentificacionPersonalizado || `#${v.numero}`,
+        descripcion,
         cantidad: v.cantidadFactura ?? undefined,
         precioUnitario: v.precioUnitarioFactura ?? undefined,
         importe: v.monto ?? 0,

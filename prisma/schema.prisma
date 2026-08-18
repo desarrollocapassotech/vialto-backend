@@ -323,6 +323,8 @@ model Viaje {
   monedaMonto                      String          @default("ARS") // ARS | USD
   precioTransportistaExterno       Float?
   monedaPrecioTransportistaExterno String          @default("ARS") // ARS | USD
+  /** Si es true, precioTransportistaExterno ya incluye IVA — no se le vuelve a sumar el IVA de una Liquidación vinculada. */
+  precioTransportistaIncluyeIva    Boolean         @default(false)
 
   cantidadFactura             Float?
   precioUnitarioFactura       Float?

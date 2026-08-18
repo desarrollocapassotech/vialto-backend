@@ -76,6 +76,8 @@ export class UpdateViajeDto {
   @Type(() => Number)
   precioTransportistaExterno?: number;
   @IsOptional() @IsIn(['ARS', 'USD']) monedaPrecioTransportistaExterno?: string;
+  /** Si es true, precioTransportistaExterno ya incluye IVA (no se le suma el IVA de una liquidación vinculada). */
+  @IsOptional() @IsBoolean() precioTransportistaIncluyeIva?: boolean;
 
   @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
   @IsNumber({}, { message: 'La cantidad a facturar debe ser un número válido' }) @Type(() => Number) cantidadFactura?: number;

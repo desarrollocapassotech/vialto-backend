@@ -206,6 +206,22 @@ export class LiquidacionesService {
       );
     }
 
+    // El CVLP calcula y discrimina el IVA por su cuenta (bruto - comisión + IVA). Un
+    // viaje con "Incluir IVA" activado ya trae el IVA adentro de su precio, así que
+    // liquidarlo por CVLP volvería a sumarle el IVA (double counting sobre el
+    // comprobante fiscal real). Se excluyen mutuamente: hay que desactivar el flag
+    // en el viaje antes de poder liquidarlo.
+    const viajesConIvaIncluido = viajes.filter(
+      (v) => (v as { precioTransportistaIncluyeIva?: boolean }).precioTransportistaIncluyeIva,
+    );
+    if (viajesConIvaIncluido.length > 0) {
+      throw new BadRequestException(
+        `Los siguientes viajes tienen "Incluir IVA" activado en su precio y no se pueden liquidar por CVLP (el comprobante calcula el IVA por separado): ${viajesConIvaIncluido
+          .map((v) => v.numero)
+          .join(', ')}. Desactivá esa opción en el viaje antes de liquidarlo.`,
+      );
+    }
+
     // Verificar que ningún viaje ya tenga liquidación activa para este transportista
     await this.assertViajesSinLiquidacionActiva(tenantId, dto.transportistaId, viajes);
 

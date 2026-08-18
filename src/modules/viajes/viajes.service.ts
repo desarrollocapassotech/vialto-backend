@@ -278,9 +278,16 @@ export class ViajesService {
   private calcularAcordado(v: {
     id?: string;
     precioTransportistaExterno?: number | null;
+    precioTransportistaIncluyeIva?: boolean | null;
     liquidacionesViaje?: any[];
   }): number {
     let acordado = v.precioTransportistaExterno ?? 0;
+
+    // El precio ya incluye IVA: se usa tal cual, sin sumarle el IVA de ninguna
+    // Liquidación vinculada (evita el doble conteo de IVA).
+    if (v.precioTransportistaIncluyeIva) {
+      return acordado;
+    }
 
     if (v.liquidacionesViaje && v.liquidacionesViaje.length > 0) {
       let montoReal = 0;
@@ -425,6 +432,7 @@ export class ViajesService {
     transportistaId?: string | null;
     precioTransportistaExterno?: number | null;
     monedaPrecioTransportistaExterno?: string | null;
+    precioTransportistaIncluyeIva?: boolean | null;
     pagosTransportista?: unknown;
     liquidacionesViaje?: any[];
   }): void {
@@ -667,6 +675,7 @@ export class ViajesService {
           id: true,
           precioTransportistaExterno: true,
           monedaPrecioTransportistaExterno: true,
+          precioTransportistaIncluyeIva: true,
           pagosTransportista: true,
           liquidacionesViaje: {
             include: {
@@ -1109,6 +1118,7 @@ export class ViajesService {
       transportistaId: refs.transportistaId,
       precioTransportistaExterno,
       monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
+      precioTransportistaIncluyeIva: dto.precioTransportistaIncluyeIva,
       pagosTransportista: dto.pagosTransportista,
       liquidacionesViaje: [], // Al crearse, obviamente no tiene liquidaciones.
     });
@@ -1139,6 +1149,8 @@ export class ViajesService {
           precioTransportistaExterno: precioTransportistaExterno ?? null,
           monedaPrecioTransportistaExterno:
             dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS",
+          precioTransportistaIncluyeIva:
+            dto.precioTransportistaIncluyeIva ?? false,
           cantidadFactura: dto.cantidadFactura ?? null,
           precioUnitarioFactura: dto.precioUnitarioFactura ?? null,
           cantidadTransportista: dto.cantidadTransportista ?? null,
@@ -1240,6 +1252,21 @@ export class ViajesService {
       }
     }
 
+    // `precioTransportistaIncluyeIva` se bloquea solo por liquidación vigente (no por
+    // facturación al cliente, que es un eje independiente): un viaje ya facturado al
+    // cliente pero todavía sin liquidar al transportista tiene que poder ajustar este
+    // flag antes de su primera liquidación — de lo contrario, un viaje viejo (de un
+    // tenant que recién adopta integracion-arca) quedaría con el flag atascado para
+    // siempre en cuanto se facture, sin ninguna forma de destildarlo.
+    if (
+      bloqueadoPorLiquidacion &&
+      dto.precioTransportistaIncluyeIva !== undefined
+    ) {
+      throw new ConflictException(
+        'No se puede cambiar "Incluir IVA" porque el viaje ya está liquidado o tiene una liquidación en curso.',
+      );
+    }
+
     const currentIds = current.vehiculosViaje.map((x) => x.vehiculoId);
     const op = mergeViajeOperacionIds(
       {
@@ -1332,6 +1359,10 @@ export class ViajesService {
     const monedaPrecioTransportistaExternoResolved =
       dto.monedaPrecioTransportistaExterno ??
       current.monedaPrecioTransportistaExterno;
+    const precioTransportistaIncluyeIvaResolved =
+      dto.precioTransportistaIncluyeIva !== undefined
+        ? dto.precioTransportistaIncluyeIva
+        : (current as any).precioTransportistaIncluyeIva;
     const pagosTransportistaResolved =
       dto.pagosTransportista !== undefined
         ? dto.pagosTransportista
@@ -1447,6 +1478,7 @@ export class ViajesService {
         precioTransportistaExterno: precioTransportistaExternoResolved,
         monedaPrecioTransportistaExterno:
           monedaPrecioTransportistaExternoResolved,
+        precioTransportistaIncluyeIva: precioTransportistaIncluyeIvaResolved,
         pagosTransportista: pagosTransportistaResolved,
         liquidacionesViaje: (current as any).liquidacionesViaje,
       });
@@ -1584,6 +1616,8 @@ export class ViajesService {
       transportistaId: viaje.transportistaId,
       precioTransportistaExterno: viaje.precioTransportistaExterno,
       monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
+      precioTransportistaIncluyeIva: (viaje as any)
+        .precioTransportistaIncluyeIva,
       pagosTransportista: pagosActualizados,
       liquidacionesViaje: (viaje as any).liquidacionesViaje,
     });

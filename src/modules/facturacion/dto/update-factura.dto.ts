@@ -14,7 +14,8 @@ import { FacturaTramoDto } from './factura-tramo.dto';
 
 export class UpdateFacturaDto {
   @IsOptional() @IsString() numero?: string;
-  @IsOptional() @IsIn(['cliente', 'transportista_externo']) tipo?: string;
+  /** Siempre "cliente" — el pago a transportistas externos se gestiona en Liquidaciones, no como Factura. */
+  @IsOptional() @IsIn(['cliente']) tipo?: string;
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() transportistaId?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) viajeIds?: string[];

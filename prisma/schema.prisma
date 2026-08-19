@@ -23,7 +23,7 @@ model Tenant {
   billingRenewsAt  DateTime?
   whiteLabelDomain String?
   /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
-  labelIdentificacionPersonalizadaViajes String? @default("ID de viaje personalizado")
+  labelIdentificacionPersonalizadaViajes String? @default("ID propio")
   /** true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla). */
   importacionesOcultas Boolean @default(false)
   createdAt        DateTime  @default(now())
@@ -323,8 +323,8 @@ model Viaje {
   monedaMonto                      String          @default("ARS") // ARS | USD
   precioTransportistaExterno       Float?
   monedaPrecioTransportistaExterno String          @default("ARS") // ARS | USD
-  /** Si es true, precioTransportistaExterno ya incluye IVA — no se le vuelve a sumar el IVA de una Liquidación vinculada. */
-  precioTransportistaIncluyeIva    Boolean         @default(false)
+  /** % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" antes de sumarlo al bruto de una Liquidación, para no duplicar el IVA. */
+  precioTransportistaIvaIncluidoPct Float          @default(0)
 
   cantidadFactura             Float?
   precioUnitarioFactura       Float?

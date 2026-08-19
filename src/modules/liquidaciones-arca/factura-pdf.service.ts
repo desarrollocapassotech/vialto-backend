@@ -164,9 +164,13 @@ export class FacturaPdfService {
         viajes: {
           select: {
             numero: true,
+            numeroIdentificacionPersonalizado: true,
             monto: true,
+            cantidadFactura: true,
+            precioUnitarioFactura: true,
             origen: true,
             destino: true,
+            fechaCarga: true,
           },
         },
       },
@@ -203,7 +207,7 @@ export class FacturaPdfService {
       }
     }
 
-    const drawCbteTipo =
+      const drawCbteTipo =
       kind === 'nc'
         ? (facturaExt.anulacionCbteTipo ?? 3)
         : (facturaExt.cbteTipo ?? 6);
@@ -613,7 +617,8 @@ export class FacturaPdfService {
       y += rcpH + 2;
     }
 
-    const colWidths = [100, 157.28, 40, 65, 65, 42, 70];
+    // Reducimos 30px de Producto y se lo damos a Descripción para que origen/destino entren mejor.
+    const colWidths = [70, 187.28, 40, 65, 65, 42, 70];
     const colX: number[] = [];
     let cx = M;
     for (const w of colWidths) { colX.push(cx); cx += w; }
@@ -635,7 +640,7 @@ export class FacturaPdfService {
 
     for (const item of comprobante.items) {
       const cells = [
-        { v: item.descripcion.toUpperCase(), align: 'left' as const },
+        { v: (item.producto ?? '').toUpperCase(), align: 'left' as const },
         { v: item.descripcion.toUpperCase(), align: 'left' as const },
         { v: item.cantidad != null ? fmtNum(item.cantidad) : '1,00', align: 'right' as const },
         { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },

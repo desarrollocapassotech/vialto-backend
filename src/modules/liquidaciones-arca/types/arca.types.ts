@@ -60,6 +60,7 @@ export interface ArcaAutorizarResponse {
  * ya que WSFEv1 no soporta detalle de líneas.
  */
 export interface ArcaComprobanteItem {
+  producto?: string;
   descripcion: string;
   cantidad?: number;
   precioUnitario?: number;

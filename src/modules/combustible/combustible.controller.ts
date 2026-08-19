@@ -81,6 +81,8 @@ export class CombustibleController {
     @Query("limit") limit?: string,
     @Query("estacion") estacion?: string,
     @Query("formaPago") formaPago?: string,
+    @Query("sortBy") sortBy?: string,
+    @Query("sortDir") sortDir?: "asc" | "desc",
   ) {
     const id = this.requiredTenantId(tenantId, current);
     return this.service.findAll(
@@ -93,6 +95,8 @@ export class CombustibleController {
       limit ? parseInt(limit, 10) : undefined,
       estacion,
       formaPago,
+      sortBy,
+      sortDir,
     );
   }
 

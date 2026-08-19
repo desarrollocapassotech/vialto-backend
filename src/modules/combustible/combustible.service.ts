@@ -289,6 +289,8 @@ export class CombustibleService {
     limit = 10,
     estacion?: string,
     formaPago?: string,
+    sortBy?: string,
+    sortDir?: "asc" | "desc",
   ) {
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(200, Math.max(1, limit));
@@ -313,11 +315,18 @@ export class CombustibleService {
       where["fecha"] = fechaWhere;
     }
 
+    let dynamicOrderBy: any[];
+    if (sortBy === "fecha_carga") {
+      dynamicOrderBy = [{ fecha: sortDir || "desc" }, { createdAt: "desc" }, { id: "desc" }];
+    } else {
+      dynamicOrderBy = [{ createdAt: sortDir || "desc" }, { id: "desc" }];
+    }
+
     const [total, cargas] = await Promise.all([
       this.prisma.cargaCombustible.count({ where }),
       this.prisma.cargaCombustible.findMany({
         where,
-        orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+        orderBy: dynamicOrderBy,
         skip: (safePage - 1) * safeLimit,
         take: safeLimit,
         include: {
@@ -529,7 +538,13 @@ export class CombustibleService {
     return { deleted: id };
   }
 
-  async findAllByChofer(choferId: string, tenantId: string, month?: string) {
+  async findAllByChofer(
+    choferId: string,
+    tenantId: string,
+    month?: string,
+    sortBy?: string,
+    sortDir?: "asc" | "desc"
+  ) {
     const where: Record<string, unknown> = { tenantId, choferId };
 
     if (month) {
@@ -540,9 +555,16 @@ export class CombustibleService {
       };
     }
 
+    let dynamicOrderBy: any[];
+    if (sortBy === "fecha_carga") {
+      dynamicOrderBy = [{ fecha: sortDir || "desc" }, { createdAt: "desc" }, { id: "desc" }];
+    } else {
+      dynamicOrderBy = [{ createdAt: sortDir || "desc" }, { id: "desc" }];
+    }
+
     const cargas = await this.prisma.cargaCombustible.findMany({
       where,
-      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+      orderBy: dynamicOrderBy,
       take: 200,
       include: {
         vehiculo: { select: { patente: true } },

@@ -305,6 +305,7 @@ export class FacturaPdfService {
       logoBuffer,
       comprobante,
       asociados,
+      kind,
     );
 
     const cbteNroStr =
@@ -426,6 +427,7 @@ export class FacturaPdfService {
     logoBuffer: Buffer | null,
     comprobante: ArcaComprobanteCvlp,
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
+    kind: 'factura' | 'nc' = 'factura',
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (misma condición que PDF CVLP).
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
@@ -447,6 +449,7 @@ export class FacturaPdfService {
           comprobante,
           asociados,
           showTestWatermark,
+          kind,
         );
         doc.addPage();
         this.draw(
@@ -460,6 +463,7 @@ export class FacturaPdfService {
           comprobante,
           asociados,
           showTestWatermark,
+          kind,
         );
         doc.end();
       } catch (e) {
@@ -477,8 +481,9 @@ export class FacturaPdfService {
     logoBuffer: Buffer | null,
     copia: 'ORIGINAL' | 'DUPLICADO',
     comprobante: ArcaComprobanteCvlp,
-    asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
-    showTestWatermark = false,
+    asociados: Array<{ tipo: number; ptoVenta: number; nro: number }>,
+    showTestWatermark: boolean,
+    kind: 'factura' | 'nc',
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -590,7 +595,8 @@ export class FacturaPdfService {
       const nameH = doc.heightOfString(nameText, { width: colW });
       const domH = doc.heightOfString(domText, { width: colW });
       const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
-      const rcpH = Math.max(leftTotalH, 48);
+      const rightTotalH = kind === 'nc' ? (5 + 12 * 4) : (5 + 12 * 2);
+      const rcpH = Math.max(leftTotalH, rightTotalH, 48);
 
       doc.rect(M, y, CW, rcpH).stroke('#aaa');
       doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke('#aaa');
@@ -613,6 +619,14 @@ export class FacturaPdfService {
       doc.fontSize(7.5).font('Helvetica').fillColor('#333')
         .text('Condición de Venta: CTA CTE', rx, y + 5, { width: colW })
         .text('Moneda: Pesos', rx, y + 17, { width: colW });
+
+      if (kind === 'nc') {
+        const refCbteNro = facturaExt.cbteNro && facturaExt.ptoVenta
+          ? `${String(facturaExt.ptoVenta).padStart(4, '0')}-${String(facturaExt.cbteNro).padStart(8, '0')}`
+          : factura.numero;
+        doc.text(`Factura Orig.: ${refCbteNro || ''}`, rx, y + 29, { width: colW });
+        doc.text(`Motivo: ${factura.motivoAnulacion || 'Anulación de comprobante'}`, rx, y + 41, { width: colW });
+      }
 
       y += rcpH + 2;
     }

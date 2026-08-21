@@ -950,6 +950,7 @@ export class LiquidacionesService {
             precioUnitarioFactura: true,
             origen: true,
             destino: true,
+            fechaCarga: true,
           },
         },
         cliente: {
@@ -1403,6 +1404,7 @@ export class LiquidacionesService {
             precioUnitarioFactura: true,
             origen: true,
             destino: true,
+            fechaCarga: true,
           },
         },
         cliente: {

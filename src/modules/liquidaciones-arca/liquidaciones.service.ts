@@ -236,18 +236,10 @@ export class LiquidacionesService {
         ? round2(tnDestino * tarifaTransportista)
         : round2(v.precioTransportistaExterno ?? 0);
 
-      // Si el precio del viaje ya incluye IVA, "neteamos" antes de sumarlo al bruto
-      // agregado de la liquidación — el CVLP vuelve a aplicar su propio IVA sobre el
-      // bruto, así que sumar el precio crudo duplicaría el IVA ya cobrado. El detalle
-      // por viaje (`subtotal`, lo que ve el transportista) queda con el precio crudo tal
-      // cual se cargó; solo el agregado `bruto` usa el valor neteado.
-      const pctIvaIncluido = Number(v.precioTransportistaIvaIncluidoPct) || 0;
-      const subtotalNeto =
-        pctIvaIncluido > 0
-          ? round2(subtotal / (1 + pctIvaIncluido / 100))
-          : subtotal;
-
-      bruto += subtotalNeto;
+      // precioTransportistaExterno es siempre neto (sin IVA) — el % de IVA del viaje
+      // (precioTransportistaIvaIncluidoPct) es independiente del IVA que declara esta
+      // Liquidación (config aparte, más abajo) y no se usa acá.
+      bruto += subtotal;
       viajesDetalle.push({
         viajeId: v.id,
         tnOrigen,

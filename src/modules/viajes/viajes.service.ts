@@ -49,6 +49,7 @@ import {
   GananciaBrutaValidationError,
   buildGananciaBrutaResumen,
   enrichViajeConGananciaBruta,
+  engrosarConIva,
   gananciaBrutaValorOrdenable,
   resolveGananciaBrutaPersist,
 } from "./viaje-ganancia-bruta.util";
@@ -98,18 +99,6 @@ const VIAJE_INCLUDE_FULL = {
     },
   },
 };
-
-/**
- * "Destapa" el IVA ya incluido en un precio: si `pctIncluido` es 0, devuelve el
- * mismo valor (comportamiento de siempre). Si es > 0, divide por (1 + pct/100)
- * para obtener el neto — la base que hay que sumar al bruto de una Liquidación
- * para que el IVA que ella misma aplica no se duplique sobre un precio que ya
- * lo traía adentro. Espejado en el frontend por `lib/viajesTransportistaPagos.ts`.
- */
-function netearIvaIncluido(precioRaw: number, pctIncluido: number): number {
-  if (!pctIncluido || pctIncluido <= 0) return precioRaw;
-  return Math.round((precioRaw / (1 + pctIncluido / 100)) * 100) / 100;
-}
 
 /**
  * Calcula el monto prorrateado que le corresponde a un viaje a partir
@@ -293,7 +282,13 @@ export class ViajesService {
     precioTransportistaIvaIncluidoPct?: number | null;
     liquidacionesViaje?: any[];
   }): number {
-    let acordado = v.precioTransportistaExterno ?? 0;
+    // Caso base (sin Liquidación vigente): "acordado" es lo que hay que pagarle en
+    // efectivo al transportista — el precio cargado (siempre neto) más el % de IVA
+    // que se le suma encima, si tiene.
+    let acordado = engrosarConIva(
+      v.precioTransportistaExterno ?? 0,
+      Number(v.precioTransportistaIvaIncluidoPct) || 0,
+    );
 
     if (v.liquidacionesViaje && v.liquidacionesViaje.length > 0) {
       let montoReal = 0;
@@ -307,14 +302,13 @@ export class ViajesService {
 
         // Cálculo contemplando conceptos asignados al viaje o generales divididos
         if (liq && Array.isArray(liq.conceptosLineas) && v.id) {
-          const rawBrutoViaje =
+          // El precio del viaje ya es neto (ver comentario de engrosarConIva) — la
+          // Liquidación lo usa tal cual, sin ajustar por el % de IVA del viaje. Ese
+          // % es independiente del IVA que declara la Liquidación (config aparte).
+          const brutoViaje =
             typeof lv.subtotal === "number"
               ? lv.subtotal
               : Number(v.precioTransportistaExterno) || 0;
-          const brutoViaje = netearIvaIncluido(
-            rawBrutoViaje,
-            Number(v.precioTransportistaIvaIncluidoPct) || 0,
-          );
           const comisionPct = Number(liq.comisionPct) || 0;
           const comisionMonto = (brutoViaje * comisionPct) / 100;
 
@@ -900,6 +894,7 @@ export class ViajesService {
           monto: true,
           monedaMonto: true,
           precioTransportistaExterno: true,
+          precioTransportistaIvaIncluidoPct: true,
           monedaPrecioTransportistaExterno: true,
           otrosGastos: true,
           gananciaBrutaManual: true,
@@ -919,6 +914,12 @@ export class ViajesService {
           monedaMonto: conReales.monedaMontoFacturadoReal ?? row.monedaMonto,
           precioTransportistaExterno:
             conReales.costoLiquidadoReal ?? row.precioTransportistaExterno,
+          // Con costo real de una Liquidación ya reconciliado, el % de IVA del viaje
+          // no aplica (ese monto ya es el líquido real, no el precio cargado).
+          precioTransportistaIvaIncluidoPct:
+            conReales.costoLiquidadoReal != null
+              ? 0
+              : row.precioTransportistaIvaIncluidoPct,
           monedaPrecioTransportistaExterno:
             conReales.monedaCostoLiquidadoReal ??
             row.monedaPrecioTransportistaExterno,
@@ -1000,6 +1001,7 @@ export class ViajesService {
         monto: true,
         monedaMonto: true,
         precioTransportistaExterno: true,
+        precioTransportistaIvaIncluidoPct: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,
@@ -1017,6 +1019,12 @@ export class ViajesService {
       monedaMonto: conReales.monedaMontoFacturadoReal ?? row.monedaMonto,
       precioTransportistaExterno:
         conReales.costoLiquidadoReal ?? row.precioTransportistaExterno,
+      // Con costo real de una Liquidación ya reconciliado, el % de IVA del viaje no
+      // aplica (ese monto ya es el líquido real, no el precio cargado).
+      precioTransportistaIvaIncluidoPct:
+        conReales.costoLiquidadoReal != null
+          ? 0
+          : row.precioTransportistaIvaIncluidoPct,
       monedaPrecioTransportistaExterno:
         conReales.monedaCostoLiquidadoReal ??
         row.monedaPrecioTransportistaExterno,

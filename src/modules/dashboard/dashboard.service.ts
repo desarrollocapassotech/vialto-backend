@@ -838,6 +838,7 @@ export class DashboardService {
         monto: true,
         monedaMonto: true,
         precioTransportistaExterno: true,
+        precioTransportistaIvaIncluidoPct: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import {
   buildGananciaBrutaResumen,
+  engrosarConIva,
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
 import { importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
@@ -153,6 +154,7 @@ type ViajeMargenRow = {
   monto: number | null;
   monedaMonto: string;
   precioTransportistaExterno: number | null;
+  precioTransportistaIvaIncluidoPct: number | null;
   monedaPrecioTransportistaExterno: string;
   otrosGastos: unknown;
   gananciaBrutaManual: number | null;
@@ -236,6 +238,7 @@ export class DashboardFinancieroService {
         monto: true,
         monedaMonto: true,
         precioTransportistaExterno: true,
+        precioTransportistaIvaIncluidoPct: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,
@@ -453,6 +456,7 @@ export class DashboardFinancieroService {
         clienteId: true,
         transportistaId: true,
         precioTransportistaExterno: true,
+        precioTransportistaIvaIncluidoPct: true,
         monedaPrecioTransportistaExterno: true,
         pagosTransportista: true,
       },
@@ -476,7 +480,10 @@ export class DashboardFinancieroService {
     const transportistaIds = new Set<string>();
     for (const v of sinLiquidarCandidatos) {
       const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
-      const acordado = v.precioTransportistaExterno ?? 0;
+      const acordado = engrosarConIva(
+        v.precioTransportistaExterno ?? 0,
+        v.precioTransportistaIvaIncluidoPct,
+      );
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
         : [];
@@ -568,6 +575,7 @@ export class DashboardFinancieroService {
       select: {
         transportistaId: true,
         precioTransportistaExterno: true,
+        precioTransportistaIvaIncluidoPct: true,
         monedaPrecioTransportistaExterno: true,
         pagosTransportista: true,
       },
@@ -580,7 +588,10 @@ export class DashboardFinancieroService {
     for (const v of viajes) {
       const tid = v.transportistaId as string;
       const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
-      const acordado = v.precioTransportistaExterno ?? 0;
+      const acordado = engrosarConIva(
+        v.precioTransportistaExterno ?? 0,
+        v.precioTransportistaIvaIncluidoPct,
+      );
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
         : [];

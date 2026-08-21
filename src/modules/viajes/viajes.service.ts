@@ -267,7 +267,7 @@ export class ViajesService {
 
   /**
    * `precioTransportistaIvaIncluidoPct` es opt-in (default oculto, ver field-catalog.ts).
-   * "Edición de viaje" es la señal canónica: si un tenant lo tuvo habilitado, cargó
+  * La configuración compartida de Viajes es la señal canónica: si un tenant lo tuvo habilitado, cargó
    * valores, y después lo deshabilita, esos valores NO se borran de la base — solo se
    * dejan de tener en cuenta en cualquier cálculo (acordado, ganancia bruta, saldo,
    * dashboard) hasta que se vuelva a habilitar.

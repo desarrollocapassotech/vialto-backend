@@ -14,6 +14,8 @@ import { ToggleFieldConfigDto } from "./dto/toggle-field-config.dto";
 type FieldConfigValue = { visible: boolean };
 type CamposJson = Record<string, FieldConfigValue>;
 
+const VIAJES_CONFIG_COMPARTIDA = "viajes_compartidos";
+
 @Injectable()
 export class TenantFieldConfigService {
   constructor(private readonly prisma: PrismaService) {}
@@ -25,10 +27,7 @@ export class TenantFieldConfigService {
     formulario: string,
   ) {
     const catalogo = getCatalogoFormulario(modulo, formulario);
-    const row = await this.prisma.tenantFieldConfig.findUnique({
-      where: { tenantId_modulo_formulario: { tenantId, modulo, formulario } },
-    });
-    const overrides = (row?.campos as CamposJson) ?? {};
+    const overrides = await this.getOverrides(tenantId, modulo, formulario);
 
     return catalogo.map((c) => ({
       campo: c.campo,
@@ -52,7 +51,7 @@ export class TenantFieldConfigService {
     campo: string,
   ): Promise<boolean> {
     const campos = await this.getConfigEfectiva(tenantId, modulo, formulario);
-    return campos.find((c) => c.campo === campo)?.visible ?? true;
+        return campos.find((c) => c.campo === campo)?.visible ?? true;
   }
 
   /** Obtiene la configuración de visibilidad de todos los formularios de un módulo para el tenant. */
@@ -64,6 +63,8 @@ export class TenantFieldConfigService {
     const overridesPorFormulario = new Map(
       rows.map((r) => [r.formulario, r.campos as CamposJson]),
     );
+    const overridesCompartidos =
+      overridesPorFormulario.get(VIAJES_CONFIG_COMPARTIDA) ?? {};
 
     const resultado: Record<string, Record<string, boolean>> = {};
     for (const [formulario, def] of Object.entries(formularios)) {
@@ -71,7 +72,12 @@ export class TenantFieldConfigService {
       resultado[formulario] = Object.fromEntries(
         def.campos.map((c) => [
           c.campo,
-          overrides[c.campo]?.visible ?? c.defaultVisible ?? true,
+          this.esCampoCompartido(modulo)
+            ? overridesCompartidos[c.campo]?.visible ??
+              this.getLegacySharedVisible(rows, modulo, c.campo) ??
+              c.defaultVisible ??
+              true
+            : overrides[c.campo]?.visible ?? c.defaultVisible ?? true,
         ]),
       );
     }
@@ -83,6 +89,31 @@ export class TenantFieldConfigService {
     dto: ToggleFieldConfigDto,
     changedBy: string,
   ) {
+    const formularioPersistencia = this.esCampoCompartido(dto.modulo)
+      ? VIAJES_CONFIG_COMPARTIDA
+      : dto.formulario;
+
+    if (formularioPersistencia === VIAJES_CONFIG_COMPARTIDA) {
+      const campoDef = getCatalogoFormulario(dto.modulo, dto.formulario).find(
+        (c) => c.campo === dto.campo,
+      );
+      if (campoDef?.obligatorioSistema && !dto.visible) {
+        throw new BadRequestException(
+          `El campo "${dto.campo}" es obligatorio a nivel sistema y no puede ocultarse.`,
+        );
+      }
+      await this.upsertCampo(
+        tenantId,
+        dto.modulo,
+        formularioPersistencia,
+        dto.campo,
+        dto.visible,
+        changedBy,
+        dto.formulario,
+      );
+      return;
+    }
+
     const formulariosAActualizar = dto.aplicarATodosLosFormularios
       ? Object.keys(getCatalogoModulo(dto.modulo))
       : [dto.formulario];
@@ -118,6 +149,7 @@ export class TenantFieldConfigService {
     campo: string,
     visible: boolean,
     changedBy: string,
+    formularioAuditoria = formulario,
   ) {
     const row = await this.prisma.tenantFieldConfig.findUnique({
       where: { tenantId_modulo_formulario: { tenantId, modulo, formulario } },
@@ -151,7 +183,7 @@ export class TenantFieldConfigService {
         data: {
           tenantId,
           modulo,
-          formulario,
+          formulario: formularioAuditoria,
           campo,
           configAnterior: configAnterior ?? undefined,
           configNuevo,
@@ -159,6 +191,64 @@ export class TenantFieldConfigService {
         },
       }),
     ]);
+  }
+
+  private esCampoCompartido(modulo: string) {
+    return modulo === "viajes";
+  }
+
+  private async getOverrides(
+    tenantId: string,
+    modulo: string,
+    formulario: string,
+  ): Promise<CamposJson> {
+    if (!this.esCampoCompartido(modulo)) {
+      const row = await this.prisma.tenantFieldConfig.findUnique({
+        where: { tenantId_modulo_formulario: { tenantId, modulo, formulario } },
+      });
+      return (row?.campos as CamposJson) ?? {};
+    }
+
+    const rows = await this.prisma.tenantFieldConfig.findMany({
+      where: { tenantId, modulo },
+    });
+    const shared = rows.find((row) => row.formulario === VIAJES_CONFIG_COMPARTIDA);
+    const sharedOverrides = (shared?.campos as CamposJson) ?? {};
+    const localOverrides =
+      (rows.find((row) => row.formulario === formulario)?.campos as CamposJson) ?? {};
+
+    const catalogFields = Object.values(getCatalogoModulo(modulo)).flatMap(
+      (definition) => definition.campos,
+    )
+      .map((definition) => definition.campo);
+    return Object.fromEntries(
+      [...new Set([...Object.keys(sharedOverrides), ...Object.keys(localOverrides), ...catalogFields])].map(
+        (campo) => [
+          campo,
+          {
+            visible:
+              this.esCampoCompartido(modulo)
+                ? sharedOverrides[campo]?.visible ??
+                  this.getLegacySharedVisible(rows, modulo, campo)
+                : localOverrides[campo]?.visible,
+          },
+        ],
+      ),
+    );
+  }
+
+  private getLegacySharedVisible(
+    rows: Array<{ formulario: string; campos: unknown }>,
+    modulo: string,
+    campo: string,
+  ): boolean | undefined {
+    if (!this.esCampoCompartido(modulo)) return undefined;
+    for (const formulario of Object.keys(getCatalogoModulo(modulo))) {
+      const campos = rows.find((row) => row.formulario === formulario)
+        ?.campos as CamposJson | undefined;
+      if (campos?.[campo]?.visible !== undefined) return campos[campo].visible;
+    }
+    return undefined;
   }
 
   getCatalogoCompleto() {

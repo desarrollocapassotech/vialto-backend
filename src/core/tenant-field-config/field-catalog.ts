@@ -96,6 +96,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "observaciones", label: "Observaciones", obligatorioSistema: false },
           { campo: "otrosGastos", label: "Gastos adicionales", obligatorioSistema: false },
           { campo: "pagosTransportista", label: "Pagos al transportista", obligatorioSistema: false },
+          { campo: "desgloseMontos", label: "Desglose de montos (Cantidad × Precio)", obligatorioSistema: false },
           { campo: "precioTransportistaIvaIncluidoPct", label: "% IVA transportista (pago en efectivo)", obligatorioSistema: false, defaultVisible: false },
         ],
       },

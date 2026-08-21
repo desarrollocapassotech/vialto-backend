@@ -20,6 +20,7 @@ import {
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+import { TenantFieldConfigService } from '../../core/tenant-field-config/tenant-field-config.service';
 
 export type MetricCompare = {
   current: number;
@@ -172,7 +173,20 @@ function buildMetric(
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantFieldConfig: TenantFieldConfigService,
+  ) {}
+
+  /** Ver comentario equivalente en viajes.service.ts — misma señal canónica. */
+  private ivaTransportistaHabilitado(tenantId: string): Promise<boolean> {
+    return this.tenantFieldConfig.isCampoVisible(
+      tenantId,
+      'viajes',
+      'edicion_viaje',
+      'precioTransportistaIvaIncluidoPct',
+    );
+  }
 
   async getOwnerDashboard(
     tenantId: string,
@@ -824,7 +838,9 @@ export class DashboardService {
     // el de la pestaña.
     const now = new Date();
     const cappedEnd = end > now ? now : end;
-    const viajes = await this.prisma.viaje.findMany({
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
+    const viajesRaw = await this.prisma.viaje.findMany({
       where: {
         tenantId,
         etapa: { not: 'cancelado' },
@@ -838,12 +854,18 @@ export class DashboardService {
         monto: true,
         monedaMonto: true,
         precioTransportistaExterno: true,
+        precioTransportistaIvaIncluidoPct: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,
         monedaGananciaBrutaManual: true,
       },
     });
+    // Si el tenant tiene el campo deshabilitado, se ignora el % guardado (sin
+    // borrarlo de la base) — mismo criterio que viajes.service.ts.
+    const viajes = ivaTransportistaHabilitado
+      ? viajesRaw
+      : viajesRaw.map((v) => ({ ...v, precioTransportistaIvaIncluidoPct: 0 }));
 
     let cantidad = 0;
     let montoNegativoArs = 0;

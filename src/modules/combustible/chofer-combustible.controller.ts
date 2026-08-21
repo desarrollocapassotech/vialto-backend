@@ -28,9 +28,11 @@ export class ChoferCombustibleController {
   getMisCargas(
     @Req() req: ChoferAuthRequest,
     @Query('month') month?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortDir') sortDir?: 'asc' | 'desc',
   ) {
     const { sub: choferId, tenantId } = req.choferAuth;
-    return this.service.findAllByChofer(choferId, tenantId, month);
+    return this.service.findAllByChofer(choferId, tenantId, month, sortBy, sortDir);
   }
 
   @ApiOperation({ summary: 'Última carga del chofer (sin filtro de mes) — para default de patente' })

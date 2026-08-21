@@ -22,7 +22,6 @@
     "fix:combustible": "ts-node scripts/fix-combustible-cargas-sospechosas.ts",
     "fix:combustible:dry": "ts-node scripts/fix-combustible-cargas-sospechosas.ts --dry-run",
     "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts",
-    "test:tarifa-incremento": "ts-node src/modules/liquidaciones-arca/tarifa-incremento.util.spec.ts",
     "test:viaje-estado-financiero": "ts-node src/modules/viajes/viaje-estado-financiero.spec.ts"
   },
   "dependencies": {

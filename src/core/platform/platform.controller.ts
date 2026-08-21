@@ -399,6 +399,23 @@ export class PlatformController {
     return this.service.createPais(tenantId, dto, auth.userId);
   }
 
+  @Patch("paises/:id")
+  updatePais(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: import("../paises/dto/update-pais.dto").UpdatePaisDto,
+  ) {
+    return this.service.updatePais(tenantId, id, dto);
+  }
+
+  @Delete("paises/:id")
+  removePais(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    return this.service.removePais(tenantId, id);
+  }
+
   @Get("destinatarios")
   destinatarios(@Query("tenantId") tenantId?: string) {
     return this.service.listDestinatarios(tenantId);

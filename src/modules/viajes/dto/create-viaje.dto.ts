@@ -7,6 +7,7 @@ import {
   IsString,
   IsNotEmpty,
   IsDateString,
+  Max,
   Min,
   ValidateIf,
   ValidateNested,
@@ -123,6 +124,13 @@ export class CreateViajeDto {
   precioTransportistaExterno?: number;
   /** ARS (default) o USD. */
   @IsOptional() @IsIn(["ARS", "USD"]) monedaPrecioTransportistaExterno?: string;
+  /** % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" al liquidar por CVLP para no duplicar el IVA. */
+  @IsOptional()
+  @IsNumber({}, { message: "El % de IVA incluido debe ser un número válido." })
+  @Min(0, { message: "El % de IVA incluido no puede ser negativo." })
+  @Max(100, { message: "El % de IVA incluido no puede superar 100." })
+  @Type(() => Number)
+  precioTransportistaIvaIncluidoPct?: number;
 
   @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
   @IsNumber({}, { message: 'La cantidad a facturar debe ser un número válido' }) @Type(() => Number) cantidadFactura?: number;

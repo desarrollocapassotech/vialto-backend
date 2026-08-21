@@ -122,7 +122,7 @@ export class CombustibleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
-  ) {}
+  ) { }
 
   async uploadFoto(
     tenantId: string,
@@ -239,6 +239,15 @@ export class CombustibleService {
     }
   }
 
+  private async getTargetCreatedAtForEdit(excludeId?: string): Promise<Date | undefined> {
+    if (!excludeId) return undefined;
+    const carga = await this.prisma.cargaCombustible.findUnique({
+      where: { id: excludeId },
+      select: { createdAt: true }
+    });
+    return carga?.createdAt;
+  }
+
   async getLimitesKm(
     tenantId: string,
     vehiculoId: string,
@@ -249,11 +258,14 @@ export class CombustibleService {
       return { prev: null, next: null };
     }
 
+    const targetCreatedAt = await this.getTargetCreatedAtForEdit(excludeId);
+
     const { prev, next } = await this.getLimitesCronologicos(
       tenantId,
       vehiculoId,
       new Date(fecha),
       excludeId,
+      targetCreatedAt,
     );
 
     return {
@@ -289,6 +301,8 @@ export class CombustibleService {
     limit = 10,
     estacion?: string,
     formaPago?: string,
+    sortBy?: string,
+    sortDir?: "asc" | "desc",
   ) {
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(200, Math.max(1, limit));
@@ -313,11 +327,18 @@ export class CombustibleService {
       where["fecha"] = fechaWhere;
     }
 
+    let dynamicOrderBy: any[];
+    if (sortBy === "fecha_carga") {
+      dynamicOrderBy = [{ fecha: sortDir || "desc" }, { createdAt: "desc" }, { id: "desc" }];
+    } else {
+      dynamicOrderBy = [{ createdAt: sortDir || "desc" }, { id: "desc" }];
+    }
+
     const [total, cargas] = await Promise.all([
       this.prisma.cargaCombustible.count({ where }),
       this.prisma.cargaCombustible.findMany({
         where,
-        orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+        orderBy: dynamicOrderBy,
         skip: (safePage - 1) * safeLimit,
         take: safeLimit,
         include: {
@@ -386,7 +407,7 @@ export class CombustibleService {
     const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
     fechaCarga.setUTCHours(0, 0, 0, 0);
     const createdAtValue = dto.createdAt ? new Date(dto.createdAt) : undefined;
-    
+
     await this.assertKmNoRetroceso(
       auth.tenantId,
       dto.vehiculoId,
@@ -529,7 +550,13 @@ export class CombustibleService {
     return { deleted: id };
   }
 
-  async findAllByChofer(choferId: string, tenantId: string, month?: string) {
+  async findAllByChofer(
+    choferId: string,
+    tenantId: string,
+    month?: string,
+    sortBy?: string,
+    sortDir?: "asc" | "desc"
+  ) {
     const where: Record<string, unknown> = { tenantId, choferId };
 
     if (month) {
@@ -540,9 +567,16 @@ export class CombustibleService {
       };
     }
 
+    let dynamicOrderBy: any[];
+    if (sortBy === "fecha_carga") {
+      dynamicOrderBy = [{ fecha: sortDir || "desc" }, { createdAt: "desc" }, { id: "desc" }];
+    } else {
+      dynamicOrderBy = [{ createdAt: sortDir || "desc" }, { id: "desc" }];
+    }
+
     const cargas = await this.prisma.cargaCombustible.findMany({
       where,
-      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+      orderBy: dynamicOrderBy,
       take: 200,
       include: {
         vehiculo: { select: { patente: true } },
@@ -573,7 +607,7 @@ export class CombustibleService {
     const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
     fechaCarga.setUTCHours(0, 0, 0, 0);
     const createdAtValue = dto.createdAt ? new Date(dto.createdAt) : undefined;
-    
+
     await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km, undefined, createdAtValue);
     this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
     const carga = await this.prisma.cargaCombustible.create({
@@ -656,12 +690,12 @@ export class CombustibleService {
         : undefined;
     const vehiculo = patente
       ? await this.prisma.vehiculo.findFirst({
-          where: {
-            tenantId,
-            patente: { equals: patente, mode: "insensitive" },
-          },
-          select: { id: true },
-        })
+        where: {
+          tenantId,
+          patente: { equals: patente, mode: "insensitive" },
+        },
+        select: { id: true },
+      })
       : null;
 
     return this.prisma.combustibleSyncErrorLog.create({
@@ -704,16 +738,7 @@ export class CombustibleService {
       const targetFecha = new Date(fecha);
       targetFecha.setUTCHours(0, 0, 0, 0);
 
-      let targetCreatedAt: Date | undefined;
-      if (excludeId) {
-        const excludedLoad = await this.prisma.cargaCombustible.findUnique({
-          where: { id: excludeId },
-          select: { fecha: true, createdAt: true }
-        });
-        if (excludedLoad && excludedLoad.fecha.getTime() === targetFecha.getTime()) {
-          targetCreatedAt = excludedLoad.createdAt;
-        }
-      }
+      const targetCreatedAt = await this.getTargetCreatedAtForEdit(excludeId);
 
       const { prev } = await this.getLimitesCronologicos(
         tenantId,
@@ -946,33 +971,33 @@ export class CombustibleService {
       await Promise.all([
         vehiculoIds.length > 0
           ? this.prisma.vehiculo.findMany({
-              where: { id: { in: vehiculoIds } },
-              select: { id: true, patente: true, tipo: true },
-            })
+            where: { id: { in: vehiculoIds } },
+            select: { id: true, patente: true, tipo: true },
+          })
           : Promise.resolve([]),
         vehiculoIds.length > 0
           ? this.prisma.cargaCombustible.findMany({
-              where: {
-                tenantId,
-                vehiculoId: { in: vehiculoIds },
-                sospechoso: false,
-              },
-              orderBy: [{ vehiculoId: "asc" }, { fecha: "asc" }],
-              select: {
-                id: true,
-                vehiculoId: true,
-                km: true,
-                fecha: true,
-                litros: true,
-                importe: true,
-              },
-            })
+            where: {
+              tenantId,
+              vehiculoId: { in: vehiculoIds },
+              sospechoso: false,
+            },
+            orderBy: [{ vehiculoId: "asc" }, { fecha: "asc" }],
+            select: {
+              id: true,
+              vehiculoId: true,
+              km: true,
+              fecha: true,
+              litros: true,
+              importe: true,
+            },
+          })
           : Promise.resolve([]),
         choferIds.length > 0
           ? this.prisma.chofer.findMany({
-              where: { id: { in: choferIds } },
-              select: { id: true, nombre: true },
-            })
+            where: { id: { in: choferIds } },
+            select: { id: true, nombre: true },
+          })
           : Promise.resolve([]),
         this.buildAlertasSospechosas(where),
         this.buildSyncErrorAlertas(tenantId, fromDate, toDate),

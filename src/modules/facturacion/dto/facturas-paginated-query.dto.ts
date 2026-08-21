@@ -39,10 +39,11 @@ export class FacturasPaginatedQueryDto {
   @MaxLength(120)
   numero?: string;
 
+  /** Siempre "cliente" — el pago a transportistas externos se gestiona en Liquidaciones, no como Factura. */
   @IsOptional()
   @Transform(({ value }) => firstQueryString(value))
-  @IsIn(['cliente', 'transportista_externo'])
-  tipo?: 'cliente' | 'transportista_externo';
+  @IsIn(['cliente'])
+  tipo?: 'cliente';
 
   @IsOptional()
   @Transform(({ value }) => firstQueryString(value))

@@ -1018,7 +1018,7 @@ model ImportLog {
 }
 ```
 
-> **`TenantFieldConfig` / `TenantFieldConfigAuditLog`** también existen en el schema pero están **fuera del alcance de este documento**: el comentario en `prisma/schema.prisma` indica que otro integrante del equipo los está desarrollando y que no hay que modificar su forma — solo están declarados para que Prisma coincida con las tablas ya existentes en QA. No asumir comportamiento sobre ellos sin consultar.
+> **`TenantFieldConfig` / `TenantFieldConfigAuditLog`** — implementados por completo (dejaron de ser "fuera de alcance"), no tienen relación con el motor de importaciones de esta sección. Documentados en su propia sección más abajo, "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant".
 
 #### Arquitectura del motor (`src/modules/importaciones/`)
 
@@ -1065,6 +1065,54 @@ Gemini como proveedor primario, **Groq como fallback automático** si Gemini fal
 #### `GET /importaciones/tenant-tiene-datos` — para el selector de módulos del wizard
 
 `ImportacionesService.tenantTieneDatos(tenantId)` cuenta (`count()`, no trae filas) si el tenant ya tiene algún `Cliente`/`Transportista`/`Chofer`/`Vehiculo` cargado. El wizard del frontend lo usa para decidir si arranca directo con la secuencia completa (tenant nuevo, sin nada cargado) o si primero deja elegir qué módulos importar (tenant con datos existentes, para no forzar un recorrido completo). Endpoint liviano, sin relación con `preview`/`confirm`.
+
+---
+
+### `core/tenant-field-config` — visibilidad de campos y features opt-in por tenant
+
+Sistema genérico para que un superadmin oculte/muestre, por tenant y por formulario, campos opcionales de un módulo (ej. "Ganancia bruta manual", "Otros gastos" en Viajes) — pantalla `campos-empresa` en el frontend superadmin. **No confundir con la Capa 2 de feature flags (`TenantConfig.flags`) descripta en "Configuración de funcionalidades por tenant" más arriba: esa es documentación de un patrón, no está implementada en ningún módulo real; `tenant-field-config` sí está implementado y en uso.**
+
+```prisma
+model TenantFieldConfig {
+  id          String   @id @default(cuid())
+  tenantId    String
+  modulo      String   // "viajes" | "stock" | ...
+  formulario  String   // "alta_viaje" | "edicion_viaje" | "detalle_viaje" | ...
+  campos      Json     // Record<campo, { visible: boolean }> — solo overrides, no el catálogo completo
+  updatedBy   String
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, modulo, formulario])
+}
+
+model TenantFieldConfigAuditLog {
+  id             String   @id @default(cuid())
+  tenantId       String
+  modulo         String
+  formulario     String
+  campo          String
+  configAnterior Json?
+  configNuevo    Json
+  changedBy      String
+  changedAt      DateTime @default(now())
+}
+```
+
+- **`field-catalog.ts`** (`FIELD_CATALOG`) es la fuente de verdad de qué campos existen por `(modulo, formulario)`, con `label`, `obligatorioSistema` (si es `true`, no se puede ocultar — `toggleCampo` rechaza el intento) y, opcional, **`defaultVisible`** (default `true` si se omite — comportamiento histórico, visible salvo que se oculte explícitamente). Un campo **opt-in** (una feature que solo algunos tenants necesitan, ej. `precioTransportistaIvaIncluidoPct`) declara `defaultVisible: false`: nace oculto para todo tenant y cada uno lo habilita explícitamente desde `campos-empresa`.
+- **`TenantFieldConfigService.getConfigEfectiva`/`getConfigEfectivaModulo`** combinan el catálogo con los overrides guardados: `overrides[campo]?.visible ?? campoDef.defaultVisible ?? true`. `getAuditLogs` usa el mismo `defaultVisible` (no asume `true`) para reconstruir el "estado anterior" del primer toggle de un campo.
+- **`isCampoVisible(tenantId, modulo, formulario, campo)`** — método liviano (una sola query) para que OTRO servicio (no solo el frontend) consulte la visibilidad efectiva de un campo puntual. Es el punto de entrada para el patrón de abajo.
+- **Frontend**: `useFieldConfig(modulo)` (`hooks/useFieldConfig.ts`) trae `GET /field-config/:modulo` (cacheado en memoria por módulo) y expone `isVisible(formulario, campo)` — `true` si no cargó todavía o el campo no está en la config (mismo default que el backend). Usado para condicionar inputs/secciones enteras en los formularios (`ViajeCreatePage.tsx`, `ViajeEditModal.tsx`, `ViajeViewModal.tsx`, etc.) — ver el patrón `desgloseActivo`/`ivaTransportistaVisible` como referencia a copiar para un campo opt-in nuevo.
+
+#### Patrón: feature opt-in que además debe ignorarse en cálculos de negocio (no solo ocultarse en el form)
+
+Ocultar un campo en el formulario **no alcanza** cuando ese campo alimenta un cálculo de dinero (acordado, ganancia bruta, saldo, dashboard) que corre en el backend independientemente de qué formulario se usó para cargar el dato. Caso real: `precioTransportistaIvaIncluidoPct` (ago 2026) — al agregar el switch de visibilidad, un tenant que lo tuvo habilitado, cargó valores, y después lo deshabilita, **no debe perder el dato** (sigue en la base, íntegro) pero esos valores **tampoco deben seguir afectando ningún cálculo** hasta que se vuelva a habilitar.
+
+- **Señal canónica única, no una por formulario**: aunque `TenantFieldConfig` permite visibilidad independiente por formulario (alta/edición/detalle), para gatear un CÁLCULO se elige **un solo formulario como señal canónica** — para este campo, `edicion_viaje` (es donde se mantiene/corrige el valor a lo largo de la vida del viaje, y ya era el criterio que usaba el lock por `liquidacionVigente`). Ver `ViajesService.ivaTransportistaHabilitado(tenantId)` / `DashboardFinancieroService`/`DashboardService` (mismo método privado, duplicado a propósito, mismo criterio).
+- **Lectura**: `ViajesService.zerarIvaTransportistaSiDeshabilitado(item, habilitado)` — helper que, si el campo está deshabilitado, devuelve el objeto con `precioTransportistaIvaIncluidoPct: 0` (nunca `null`/`undefined`, para no romper cálculos que hacen `Number(x) || 0`). Se aplica en **todo** punto donde `ViajesService` responde un viaje (o lista) al frontend: `findAll`, `findAllPaginated` (los 4 caminos de sort — default, fecha, monto, ganancia_bruta — todos terminan en `findAllPaginatedPageFromSortedIds`, que también lo aplica), `findOne`, `getGananciaBruta`, y los retornos de `create`/`update`/`addPagoTransportista`/`deletePagoTransportista`/`getViajesSaldoPendienteTransportista`. Así, **cualquier consumidor** (grillas, badges de saldo, resumen de ganancia bruta, o el propio frontend recalculando en cliente vía `lib/viajesTransportistaPagos.ts`) ve "no aplica" sin tener que conocer la configuración del tenant — no hizo falta tocar el frontend más allá del gating de UI ya existente.
+- **Escritura**: `update()` **ignora en silencio** cualquier `dto.precioTransportistaIvaIncluidoPct` entrante si el campo está deshabilitado — preserva `current.precioTransportistaIvaIncluidoPct` tal cual, nunca lo pisa con lo que venga en el body (que de todos modos el form tiene oculto). Nunca lanza error por esto — el guard de `liquidacionVigente` (`ConflictException`) es un caso aparte y solo corre si el campo SÍ está habilitado.
+- **Cálculos server-side afectados** (todos reciben el flag ya resuelto una vez por método, no por fila — una sola query extra por request): `calcularAcordado`/`assertPagosTransportistaNoSuperanSaldo` (`viajes.service.ts`), `calcularGananciaAutomatica` vía el mismo ternario que ya zeroaba con `costoLiquidadoReal` (extendido con `|| !ivaTransportistaHabilitado`), y los 3 usos de `engrosarConIva`/`buildGananciaBrutaResumen` en `dashboard-financiero.service.ts` (`buildMargen`, `buildViajesFunnel`, `buildLiquidaciones`) + 1 en `dashboard.service.ts` (`buildMargenBajoAlerta`).
+- **Fuera de alcance a propósito** (documentado también en la sección de `precioTransportistaExterno` con IVA): la Liquidación/CVLP nunca leyó este campo, así que no necesita ningún gating nuevo; los `_sum` agregados de `getStats()`/`sumAPagarPorMoneda` siguen sin aplicar el % (ya lo hacían así antes de este campo existir).
+- **Replicar este patrón** para el próximo campo opt-in que alimente un cálculo: (1) `defaultVisible: false` en `field-catalog.ts`; (2) elegir UN formulario canónico; (3) un método privado `xHabilitado(tenantId)` por servicio que lo necesite (duplicado a propósito, no vale la pena una dependencia compartida para un one-liner); (4) un helper de zero-out aplicado en cada punto de lectura; (5) proteger el `update()` correspondiente para que ignore el dto en vez de pisar el valor guardado.
 
 ---
 
@@ -1221,5 +1269,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: agosto 2026 (`Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
+*Última actualización: agosto 2026 (`precioTransportistaIvaIncluidoPct` pasó a ser opt-in vía `core/tenant-field-config` — `defaultVisible: false`, oculto por defecto para todo tenant; si un tenant lo deshabilita después de haberlo usado, los valores cargados NO se borran pero se ignoran en todo cálculo hasta reactivarlo, ver sección "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant"; y, de la misma pasada, `Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

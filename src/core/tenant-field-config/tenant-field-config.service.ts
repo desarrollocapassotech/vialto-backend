@@ -38,6 +38,23 @@ export class TenantFieldConfigService {
     }));
   }
 
+  /**
+   * Visibilidad efectiva de UN campo puntual para el tenant, usada por servicios que
+   * necesitan decidir si un campo opt-in (ej. `precioTransportistaIvaIncluidoPct`,
+   * default oculto) debe tenerse en cuenta en un cálculo de negocio, no solo en el
+   * formulario. `formulario` es la señal canónica elegida para ese campo (no
+   * necesariamente todos los formularios del módulo deben coincidir).
+   */
+  async isCampoVisible(
+    tenantId: string,
+    modulo: string,
+    formulario: string,
+    campo: string,
+  ): Promise<boolean> {
+    const campos = await this.getConfigEfectiva(tenantId, modulo, formulario);
+    return campos.find((c) => c.campo === campo)?.visible ?? true;
+  }
+
   /** Obtiene la configuración de visibilidad de todos los formularios de un módulo para el tenant. */
   async getConfigEfectivaModulo(tenantId: string, modulo: string) {
     const formularios = getCatalogoModulo(modulo);

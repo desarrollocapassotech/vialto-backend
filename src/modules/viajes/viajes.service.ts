@@ -7,6 +7,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ViajesAutoEstadoService } from "./viajes-auto-estado.service";
+import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
 import { CreateViajeDto } from "./dto/create-viaje.dto";
 import { AddGastoDto } from "./dto/add-gasto.dto";
 import { AddPagoTransportistaDto } from "./dto/add-pago-transportista.dto";
@@ -261,7 +262,41 @@ export class ViajesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly autoEstado: ViajesAutoEstadoService,
+    private readonly tenantFieldConfig: TenantFieldConfigService,
   ) {}
+
+  /**
+   * `precioTransportistaIvaIncluidoPct` es opt-in (default oculto, ver field-catalog.ts).
+   * "Edición de viaje" es la señal canónica: si un tenant lo tuvo habilitado, cargó
+   * valores, y después lo deshabilita, esos valores NO se borran de la base — solo se
+   * dejan de tener en cuenta en cualquier cálculo (acordado, ganancia bruta, saldo,
+   * dashboard) hasta que se vuelva a habilitar.
+   */
+  private ivaTransportistaHabilitado(tenantId: string): Promise<boolean> {
+    return this.tenantFieldConfig.isCampoVisible(
+      tenantId,
+      "viajes",
+      "edicion_viaje",
+      "precioTransportistaIvaIncluidoPct",
+    );
+  }
+
+  /**
+   * Aplica el mismo criterio de arriba a un viaje (o lista) ya resuelto desde la base,
+   * antes de responder al frontend: si el tenant tiene el campo deshabilitado, se
+   * devuelve 0 en vez del valor real guardado (que sigue intacto en la base) — así
+   * cualquier consumidor (grillas, badges de saldo, resumen de ganancia bruta, o el
+   * propio frontend recalculando en cliente) ve exactamente el mismo "no aplica" sin
+   * tener que conocer la configuración del tenant.
+   */
+  private zerarIvaTransportistaSiDeshabilitado<
+    T extends { precioTransportistaIvaIncluidoPct?: unknown },
+  >(item: T, habilitado: boolean): T {
+    if (habilitado || item.precioTransportistaIvaIncluidoPct == null) {
+      return item;
+    }
+    return { ...item, precioTransportistaIvaIncluidoPct: 0 };
+  }
 
   /** Acepta legado del `estado` combinado y valida contra {@link VIAJE_ETAPAS}. */
   private parseEtapaViaje(etapa: string): ViajeEtapa {
@@ -276,18 +311,24 @@ export class ViajesService {
    * Obtiene el monto real acordado sumando las liquidaciones emitidas,
    * prorrateando los conceptos según si son del viaje puntual o generales.
    */
-  private calcularAcordado(v: {
-    id?: string;
-    precioTransportistaExterno?: number | null;
-    precioTransportistaIvaIncluidoPct?: number | null;
-    liquidacionesViaje?: any[];
-  }): number {
+  private calcularAcordado(
+    v: {
+      id?: string;
+      precioTransportistaExterno?: number | null;
+      precioTransportistaIvaIncluidoPct?: number | null;
+      liquidacionesViaje?: any[];
+    },
+    ivaTransportistaHabilitado: boolean,
+  ): number {
     // Caso base (sin Liquidación vigente): "acordado" es lo que hay que pagarle en
     // efectivo al transportista — el precio cargado (siempre neto) más el % de IVA
-    // que se le suma encima, si tiene.
+    // que se le suma encima, si tiene. Si el tenant tiene el campo deshabilitado
+    // (ver ivaTransportistaHabilitado()), el % guardado se ignora sin borrarlo.
     let acordado = engrosarConIva(
       v.precioTransportistaExterno ?? 0,
-      Number(v.precioTransportistaIvaIncluidoPct) || 0,
+      ivaTransportistaHabilitado
+        ? Number(v.precioTransportistaIvaIncluidoPct) || 0
+        : 0,
     );
 
     if (v.liquidacionesViaje && v.liquidacionesViaje.length > 0) {
@@ -431,15 +472,18 @@ export class ViajesService {
     return monto + extraMismaMmoneda;
   }
 
-  private assertPagosTransportistaNoSuperanSaldo(params: {
-    id?: string;
-    transportistaId?: string | null;
-    precioTransportistaExterno?: number | null;
-    monedaPrecioTransportistaExterno?: string | null;
-    precioTransportistaIvaIncluidoPct?: number | null;
-    pagosTransportista?: unknown;
-    liquidacionesViaje?: any[];
-  }): void {
+  private assertPagosTransportistaNoSuperanSaldo(
+    params: {
+      id?: string;
+      transportistaId?: string | null;
+      precioTransportistaExterno?: number | null;
+      monedaPrecioTransportistaExterno?: string | null;
+      precioTransportistaIvaIncluidoPct?: number | null;
+      pagosTransportista?: unknown;
+      liquidacionesViaje?: any[];
+    },
+    ivaTransportistaHabilitado: boolean,
+  ): void {
     const pagos = Array.isArray(params.pagosTransportista)
       ? (params.pagosTransportista as PagoTransportistaInput[])
       : [];
@@ -455,7 +499,10 @@ export class ViajesService {
       params.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
 
     // Calculamos el saldo incluyendo el monto de liquidaciones, si existen
-    const totalAcordado = this.calcularAcordado(params);
+    const totalAcordado = this.calcularAcordado(
+      params,
+      ivaTransportistaHabilitado,
+    );
 
     const totalPagado = pagos
       .filter((p) => (p.moneda === "USD" ? "USD" : "ARS") === monedaAcordada)
@@ -589,6 +636,8 @@ export class ViajesService {
   }
 
   async findAll(tenantId: string, etapa?: string) {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const rows = await this.prisma.viaje.findMany({
       where: { tenantId, ...(etapa ? { etapa } : {}) },
       orderBy: { createdAt: "desc" },
@@ -601,12 +650,18 @@ export class ViajesService {
         ...VIAJE_INCLUDE_FULL,
       } as any,
     });
-    return rows.map((r) => calcularMontosReales(r));
+    return rows.map((r) =>
+      calcularMontosReales(
+        this.zerarIvaTransportistaSiDeshabilitado(r, ivaTransportistaHabilitado),
+      ),
+    );
   }
 
   async getStats(tenantId: string) {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
 
     // null monedaMonto/monedaPrecioTransportistaExterno is treated as ARS (same convention
     // used throughout the codebase, e.g. getViajesSaldoPendienteTransportista).
@@ -700,7 +755,7 @@ export class ViajesService {
     for (const v of saldoViajes) {
       const moneda =
         v.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
-      const acordado = this.calcularAcordado(v);
+      const acordado = this.calcularAcordado(v, ivaTransportistaHabilitado);
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
         : [];
@@ -749,6 +804,8 @@ export class ViajesService {
     );
     const where = buildViajesPaginatedWhere(tenantId, query);
     const { sortBy, sortDir } = resolveViajesSort(query);
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
 
     if (sortBy === "ganancia_bruta") {
       return this.findAllPaginatedOrdenGananciaBruta(
@@ -756,6 +813,7 @@ export class ViajesService {
         page,
         pageSize,
         sortDir,
+        ivaTransportistaHabilitado,
       );
     }
 
@@ -766,11 +824,18 @@ export class ViajesService {
         pageSize,
         sortBy,
         sortDir,
+        ivaTransportistaHabilitado,
       );
     }
 
     if (sortBy === "monto") {
-      return this.findAllPaginatedOrdenMonto(where, page, pageSize, sortDir);
+      return this.findAllPaginatedOrdenMonto(
+        where,
+        page,
+        pageSize,
+        sortDir,
+        ivaTransportistaHabilitado,
+      );
     }
 
     const orderBy = buildViajesPrismaOrderBy(sortBy, sortDir);
@@ -787,7 +852,10 @@ export class ViajesService {
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
       items: items.map((item) =>
-        enrichViajeConExportaciones(calcularMontosReales(item)),
+        this.zerarIvaTransportistaSiDeshabilitado(
+          enrichViajeConExportaciones(calcularMontosReales(item)),
+          ivaTransportistaHabilitado,
+        ),
       ),
       meta: {
         page,
@@ -806,6 +874,7 @@ export class ViajesService {
     pageSize: number,
     sortBy: "fecha_carga" | "fecha_descarga",
     sortDir: ViajesSortDir,
+    ivaTransportistaHabilitado: boolean,
   ) {
     const prismaField =
       sortBy === "fecha_carga" ? "fechaCarga" : "fechaDescarga";
@@ -835,6 +904,7 @@ export class ViajesService {
       total,
       page,
       pageSize,
+      ivaTransportistaHabilitado,
     );
   }
 
@@ -843,6 +913,7 @@ export class ViajesService {
     page: number,
     pageSize: number,
     sortDir: ViajesSortDir,
+    ivaTransportistaHabilitado: boolean,
   ) {
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.viaje.count({ where }),
@@ -876,6 +947,7 @@ export class ViajesService {
       total,
       page,
       pageSize,
+      ivaTransportistaHabilitado,
     );
   }
 
@@ -884,6 +956,7 @@ export class ViajesService {
     page: number,
     pageSize: number,
     sortDir: ViajesSortDir,
+    ivaTransportistaHabilitado: boolean,
   ) {
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.viaje.count({ where }),
@@ -915,9 +988,10 @@ export class ViajesService {
           precioTransportistaExterno:
             conReales.costoLiquidadoReal ?? row.precioTransportistaExterno,
           // Con costo real de una Liquidación ya reconciliado, el % de IVA del viaje
-          // no aplica (ese monto ya es el líquido real, no el precio cargado).
+          // no aplica (ese monto ya es el líquido real, no el precio cargado). Tampoco
+          // aplica si el tenant tiene el campo deshabilitado (ver ivaTransportistaHabilitado()).
           precioTransportistaIvaIncluidoPct:
-            conReales.costoLiquidadoReal != null
+            conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
               ? 0
               : row.precioTransportistaIvaIncluidoPct,
           monedaPrecioTransportistaExterno:
@@ -942,6 +1016,7 @@ export class ViajesService {
       total,
       page,
       pageSize,
+      ivaTransportistaHabilitado,
     );
   }
 
@@ -951,6 +1026,7 @@ export class ViajesService {
     total: number,
     page: number,
     pageSize: number,
+    ivaTransportistaHabilitado: boolean,
   ) {
     const pageIds = sortedIds.slice((page - 1) * pageSize, page * pageSize);
     const itemsUnsorted =
@@ -968,7 +1044,10 @@ export class ViajesService {
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return {
       items: items.map((item) =>
-        enrichViajeConExportaciones(calcularMontosReales(item)),
+        this.zerarIvaTransportistaSiDeshabilitado(
+          enrichViajeConExportaciones(calcularMontosReales(item)),
+          ivaTransportistaHabilitado,
+        ),
       ),
       meta: {
         page,
@@ -982,19 +1061,27 @@ export class ViajesService {
   }
 
   async findOne(id: string, tenantId: string): Promise<ViajeConVehiculosViaje> {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const row = await this.prisma.viaje.findFirst({
       where: { id, tenantId },
       include: VIAJE_INCLUDE_FULL,
     });
     if (!row) throw new NotFoundException("Viaje no encontrado");
+    const rowSinIva = this.zerarIvaTransportistaSiDeshabilitado(
+      row,
+      ivaTransportistaHabilitado,
+    );
     return enrichViajeConGananciaBruta(
       enrichViajeConExportaciones(
-        calcularMontosReales(row) as unknown as ViajeConVehiculosViaje,
+        calcularMontosReales(rowSinIva) as unknown as ViajeConVehiculosViaje,
       ),
     ) as ViajeConVehiculosViaje;
   }
 
   async getGananciaBruta(id: string, tenantId: string) {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const row = await this.prisma.viaje.findFirst({
       where: { id, tenantId },
       select: {
@@ -1020,9 +1107,10 @@ export class ViajesService {
       precioTransportistaExterno:
         conReales.costoLiquidadoReal ?? row.precioTransportistaExterno,
       // Con costo real de una Liquidación ya reconciliado, el % de IVA del viaje no
-      // aplica (ese monto ya es el líquido real, no el precio cargado).
+      // aplica (ese monto ya es el líquido real, no el precio cargado). Tampoco aplica
+      // si el tenant tiene el campo deshabilitado (opt-in, ver ivaTransportistaHabilitado()).
       precioTransportistaIvaIncluidoPct:
-        conReales.costoLiquidadoReal != null
+        conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
           ? 0
           : row.precioTransportistaIvaIncluidoPct,
       monedaPrecioTransportistaExterno:
@@ -1042,6 +1130,8 @@ export class ViajesService {
   }
 
   async create(tenantId: string, userId: string, dto: CreateViajeDto) {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const op = mergeViajeOperacionIds(
       { transportistaId: null, choferId: null, vehiculoIds: [] },
       {
@@ -1131,15 +1221,18 @@ export class ViajesService {
       },
       dto,
     );
-    this.assertPagosTransportistaNoSuperanSaldo({
-      id: undefined,
-      transportistaId: refs.transportistaId,
-      precioTransportistaExterno,
-      monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
-      precioTransportistaIvaIncluidoPct: dto.precioTransportistaIvaIncluidoPct,
-      pagosTransportista: dto.pagosTransportista,
-      liquidacionesViaje: [], // Al crearse, obviamente no tiene liquidaciones.
-    });
+    this.assertPagosTransportistaNoSuperanSaldo(
+      {
+        id: undefined,
+        transportistaId: refs.transportistaId,
+        precioTransportistaExterno,
+        monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
+        precioTransportistaIvaIncluidoPct: dto.precioTransportistaIvaIncluidoPct,
+        pagosTransportista: dto.pagosTransportista,
+        liquidacionesViaje: [], // Al crearse, obviamente no tiene liquidaciones.
+      },
+      ivaTransportistaHabilitado,
+    );
     const destinosNorm = resolveDestinosParaCreate(dto);
     const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
 
@@ -1202,8 +1295,12 @@ export class ViajesService {
           where: { id: viaje.id, tenantId },
           include: VIAJE_INCLUDE_FULL,
         });
+        const outSinIva = this.zerarIvaTransportistaSiDeshabilitado(
+          out,
+          ivaTransportistaHabilitado,
+        );
         return enrichViajeConGananciaBruta(
-          calcularMontosReales(out) as unknown as ViajeConVehiculosViaje,
+          calcularMontosReales(outSinIva) as unknown as ViajeConVehiculosViaje,
         ) as ViajeConVehiculosViaje;
       }, VIAJE_INTERACTIVE_TX);
     } catch (e) {
@@ -1238,6 +1335,8 @@ export class ViajesService {
 
   async update(id: string, tenantId: string, dto: UpdateViajeDto) {
     const current = await this.findOne(id, tenantId);
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
 
     const facturacionEstado = (current as any).facturacionEstado as string;
     const liquidacionEstado = (current as any).liquidacionEstado as
@@ -1277,7 +1376,11 @@ export class ViajesService {
     // tenant que recién adopta integracion-arca) quedaría con el % atascado para
     // siempre en cuanto se facture, sin ninguna forma de corregirlo. Una vez liquidado,
     // el % queda fijo porque `Liquidacion.bruto` ya se calculó neteando con ese valor.
+    // Si el tenant tiene el campo deshabilitado (opt-in, ver ivaTransportistaHabilitado()),
+    // ni siquiera se llega a mirar esto — el valor entrante se ignora en silencio más
+    // abajo (precioTransportistaIvaIncluidoPctResolved), nunca con un error.
     if (
+      ivaTransportistaHabilitado &&
       bloqueadoPorLiquidacion &&
       dto.precioTransportistaIvaIncluidoPct !== undefined
     ) {
@@ -1378,8 +1481,12 @@ export class ViajesService {
     const monedaPrecioTransportistaExternoResolved =
       dto.monedaPrecioTransportistaExterno ??
       current.monedaPrecioTransportistaExterno;
-    const precioTransportistaIvaIncluidoPctResolved =
-      dto.precioTransportistaIvaIncluidoPct !== undefined
+    // Si el campo está deshabilitado para el tenant, se ignora cualquier valor que
+    // venga en el dto (el formulario lo tiene oculto igual) y se preserva el valor
+    // guardado tal cual, sin borrarlo — solo deja de tenerse en cuenta en los cálculos.
+    const precioTransportistaIvaIncluidoPctResolved = !ivaTransportistaHabilitado
+      ? (current as any).precioTransportistaIvaIncluidoPct
+      : dto.precioTransportistaIvaIncluidoPct !== undefined
         ? dto.precioTransportistaIvaIncluidoPct
         : (current as any).precioTransportistaIvaIncluidoPct;
     const pagosTransportistaResolved =
@@ -1491,17 +1598,20 @@ export class ViajesService {
       precioTransportistaExternoInput !== undefined ||
       dto.monedaPrecioTransportistaExterno !== undefined
     ) {
-      this.assertPagosTransportistaNoSuperanSaldo({
-        id,
-        transportistaId: op.transportistaId,
-        precioTransportistaExterno: precioTransportistaExternoResolved,
-        monedaPrecioTransportistaExterno:
-          monedaPrecioTransportistaExternoResolved,
-        precioTransportistaIvaIncluidoPct:
-          precioTransportistaIvaIncluidoPctResolved,
-        pagosTransportista: pagosTransportistaResolved,
-        liquidacionesViaje: (current as any).liquidacionesViaje,
-      });
+      this.assertPagosTransportistaNoSuperanSaldo(
+        {
+          id,
+          transportistaId: op.transportistaId,
+          precioTransportistaExterno: precioTransportistaExternoResolved,
+          monedaPrecioTransportistaExterno:
+            monedaPrecioTransportistaExternoResolved,
+          precioTransportistaIvaIncluidoPct:
+            precioTransportistaIvaIncluidoPctResolved,
+          pagosTransportista: pagosTransportistaResolved,
+          liquidacionesViaje: (current as any).liquidacionesViaje,
+        },
+        ivaTransportistaHabilitado,
+      );
     }
 
     const destinosUpdate = resolveDestinosParaUpdate(dto);
@@ -1534,8 +1644,12 @@ export class ViajesService {
         if (esEtapaFinal(full.etapa)) {
           await this.upsertCargoFinalizacion(tx, full);
         }
+        const fullSinIva = this.zerarIvaTransportistaSiDeshabilitado(
+          full,
+          ivaTransportistaHabilitado,
+        );
         return enrichViajeConGananciaBruta(
-          calcularMontosReales(full) as any,
+          calcularMontosReales(fullSinIva) as any,
         ) as ViajeConVehiculosViaje;
       }, VIAJE_INTERACTIVE_TX);
     } catch (e) {
@@ -1601,6 +1715,8 @@ export class ViajesService {
     userId: string,
     dto: AddPagoTransportistaDto,
   ) {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const viaje = await this.findOne(id, tenantId);
 
     if (viaje.etapa === "cancelado") {
@@ -1631,16 +1747,19 @@ export class ViajesService {
 
     const pagosActualizados = [...pagosActuales, nuevoPago];
 
-    this.assertPagosTransportistaNoSuperanSaldo({
-      id: viaje.id,
-      transportistaId: viaje.transportistaId,
-      precioTransportistaExterno: viaje.precioTransportistaExterno,
-      monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
-      precioTransportistaIvaIncluidoPct: (viaje as any)
-        .precioTransportistaIvaIncluidoPct,
-      pagosTransportista: pagosActualizados,
-      liquidacionesViaje: (viaje as any).liquidacionesViaje,
-    });
+    this.assertPagosTransportistaNoSuperanSaldo(
+      {
+        id: viaje.id,
+        transportistaId: viaje.transportistaId,
+        precioTransportistaExterno: viaje.precioTransportistaExterno,
+        monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
+        precioTransportistaIvaIncluidoPct: (viaje as any)
+          .precioTransportistaIvaIncluidoPct,
+        pagosTransportista: pagosActualizados,
+        liquidacionesViaje: (viaje as any).liquidacionesViaje,
+      },
+      ivaTransportistaHabilitado,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
@@ -1654,7 +1773,9 @@ export class ViajesService {
         where: { id, tenantId },
         include: VIAJE_INCLUDE_FULL,
       });
-      return calcularMontosReales(out) as unknown as ViajeConVehiculosViaje;
+      return calcularMontosReales(
+        this.zerarIvaTransportistaSiDeshabilitado(out, ivaTransportistaHabilitado),
+      ) as unknown as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
 
@@ -1664,6 +1785,8 @@ export class ViajesService {
     userId: string,
     index: number,
   ) {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const viaje = await this.findOne(id, tenantId);
 
     if (viaje.etapa === "cancelado") {
@@ -1699,11 +1822,15 @@ export class ViajesService {
         where: { id, tenantId },
         include: VIAJE_INCLUDE_FULL,
       });
-      return calcularMontosReales(out) as unknown as ViajeConVehiculosViaje;
+      return calcularMontosReales(
+        this.zerarIvaTransportistaSiDeshabilitado(out, ivaTransportistaHabilitado),
+      ) as unknown as ViajeConVehiculosViaje;
     }, VIAJE_INTERACTIVE_TX);
   }
 
   async getViajesSaldoPendienteTransportista(tenantId: string) {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const viajes = await this.prisma.viaje.findMany({
       where: {
         tenantId,
@@ -1728,25 +1855,29 @@ export class ViajesService {
       },
     });
 
-    return viajes.filter((v) => {
-      const moneda =
-        v.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
+    return viajes
+      .filter((v) => {
+        const moneda =
+          v.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
 
-      const acordado = this.calcularAcordado(v);
+        const acordado = this.calcularAcordado(v, ivaTransportistaHabilitado);
 
-      const pagos = Array.isArray(v.pagosTransportista)
-        ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
-        : [];
-      const pagado = pagos
-        .filter(
-          (p) => ((p.moneda ?? "ARS") === "USD" ? "USD" : "ARS") === moneda,
-        )
-        .reduce(
-          (acc, p) => acc + (typeof p.monto === "number" ? p.monto : 0),
-          0,
-        );
-      return pagado < acordado;
-    });
+        const pagos = Array.isArray(v.pagosTransportista)
+          ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
+          : [];
+        const pagado = pagos
+          .filter(
+            (p) => ((p.moneda ?? "ARS") === "USD" ? "USD" : "ARS") === moneda,
+          )
+          .reduce(
+            (acc, p) => acc + (typeof p.monto === "number" ? p.monto : 0),
+            0,
+          );
+        return pagado < acordado;
+      })
+      .map((v) =>
+        this.zerarIvaTransportistaSiDeshabilitado(v, ivaTransportistaHabilitado),
+      );
   }
 
   async remove(id: string, tenantId: string, force = false) {

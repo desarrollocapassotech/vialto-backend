@@ -7,6 +7,7 @@ import {
 } from '../viajes/viaje-ganancia-bruta.util';
 import { importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+import { TenantFieldConfigService } from '../../core/tenant-field-config/tenant-field-config.service';
 
 export type Money = { ARS: number; USD: number };
 
@@ -166,7 +167,20 @@ type ViajeMargenRow = {
 
 @Injectable()
 export class DashboardFinancieroService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantFieldConfig: TenantFieldConfigService,
+  ) {}
+
+  /** Ver comentario equivalente en viajes.service.ts — misma señal canónica. */
+  private ivaTransportistaHabilitado(tenantId: string): Promise<boolean> {
+    return this.tenantFieldConfig.isCampoVisible(
+      tenantId,
+      'viajes',
+      'edicion_viaje',
+      'precioTransportistaIvaIncluidoPct',
+    );
+  }
 
   async getFinancieroDashboard(
     tenantId: string,
@@ -223,7 +237,9 @@ export class DashboardFinancieroService {
     end: Date,
     whereViajeAtribuido: (s: Date, e: Date) => Record<string, unknown>,
   ): Promise<NonNullable<FinancieroDashboardResponse['margen']>> {
-    const viajes = await this.prisma.viaje.findMany({
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
+    const viajesRaw = await this.prisma.viaje.findMany({
       where: {
         tenantId,
         etapa: { not: 'cancelado' },
@@ -248,6 +264,11 @@ export class DashboardFinancieroService {
         detalleCarga: true,
       },
     });
+    // Si el tenant tiene el campo deshabilitado, se ignora el % guardado en el cálculo
+    // de margen (sin borrarlo de la base) — mismo criterio que viajes.service.ts.
+    const viajes = ivaTransportistaHabilitado
+      ? viajesRaw
+      : viajesRaw.map((v) => ({ ...v, precioTransportistaIvaIncluidoPct: 0 }));
 
     const clienteIds = [...new Set(viajes.map((v) => v.clienteId))];
     const transportistaIds = [
@@ -445,6 +466,8 @@ export class DashboardFinancieroService {
     end: Date,
     whereViajeAtribuido: (s: Date, e: Date) => Record<string, unknown>,
   ): Promise<NonNullable<FinancieroDashboardResponse['viajesFunnel']>> {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const viajes = await this.prisma.viaje.findMany({
       where: { tenantId, ...whereViajeAtribuido(start, end) },
       select: {
@@ -482,7 +505,7 @@ export class DashboardFinancieroService {
       const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
       const acordado = engrosarConIva(
         v.precioTransportistaExterno ?? 0,
-        v.precioTransportistaIvaIncluidoPct,
+        ivaTransportistaHabilitado ? v.precioTransportistaIvaIncluidoPct : 0,
       );
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
@@ -565,6 +588,8 @@ export class DashboardFinancieroService {
     end: Date,
     whereViajeAtribuido: (s: Date, e: Date) => Record<string, unknown>,
   ): Promise<NonNullable<FinancieroDashboardResponse['liquidaciones']>> {
+    const ivaTransportistaHabilitado =
+      await this.ivaTransportistaHabilitado(tenantId);
     const viajes = await this.prisma.viaje.findMany({
       where: {
         tenantId,
@@ -590,7 +615,7 @@ export class DashboardFinancieroService {
       const moneda = v.monedaPrecioTransportistaExterno === 'USD' ? 'USD' : 'ARS';
       const acordado = engrosarConIva(
         v.precioTransportistaExterno ?? 0,
-        v.precioTransportistaIvaIncluidoPct,
+        ivaTransportistaHabilitado ? v.precioTransportistaIvaIncluidoPct : 0,
       );
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)

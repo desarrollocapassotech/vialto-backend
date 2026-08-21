@@ -34,7 +34,7 @@ export class TenantFieldConfigService {
       campo: c.campo,
       label: c.label,
       obligatorioSistema: c.obligatorioSistema,
-      visible: overrides[c.campo]?.visible ?? true,
+      visible: overrides[c.campo]?.visible ?? c.defaultVisible ?? true,
     }));
   }
 
@@ -52,7 +52,10 @@ export class TenantFieldConfigService {
     for (const [formulario, def] of Object.entries(formularios)) {
       const overrides = overridesPorFormulario.get(formulario) ?? {};
       resultado[formulario] = Object.fromEntries(
-        def.campos.map((c) => [c.campo, overrides[c.campo]?.visible ?? true]),
+        def.campos.map((c) => [
+          c.campo,
+          overrides[c.campo]?.visible ?? c.defaultVisible ?? true,
+        ]),
       );
     }
     return resultado;
@@ -168,15 +171,21 @@ export class TenantFieldConfigService {
     return logs.map((log) => {
       const ant = log.configAnterior as FieldConfigValue | null;
       const nue = log.configNuevo as FieldConfigValue | null;
+      // Si no hay estado anterior (es el primer cambio), el default no siempre es
+      // "visible" — depende de `defaultVisible` del campo en el catálogo (ver
+      // field-catalog.ts; false para features opt-in como precioTransportistaIvaIncluidoPct).
+      const campoDef = getCatalogoFormulario(log.modulo, log.formulario).find(
+        (c) => c.campo === log.campo,
+      );
+      const defaultVisible = campoDef?.defaultVisible ?? true;
 
       return {
         id: log.id,
         modulo: log.modulo,
         formulario: log.formulario,
         campo: log.campo,
-        // Si no hay estado anterior (es el primer cambio), por defecto el campo era visible
-        estadoAnterior: ant ? ant.visible : true,
-        estadoNuevo: nue ? nue.visible : true,
+        estadoAnterior: ant ? ant.visible : defaultVisible,
+        estadoNuevo: nue ? nue.visible : defaultVisible,
         userId: log.changedBy,
         createdAt: log.changedAt, // <-- CORREGIDO: Mapeamos changedAt para el frontend
       };

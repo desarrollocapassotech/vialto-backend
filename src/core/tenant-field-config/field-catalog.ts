@@ -2,6 +2,8 @@ export type CampoCatalogo = {
   campo: string;
   label: string;
   obligatorioSistema: boolean;
+  /** Visibilidad por defecto para un tenant sin override guardado. Si se omite, true (comportamiento histórico: visible salvo que se oculte explícitamente). Usar `false` para features opt-in que solo algunos tenants necesitan. */
+  defaultVisible?: boolean;
 };
 
 export type FormularioCatalogo = {
@@ -44,6 +46,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "otrosGastos", label: "Otros gastos", obligatorioSistema: false },
           { campo: "pagosTransportista", label: "Pagos al transportista", obligatorioSistema: false },
           { campo: "desgloseMontos", label: "Desglose de montos (Cantidad × Precio)", obligatorioSistema: false },
+          { campo: "precioTransportistaIvaIncluidoPct", label: "% IVA transportista (pago en efectivo)", obligatorioSistema: false, defaultVisible: false },
         ],
       },
       edicion_viaje: {
@@ -72,6 +75,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "otrosGastos", label: "Otros gastos", obligatorioSistema: false },
           { campo: "pagosTransportista", label: "Pagos al transportista", obligatorioSistema: false },
           { campo: "desgloseMontos", label: "Desglose de montos (Cantidad × Precio)", obligatorioSistema: false },
+          { campo: "precioTransportistaIvaIncluidoPct", label: "% IVA transportista (pago en efectivo)", obligatorioSistema: false, defaultVisible: false },
         ],
       },
       detalle_viaje: {
@@ -92,6 +96,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "observaciones", label: "Observaciones", obligatorioSistema: false },
           { campo: "otrosGastos", label: "Gastos adicionales", obligatorioSistema: false },
           { campo: "pagosTransportista", label: "Pagos al transportista", obligatorioSistema: false },
+          { campo: "precioTransportistaIvaIncluidoPct", label: "% IVA transportista (pago en efectivo)", obligatorioSistema: false, defaultVisible: false },
         ],
       },
     },

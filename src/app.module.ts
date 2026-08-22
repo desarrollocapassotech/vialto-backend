@@ -30,6 +30,7 @@ import { HealthController } from './health.controller';
 import { PlatformModule } from './core/platform/platform.module';
 import { TenantFieldConfigModule } from './core/tenant-field-config/tenant-field-config.module';
 import { PaisesModule } from './core/paises/paises.module';
+import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { PaisesModule } from './core/paises/paises.module';
     PlatformModule,
     TenantFieldConfigModule,
     PaisesModule,
+    NotificacionesModule,
   ],
   controllers: [HealthController],
 })

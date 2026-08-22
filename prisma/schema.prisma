@@ -62,6 +62,8 @@ model Tenant {
   conceptosLiquidacion       ConceptoLiquidacion[]
   tenantFieldConfigs         TenantFieldConfig[]
   tenantFieldConfigAuditLogs TenantFieldConfigAuditLog[]
+  notificacionConfigs        NotificacionConfig[]
+  notificacionEnvios         NotificacionEnvio[]
 
   @@map("tenants")
 }
@@ -961,6 +963,40 @@ model TenantFieldConfigAuditLog {
   @@index([tenantId])
   @@index([tenantId, modulo, formulario])
   @@map("tenant_field_config_audit_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Módulo: notificaciones (alertas por email vía Resend, configurables por tenant)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Override por tenant de si un tipo de notificación (ver `notificaciones-catalog.ts`) está activo. Sin fila = usa el default del catálogo. */
+model NotificacionConfig {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tipo      String
+  activo    Boolean
+  updatedBy String
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, tipo])
+  @@index([tenantId])
+  @@map("notificacion_configs")
+}
+
+/** Registro de qué entidad ya generó un email para un tipo de notificación — evita reenviar el mismo aviso en cada corrida del cron. */
+model NotificacionEnvio {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tipo          String
+  entidadId     String
+  destinatarios String[]
+  enviadoAt     DateTime @default(now())
+
+  @@unique([tenantId, tipo, entidadId])
+  @@index([tenantId, tipo])
+  @@map("notificacion_envios")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

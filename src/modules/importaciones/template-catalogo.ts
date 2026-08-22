@@ -50,7 +50,7 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
     { field: "idFiscal", campoLabel: "CUIT", type: "string", systemRequired: false, warnIfEmpty: true, defaultExcelHeader: "CUIT" },
     { field: "pais", campoLabel: "País", type: "string", systemRequired: false, warnIfEmpty: true, defaultExcelHeader: "País" },
     { field: "domicilio", campoLabel: "Domicilio", type: "string", systemRequired: false, defaultExcelHeader: "Domicilio" },
-    { field: "condicionIva", campoLabel: "Condición IVA", type: "number", systemRequired: false, defaultExcelHeader: "Cond. IVA" },
+    { field: "condicionIva", campoLabel: "Condición IVA", type: "number", systemRequired: false, warnIfEmpty: true, defaultExcelHeader: "Cond. IVA" },
     { field: "comisionPct", campoLabel: "% Comisión", type: "number", systemRequired: false, defaultExcelHeader: "% Comisión" },
     { field: "paut", campoLabel: "PAUT", type: "string", systemRequired: false, defaultExcelHeader: "PAUT" },
     { field: "permisoInternacional", campoLabel: "Permiso internacional", type: "string", systemRequired: false, defaultExcelHeader: "Permiso internacional" },
@@ -215,6 +215,7 @@ export function construirConfigPorDefecto(modulo: string): TemplateConfig | null
       }
       if (c.allowedValues) col.allowedValues = c.allowedValues;
       if (c.format) col.format = c.format;
+      if (c.warnIfEmpty) col.warnIfEmpty = true;
       return col;
     }),
   };

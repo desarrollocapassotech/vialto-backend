@@ -165,14 +165,20 @@ export class ValidatorService {
       case "number": {
         const n = parseFloat(str.replace(",", "."));
         if (isNaN(n)) {
-          return {
-            error: {
-              fila: rowNum,
-              campo: col.excelHeader,
-              error: `Valor numérico inválido`,
-              valor: raw,
-            },
-          };
+          if (col.required) {
+            return {
+              error: {
+                fila: rowNum,
+                campo: col.excelHeader,
+                error: `Valor numérico inválido`,
+                valor: raw,
+              },
+            };
+          }
+          // Campo opcional (ej. "Cond. IVA" con un texto en vez del código
+          // AFIP): un valor no numérico no bloquea toda la fila — se deja
+          // vacío y se avisa, mismo criterio que un warnIfEmpty vacío.
+          return { value: null, warning: true };
         }
         return { value: n };
       }

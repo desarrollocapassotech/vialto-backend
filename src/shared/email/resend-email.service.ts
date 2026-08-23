@@ -21,7 +21,7 @@ export class ResendEmailService {
   constructor() {
     const apiKey = process.env.RESEND_API_KEY;
     this.client = apiKey ? new Resend(apiKey) : null;
-    this.from = process.env.RESEND_FROM_EMAIL ?? 'Vialto <notificaciones@vialto.app>';
+    this.from = process.env.RESEND_FROM_EMAIL ?? 'Vialto <notificaciones@vialto.uno>';
 
     if (!this.client) {
       this.logger.warn(

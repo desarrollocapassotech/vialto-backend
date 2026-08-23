@@ -17,6 +17,16 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** Logo servido desde el sitio en producción (URL pública estable) — un cliente de email no puede resolver rutas relativas ni localhost. */
+const LOGO_URL = 'https://admin.vialto.uno/vialto-software-white-removebg.png';
+const APP_URL = 'https://admin.vialto.uno';
+
+/** Mismos colores de marca que `index.css` (`--color-vialto-*`) del frontend. */
+const COLOR_CHARCOAL = '#1a1a1a';
+const COLOR_FIRE = '#e8470a';
+const COLOR_STEEL = '#4a4a4a';
+const COLOR_MIST = '#f5f3f0';
+
 /**
  * Cron diario que evalúa el catálogo de notificaciones para cada tenant y manda un email
  * agrupado por tipo (solo si está activo para ese tenant y hay ítems nuevos — dedup por
@@ -135,21 +145,69 @@ export class NotificacionesCronService {
   }
 
   private buildHtml(label: string, items: NotificacionItem[]): string {
-    const filas = items
+    const tarjetas = items
       .map(
-        (i) =>
-          `<li style="margin-bottom:10px;"><strong>${escapeHtml(i.titulo)}</strong><br/><span style="color:#555;">${escapeHtml(i.detalle)}</span></li>`,
+        (i) => `
+          <tr>
+            <td style="padding-bottom:12px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e7e3dc; border-radius:8px;">
+                <tr>
+                  <td style="padding:14px 16px;">
+                    <p style="margin:0 0 4px; font-family:Arial, sans-serif; font-size:14px; font-weight:700; color:${COLOR_CHARCOAL};">${escapeHtml(i.titulo)}</p>
+                    <p style="margin:0; font-family:Arial, sans-serif; font-size:13px; line-height:1.5; color:${COLOR_STEEL};">${escapeHtml(i.detalle)}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>`,
       )
       .join('');
 
     return `
-      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a1a;">
-        <h2 style="margin-bottom: 16px;">${escapeHtml(label)}</h2>
-        <ul style="padding-left: 18px; margin: 0;">${filas}</ul>
-        <p style="color: #888; font-size: 12px; margin-top: 24px;">
-          Podés desactivar este aviso desde Configuración → Notificaciones en Vialto.
-        </p>
-      </div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLOR_MIST}; padding:32px 16px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px; background-color:#ffffff; border-radius:10px; overflow:hidden;">
+              <tr>
+                <td align="center" style="background-color:${COLOR_CHARCOAL}; padding:22px 32px; text-align:center;">
+                  <img src="${LOGO_URL}" alt="Vialto Software" width="130" style="display:block; height:auto; border:0; margin:0 auto;" />
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:32px;">
+                  <p style="margin:0 0 6px; font-family:Arial, sans-serif; font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:${COLOR_FIRE};">
+                    Aviso de Vialto
+                  </p>
+                  <h1 style="margin:0 0 20px; font-family:Arial, sans-serif; font-size:21px; line-height:1.3; color:${COLOR_CHARCOAL};">
+                    ${escapeHtml(label)}
+                  </h1>
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                    ${tarjetas}
+                  </table>
+                  <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+                    <tr>
+                      <td style="border-radius:6px; background-color:${COLOR_CHARCOAL};">
+                        <a href="${APP_URL}" style="display:inline-block; padding:11px 22px; font-family:Arial, sans-serif; font-size:13px; font-weight:700; letter-spacing:0.04em; color:#ffffff; text-decoration:none;">
+                          Ver en Vialto
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:18px 32px; background-color:${COLOR_MIST}; border-top:1px solid #e7e3dc;">
+                  <p style="margin:0; font-family:Arial, sans-serif; font-size:12px; line-height:1.5; color:${COLOR_STEEL};">
+                    Podés elegir qué avisos recibís desde
+                    <a href="${APP_URL}/configuracion/notificaciones" style="color:${COLOR_FIRE}; text-decoration:none;">Configuración → Notificaciones</a>
+                    en Vialto.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     `;
   }
 }

@@ -969,33 +969,48 @@ model TenantFieldConfigAuditLog {
 // Módulo: notificaciones (alertas por email vía Resend, configurables por tenant)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Override por tenant de si un tipo de notificación (ver `notificaciones-catalog.ts`) está activo. Sin fila = usa el default del catálogo. */
+/**
+ * Override por tenant de un tipo de notificación (ver `notificaciones-catalog.ts`). Sin fila = usa el
+ * default del catálogo (activo) y los destinatarios por defecto (todos los `org:admin`).
+ * `destinatarios`: userIds de Clerk elegidos a mano para este tipo — vacío = default (todos los admins);
+ * no vacío = SOLO esos usuarios (sin importar su rol).
+ */
 model NotificacionConfig {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  tipo      String
-  activo    Boolean
-  updatedBy String
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tipo          String
+  activo        Boolean
+  destinatarios String[] @default([])
+  updatedBy     String
+  updatedAt     DateTime @updatedAt
 
   @@unique([tenantId, tipo])
   @@index([tenantId])
   @@map("notificacion_configs")
 }
 
-/** Registro de qué entidad ya generó un email para un tipo de notificación — evita reenviar el mismo aviso en cada corrida del cron. */
+/**
+ * Registro de qué entidad ya generó un email para un tipo de notificación — evita reenviar el mismo aviso en
+ * cada corrida del cron. `titulo`/`detalle` quedan grabados como snapshot del momento del envío (misma data
+ * que fue al email) para poder mostrar el feed de la campana sin re-evaluar contra el estado actual de la
+ * entidad. `leidoPor` acumula los userId de Clerk que ya vieron el aviso en el desplegable.
+ */
 model NotificacionEnvio {
   id            String   @id @default(cuid())
   tenantId      String
   tenant        Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   tipo          String
   entidadId     String
+  titulo        String
+  detalle       String
   destinatarios String[]
+  leidoPor      String[] @default([])
   enviadoAt     DateTime @default(now())
 
   @@unique([tenantId, tipo, entidadId])
   @@index([tenantId, tipo])
+  @@index([tenantId, enviadoAt])
   @@map("notificacion_envios")
 }
 

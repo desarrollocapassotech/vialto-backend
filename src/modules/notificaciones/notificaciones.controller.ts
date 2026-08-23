@@ -2,7 +2,9 @@ import { BadRequestException, Body, Controller, Get, Post, Query, UseGuards } fr
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { NotificacionesConfigService } from './notificaciones-config.service';
 import { NotificacionesCronService } from './notificaciones-cron.service';
+import { NotificacionesFeedService } from './notificaciones-feed.service';
 import { ToggleNotificacionConfigDto } from './dto/toggle-notificacion-config.dto';
+import { MarcarLeidasDto } from './dto/marcar-leidas.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -20,6 +22,7 @@ export class NotificacionesController {
   constructor(
     private readonly configService: NotificacionesConfigService,
     private readonly cronService: NotificacionesCronService,
+    private readonly feedService: NotificacionesFeedService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -37,6 +40,25 @@ export class NotificacionesController {
   async toggle(@Body() dto: ToggleNotificacionConfigDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     await this.configService.toggle(auth.tenantId, dto.tipo, dto.activo, auth.userId);
+    return { ok: true };
+  }
+
+  @ApiOperation({ summary: 'Feed de notificaciones para la campana de la navbar (últimos avisos enviados al tenant)' })
+  @Get('feed')
+  @Roles('admin', 'member', 'superadmin')
+  getFeed(@Query('limit') limit: string | undefined, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    const parsed = limit ? Number(limit) : 20;
+    const safeLimit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 100) : 20;
+    return this.feedService.getFeed(auth.tenantId, auth.userId, safeLimit);
+  }
+
+  @ApiOperation({ summary: 'Marca avisos del feed como leídos para el usuario actual (todos los no leídos si no se pasan ids)' })
+  @Post('feed/marcar-leidas')
+  @Roles('admin', 'member', 'superadmin')
+  async marcarLeidas(@Body() dto: MarcarLeidasDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    await this.feedService.marcarLeidas(auth.tenantId, auth.userId, dto.ids);
     return { ok: true };
   }
 

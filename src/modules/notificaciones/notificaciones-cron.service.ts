@@ -97,6 +97,8 @@ export class NotificacionesCronService {
           tenantId,
           tipo: item.tipo,
           entidadId: c.entidadId,
+          titulo: c.titulo,
+          detalle: c.detalle,
           destinatarios,
         })),
         skipDuplicates: true,

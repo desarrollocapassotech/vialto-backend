@@ -20,7 +20,8 @@ function escapeHtml(s: string): string {
 /**
  * Cron diario que evalúa el catálogo de notificaciones para cada tenant y manda un email
  * agrupado por tipo (solo si está activo para ese tenant y hay ítems nuevos — dedup por
- * `NotificacionEnvio`). Los destinatarios son los miembros `org:admin` del tenant en Clerk.
+ * `NotificacionEnvio`). Destinatarios: por default todos los `org:admin` del tenant, salvo que el
+ * tenant haya elegido usuarios puntuales para ese tipo (`NotificacionConfig.destinatarios`).
  */
 @Injectable()
 export class NotificacionesCronService {
@@ -80,9 +81,9 @@ export class NotificacionesCronService {
       const nuevas = candidatas.filter((c) => !yaNotificadasSet.has(c.entidadId));
       if (nuevas.length === 0) continue;
 
-      const destinatarios = await this.resolverDestinatarios(tenantId);
+      const destinatarios = await this.resolverDestinatarios(tenantId, item.tipo);
       if (destinatarios.length === 0) {
-        this.logger.warn(`[${tenantId}] ${item.tipo}: sin destinatarios (sin admins con email en Clerk) — no se envía.`);
+        this.logger.warn(`[${tenantId}] ${item.tipo}: sin destinatarios (sin admins/usuarios elegidos con email en Clerk) — no se envía.`);
         continue;
       }
 
@@ -110,8 +111,24 @@ export class NotificacionesCronService {
     }
   }
 
-  private async resolverDestinatarios(tenantId: string): Promise<string[]> {
-    const miembros = await this.usersService.listByTenant(tenantId);
+  /**
+   * Emails de los destinatarios de un tipo de notificación. Si el tenant eligió usuarios puntuales
+   * (`NotificacionConfig.destinatarios`), manda solo a esos (sin importar su rol). Si no hay override,
+   * default: todos los `org:admin` del tenant.
+   */
+  private async resolverDestinatarios(tenantId: string, tipo: string): Promise<string[]> {
+    const [miembros, destinatariosElegidos] = await Promise.all([
+      this.usersService.listByTenant(tenantId),
+      this.configService.getDestinatarios(tenantId, tipo),
+    ]);
+
+    if (destinatariosElegidos.length > 0) {
+      const emailPorUserId = new Map(miembros.map((m) => [m.userId, m.email]));
+      return destinatariosElegidos
+        .map((userId) => emailPorUserId.get(userId))
+        .filter((email): email is string => !!email);
+    }
+
     return miembros
       .filter((m) => m.role === 'org:admin' && !!m.email)
       .map((m) => m.email as string);

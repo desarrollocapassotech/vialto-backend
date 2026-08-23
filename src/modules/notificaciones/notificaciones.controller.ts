@@ -4,6 +4,7 @@ import { NotificacionesConfigService } from './notificaciones-config.service';
 import { NotificacionesCronService } from './notificaciones-cron.service';
 import { NotificacionesFeedService } from './notificaciones-feed.service';
 import { ToggleNotificacionConfigDto } from './dto/toggle-notificacion-config.dto';
+import { SetDestinatariosDto } from './dto/set-destinatarios.dto';
 import { MarcarLeidasDto } from './dto/marcar-leidas.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
@@ -40,6 +41,18 @@ export class NotificacionesController {
   async toggle(@Body() dto: ToggleNotificacionConfigDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     await this.configService.toggle(auth.tenantId, dto.tipo, dto.activo, auth.userId);
+    return { ok: true };
+  }
+
+  @ApiOperation({
+    summary:
+      'Configura qué usuarios (sin importar rol) reciben un tipo de notificación. Lista vacía = volver al default (todos los admins)',
+  })
+  @Post('config/destinatarios')
+  @Roles('admin', 'superadmin')
+  async setDestinatarios(@Body() dto: SetDestinatariosDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    await this.configService.setDestinatarios(auth.tenantId, dto.tipo, dto.destinatarios, auth.userId);
     return { ok: true };
   }
 

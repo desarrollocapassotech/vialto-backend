@@ -8,6 +8,8 @@ export type NotificacionConfigEfectiva = {
   label: string;
   descripcion: string;
   activo: boolean;
+  /** userIds de Clerk elegidos a mano para este tipo. Vacío = default (todos los org:admin). */
+  destinatarios: string[];
 };
 
 @Injectable()
@@ -25,17 +27,21 @@ export class NotificacionesConfigService {
 
     const overrides = await this.prisma.notificacionConfig.findMany({
       where: { tenantId, tipo: { in: catalogo.map((c) => c.tipo) } },
-      select: { tipo: true, activo: true },
+      select: { tipo: true, activo: true, destinatarios: true },
     });
-    const activoPorTipo = new Map(overrides.map((o) => [o.tipo, o.activo]));
+    const overridePorTipo = new Map(overrides.map((o) => [o.tipo, o]));
 
-    return catalogo.map((c) => ({
-      tipo: c.tipo,
-      modulo: c.modulo,
-      label: c.label,
-      descripcion: c.descripcion,
-      activo: activoPorTipo.get(c.tipo) ?? c.defaultActivo,
-    }));
+    return catalogo.map((c) => {
+      const override = overridePorTipo.get(c.tipo);
+      return {
+        tipo: c.tipo,
+        modulo: c.modulo,
+        label: c.label,
+        descripcion: c.descripcion,
+        activo: override?.activo ?? c.defaultActivo,
+        destinatarios: override?.destinatarios ?? [],
+      };
+    });
   }
 
   /** Estado efectivo (override o default) de UN tipo puntual — usado por el cron, no requiere traer todo el catálogo. */
@@ -49,8 +55,18 @@ export class NotificacionesConfigService {
     return override?.activo ?? defaultActivo;
   }
 
+  /** Destinatarios elegidos a mano (userIds) para un tipo puntual — vacío = sin override, usar default (todos los admins). */
+  async getDestinatarios(tenantId: string, tipo: string): Promise<string[]> {
+    const override = await this.prisma.notificacionConfig.findUnique({
+      where: { tenantId_tipo: { tenantId, tipo } },
+      select: { destinatarios: true },
+    });
+    return override?.destinatarios ?? [];
+  }
+
   async toggle(tenantId: string, tipo: string, activo: boolean, updatedBy: string): Promise<void> {
-    if (!NOTIFICACIONES_CATALOG.some((c) => c.tipo === tipo)) {
+    const item = NOTIFICACIONES_CATALOG.find((c) => c.tipo === tipo);
+    if (!item) {
       throw new BadRequestException(`Tipo de notificación desconocido: "${tipo}"`);
     }
 
@@ -58,6 +74,25 @@ export class NotificacionesConfigService {
       where: { tenantId_tipo: { tenantId, tipo } },
       create: { tenantId, tipo, activo, updatedBy },
       update: { activo, updatedBy },
+    });
+  }
+
+  /** Reemplaza la lista de destinatarios a mano de un tipo. Pasar `[]` vuelve al default (todos los admins). */
+  async setDestinatarios(
+    tenantId: string,
+    tipo: string,
+    destinatarios: string[],
+    updatedBy: string,
+  ): Promise<void> {
+    const item = NOTIFICACIONES_CATALOG.find((c) => c.tipo === tipo);
+    if (!item) {
+      throw new BadRequestException(`Tipo de notificación desconocido: "${tipo}"`);
+    }
+
+    await this.prisma.notificacionConfig.upsert({
+      where: { tenantId_tipo: { tenantId, tipo } },
+      create: { tenantId, tipo, activo: item.defaultActivo, destinatarios, updatedBy },
+      update: { destinatarios, updatedBy },
     });
   }
 }

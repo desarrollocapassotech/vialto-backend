@@ -348,6 +348,7 @@ export class FacturaPdfService {
         Array.isArray(metadata.items) &&
         metadata.cbteTipo === drawExt.cbteTipo
       ) {
+        this.retrofitMetadataItems(metadata, factura.viajes);
         return metadata;
       }
       const ivaPct = resolveIvaPct(factura.ivaPct ?? config?.ivaGastosAdmin);
@@ -377,6 +378,35 @@ export class FacturaPdfService {
     }
     return this.resolveComprobante(factura, config);
   }
+  private retrofitMetadataItems(metadata: ArcaComprobanteCvlp, viajes: any[]) {
+    if (!viajes || !Array.isArray(viajes)) return;
+    for (const item of metadata.items) {
+      if (item.producto) continue; // Ya tiene el formato nuevo
+      
+      const match = item.descripcion.match(/Viaje #([a-zA-Z0-9_-]+)/i);
+      if (match) {
+        const numero = match[1];
+        const viaje = viajes.find((v) => v.numero === numero);
+        if (viaje) {
+          item.producto = viaje.numeroIdentificacionPersonalizado || `#${viaje.numero}`;
+          
+          const ruta = [viaje.origen, viaje.destino].filter(Boolean).join(' — ');
+          const fechaTxt = viaje.fechaCarga 
+            ? new Intl.DateTimeFormat('es-AR', { timeZone: 'UTC' }).format(viaje.fechaCarga) 
+            : '';
+          const partesDesc = [ruta, fechaTxt].filter(Boolean).join(' - ');
+          item.descripcion = partesDesc || item.descripcion;
+          
+          if (item.cantidad == null && viaje.cantidadFactura != null) {
+            item.cantidad = viaje.cantidadFactura;
+          }
+          if (item.precioUnitario == null && viaje.precioUnitarioFactura != null) {
+            item.precioUnitario = viaje.precioUnitarioFactura;
+          }
+        }
+      }
+    }
+  }
 
   private async resolveComprobante(
     factura: PrismaAny,
@@ -390,6 +420,7 @@ export class FacturaPdfService {
       const metadata = (log?.requestBody as { auditMetadata?: ArcaComprobanteCvlp })
         ?.auditMetadata;
       if (metadata && Array.isArray(metadata.items)) {
+        this.retrofitMetadataItems(metadata, factura.viajes);
         return metadata;
       }
     }

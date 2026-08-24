@@ -15,7 +15,7 @@ import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 
-@ApiTags('[Próximamente] Mantenimiento')
+@ApiTags('Mantenimiento')
 @ApiBearerAuth('clerk-jwt')
 @Controller('mantenimiento')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
@@ -23,7 +23,7 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 export class MantenimientoController {
   constructor(private readonly service: MantenimientoService) {}
 
-  @ApiOperation({ summary: 'Listar intervenciones de mantenimiento · Fase 4 — aún no activo' })
+  @ApiOperation({ summary: 'Listar intervenciones de mantenimiento' })
   @Get('intervenciones')
   @Roles('admin', 'member', 'superadmin')
   list(
@@ -34,7 +34,7 @@ export class MantenimientoController {
     return this.service.findAll(auth.tenantId, vehiculoId);
   }
 
-  @ApiOperation({ summary: 'Obtener intervención por ID · Fase 4 — aún no activo' })
+  @ApiOperation({ summary: 'Obtener intervención por ID' })
   @Get('intervenciones/:id')
   @Roles('admin', 'member', 'superadmin')
   findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
@@ -42,7 +42,7 @@ export class MantenimientoController {
     return this.service.findOne(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Registrar intervención de mantenimiento · Fase 4 — aún no activo' })
+  @ApiOperation({ summary: 'Registrar intervención de mantenimiento' })
   @Post('intervenciones')
   @Roles('admin', 'superadmin')
   create(@Body() dto: CreateIntervencionDto, @CurrentAuth() auth: AuthPayload) {
@@ -50,7 +50,7 @@ export class MantenimientoController {
     return this.service.create(auth.tenantId, auth.userId, dto);
   }
 
-  @ApiOperation({ summary: 'Actualizar intervención · Fase 4 — aún no activo' })
+  @ApiOperation({ summary: 'Actualizar intervención' })
   @Patch('intervenciones/:id')
   @Roles('admin', 'superadmin')
   update(
@@ -62,7 +62,7 @@ export class MantenimientoController {
     return this.service.update(id, auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Eliminar intervención · Fase 4 — aún no activo' })
+  @ApiOperation({ summary: 'Eliminar intervención' })
   @Delete('intervenciones/:id')
   @Roles('admin', 'superadmin')
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {

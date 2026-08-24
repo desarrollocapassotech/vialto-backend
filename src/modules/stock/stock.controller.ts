@@ -63,7 +63,7 @@ export class StockController {
   @ApiOperation({ summary: 'Listar productos paginado con búsqueda y filtro' })
   @Get('productos/paginated')
   @RequireModule('stock', 'viajes')
-  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer', 'stock_operator')
   findProductosPaginated(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ProductosPaginatedQueryDto,
@@ -177,7 +177,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Listar depósitos' })
   @Get('depositos')
-  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer', 'stock_operator')
   listDepositos(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
@@ -284,7 +284,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Descargar / previsualizar remito PDF del egreso' })
   @Get('movimientos/:id/remito-adjunto')
-  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer', 'stock_operator')
   async getRemitoAdjunto(
     @Param("id") id: string,
     @CurrentAuth() auth: AuthPayload,
@@ -336,7 +336,7 @@ export class StockController {
     },
   })
   @Post("upload-foto-ingreso")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
@@ -361,7 +361,7 @@ export class StockController {
     },
   })
   @Post("upload-remito")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
@@ -383,7 +383,7 @@ export class StockController {
     summary: "Formato del número de remito en egresos (prefijo y dígitos)",
   })
   @Get("egresos/remito-config")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   getEgresoRemitoConfig(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.getEgresoRemitoConfig(auth.tenantId);
@@ -407,7 +407,7 @@ export class StockController {
       "Registrar egreso / despacho (descuenta stock y asigna número de remito)",
   })
   @Post("egresos")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   createEgreso(@Body() dto: CreateEgresoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.createEgreso(auth.tenantId, dto, auth.userId);
@@ -415,7 +415,7 @@ export class StockController {
 
   @ApiOperation({ summary: "Listar egresos recientes" })
   @Get("egresos")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   listEgresos(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
@@ -439,7 +439,7 @@ export class StockController {
 
   @ApiOperation({ summary: "Obtener egreso por ID (remito interno)" })
   @Get("egresos/:id")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   getEgreso(@Param("id") id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.findEgreso(id, auth.tenantId);
@@ -447,7 +447,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Visualizar remito interno en PDF (inline, sin descarga)' })
   @Get('egresos/:id/remito-interno/view')
-  @Roles('admin', 'member', 'superadmin', 'stock_viewer')
+  @Roles('admin', 'member', 'superadmin', 'stock_viewer', 'stock_operator')
   async viewRemitoInterno(
     @Param("id") id: string,
     @CurrentAuth() auth: AuthPayload,
@@ -461,7 +461,7 @@ export class StockController {
     summary: "Generar (si falta) y obtener URL del remito interno en PDF",
   })
   @Post("egresos/:id/remito-interno")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   ensureRemitoInterno(
     @Param("id") id: string,
     @CurrentAuth() auth: AuthPayload,
@@ -476,7 +476,7 @@ export class StockController {
     summary: "Registrar ingreso de mercadería al depósito (actualiza stock)",
   })
   @Post("ingresos")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   createIngreso(
     @Body() dto: CreateIngresoDto,
     @CurrentAuth() auth: AuthPayload,
@@ -487,7 +487,7 @@ export class StockController {
 
   @ApiOperation({ summary: "Listar ingresos al depósito" })
   @Get("ingresos")
-  @Roles("admin", "member", "superadmin")
+  @Roles("admin", "member", "superadmin", "stock_operator")
   listIngresos(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: PaginationQueryDto,
@@ -575,7 +575,7 @@ export class StockController {
     summary: "Lotes disponibles para un producto/cliente/depósito",
   })
   @Get("lotes")
-  @Roles("admin", "member", "superadmin", "stock_viewer")
+  @Roles("admin", "member", "superadmin", "stock_viewer", "stock_operator")
   getLotes(
     @CurrentAuth() auth: AuthPayload,
     @Query("productoId") productoId: string,
@@ -595,7 +595,7 @@ export class StockController {
 
   @ApiOperation({ summary: 'Stock disponible por producto/cliente' })
   @Get('disponible')
-  @Roles('admin', 'superadmin', 'stock_viewer')
+  @Roles('admin', 'superadmin', 'stock_viewer', 'stock_operator')
   listStockDisponible(
     @CurrentAuth() auth: AuthPayload,
     @Query("clienteId") clienteId?: string,

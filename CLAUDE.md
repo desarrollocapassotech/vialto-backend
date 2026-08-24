@@ -286,6 +286,7 @@ src/
     reportes/               ← ⚠️ parcial — 2 endpoints reales (`resumen`, `tablero-general`) con agregaciones cross-módulo; falta el resto de la visión (Fase 8: builder de reportes, exports)
     dashboard/              ← ✅ implementado — KPIs y alertas del tenant (`GET dashboard/resumen`); no es un módulo vendible (no gateado por `RequireModule`, disponible para todo tenant)
     importaciones/          ← ✅ implementado — motor de importación desde Excel (parser/validator/processors por módulo), preview/confirm, templates y logs; uso admin, no gateado como módulo vendible
+    notificaciones/         ← ✅ implementado — alertas por email vía Resend, catálogo + config on/off por tenant; ver sección propia más abajo
 
   shared/
     guards/                 ← ClerkAuthGuard, TenantGuard, ModuleGuard
@@ -1068,6 +1069,44 @@ Gemini como proveedor primario, **Groq como fallback automático** si Gemini fal
 
 ---
 
+### `notificaciones` — alertas por email vía Resend (ago 2026)
+
+Tampoco es un módulo vendible (no gateado por `RequireModule`) — corre para cualquier tenant que tenga contratado el módulo del que depende cada tipo de aviso. Un cron diario (`NotificacionesCronService`, `@Cron('0 8 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })`) recorre todos los tenants, evalúa el catálogo de tipos de notificación aplicables y manda **un email agrupado por tipo** (no uno por entidad) a los miembros `org:admin` del tenant en Clerk.
+
+```prisma
+/** Override por tenant de si un tipo de notificación está activo. Sin fila = usa el default del catálogo. */
+model NotificacionConfig {
+  tenantId  String
+  tipo      String
+  activo    Boolean
+  updatedBy String
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, tipo])
+}
+
+/** Dedup: qué entidad ya generó un email para un tipo de notificación, para no reenviar en cada corrida del cron. */
+model NotificacionEnvio {
+  tenantId      String
+  tipo          String
+  entidadId     String
+  destinatarios String[]
+  enviadoAt     DateTime @default(now())
+
+  @@unique([tenantId, tipo, entidadId])
+}
+```
+
+- **Catálogo en código** (`notificaciones-catalog.ts`, `NOTIFICACIONES_CATALOG`): cada entrada declara `tipo` (slug estable, persistido — no renombrar sin migrar datos), `modulo` (agrupa la pantalla de config), `defaultActivo` y `requiereModulo` (si el tenant no tiene ese módulo en `Tenant.modules`, la notificación ni se evalúa ni se muestra en la config — mismo criterio de "catálogo filtrado por módulos contratados" que ya usa `tenant-field-config`). Arranca con dos tipos: `facturacion.facturaPorVencer` (factura de cliente que vence en los próximos 3 días y sigue con saldo, sin cobrar ni anular — `FacturaPorVencerEvaluator`, reusa `computeEstadoFacturaLectura`/`importeOperativoFactura` de `factura-estado-lectura.ts`) y `combustible.cargaSospechosa` (`CargaSospechosaEvaluator`, reusa el flag `CargaCombustible.sospechoso` que ya calcula `combustible.service.ts` — no vuelve a correr la heurística de detección, solo lee el resultado).
+- **Un evaluator por tipo** (`evaluators/`, interfaz `NotificacionEvaluator.evaluar(tenantId): Promise<NotificacionItem[]>`) — solo lee, nunca escribe ni decide envío/dedup; eso lo hace `NotificacionesCronService`. Para sumar un tipo nuevo: agregar la entrada al catálogo + un evaluator que implemente la interfaz + registrarlo en el array `evaluators` del constructor de `NotificacionesCronService`.
+- **Dedup por entidad, no por corrida**: antes de enviar, el cron filtra los candidatos de `evaluar()` contra `NotificacionEnvio` (`tenantId + tipo + entidadId`) — una factura que sigue "por vencer" tres corridas seguidas del cron solo genera un email la primera vez. El email agrupa todos los ítems nuevos de un mismo tipo en un solo mensaje (no uno por entidad).
+- **Destinatarios = admins de Clerk, no una lista propia**: `resolverDestinatarios()` llama `UsersService.listByTenant(tenantId)` (por eso `UsersModule` ahora exporta `UsersService` — antes solo lo usaba su propio controller) y filtra por `role === 'org:admin'` con email. Sin admins con email, el tipo se skipea con un log — no hay tabla de destinatarios propia del módulo.
+- **`ResendEmailService`** (`shared/email/`) nunca rompe el flujo que lo llama: sin `RESEND_API_KEY` configurada, loguea y no envía (útil en dev/homologación sin cuenta de Resend armada) — ver variables de entorno más abajo.
+- **Config por tenant** (`NotificacionesConfigService`, patrón calcado de `tenant-field-config`: catálogo en código + tabla de overrides, `overrides[tipo]?.activo ?? item.defaultActivo`): `GET /notificaciones/config` (catálogo efectivo filtrado por módulos del tenant) y `POST /notificaciones/config/toggle` — ambos `@Roles('admin', ...)`, sin `tenantId` en el request (viene del token, regla de siempre). `POST /notificaciones/ejecutar?tenantId=...` es `@Roles('superadmin')` — corre la evaluación de un tenant puntual fuera del horario del cron, para operar/testear sin esperar al día siguiente (único endpoint del módulo que lee `tenantId` de la query, y solo porque está gateado a superadmin).
+- **Frontend**: `pages/ConfiguracionNotificacionesTenantPage.tsx` (`/configuracion/notificaciones`, tenant-admin) — lista el catálogo agrupado por módulo con un toggle on/off por tipo, guardado inmediato al tocar el switch (mismo patrón que `CamposEmpresaPage.tsx`, sin botón "Guardar" aparte). Sin pantalla superadmin todavía — si se necesita, seguir el mismo patrón de `campos-empresa` (selector de tenant + mismo endpoint con `resolveTenantId`).
+
+---
+
 ### `core/tenant-field-config` — visibilidad de campos y features opt-in por tenant
 
 Sistema genérico para que un superadmin oculte/muestre, por tenant y por formulario, campos opcionales de un módulo (ej. "Ganancia bruta manual", "Otros gastos" en Viajes) — pantalla `campos-empresa` en el frontend superadmin. **No confundir con la Capa 2 de feature flags (`TenantConfig.flags`) descripta en "Configuración de funcionalidades por tenant" más arriba: esa es documentación de un patrón, no está implementada en ningún módulo real; `tenant-field-config` sí está implementado y en uso.**
@@ -1262,6 +1301,11 @@ NODE_ENV=production
 ARCA_ENCRYPTION_KEY=              # clave AES-256 (hex 64 chars) para cifrar cert/key/credenciales AFIP en DB
 AFIP_SDK_API_KEY=                 # token de AfipSDK (afipsdk.com)
 
+# Módulo notificaciones (alertas por email vía Resend) — sin RESEND_API_KEY el cron
+# sigue corriendo pero solo loguea, no envía nada (ver ResendEmailService)
+RESEND_API_KEY=                   # API key de Resend (resend.com)
+RESEND_FROM_EMAIL=                # remitente, ej. "Vialto <notificaciones@vialto.app>" — default hardcodeado si se omite
+
 # Futuro — Stripe para billing
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
@@ -1269,5 +1313,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: agosto 2026 (`precioTransportistaIvaIncluidoPct` pasó a ser opt-in vía `core/tenant-field-config` — `defaultVisible: false`, oculto por defecto para todo tenant; si un tenant lo deshabilita después de haberlo usado, los valores cargados NO se borran pero se ignoran en todo cálculo hasta reactivarlo, ver sección "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant"; y, de la misma pasada, `Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
+*Última actualización: agosto 2026 (módulo `notificaciones` nuevo — alertas por email vía Resend, catálogo en código + config on/off por tenant calcada de `tenant-field-config`, cron diario agrupado por tipo con dedup por entidad, destinatarios = admins de Clerk del tenant, ver sección "`notificaciones` — alertas por email vía Resend"; y, de una pasada anterior, `precioTransportistaIvaIncluidoPct` pasó a ser opt-in vía `core/tenant-field-config` — `defaultVisible: false`, oculto por defecto para todo tenant; si un tenant lo deshabilita después de haberlo usado, los valores cargados NO se borran pero se ignoran en todo cálculo hasta reactivarlo, ver sección "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant"; y, de la misma pasada, `Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

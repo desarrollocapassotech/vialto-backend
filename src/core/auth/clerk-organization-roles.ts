@@ -1,5 +1,5 @@
 /** Roles de tenant persistidos en `publicMetadata.vialtoRole` (fuente de verdad en Vialto). */
-export const VIALTO_TENANT_ROLES = ['admin', 'member', 'stock_viewer'] as const;
+export const VIALTO_TENANT_ROLES = ['admin', 'member', 'stock_viewer', 'stock_operator'] as const;
 export type VialtoTenantRole = (typeof VIALTO_TENANT_ROLES)[number];
 
 /** Clerk solo expone org:admin y org:member sin add-on; roles custom van en metadata. */
@@ -11,6 +11,7 @@ export function toClerkOrganizationRole(appRole: string): string {
 export function toVialtoRole(appRole: string): string {
   if (appRole === 'admin') return 'admin';
   if (appRole === 'stock_viewer') return 'stock_viewer';
+  if (appRole === 'stock_operator') return 'stock_operator';
   return 'member';
 }
 
@@ -31,9 +32,10 @@ export function resolveAuthRole(
   return orgRoleClaim.replace(/^org:/, '');
 }
 
-/** Rol en formato Clerk para listados de UI (`org:admin`, `org:member`, `org:stock_viewer`). */
+/** Rol en formato Clerk para listados de UI (`org:admin`, `org:member`, `org:stock_viewer`, `org:stock_operator`). */
 export function toDisplayOrgRole(vialtoRole: string): string {
   if (vialtoRole === 'admin') return 'org:admin';
   if (vialtoRole === 'stock_viewer') return 'org:stock_viewer';
+  if (vialtoRole === 'stock_operator') return 'org:stock_operator';
   return 'org:member';
 }

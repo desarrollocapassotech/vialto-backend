@@ -222,9 +222,11 @@ export class StockService {
     }
 
     if (presentaciones.length > 0) {
-      const presIds = presentaciones.map((p) => p.presentacionId);
-      if (new Set(presIds).size !== presIds.length) {
-        throw new BadRequestException('No se pueden repetir presentaciones en el mismo producto.');
+      const claves = presentaciones.map((p) => `${p.presentacionId}::${p.unidadesPorBulto}`);
+      if (new Set(claves).size !== claves.length) {
+        throw new BadRequestException(
+          'No se puede repetir la misma presentación con la misma cantidad de unidades por bulto.',
+        );
       }
       for (const pp of presentaciones) {
         const p = await this.prisma.presentacion.findFirst({
@@ -280,9 +282,11 @@ export class StockService {
     const nombreNormalizado = dto.nombre !== undefined ? normalizarNombre(nombre) : current.nombreNormalizado;
 
     if (dto.presentaciones !== undefined) {
-      const presIds = dto.presentaciones.map((p) => p.presentacionId);
-      if (new Set(presIds).size !== presIds.length) {
-        throw new BadRequestException('No se pueden repetir presentaciones en el mismo producto.');
+      const claves = dto.presentaciones.map((p) => `${p.presentacionId}::${p.unidadesPorBulto}`);
+      if (new Set(claves).size !== claves.length) {
+        throw new BadRequestException(
+          'No se puede repetir la misma presentación con la misma cantidad de unidades por bulto.',
+        );
       }
       for (const pp of dto.presentaciones) {
         const p = await this.prisma.presentacion.findFirst({

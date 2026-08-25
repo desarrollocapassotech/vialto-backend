@@ -573,7 +573,7 @@ El modelo cambió de forma respecto a versiones anteriores de este documento: ya
 
 - **`Producto`** es el artículo en sí (nombre, código autogenerado `P-001…`, peso unitario opcional).
 - **`Presentacion`** es el catálogo de unidades de medida por tenant (ej. "Pallet", "Bolsa", "Kg").
-- **`ProductoPresentacion`** vincula un producto con una o más presentaciones, cada una con su propio `unidadesPorBulto` (ej. "Pallet" = 40 bolsas de este producto).
+- **`ProductoPresentacion`** vincula un producto con una o más presentaciones, cada una con su propio `unidadesPorBulto` (ej. "Pallet" = 40 bolsas de este producto). Un mismo producto puede repetir la misma presentación con distinto `unidadesPorBulto` (ej. "Pallet x8" y "Pallet x12" del mismo producto, pedido real de Riedel ago 2026) — cada combinación es un `ProductoPresentacion` (SKU) independiente con su propio stock (`MovimientoStock`/`StockItem` referencian el `id` de `ProductoPresentacion`, no el de `Presentacion`). Lo único que sigue bloqueado es repetir la misma presentación con el mismo `unidadesPorBulto` dos veces en el mismo producto (`@@unique([productoId, presentacionId, unidadesPorBulto])`) — validado en `StockService.createProducto`/`updateProducto` antes de tocar la base, y reflejado también en el frontend (`ProductoModal.tsx`).
 - **`StockOperacion`** es el encabezado de una operación (ingreso/egreso/división): cliente, depósito, fecha, fotos, remito (interno y del proveedor), y los datos de entrega (`entregadoPor`, `destinatario`, `destinoFinal`, `numeroDocumentoExterno`) — estos campos que documentos anteriores marcaban como "pendientes" **ya están implementados**, y viven acá, no en `MovimientoStock`.
 - **`MovimientoStock`** es el detalle línea a línea dentro de una operación: producto + presentación + `bultos`/`unidades` + `lote` opcional (también ya implementado) + vencimiento opcional.
 - **`StockItem`** es el snapshot de disponible, ahora clave por `(productoId, presentacionId, clienteId, depositoId)`.
@@ -620,7 +620,7 @@ model ProductoPresentacion {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  @@unique([productoId, presentacionId])
+  @@unique([productoId, presentacionId, unidadesPorBulto])
 }
 
 model ProductoSecuencia {

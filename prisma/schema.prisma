@@ -742,7 +742,7 @@ model ProductoPresentacion {
   movimientos MovimientoStock[]
   stockItems  StockItem[]
 
-  @@unique([productoId, presentacionId])
+  @@unique([productoId, presentacionId, unidadesPorBulto])
   @@index([tenantId])
   @@index([tenantId, productoId])
   @@map("producto_presentaciones")

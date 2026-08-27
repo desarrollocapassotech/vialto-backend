@@ -30,6 +30,14 @@ import {
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
   type ViajeConVehiculosViaje,
 } from "./viaje-vehiculos.helper";
+import {
+  assertClientesDelViaje,
+  assertProductosClientesDelViaje,
+  normalizarClientesDelViaje,
+  reemplazarClientesDelViaje,
+  viajeClientesViajeInclude,
+  type ViajeClienteItem,
+} from "./viaje-clientes.helper";
 import { UpdateViajeDto } from "./dto/update-viaje.dto";
 import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
 import {
@@ -72,6 +80,7 @@ const VIAJE_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
  */
 const VIAJE_INCLUDE_FULL = {
   ...VIAJE_INCLUDE_VEHICULOS_INCLUDE,
+  clientesViaje: viajeClientesViajeInclude,
   factura: {
     select: {
       id: true,
@@ -197,6 +206,18 @@ function resolveDestinosParaUpdate(
     return [{ etiqueta: legacy }];
   }
   return undefined;
+}
+
+/** Clientes adicionales del viaje (multi-cliente, opcional) — sin fallback legacy porque `clienteId` ya cubre el caso de un solo cliente. */
+function resolveClientesParaCreate(dto: CreateViajeDto): ViajeClienteItem[] {
+  return normalizarClientesDelViaje(dto.clientes);
+}
+
+function resolveClientesParaUpdate(
+  dto: UpdateViajeDto,
+): ViajeClienteItem[] | undefined {
+  if (dto.clientes === undefined) return undefined;
+  return normalizarClientesDelViaje(dto.clientes);
 }
 
 function normalizarProductoItems(
@@ -1186,6 +1207,15 @@ export class ViajesService {
     await assertProductosAsignables(this.prisma, tenantId, productoItemsNorm, {
       modo: "create",
     });
+    const clientesNorm = resolveClientesParaCreate(dto);
+    if (clientesNorm.length > 0) {
+      await assertClientesDelViaje(
+        this.prisma,
+        tenantId,
+        clientesNorm.map((c) => c.clienteId),
+      );
+      await assertProductosClientesDelViaje(this.prisma, tenantId, clientesNorm);
+    }
     assertFechaDescargaValida(
       new Date(dto.fechaCarga),
       new Date(dto.fechaDescarga),
@@ -1200,6 +1230,10 @@ export class ViajesService {
     if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
       monto = dto.cantidadFactura * dto.precioUnitarioFactura;
     }
+    // `monto` sigue siendo el propio del cliente principal, tal cual lo carga el
+    // usuario — nunca se reemplaza por la suma de los clientes adicionales (eso
+    // perdería el monto principal). El total informativo del viaje se calcula
+    // en lectura (monto del principal + suma de `clientesViaje`), nunca se persiste acá.
 
     let precioTransportistaExterno = dto.precioTransportistaExterno;
     if (
@@ -1291,6 +1325,7 @@ export class ViajesService {
           tenantId,
         );
         await reemplazarDestinosDelViaje(tx, viaje.id, destinosNorm, tenantId);
+        await reemplazarClientesDelViaje(tx, viaje.id, clientesNorm, tenantId);
         const out = await tx.viaje.findFirstOrThrow({
           where: { id: viaje.id, tenantId },
           include: VIAJE_INCLUDE_FULL,
@@ -1523,6 +1558,7 @@ export class ViajesService {
     delete (data as { vehiculoIds?: unknown }).vehiculoIds;
     delete (data as { productoItems?: unknown }).productoItems;
     delete (data as { destinos?: unknown }).destinos;
+    delete (data as { clientes?: unknown }).clientes;
     delete (data as { contratanteRealizaFlete?: unknown })
       .contratanteRealizaFlete;
     delete (data as { transportistaEfectivoId?: unknown })
@@ -1619,6 +1655,19 @@ export class ViajesService {
       (data as any).destino = ultimoDestinoEtiqueta(destinosUpdate);
     }
 
+    const clientesUpdate = resolveClientesParaUpdate(dto);
+    if (clientesUpdate !== undefined && clientesUpdate.length > 0) {
+      await assertClientesDelViaje(
+        this.prisma,
+        tenantId,
+        clientesUpdate.map((c) => c.clienteId),
+      );
+      await assertProductosClientesDelViaje(this.prisma, tenantId, clientesUpdate);
+      // `monto` (arriba, ya resuelto en `data`) sigue siendo el propio del cliente
+      // principal — no se reemplaza por la suma de los adicionales, ver mismo
+      // criterio en `create()`.
+    }
+
     try {
       return await this.prisma.$transaction(async (tx) => {
         const updated = await tx.viaje.update({
@@ -1636,6 +1685,9 @@ export class ViajesService {
         }
         if (destinosUpdate !== undefined) {
           await reemplazarDestinosDelViaje(tx, id, destinosUpdate, tenantId);
+        }
+        if (clientesUpdate !== undefined) {
+          await reemplazarClientesDelViaje(tx, id, clientesUpdate, tenantId);
         }
         const full = (await tx.viaje.findFirstOrThrow({
           where: { id, tenantId },

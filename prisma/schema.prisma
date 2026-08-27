@@ -13,20 +13,24 @@ datasource db {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Tenant {
-  id               String    @id @default(cuid())
-  clerkOrgId       String    @unique
-  name             String
-  idFiscal         String?   @unique
-  modules          String[]  @default([])
-  maxUsers         Int       @default(10)
-  billingStatus    String    @default("trial") // trial | active | suspended | expired
-  billingRenewsAt  DateTime?
-  whiteLabelDomain String?
-  /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
-  labelIdentificacionPersonalizadaViajes String? @default("ID propio")
-  /** true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla). */
-  importacionesOcultas Boolean @default(false)
-  createdAt        DateTime  @default(now())
+  id                                     String    @id @default(cuid())
+  clerkOrgId                             String    @unique
+  name                                   String
+  idFiscal                               String?   @unique
+  modules                                String[]  @default([])
+  maxUsers                               Int       @default(10)
+  billingStatus                          String    @default("trial") // trial | active | suspended | expired
+  billingRenewsAt                        DateTime?
+  whiteLabelDomain                       String?
+  /**
+   * Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG").
+   */
+  labelIdentificacionPersonalizadaViajes String?   @default("ID propio")
+  /**
+   * true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla).
+   */
+  importacionesOcultas                   Boolean   @default(false)
+  createdAt                              DateTime  @default(now())
 
   clientes                   Cliente[]
   transportistas             Transportista[]
@@ -87,6 +91,7 @@ model Cliente {
   createdAt           DateTime @default(now())
 
   viajes           Viaje[]
+  viajesCliente    ViajeCliente[]
   facturas         Factura[]
   movimientosCc    MovimientoCuentaCorriente[]
   stockOperaciones StockOperacion[]
@@ -214,7 +219,9 @@ model Vehiculo {
   transportistaId   String?
   transportista     Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   activo            Boolean        @default(true)
-  /** true si `patente` es un placeholder autogenerado (PENDIENTE-xxxxxx) porque todavía no se cargó la patente real. */
+  /**
+   * true si `patente` es un placeholder autogenerado (PENDIENTE-xxxxxx) porque todavía no se cargó la patente real.
+   */
   patentePendiente  Boolean        @default(false)
   createdAt         DateTime       @default(now())
 
@@ -279,54 +286,143 @@ model ViajeDestino {
   @@map("viajes_destinos")
 }
 
+/**
+ * Cliente adicional de un viaje multi-cliente: origen/destino/carga y forma de
+ * cobro propios, independientes del `clienteId`/`monto` "principal" del Viaje
+ * (que sigue siendo el único dato para un viaje de un solo cliente — este
+ * modelo es 100% opcional y convive con ese flujo legacy sin reemplazarlo).
+ * Tiene su propio `facturaId`/`facturacionEstado` porque un viaje puede
+ * facturarse a varios clientes en facturas distintas y simultáneas — el
+ * `Viaje.facturaId` (columna simple, un viaje = una factura a la vez) no
+ * alcanza para eso.
+ */
+model ViajeCliente {
+  id                String                 @id @default(cuid())
+  tenantId          String
+  viajeId           String
+  viaje             Viaje                  @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  clienteId         String
+  cliente           Cliente                @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  orden             Int                    @default(0)
+  origen            String?
+  /**
+   * Denormalizado: último destino de la ruta de este cliente (legacy/compat, mismo criterio que Viaje.destino).
+   */
+  destino           String?
+  destinosCliente   ViajeClienteDestino[]
+  productosCliente  ViajeClienteProducto[]
+  /**
+   * Igual que Viaje.cantidadFactura/precioUnitarioFactura: si ambos vienen, `monto` = cantidad × precioUnitario.
+   */
+  cantidad          Float?
+  precioUnitario    Float?
+  monto             Float?
+  monedaMonto       String                 @default("ARS") // ARS | USD
+  facturaId         String?
+  factura           Factura?               @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  facturacionEstado String                 @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturaTramos     FacturaTramo[]
+  createdAt         DateTime               @default(now())
+
+  @@unique([viajeId, clienteId])
+  @@index([tenantId])
+  @@index([tenantId, viajeId])
+  @@index([tenantId, clienteId])
+  @@index([tenantId, facturaId])
+  @@map("viajes_clientes")
+}
+
+model ViajeClienteDestino {
+  id             String       @id @default(cuid())
+  tenantId       String
+  viajeClienteId String
+  viajeCliente   ViajeCliente @relation(fields: [viajeClienteId], references: [id], onDelete: Cascade)
+  orden          Int          @default(0)
+  etiqueta       String
+  createdAt      DateTime     @default(now())
+
+  @@unique([viajeClienteId, orden])
+  @@index([tenantId])
+  @@index([viajeClienteId])
+  @@map("viajes_clientes_destinos")
+}
+
+model ViajeClienteProducto {
+  id             String       @id @default(cuid())
+  tenantId       String
+  viajeClienteId String
+  viajeCliente   ViajeCliente @relation(fields: [viajeClienteId], references: [id], onDelete: Cascade)
+  productoId     String
+  producto       Producto     @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  orden          Int          @default(0)
+  cantidad       Float?
+  pesoKg         Float?
+
+  @@unique([viajeClienteId, productoId])
+  @@index([tenantId])
+  @@index([viajeClienteId])
+  @@index([productoId])
+  @@map("viajes_clientes_productos")
+}
+
 model Viaje {
-  id                               String          @id @default(cuid())
-  tenantId                         String
-  tenant                           Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero                           String
-  /** ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna. */
+  id                                String          @id @default(cuid())
+  tenantId                          String
+  tenant                            Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero                            String
+  /**
+   * ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna.
+   */
   numeroIdentificacionPersonalizado String?
-  /** @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura. */
-  estado                           String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
+  /**
+   * @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura.
+   */
+  estado                            String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
   /**
    * Etapa operativa del viaje, editable a mano y por fecha (ver ViajesAutoEstadoService).
    */
-  etapa                            String          @default("pendiente") // pendiente | en_curso | finalizado | cancelado
+  etapa                             String          @default("pendiente") // pendiente | en_curso | finalizado | cancelado
   /**
    * Estado de facturación al cliente, sincronizado automáticamente — no editable a mano.
    */
-  facturacionEstado                String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturacionEstado                 String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
   /**
    * Estado de liquidación al transportista externo (null si no aplica: sin transportista externo o tenant sin integracion-arca).
    */
-  liquidacionEstado                String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
-  clienteId                        String
-  cliente                          Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  transportistaId                  String?
-  transportista                    Transportista?  @relation("ViajeTransportistaPrincipal", fields: [transportistaId], references: [id], onDelete: SetNull)
+  liquidacionEstado                 String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
+  clienteId                         String
+  cliente                           Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  transportistaId                   String?
+  transportista                     Transportista?  @relation("ViajeTransportistaPrincipal", fields: [transportistaId], references: [id], onDelete: SetNull)
   /**
    * Transportista que efectivamente realiza el flete (puede diferir del contratante).
    */
-  transportistaEfectivoId          String?
-  transportistaEfectivo            Transportista?  @relation("ViajeTransportistaEfectivo", fields: [transportistaEfectivoId], references: [id], onDelete: SetNull)
-  choferId                         String?
-  chofer                           Chofer?         @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  vehiculosViaje                   ViajeVehiculo[]
-  origen                           String?
-  destino                          String?
-  destinosViaje                    ViajeDestino[]
-  fechaCarga                       DateTime?
-  fechaDescarga                    DateTime?
-  productosViaje                   ViajeProducto[]
-  detalleCarga                     String?
-  kmRecorridos                     Int?
-  litrosConsumidos                 Float?
-  monto                            Float?
-  monedaMonto                      String          @default("ARS") // ARS | USD
-  precioTransportistaExterno       Float?
-  monedaPrecioTransportistaExterno String          @default("ARS") // ARS | USD
-  /** % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" antes de sumarlo al bruto de una Liquidación, para no duplicar el IVA. */
-  precioTransportistaIvaIncluidoPct Float          @default(0)
+  transportistaEfectivoId           String?
+  transportistaEfectivo             Transportista?  @relation("ViajeTransportistaEfectivo", fields: [transportistaEfectivoId], references: [id], onDelete: SetNull)
+  choferId                          String?
+  chofer                            Chofer?         @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  vehiculosViaje                    ViajeVehiculo[]
+  origen                            String?
+  destino                           String?
+  destinosViaje                     ViajeDestino[]
+  /**
+   * Clientes adicionales del viaje (multi-cliente, opcional) — ver modelo ViajeCliente.
+   */
+  clientesViaje                     ViajeCliente[]
+  fechaCarga                        DateTime?
+  fechaDescarga                     DateTime?
+  productosViaje                    ViajeProducto[]
+  detalleCarga                      String?
+  kmRecorridos                      Int?
+  litrosConsumidos                  Float?
+  monto                             Float?
+  monedaMonto                       String          @default("ARS") // ARS | USD
+  precioTransportistaExterno        Float?
+  monedaPrecioTransportistaExterno  String          @default("ARS") // ARS | USD
+  /**
+   * % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" antes de sumarlo al bruto de una Liquidación, para no duplicar el IVA.
+   */
+  precioTransportistaIvaIncluidoPct Float           @default(0)
 
   cantidadFactura             Float?
   precioUnitarioFactura       Float?
@@ -381,7 +477,9 @@ model Factura {
   id               String         @id @default(cuid())
   tenantId         String
   tenant           Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  /** Número de comprobante. Obligatorio para tenants sin ARCA (registran un comprobante ya numerado externamente). Para tenants con integracion-arca queda null hasta que no aplica — el número real vive en cbteTipo/ptoVenta/cbteNro, asignados por AFIP al emitir. */
+  /**
+   * Número de comprobante. Obligatorio para tenants sin ARCA (registran un comprobante ya numerado externamente). Para tenants con integracion-arca queda null hasta que no aplica — el número real vive en cbteTipo/ptoVenta/cbteNro, asignados por AFIP al emitir.
+   */
   numero           String?
   tipo             String // cliente | transportista_externo
   clienteId        String?
@@ -396,7 +494,9 @@ model Factura {
   estado           String         @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
   ivaPct           Float?         @default(21)
-  /** Si true, el importe se arma con tramos (+ monto de viajes sin tramos). */
+  /**
+   * Si true, el importe se arma con tramos (+ monto de viajes sin tramos).
+   */
   facturarPorTramo Boolean        @default(false)
   comprobanteUrl   String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
   // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
@@ -423,9 +523,13 @@ model Factura {
   anuladoAt            DateTime?
   notaCreditoUrl       String? // PDF NC en Cloudinary
 
-  createdAt DateTime @default(now())
-  pagos     Pago[]
-  tramos    FacturaTramo[]
+  createdAt     DateTime       @default(now())
+  pagos         Pago[]
+  tramos        FacturaTramo[]
+  /**
+   * Clientes-tramo (ViajeCliente) facturados directamente a esta factura — ver "facturación por tramo, por cliente".
+   */
+  clientesViaje ViajeCliente[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])
@@ -436,24 +540,32 @@ model Factura {
   @@map("facturas")
 }
 
-/** Línea de tramo cuando la factura se arma “por tramo” (varios montos/IVA por viaje). */
+/**
+ * Línea de tramo cuando la factura se arma “por tramo” (varios montos/IVA por viaje).
+ */
 model FacturaTramo {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  facturaId String
-  factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
-  viajeId   String
-  viaje     Viaje    @relation(fields: [viajeId], references: [id], onDelete: Restrict)
-  detalle   String
-  monto     Float
-  ivaPct    Float
-  orden     Int      @default(0)
-  createdAt DateTime @default(now())
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  facturaId      String
+  factura        Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  viajeId        String
+  viaje          Viaje         @relation(fields: [viajeId], references: [id], onDelete: Restrict)
+  /**
+   * Si está seteado, este tramo factura específicamente a ESTE ViajeCliente (viaje multi-cliente); si es null, es el tramo "de siempre" del viaje entero.
+   */
+  viajeClienteId String?
+  viajeCliente   ViajeCliente? @relation(fields: [viajeClienteId], references: [id], onDelete: Restrict)
+  detalle        String
+  monto          Float
+  ivaPct         Float
+  orden          Int           @default(0)
+  createdAt      DateTime      @default(now())
 
   @@index([facturaId])
   @@index([tenantId])
   @@index([viajeId])
+  @@index([viajeClienteId])
   @@map("factura_tramos")
 }
 
@@ -525,6 +637,7 @@ model Producto {
 
   movimientos            MovimientoStock[]
   viajesProducto         ViajeProducto[]
+  viajesClienteProducto  ViajeClienteProducto[]
   stockItems             StockItem[]
   productoPresentaciones ProductoPresentacion[]
 

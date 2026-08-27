@@ -42,6 +42,9 @@ export class TransportistasProcessor implements IImportProcessor {
       domicilio: (row.domicilio as string | null)?.toString().trim() || undefined,
       condicionIva:
         row.condicionIva != null ? Number(row.condicionIva) : undefined,
+      condicionTributaria:
+        (row.condicionTributaria as string | null)?.toString().trim() ||
+        undefined,
       comisionPct:
         row.comisionPct != null ? Number(row.comisionPct) : undefined,
       paut: (row.paut as string | null)?.toString().trim() || undefined,

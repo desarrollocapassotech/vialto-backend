@@ -71,6 +71,8 @@ Table tenants as "[IMP-CORE] tenants" [note: 'CORE — una fila por org Clerk. P
   billingStatus String [default: 'trial', note: 'trial|active|suspended|expired']
   billingRenewsAt DateTime
   whiteLabelDomain String
+  labelIdentificacionPersonalizadaViajes String [default: 'ID propio', note: 'label del campo "ID propio" del módulo viajes, personalizable por tenant']
+  importacionesOcultas Boolean [default: false, note: 'true = el admin del tenant no ve la pantalla de import masivo (superadmin sí)']
   createdAt DateTime [default: `now()`]
 }
 
@@ -126,9 +128,26 @@ Table choferes as "[IMP-CORE] choferes" {
   telefono String
   transportistaId String [ref: > transportistas.id, note: 'ON DELETE SET NULL']
   pin String [note: 'hash PIN app combustible; no exponer en API']
+  activo Boolean [default: true, note: 'chofer desactivado no puede loguearse en la app vialto-combustible']
   createdAt DateTime [default: `now()`]
 
   Indexes {
+    tenantId
+    (tenantId, activo)
+  }
+}
+
+Table paises as "[IMP-CORE] paises" [note: 'Catálogo de países por tenant (para origen/destino de viajes; predefinidos + creados a mano)'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  codigo String
+  esPredefinido Boolean [default: false]
+  createdAt DateTime [default: `now()`]
+  createdBy String
+
+  Indexes {
+    (tenantId, nombre) [unique]
     tenantId
   }
 }
@@ -215,14 +234,18 @@ Table tenant_field_config_audit_logs as "[IMP-CORE] tenant_field_config_audit_lo
 // MÓDULO: viajes (implementado)
 // =============================================================================
 
-Table viajes as "[IMP-VIAJES] viajes" [note: 'MÓDULO viajes — Capa 3: documentoAduanero / otrosGastos / pagosTransportista (Json)'] {
+Table viajes as "[IMP-VIAJES] viajes" [note: 'MÓDULO viajes — Capa 3: documentoAduanero / otrosGastos / pagosTransportista (Json). 3 estados independientes: etapa / facturacionEstado / liquidacionEstado (estado queda deprecado)'] {
   id String [pk]
   tenantId String [not null, ref: > tenants.clerkOrgId]
   numero String [not null]
-  estado String [default: 'pendiente']
-  clienteId String [not null, ref: > clientes.id]
+  numeroIdentificacionPersonalizado String [note: 'ID propio del cliente (ej. CTG); reemplaza a numero en toda vista humana']
+  estado String [default: 'pendiente', note: 'DEPRECADO — ya no se escribe, reemplazado por etapa+facturacionEstado+liquidacionEstado']
+  etapa String [default: 'pendiente', note: 'pendiente|en_curso|finalizado|cancelado — editable a mano y por fecha']
+  facturacionEstado String [default: 'sin_facturar', note: 'sin_facturar|esperando_afip|facturado|cobrado|error_afip|anulado — solo sincronizado, no editable a mano']
+  liquidacionEstado String [note: 'sin_liquidar|esperando_afip|liquidado|error_afip|anulado; null = no aplica (sin transportista externo o tenant sin integracion-arca)']
+  clienteId String [not null, ref: > clientes.id, note: '"cliente principal" del viaje — ver viajes_clientes para clientes adicionales']
   transportistaId String [ref: > transportistas.id]
-  transportistaEfectivoId String [ref: > transportistas.id]
+  transportistaEfectivoId String [ref: > transportistas.id, note: 'transportista que efectivamente realiza el flete, si difiere del contratante']
   choferId String [ref: > choferes.id]
   origen String
   destino String
@@ -231,11 +254,16 @@ Table viajes as "[IMP-VIAJES] viajes" [note: 'MÓDULO viajes — Capa 3: documen
   detalleCarga String [note: 'texto libre; detalle tipado en viajes_productos']
   kmRecorridos Int
   litrosConsumidos Float
-  monto Float
+  monto Float [note: 'monto del cliente principal — no se recalcula por los clientes adicionales de viajes_clientes']
   monedaMonto String [default: 'ARS']
   precioTransportistaExterno Float
   monedaPrecioTransportistaExterno String [default: 'ARS']
-  gananciaBrutaManual Float
+  precioTransportistaIvaIncluidoPct Float [default: 0, note: '% de IVA que el transportista suma en efectivo por encima del precio neto']
+  cantidadFactura Float [note: 'modo desglose: si viene junto con precioUnitarioFactura, monto = cantidadFactura × precioUnitarioFactura']
+  precioUnitarioFactura Float
+  cantidadTransportista Float [note: 'modo desglose del transportista: análogo a cantidadFactura/precioUnitarioFactura']
+  precioUnitarioTransportista Float
+  gananciaBrutaManual Float [note: 'solo si monedaMonto ≠ monedaPrecioTransportistaExterno']
   monedaGananciaBrutaManual String
   observaciones String
   otrosGastos Json [default: `'[]'`, note: 'Capa 3']
@@ -249,8 +277,12 @@ Table viajes as "[IMP-VIAJES] viajes" [note: 'MÓDULO viajes — Capa 3: documen
 
   Indexes {
     (tenantId, numero) [unique]
+    (tenantId, numeroIdentificacionPersonalizado) [unique]
     tenantId
     (tenantId, estado)
+    (tenantId, etapa)
+    (tenantId, facturacionEstado)
+    (tenantId, liquidacionEstado)
     (tenantId, clienteId)
     (tenantId, transportistaId)
     (tenantId, transportistaEfectivoId)
@@ -259,6 +291,63 @@ Table viajes as "[IMP-VIAJES] viajes" [note: 'MÓDULO viajes — Capa 3: documen
     (tenantId, fechaFinalizado)
     (tenantId, createdAt)
     (tenantId, estado, fechaDescarga)
+  }
+}
+
+Table viajes_clientes as "[IMP-VIAJES] viajes_clientes" [note: 'Clientes ADICIONALES de un viaje multi-cliente (opcional) — cada uno con su propio origen/destino(s)/productos y cobro/facturación, independiente del cliente principal (viajes.clienteId)'] {
+  id String [pk]
+  tenantId String [not null]
+  viajeId String [not null, ref: > viajes.id, note: 'ON DELETE CASCADE']
+  clienteId String [not null, ref: > clientes.id, note: 'ON DELETE RESTRICT']
+  orden Int [default: 0]
+  origen String
+  destino String [note: 'denormalizado: último destino de este cliente (igual criterio que viajes.destino)']
+  cantidad Float [note: 'modo desglose: si viene con precioUnitario, monto = cantidad × precioUnitario']
+  precioUnitario Float
+  monto Float
+  monedaMonto String [default: 'ARS']
+  facturaId String [ref: > facturas.id, note: 'tramo facturado a ESTE cliente, independiente de viajes.facturaId']
+  facturacionEstado String [default: 'sin_facturar', note: 'mismo vocabulario que viajes.facturacionEstado, pero por cliente']
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (viajeId, clienteId) [unique]
+    tenantId
+    (tenantId, viajeId)
+    (tenantId, clienteId)
+    (tenantId, facturaId)
+  }
+}
+
+Table viajes_clientes_destinos as "[IMP-VIAJES] viajes_clientes_destinos" [note: 'Destinos múltiples de un cliente adicional del viaje (equivalente a viajes_destinos, pero por viajes_clientes)'] {
+  id String [pk]
+  tenantId String [not null]
+  viajeClienteId String [not null, ref: > viajes_clientes.id, note: 'ON DELETE CASCADE']
+  orden Int [default: 0]
+  etiqueta String [not null]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    (viajeClienteId, orden) [unique]
+    tenantId
+    viajeClienteId
+  }
+}
+
+Table viajes_clientes_productos as "[IMP-VIAJES] viajes_clientes_productos" [note: 'Productos/carga de un cliente adicional del viaje (equivalente a viajes_productos, pero por viajes_clientes)'] {
+  id String [pk]
+  tenantId String [not null]
+  viajeClienteId String [not null, ref: > viajes_clientes.id, note: 'ON DELETE CASCADE']
+  productoId String [not null, ref: > productos.id, note: 'ON DELETE RESTRICT']
+  orden Int [default: 0]
+  cantidad Float
+  pesoKg Float
+
+  Indexes {
+    (viajeClienteId, productoId) [unique]
+    tenantId
+    viajeClienteId
+    productoId
   }
 }
 
@@ -327,6 +416,7 @@ Table facturas as "[IMP-FACT] facturas" {
   estado String [default: 'pendiente']
   diferencia Float
   ivaPct Float [default: 21]
+  facturarPorTramo Boolean [default: false, note: 'si true, el importe se arma con factura_tramos (+ monto de viajes sin tramo)']
   comprobanteUrl String [note: 'Cloudinary']
   cbteTipo Int [note: 'ARCA: 1=A, 6=B']
   cbteNro Int
@@ -335,6 +425,17 @@ Table facturas as "[IMP-FACT] facturas" {
   caeFechaVto DateTime
   arcaEstado String
   arcaError String
+  ambiente String [note: 'homologacion|produccion — snapshot al autorizar, no se re-escribe en la anulación']
+  anulacionCbteTipo Int [note: 'Nota de Crédito A/B (03/08) emitida al anular']
+  anulacionCbteNro Int
+  anulacionPtoVenta Int
+  anulacionCae String
+  anulacionCaeFechaVto DateTime
+  anulacionFecha DateTime
+  motivoAnulacion String
+  anuladoPor String [note: 'Clerk userId']
+  anuladoAt DateTime
+  notaCreditoUrl String [note: 'PDF de la Nota de Crédito en Cloudinary']
   createdAt DateTime [default: `now()`]
 
   Indexes {
@@ -344,6 +445,26 @@ Table facturas as "[IMP-FACT] facturas" {
     (tenantId, transportistaId)
     (tenantId, estado)
     (tenantId, fechaEmision)
+  }
+}
+
+Table factura_tramos as "[IMP-FACT] factura_tramos" [note: 'Línea de tramo cuando la factura se arma "por tramo" (varios montos/IVA por viaje, o por cliente de un viaje multi-cliente)'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  facturaId String [not null, ref: > facturas.id, note: 'ON DELETE CASCADE']
+  viajeId String [not null, ref: > viajes.id, note: 'ON DELETE RESTRICT']
+  viajeClienteId String [ref: > viajes_clientes.id, note: 'si está seteado, este tramo factura a ESE cliente adicional del viaje; si es null, es el tramo del viaje entero']
+  detalle String [not null]
+  monto Float [not null]
+  ivaPct Float [not null]
+  orden Int [default: 0]
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    facturaId
+    tenantId
+    viajeId
+    viajeClienteId
   }
 }
 
@@ -601,6 +722,24 @@ Table cargas_combustible as "[IMP-COMB] cargas_combustible" {
   }
 }
 
+Table combustible_sync_error_logs as "[IMP-COMB] combustible_sync_error_logs" [note: 'Cargas offline de la app vialto-combustible que el backend rechazó al sincronizar (nunca llegaron a crear una CargaCombustible) — para que el admin revise por qué le quedaron cargas sin sincronizar a un chofer'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  choferId String [ref: > choferes.id]
+  vehiculoId String [ref: > vehiculos.id]
+  mensaje String [not null, note: 'mensaje de error devuelto por la validación']
+  payload Json [not null, note: 'datos de la carga que se intentó sincronizar (incluye localId de IndexedDB para correlacionar reintentos)']
+  createdAt DateTime [default: `now()`]
+  resueltoEn DateTime [note: 'se completa cuando el chofer logra resincronizar esta misma carga; null = pendiente de revisión']
+
+  Indexes {
+    tenantId
+    (tenantId, choferId)
+    (tenantId, createdAt)
+    (tenantId, resueltoEn)
+  }
+}
+
 // =============================================================================
 // MÓDULO: mantenimiento (implementado en PG; checklist → Firestore)
 // =============================================================================
@@ -707,6 +846,43 @@ Table import_logs as "[IMP-IMPORT] import_logs" {
 }
 
 // =============================================================================
+// MÓDULO: notificaciones (implementado — alertas por email vía Resend)
+// =============================================================================
+
+Table notificacion_configs as "[IMP-NOTIF] notificacion_configs" [note: 'Override por tenant de un tipo de notificación. Sin fila = usa el default del catálogo (activo, destinatarios = todos los org:admin)'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  tipo String [not null]
+  activo Boolean [not null]
+  destinatarios String[] [default: '[]', note: 'userIds Clerk elegidos a mano; vacío = default (todos los admins)']
+  updatedBy String [not null]
+  updatedAt DateTime
+
+  Indexes {
+    (tenantId, tipo) [unique]
+    tenantId
+  }
+}
+
+Table notificacion_envios as "[IMP-NOTIF] notificacion_envios" [note: 'Registro de qué entidad ya generó un email para un tipo de notificación — evita reenviar el mismo aviso en cada corrida del cron; también alimenta el feed de la campana'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  tipo String [not null]
+  entidadId String [not null]
+  titulo String [not null]
+  detalle String [not null]
+  destinatarios String[] [not null]
+  leidoPor String[] [default: '[]', note: 'userIds Clerk que ya vieron el aviso en el desplegable']
+  enviadoAt DateTime [default: `now()`]
+
+  Indexes {
+    (tenantId, tipo, entidadId) [unique]
+    (tenantId, tipo)
+    (tenantId, enviadoAt)
+  }
+}
+
+// =============================================================================
 // MÓDULO: integracion-arca / liquidaciones-arca (implementado — Fase NyM)
 // =============================================================================
 
@@ -718,13 +894,15 @@ Table arca_configs as "[IMP-ARCA] arca_configs" {
   condicionIvaEmisor String
   ingBrutos String
   inicActEmisor String
+  logoUrl String [note: 'Cloudinary — embebido en los PDF de comprobantes']
   ptoVentaCvlp Int [not null]
   ptoVentaFactura Int [not null]
   ambiente String [default: 'homologacion']
   comisionPctDefault Float [default: 8]
   ivaGastosAdmin Float [default: 21]
-  certPem String [note: 'nunca exponer en API pública']
-  keyPem String
+  anulacionTipoComprobante String [default: 'nota_credito', note: 'nota_credito (3/8) | nota_debito (2/7) — comprobante con que se anula un CVLP']
+  certPemProduccion String [note: 'nunca exponer en API pública; solo hace falta para producción']
+  keyPemProduccion String
   updatedAt DateTime
 }
 
@@ -738,6 +916,7 @@ Table liquidaciones as "[IMP-ARCA] liquidaciones" {
   bruto Float [not null]
   comisionPct Float [not null]
   comision Float [not null]
+  ivaPct Float [default: 21, note: 'alícuota IVA aplicada (snapshot; default tenant o override)']
   gastosAdmin Float [not null]
   gastosAdminIva Float [not null]
   liquido Float [not null]
@@ -746,11 +925,22 @@ Table liquidaciones as "[IMP-ARCA] liquidaciones" {
   ptoVenta Int
   cae String
   caeFechaVto DateTime
+  ambiente String [note: 'homologacion|produccion — snapshot al emitir']
+  anulacionCbteTipo Int [note: 'Nota de crédito 065 emitida al anular (el CVLP original se conserva arriba)']
+  anulacionCbteNro Int
+  anulacionPtoVenta Int
+  anulacionCae String
+  anulacionCaeFechaVto DateTime
+  anulacionFecha DateTime
   estado String [default: 'borrador']
   arcaError String
+  arcaErrorDetalle String [note: 'detalle técnico crudo de AFIP SDK, para "ver error completo"']
   reintentos Int [default: 0]
   comprobanteUrl String [note: 'Cloudinary']
-  payloadHash String
+  motivoAnulacion String
+  anuladoPor String [note: 'Clerk userId']
+  anuladoAt DateTime
+  payloadHash String [note: 'idempotencia — evita duplicar en reintento']
   createdAt DateTime [default: `now()`]
   createdBy String [not null]
   updatedAt DateTime
@@ -760,6 +950,43 @@ Table liquidaciones as "[IMP-ARCA] liquidaciones" {
     (tenantId, transportistaId)
     (tenantId, estado)
     (tenantId, periodoDesde, periodoHasta)
+  }
+}
+
+Table conceptos_liquidacion as "[IMP-ARCA] conceptos_liquidacion" [note: 'Catálogo de conceptos extras de liquidación CVLP por tenant (seguro, combustible, etc.) — arranca vacío, cada cuenta define los que necesita'] {
+  id String [pk]
+  tenantId String [not null, ref: > tenants.clerkOrgId]
+  nombre String [not null]
+  signo String [not null, note: 'favor = suma al líquido del transportista; contra = descuenta']
+  ivaPct Float [default: 21]
+  activo Boolean [default: true]
+  monto Float
+  bloqueado Boolean [default: false]
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  Indexes {
+    (tenantId, activo)
+  }
+}
+
+Table liquidacion_concepto_lineas as "[IMP-ARCA] liquidacion_concepto_lineas" [note: 'Línea de concepto aplicada a una liquidación (monto manual, una vez por liquidación) — snapshot de nombre/signo/IVA para que el PDF no dependa del catálogo vivo'] {
+  id String [pk]
+  tenantId String [not null]
+  liquidacionId String [not null, ref: > liquidaciones.id, note: 'ON DELETE CASCADE']
+  conceptoLiquidacionId String [ref: > conceptos_liquidacion.id, note: 'ON DELETE SET NULL']
+  nombreSnapshot String [not null]
+  signo String [not null]
+  ivaPct Float [not null]
+  monto Float [not null, note: 'monto absoluto (> 0); el signo determina si suma o resta']
+  orden Int [default: 0]
+  modoAplicacion String [default: 'GENERAL', note: 'GENERAL|VIAJE_PUNTUAL|TODOS_LOS_VIAJES']
+  viajeId String [note: 'sin FK formal — referencial, solo cuando modoAplicacion = VIAJE_PUNTUAL']
+  createdAt DateTime [default: `now()`]
+
+  Indexes {
+    liquidacionId
+    tenantId
   }
 }
 

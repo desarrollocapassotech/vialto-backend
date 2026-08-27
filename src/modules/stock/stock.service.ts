@@ -28,6 +28,7 @@ import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { parseFechaMovimientoStock, yearInBuenosAires, parseYyyyMmDdInicioAr, parseYyyyMmDdFinAr } from './stock-fecha.util';
 import { resolverLoteIngreso } from './stock-lote.util';
 import { paginate, buildPaginatedResult } from '../../shared/util/pagination.util';
+import { calcularKg } from './stock-kg.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
@@ -86,9 +87,16 @@ const productoMiniSelect = {
 } as const;
 
 const stockItemRelations = {
-  producto: { select: productoMiniSelect },
+  producto: { select: { id: true, nombre: true, pesoUnitarioKg: true } },
   cliente: { select: { id: true, nombre: true } },
   deposito: { select: { id: true, nombre: true } },
+  presentacion: {
+    select: {
+      id: true,
+      unidadesPorBulto: true,
+      presentacion: { select: { id: true, nombre: true } },
+    },
+  },
 } as const;
 
 @Injectable()
@@ -548,6 +556,7 @@ export class StockService {
             select: {
               id: true,
               nombre: true,
+              pesoUnitarioKg: true,
             },
           },
           presentacion: {
@@ -614,6 +623,12 @@ export class StockService {
       numeroDocumentoExterno: mov.operacion.numeroDocumentoExterno,
       cantidad1: mov.bultos,
       cantidad2: mov.unidades,
+      kg: calcularKg(
+        mov.bultos,
+        mov.unidades,
+        mov.presentacion?.unidadesPorBulto ?? 0,
+        mov.producto.pesoUnitarioKg ?? 0,
+      ),
     }));
 
     return {
@@ -641,6 +656,7 @@ export class StockService {
             select: {
               id: true,
               nombre: true,
+              pesoUnitarioKg: true,
             },
           },
           presentacionId: true,
@@ -682,7 +698,7 @@ export class StockService {
       movimientos: Array<{
         id: string;
         productoId: string;
-        producto: { id: string; nombre: string };
+        producto: { id: string; nombre: string; pesoUnitarioKg: number | null };
         presentacionId: string | null;
         presentacion: {
           id: string;
@@ -717,6 +733,12 @@ export class StockService {
       movimientos: op.movimientos.map((m) => ({
         ...m,
         fechaVencimiento: m.fechaVencimiento?.toISOString() ?? null,
+        kg: calcularKg(
+          m.bultos,
+          m.unidades,
+          m.presentacion?.unidadesPorBulto ?? 0,
+          m.producto.pesoUnitarioKg ?? 0,
+        ),
       })),
     });
   }
@@ -816,7 +838,7 @@ export class StockService {
 
   async findMovimiento(id: string, tenantId: string) {
     const INCLUDE = {
-      producto: { select: { id: true, nombre: true } },
+      producto: { select: { id: true, nombre: true, pesoUnitarioKg: true } },
       presentacion: {
         select: {
           id: true,
@@ -887,6 +909,12 @@ export class StockService {
       numeroDocumentoExterno: mov.operacion.numeroDocumentoExterno,
       cantidad1: mov.bultos,
       cantidad2: mov.unidades,
+      kg: calcularKg(
+        mov.bultos,
+        mov.unidades,
+        mov.presentacion?.unidadesPorBulto ?? 0,
+        mov.producto.pesoUnitarioKg ?? 0,
+      ),
     };
   }
 
@@ -984,16 +1012,24 @@ export class StockService {
     if (!cliente) throw new BadRequestException('Cliente inválido.');
     if (!deposito) throw new BadRequestException('Depósito inválido o inactivo.');
 
+    // Mapeamos los datos, para calcular los kilos más abajo sin volver a consultar la base
+    const datosKgPorPresentacion = new Map<string, { unidadesPorBulto: number; pesoUnitarioKg: number }>();
+
     for (const linea of dto.lineas) {
       if (linea.bultos <= 0 && linea.sueltas <= 0) {
         throw new BadRequestException('Cada línea debe tener bultos o sueltas mayor a 0.');
       }
       const pp = await this.prisma.productoPresentacion.findFirst({
         where: { id: linea.presentacionId, productoId: linea.productoId, tenantId, activo: true },
+        include: { producto: { select: { pesoUnitarioKg: true } } },
       });
       if (!pp) {
         throw new BadRequestException('Presentación inválida para uno de los productos seleccionados.');
       }
+      datosKgPorPresentacion.set(linea.presentacionId, {
+        unidadesPorBulto: pp.unidadesPorBulto,
+        pesoUnitarioKg: pp.producto.pesoUnitarioKg ?? 0,
+      });
     }
 
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
@@ -1013,6 +1049,8 @@ export class StockService {
           createdBy,
         },
       });
+
+      let totalKg = 0;
 
       for (const linea of dto.lineas) {
         const fechaVencimiento = parseFechaMovimientoStock(linea.fechaVencimiento);
@@ -1056,9 +1094,12 @@ export class StockService {
             cantidad2: linea.sueltas,
           },
         });
+
+        const datosKg = datosKgPorPresentacion.get(linea.presentacionId)!;
+        totalKg += calcularKg(linea.bultos, linea.sueltas, datosKg.unidadesPorBulto, datosKg.pesoUnitarioKg);
       }
 
-      return { id: operacion.id, movimientosCount: dto.lineas.length };
+      return { id: operacion.id, movimientosCount: dto.lineas.length, totalKg };
     });
   }
 
@@ -1154,16 +1195,24 @@ export class StockService {
     if (!cliente) throw new BadRequestException('Cliente inválido.');
     if (!deposito) throw new BadRequestException('Depósito inválido o inactivo.');
 
+    // Mapeamos los datos, para calcular los kilos más abajo sin volver a consultar la base
+    const datosKgPorPresentacion = new Map<string, { unidadesPorBulto: number; pesoUnitarioKg: number }>();
+
     for (const linea of dto.lineas) {
       if (linea.bultos <= 0 && linea.sueltas <= 0) {
         throw new BadRequestException('Cada línea debe tener bultos o sueltas mayor a 0.');
       }
       const pp = await this.prisma.productoPresentacion.findFirst({
         where: { id: linea.presentacionId, productoId: linea.productoId, tenantId, activo: true },
+        include: { producto: { select: { pesoUnitarioKg: true } } },
       });
       if (!pp) {
         throw new BadRequestException('Presentación inválida para uno de los productos seleccionados.');
       }
+      datosKgPorPresentacion.set(linea.presentacionId, {
+        unidadesPorBulto: pp.unidadesPorBulto,
+        pesoUnitarioKg: pp.producto.pesoUnitarioKg ?? 0,
+      });
     }
 
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
@@ -1192,6 +1241,8 @@ export class StockService {
           createdBy,
         },
       });
+
+      let totalKg = 0;
 
       for (const linea of dto.lineas) {
         const { lote, fechaVencimiento } = await this.validarLineaEgresoConLote(
@@ -1257,9 +1308,12 @@ export class StockService {
         if (updated.cantidad2 < 0) {
           throw new BadRequestException(`Stock insuficiente de sueltas para uno de los productos.`);
         }
+
+        const datosKg = datosKgPorPresentacion.get(linea.presentacionId)!;
+        totalKg += calcularKg(linea.bultos, linea.sueltas, datosKg.unidadesPorBulto, datosKg.pesoUnitarioKg);
       }
 
-      return { id: operacion.id, numeroRemito, movimientosCount: dto.lineas.length };
+      return { id: operacion.id, numeroRemito, movimientosCount: dto.lineas.length, totalKg };
     }).then(async (result) => {
       try {
         await this.ensureRemitoInternoPdf(result.id, tenantId);
@@ -1413,6 +1467,7 @@ export class StockService {
 
     const pp = await this.prisma.productoPresentacion.findFirst({
       where: { id: dto.presentacionId, tenantId, productoId: dto.productoId, activo: true },
+      include: { producto: { select: { pesoUnitarioKg: true } } },
     });
     if (!pp) throw new BadRequestException('Presentación no encontrada para este producto.');
     if (!pp.unidadesPorBulto || pp.unidadesPorBulto <= 0) {
@@ -1423,6 +1478,9 @@ export class StockService {
 
     const fechaMov = parseFechaMovimientoStock(dto.fecha);
     const unidadesGeneradas = dto.bultos * pp.unidadesPorBulto;
+    const pesoUnitarioKg = pp.producto.pesoUnitarioKg ?? 0;
+    const kgBultosDivididos = calcularKg(dto.bultos, 0, pp.unidadesPorBulto, pesoUnitarioKg);
+    const kgUnidadesGeneradas = calcularKg(0, unidadesGeneradas, pp.unidadesPorBulto, pesoUnitarioKg);
     const stockKey = {
       productoId: dto.productoId,
       presentacionId: dto.presentacionId,
@@ -1503,7 +1561,13 @@ export class StockService {
         throw new BadRequestException('Stock insuficiente de bultos (verificación post-transacción).');
       }
 
-      return { id: operacion.id, bultosRestados: dto.bultos, unidadesGeneradas };
+      return {
+        id: operacion.id,
+        bultosRestados: dto.bultos,
+        unidadesGeneradas,
+        kgBultosDivididos,
+        kgUnidadesGeneradas,
+      };
     });
   }
 
@@ -1590,8 +1654,8 @@ export class StockService {
     };
   }
 
-  listStockDisponible(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
-    return this.prisma.stockItem.findMany({
+  async listStockDisponible(tenantId: string, clienteId?: string, productoId?: string, depositoId?: string) {
+    const items = await this.prisma.stockItem.findMany({
       where: {
         tenantId,
         ...(clienteId ? { clienteId } : {}),
@@ -1602,6 +1666,74 @@ export class StockService {
       orderBy: [{ clienteId: 'asc' }, { productoId: 'asc' }],
       include: stockItemRelations,
     });
+
+    // Agregamos el kg calculado a cada fila
+    return items.map((item) => {
+      const pesoUnitarioKg = item.producto.pesoUnitarioKg ?? 0;
+      const unidadesPorBulto = item.presentacion?.unidadesPorBulto ?? 0;
+      const kg = calcularKg(item.cantidad1, item.cantidad2, unidadesPorBulto, pesoUnitarioKg);
+
+      return { ...item, kg };
+    });
+  }
+
+  async listStockAgrupadoPorProducto(
+    tenantId: string,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+  ) {
+    const items = await this.prisma.stockItem.findMany({
+      where: {
+        tenantId,
+        ...(clienteId ? { clienteId } : {}),
+        ...(productoId ? { productoId } : {}),
+        ...(depositoId ? { depositoId } : {}),
+        OR: [{ cantidad1: { gt: 0 } }, { cantidad2: { gt: 0 } }],
+      },
+      orderBy: [{ productoId: 'asc' }],
+      include: stockItemRelations,
+    });
+
+    // Agrupamos las filas por producto
+    const porProducto = new Map<string, {
+      productoId: string;
+      nombre: string;
+      totalKg: number;
+      composicion: Array<{
+        presentacionId: string | null;
+        presentacionNombre: string;
+        bultos: number;
+        sueltas: number;
+        kg: number;
+      }>;
+    }>();
+
+    for (const item of items) {
+      const pesoUnitarioKg = item.producto.pesoUnitarioKg ?? 0;
+      const unidadesPorBulto = item.presentacion?.unidadesPorBulto ?? 0;
+      const kg = calcularKg(item.cantidad1, item.cantidad2, unidadesPorBulto, pesoUnitarioKg);
+
+      const grupo = porProducto.get(item.productoId) ?? {
+        productoId: item.productoId,
+        nombre: item.producto.nombre,
+        totalKg: 0,
+        composicion: [],
+      };
+
+      grupo.totalKg += kg;
+      grupo.composicion.push({
+        presentacionId: item.presentacionId,
+        presentacionNombre: item.presentacion?.presentacion.nombre ?? 'Sin presentación',
+        bultos: item.cantidad1,
+        sueltas: item.cantidad2,
+        kg,
+      });
+
+      porProducto.set(item.productoId, grupo);
+    }
+
+    return Array.from(porProducto.values());
   }
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CONFIG NÚMERO DE REMITO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -113,7 +113,7 @@ Ejemplos de uso:
 2. **El `tenantId` siempre viene del token de Clerk** (`orgId`) — nunca del body del request.
 3. **Todo endpoint de módulo DEBE tener `@UseGuards(ModuleGuard)`** con el nombre del módulo.
 4. **Nuevos módulos van en `src/modules/{nombre}/`** con su propio NestJS module, controller, service y schema Prisma.
-5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí (salvo `reportes`).
+5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí.
 6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** de Neon (entorno QA); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
    - **OJO — la base develop es compartida entre ramas.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
 
@@ -280,10 +280,7 @@ src/
     stock/                  ← ✅ implementado — operaciones (ingreso/egreso/división), lotes, presentaciones por producto, remito interno
     combustible/            ← ✅ implementado — CRUD, detección de cargas sospechosas, dashboard, export Excel, fotos (Cloudinary), API paralela para choferes vía chofer-auth. El tag Swagger "[Próximamente]" quedó desactualizado: el módulo está activo.
     mantenimiento/          ← ✅ implementado (parcial) — CRUD de `Intervencion` en Postgres; el checklist diario en Firestore que describe este documento NO está implementado todavía
-    remitos/                ← ✅ implementado — CRUD de `Remito` con firma (`firmaUrl`); el flujo PWA de firma desde el celular es responsabilidad del frontend, no confirmado acá
     liquidaciones-arca/     ← ✅ implementado — OJO: el slug de módulo real (`RequireModule`, `Tenant.modules`) es `integracion-arca`, no `liquidaciones-arca` — ver nota de VIALTO_MODULES arriba
-    turnos/                 ← 🔲 stub real — solo un endpoint estático (`GET turnos/estado`), sin modelo Prisma ni service (Fase 7 — Pereyra, módulo aislado)
-    reportes/               ← ⚠️ parcial — 2 endpoints reales (`resumen`, `tablero-general`) con agregaciones cross-módulo; falta el resto de la visión (Fase 8: builder de reportes, exports)
     dashboard/              ← ✅ implementado — KPIs y alertas del tenant (`GET dashboard/resumen`); no es un módulo vendible (no gateado por `RequireModule`, disponible para todo tenant)
     importaciones/          ← ✅ implementado — motor de importación desde Excel (parser/validator/processors por módulo), preview/confirm, templates y logs; uso admin, no gateado como módulo vendible
     notificaciones/         ← ✅ implementado — alertas por email vía Resend, catálogo + config on/off por tenant; ver sección propia más abajo
@@ -298,7 +295,7 @@ src/
   main.ts
 ```
 
-> **Nota sobre `turnos`:** Módulo para sindicatos/cooperativas de choferes (Pereyra). No es para empresas de logística. Se desarrolla aislado y no se incluye en los planes standard de Vialto por ahora.
+> **Nota sobre `turnos`:** Módulo para sindicatos/cooperativas de choferes (Pereyra), no para empresas de logística — se pensaba desarrollar aislado, fuera de los planes standard de Vialto. El stub que existía (`GET turnos/estado`, sin modelo Prisma ni service) se borró por completo en ago 2026 — código y slug en `VIALTO_MODULES` — porque no tenía nada real detrás y Pereyra sigue "🔲 Pendiente" (ver "Clientes actuales y estado"). Si se retoma, es desde cero.
 >
 > Los ✅/⚠️/🔲 de arriba describen **estado del código**, no si el cliente ya lo tiene contratado/activo — eso está en la tabla de "Clientes actuales y estado" más abajo, que puede ir por detrás o por delante del código según el momento comercial.
 
@@ -578,7 +575,7 @@ El modelo cambió de forma respecto a versiones anteriores de este documento: ya
 - **`MovimientoStock`** es el detalle línea a línea dentro de una operación: producto + presentación + `bultos`/`unidades` + `lote` opcional (también ya implementado) + vencimiento opcional.
 - **`StockItem`** es el snapshot de disponible, ahora clave por `(productoId, presentacionId, clienteId, depositoId)`.
 
-Los egresos generan un número de remito interno automático (`remitoPrefix-YYYY-NNNNN`), vía `StockEgresoRemitoConfig` + `StockRemitoSecuencia`, y pueden vincularse a un `Remito` del módulo `remitos` (`remitoId`).
+Los egresos generan un número de remito interno automático (`remitoPrefix-YYYY-NNNNN`), vía `StockEgresoRemitoConfig` + `StockRemitoSecuencia`. (El vínculo opcional `remitoId` hacia el módulo standalone `remitos` existió hasta ago 2026 — se borró junto con ese módulo, ver sección "`remitos` — eliminado" más abajo; no confundir con este remito interno, que sigue igual.)
 
 ```prisma
 model Producto {
@@ -652,7 +649,6 @@ model StockOperacion {
   fotosUrls              String[] // fotos del producto en ingresos (hasta 2, Cloudinary)
   numeroRemito           String?  // remito interno generado (ej. R-2026-00001)
   numeroRemitoProveedor  String?  // informado manualmente en ingresos
-  remitoId               String?  // vínculo opcional a Remito (módulo remitos)
   entregadoPor           String?
   destinatario           String?
   destinoFinal           String?
@@ -680,7 +676,6 @@ model MovimientoStock {
   lote                  String?
   observaciones         String?
   movimientoVinculadoId String?   // en divisiones: apunta al movimiento par (origen ↔ destino)
-  remitoId              String?
   createdBy             String    @default("")
   fecha                 DateTime
   createdAt             DateTime  @default(now())
@@ -689,7 +684,6 @@ model MovimientoStock {
   @@index([tenantId, operacionId])
   @@index([tenantId, productoId])
   @@index([tenantId, presentacionId])
-  @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
 }
 
@@ -794,30 +788,13 @@ model Intervencion {
 
 ---
 
-### `remitos` — Remitos digitales (Melisa)
-CRUD del backend implementado, incluyendo `firmaUrl` para la firma del cliente. El flujo de PWA para que el chofer complete y el cliente firme desde el celular es responsabilidad del frontend — su estado no está confirmado en este documento (verificar en `vialto-frontend` antes de asumirlo). Un `Remito` puede vincularse a movimientos/operaciones de `stock` (relación inversa).
+### `remitos` — eliminado (ago 2026)
 
-```prisma
-model Remito {
-  id          String    @id @default(cuid())
-  tenantId    String
-  numero      String
-  clienteId   String
-  choferId    String?
-  vehiculoId  String?
-  descripcion String
-  fecha       DateTime
-  firmaUrl    String?   // URL en Cloudinary (firma digital del cliente)
-  estado      String    @default("emitido") // emitido | firmado | facturado
-  createdAt   DateTime  @default(now())
+Existió un módulo standalone `remitos` (modelo `Remito` con `firmaUrl` para firma digital del cliente, CRUD completo en el backend). Se borró por completo — módulo, controller/service/DTOs, modelo Prisma y las columnas `remitoId` (FK opcional, `onDelete: SetNull`) que `MovimientoStock`/`StockOperacion` tenían hacia él — porque, pese a estar terminado del lado backend, **nunca tuvo ninguna pantalla de frontend** (cero rutas, cero componentes) y ningún tenant real lo tuvo contratado en producción (solo el tenant interno de testing `CapassoTech`). Migración: `20260828164256_drop_remito_module`, aplicada en la rama `develop` de Neon.
 
-  @@unique([tenantId, numero])
-  @@index([tenantId])
-  @@index([tenantId, clienteId])
-  @@index([tenantId, estado])
-  @@index([tenantId, fecha])
-}
-```
+**No confundir con el "remito interno" de Stock**, que sigue intacto y es una feature completamente distinta: `StockOperacion.remitoUrl`/`numeroRemito`/`numeroRemitoProveedor` + `StockEgresoRemitoConfig` + `StockRemitoSecuencia` — el PDF que se genera automáticamente al hacer un egreso de stock. Ese no se tocó.
+
+Si en el futuro Melisa (Desagotes, ver "Clientes actuales y estado" más abajo) confirma como cliente y necesita remitos con firma digital del chofer/cliente vía PWA, hay que reconstruir el módulo desde cero (no queda nada reusable salvo este historial).
 
 ---
 
@@ -1171,13 +1148,13 @@ Ocultar un campo en el formulario **no alcanza** cuando ese campo alimenta un c�
 | Bressan | ✅ Activo (stack viejo) | combustible | Migrar a Vialto en el futuro |
 | Sebastián Fernández | ✅ Cerrado | viajes | 1 — construir ya |
 | Matías Riedel | ✅ Activo | stock, cuenta-corriente | 2 |
-| Melisa (Desagotes) | ⏳ Muy probable | remitos, cuenta-corriente | 3 |
+| Melisa (Desagotes) | ⏳ Muy probable | remitos (⚠️ a reconstruir, ver sección "`remitos` — eliminado"), cuenta-corriente | 3 |
 | Marcos Venturini (NyM Logística) | ⏳ Presupuesto enviado | integracion-arca, viajes | 4 |
 | Wichi Toledo SRL | ⏳ Muy probable | mantenimiento, combustible | 5 |
 | Gabriel González e Hijo | 🔲 Interesado | facturacion (viajes + cobranzas) | 6 |
 | Javier Altamirano | 🔲 Pendiente | viajes, facturacion, combustible | 7 |
 | Mailen Matilla | 🔲 Pendiente | viajes, facturacion | 8 |
-| Hernán Pereyra | 🔲 Pendiente | turnos (PWA) | 9 — módulo aislado |
+| Hernán Pereyra | 🔲 Pendiente | turnos (⚠️ el stub se borró, a reconstruir desde cero) (PWA) | 9 — módulo aislado |
 
 ---
 
@@ -1192,8 +1169,6 @@ Ocultar un campo en el formulario **no alcanza** cuando ese campo alimenta un c�
 | mantenimiento | — | — | — | — | ✓ | — | — | — | — |
 | combustible | — | — | — | — | ✓ | ✓ | — | — | — |
 | stock | — | ✓ | — | — | — | — | — | — | — |
-| remitos | — | — | ✓ | — | — | — | — | — | — |
-| turnos | — | — | — | — | — | — | — | ✓ | — |
 | integracion-arca | — | — | — | — | — | — | — | — | ✓ |
 
 ---
@@ -1217,7 +1192,7 @@ FASE 2 — Riedel
   → módulo: cuenta-corriente (saldo por cliente, pagos, historial)
 
 FASE 3 — Melisa
-  → módulo: remitos (PWA para chofer, firma digital)
+  → módulo: remitos (PWA para chofer, firma digital) — ⚠️ el que existía se borró en ago 2026 (sin uso real, sin frontend nunca conectado); reconstruir desde cero llegado el momento, ver "`remitos` — eliminado"
   → cuenta-corriente ya construida en Fase 2 → reutilizar
 
 FASE 4 — Wichi Toledo
@@ -1232,7 +1207,7 @@ FASE 6 — Altamirano / Matilla
   → viajes + facturacion ya construidos → solo onboarding
 
 FASE 7 — Pereyra
-  → módulo: turnos (PWA para choferes, panel admin, listas de turno)
+  → módulo: turnos (PWA para choferes, panel admin, listas de turno) — el stub que existía se borró en ago 2026 (sin nada real detrás); reconstruir desde cero llegado el momento
   → Módulo aislado, no depende de los anteriores
 
 FASE NyM — Venturini (NyM Logística)
@@ -1245,7 +1220,7 @@ FASE NyM — Venturini (NyM Logística)
   → PDF del comprobante con formato NyM Logística
 
 FASE 8 — Transversal
-  → módulo: reportes (dashboards cross-módulo, exportación, KPIs)
+  → módulo: reportes — el que existía (2 endpoints, sin frontend conectado) se borró en ago 2026 por no tener ningún consumidor real; si se retoma, es desde cero
   → Integración AFIP/ARCA (facturación electrónica)
   → App móvil nativa para choferes
   → Migración de Bressan al nuevo stack
@@ -1322,5 +1297,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: agosto 2026 (módulo `notificaciones` nuevo — alertas por email vía Resend, catálogo en código + config on/off por tenant calcada de `tenant-field-config`, cron diario agrupado por tipo con dedup por entidad, destinatarios = admins de Clerk del tenant, ver sección "`notificaciones` — alertas por email vía Resend"; y, de una pasada anterior, `precioTransportistaIvaIncluidoPct` pasó a ser opt-in vía `core/tenant-field-config` — `defaultVisible: false`, oculto por defecto para todo tenant; si un tenant lo deshabilita después de haberlo usado, los valores cargados NO se borran pero se ignoran en todo cálculo hasta reactivarlo, ver sección "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant"; y, de la misma pasada, `Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
+*Última actualización: agosto 2026 (módulos `remitos`, `reportes` y `turnos` eliminados por completo — código, y en el caso de `remitos` también su modelo Prisma vía migración `20260828164256_drop_remito_module` — y sus slugs sacados de `VIALTO_MODULES`; ningún tenant real los tenía contratados y ninguno tenía frontend que los consumiera (`turnos` era un stub sin modelo ni service, para un cliente — Pereyra — que sigue "🔲 Pendiente"). Ver secciones "`remitos` — eliminado", nota de "`turnos`" arriba, y las notas de Fase 3/Fase 7/Fase 8 del roadmap; y, de la misma pasada, módulo `notificaciones` nuevo — alertas por email vía Resend, catálogo en código + config on/off por tenant calcada de `tenant-field-config`, cron diario agrupado por tipo con dedup por entidad, destinatarios = admins de Clerk del tenant, ver sección "`notificaciones` — alertas por email vía Resend"; y, de una pasada anterior, `precioTransportistaIvaIncluidoPct` pasó a ser opt-in vía `core/tenant-field-config` — `defaultVisible: false`, oculto por defecto para todo tenant; si un tenant lo deshabilita después de haberlo usado, los valores cargados NO se borran pero se ignoran en todo cálculo hasta reactivarlo, ver sección "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant"; y, de la misma pasada, `Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

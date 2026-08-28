@@ -54,7 +54,6 @@ model Tenant {
   cargasCombustible          CargaCombustible[]
   combustibleSyncErrorLogs   CombustibleSyncErrorLog[]
   intervenciones             Intervencion[]
-  remitos                    Remito[]
   importTemplates            ImportTemplate[]
   importLogs                 ImportLog[]
   importSessions             ImportSession[]
@@ -96,7 +95,6 @@ model Cliente {
   movimientosCc    MovimientoCuentaCorriente[]
   stockOperaciones StockOperacion[]
   stockItems       StockItem[]
-  remitos          Remito[]
 
   @@index([tenantId])
   @@map("clientes")
@@ -157,7 +155,6 @@ model Chofer {
   viajes                   Viaje[]
   cargasCombustible        CargaCombustible[]
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
-  remitos                  Remito[]
 
   @@index([tenantId])
   @@index([tenantId, activo])
@@ -229,7 +226,6 @@ model Vehiculo {
   cargasCombustible        CargaCombustible[]
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
   intervenciones           Intervencion[]
-  remitos                  Remito[]
 
   @@unique([tenantId, patente])
   @@index([tenantId])
@@ -696,8 +692,6 @@ model MovimientoStock {
    * ID del movimiento par en una división (el origen apunta al destino y viceversa).
    */
   movimientoVinculadoId String?
-  remitoId              String?
-  remito                Remito?               @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   createdBy             String                @default("")
   fecha                 DateTime
   createdAt             DateTime              @default(now())
@@ -706,7 +700,6 @@ model MovimientoStock {
   @@index([tenantId, operacionId])
   @@index([tenantId, productoId])
   @@index([tenantId, presentacionId])
-  @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("movimientos_stock")
@@ -812,8 +805,6 @@ model StockOperacion {
    * Número de remito del proveedor, informado manualmente al registrar un ingreso.
    */
   numeroRemitoProveedor  String?
-  remitoId               String?
-  remito                 Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   entregadoPor           String?
   destinatario           String?
   destinoFinal           String?
@@ -949,37 +940,6 @@ model Intervencion {
   @@index([tenantId, vehiculoId])
   @@index([tenantId, fecha])
   @@map("intervenciones")
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Módulo: remitos
-// ═══════════════════════════════════════════════════════════════════════════
-
-model Remito {
-  id               String            @id @default(cuid())
-  tenantId         String
-  tenant           Tenant            @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero           String
-  clienteId        String
-  cliente          Cliente           @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  choferId         String?
-  chofer           Chofer?           @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  vehiculoId       String?
-  vehiculo         Vehiculo?         @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
-  descripcion      String
-  fecha            DateTime
-  firmaUrl         String?
-  estado           String            @default("emitido") // emitido | firmado | facturado
-  createdAt        DateTime          @default(now())
-  movimientosStock MovimientoStock[]
-  stockOperaciones StockOperacion[]
-
-  @@unique([tenantId, numero])
-  @@index([tenantId])
-  @@index([tenantId, clienteId])
-  @@index([tenantId, estado])
-  @@index([tenantId, fecha])
-  @@map("remitos")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -8,7 +8,6 @@ export class CreateMovimientoStockDto {
   @IsIn(['ingreso', 'egreso', 'division']) tipo: string;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidad1?: number;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cantidad2?: number;
-  @IsOptional() @IsString() remitoId?: string;
   @IsString() @IsNotEmpty()
   /** ISO 8601 (recomendado) o solo `YYYY-MM-DD` (medianoche Argentina). */
   fecha: string;

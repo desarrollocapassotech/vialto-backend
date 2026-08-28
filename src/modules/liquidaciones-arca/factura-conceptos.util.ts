@@ -1,6 +1,18 @@
 import type { ConceptoFacturable } from './arca-cvlp.util';
-import { resolveIvaPct } from './arca-iva.util';
+import { resolveIvaPct, round2 } from './arca-iva.util';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+
+/** Neto de la línea: cantidad × precio (2 decimales) si ambos están; si no, `monto`. */
+export function importeNetoLineaViaje(v: {
+  monto: number | null;
+  cantidadFactura?: number | null;
+  precioUnitarioFactura?: number | null;
+}): number {
+  if (v.cantidadFactura != null && v.precioUnitarioFactura != null) {
+    return round2(v.cantidadFactura * v.precioUnitarioFactura);
+  }
+  return round2(v.monto ?? 0);
+}
 
 export interface FacturaLineaInput {
   producto?: string;
@@ -58,7 +70,7 @@ export function defaultFacturaLineas(
         descripcion,
         cantidad: v.cantidadFactura ?? undefined,
         precioUnitario: v.precioUnitarioFactura ?? undefined,
-        importe: v.monto ?? 0,
+        importe: importeNetoLineaViaje(v),
         ivaPct,
       };
     });

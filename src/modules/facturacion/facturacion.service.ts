@@ -27,7 +27,20 @@ type ViajeSnap = {
   facturacionEstado: string;
   monto: number | null;
   monedaMonto: string;
+  cantidadFactura: number | null;
+  precioUnitarioFactura: number | null;
 };
+
+function importeNetoViaje(v: {
+  monto: number | null;
+  cantidadFactura?: number | null;
+  precioUnitarioFactura?: number | null;
+}): number {
+  if (v.cantidadFactura != null && v.precioUnitarioFactura != null) {
+    return Math.round(v.cantidadFactura * v.precioUnitarioFactura * 100) / 100;
+  }
+  return v.monto ?? 0;
+}
 
 type TramoSnap = {
   id: string;
@@ -46,22 +59,33 @@ export class FacturacionService {
     private readonly clerkUsers: ClerkVialtoRoleService,
   ) {}
 
-  private computeImporte(viajes: { monto: number | null }[]): number {
-    return viajes.reduce((sum, v) => sum + (v.monto ?? 0), 0);
+  private computeImporte(
+    viajes: Array<{
+      monto: number | null;
+      cantidadFactura?: number | null;
+      precioUnitarioFactura?: number | null;
+    }>,
+  ): number {
+    return viajes.reduce((sum, v) => sum + importeNetoViaje(v), 0);
   }
 
   /**
    * Importe con tramos: suma montos de tramos + monto de viajes que no tienen ningún tramo.
    */
   private computeImporteConTramos(
-    viajes: { id: string; monto: number | null }[],
+    viajes: Array<{
+      id: string;
+      monto: number | null;
+      cantidadFactura?: number | null;
+      precioUnitarioFactura?: number | null;
+    }>,
     tramos: { viajeId: string; monto: number }[],
   ): number {
     const viajeIdsConTramo = new Set(tramos.map((t) => t.viajeId));
     const sumaTramos = tramos.reduce((sum, t) => sum + (t.monto ?? 0), 0);
     const sumaViajesSinTramo = viajes
       .filter((v) => !viajeIdsConTramo.has(v.id))
-      .reduce((sum, v) => sum + (v.monto ?? 0), 0);
+      .reduce((sum, v) => sum + importeNetoViaje(v), 0);
     return sumaTramos + sumaViajesSinTramo;
   }
 
@@ -255,7 +279,14 @@ export class FacturacionService {
     if (viajeIds.length === 0) return [];
     const rows = await this.prisma.viaje.findMany({
       where: { id: { in: viajeIds }, tenantId },
-      select: { id: true, facturacionEstado: true, monto: true, monedaMonto: true },
+      select: {
+        id: true,
+        facturacionEstado: true,
+        monto: true,
+        monedaMonto: true,
+        cantidadFactura: true,
+        precioUnitarioFactura: true,
+      },
     });
     if (rows.length !== viajeIds.length) {
       throw new BadRequestException(
@@ -281,6 +312,8 @@ export class FacturacionService {
     facturacionEstado: true,
     monto: true,
     monedaMonto: true,
+    cantidadFactura: true,
+    precioUnitarioFactura: true,
   } as const;
   private readonly PAGO_SELECT = { importe: true } as const;
   private readonly TRAMO_SELECT = {

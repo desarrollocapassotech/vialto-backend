@@ -1228,7 +1228,7 @@ export class ViajesService {
     }
     let monto = dto.monto;
     if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
-      monto = dto.cantidadFactura * dto.precioUnitarioFactura;
+      monto = Math.round(dto.cantidadFactura * dto.precioUnitarioFactura * 100) / 100;
     }
     // `monto` sigue siendo el propio del cliente principal, tal cual lo carga el
     // usuario — nunca se reemplaza por la suma de los clientes adicionales (eso
@@ -1506,7 +1506,8 @@ export class ViajesService {
 
     let montoInput = dto.monto;
     if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
-      montoInput = dto.cantidadFactura * dto.precioUnitarioFactura;
+      montoInput =
+        Math.round(dto.cantidadFactura * dto.precioUnitarioFactura * 100) / 100;
     }
 
     const precioTransportistaExternoResolved =

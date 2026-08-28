@@ -62,9 +62,9 @@ export function buildCvlpConceptosList(args: {
 
 /**
  * Totales a persistir en Liquidacion.
- * El IVA de la liquidación (`ivaPctDefault`) aplica a flete, comisión y conceptos.
- * Así el campo IVA del formulario es la única fuente de verdad (no se remapea a
- * alícuotas AFIP ni se pisa con el IVA del catálogo de conceptos).
+ * El IVA se calcula por línea (alícuota de flete/comisión vs. la de cada concepto)
+ * y se agrupa por tasa: 0% no reduce el IVA de las gravadas. El neto del pie es
+ * la suma de todas las bases (incluye gastos/seguro a 0%).
  */
 export function computeLiquidacionTotales(args: {
   bruto: number;
@@ -73,14 +73,22 @@ export function computeLiquidacionTotales(args: {
   lineas?: ConceptoLineaInput[];
   viajes?: { id: string; numero: string | number }[];
 }): { impNeto: number; impIva: number; liquido: number } {
-  const pct = Number(args.ivaPctDefault);
-  const rate = Number.isFinite(pct) ? pct : 0;
+  const defaultPct = Number(args.ivaPctDefault);
+  const fallbackPct = Number.isFinite(defaultPct) ? defaultPct : 0;
   const conceptos = buildCvlpConceptosList(args).filter((c) => c.importe !== 0);
-  let impNeto = 0;
+  const byPct = new Map<number, number>();
   for (const c of conceptos) {
-    impNeto = round2(impNeto + round2(c.importe));
+    const base = round2(c.importe);
+    const raw = c.ivaPct;
+    const pct = typeof raw === 'number' && Number.isFinite(raw) ? raw : fallbackPct;
+    byPct.set(pct, round2((byPct.get(pct) ?? 0) + base));
   }
-  const impIva = round2((impNeto * rate) / 100);
+  let impNeto = 0;
+  let impIva = 0;
+  for (const [pct, base] of byPct) {
+    impNeto = round2(impNeto + base);
+    impIva = round2(impIva + round2((base * pct) / 100));
+  }
   return {
     impNeto,
     impIva,

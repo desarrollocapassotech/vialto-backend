@@ -40,7 +40,7 @@ export class ViajesProcessor implements IImportProcessor {
         ? Number(row.precioUnitarioFactura)
         : null;
     if (cantidad != null && precioUnit != null) {
-      return cantidad * precioUnit;
+      return Math.round(cantidad * precioUnit * 100) / 100;
     }
     return row.monto != null ? Number(row.monto) : null;
   }

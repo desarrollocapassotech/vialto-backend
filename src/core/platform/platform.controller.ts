@@ -892,6 +892,22 @@ export class PlatformController {
     );
   }
 
+  @ApiOperation({ summary: "Stock agrupado por producto con total en kg (superadmin)" })
+  @Get("stock/disponible/agrupado")
+  listStockAgrupadoPorProducto(
+    @Query("tenantId") tenantId: string | undefined,
+    @Query("clienteId") clienteId?: string,
+    @Query("productoId") productoId?: string,
+    @Query("depositoId") depositoId?: string,
+  ) {
+    return this.service.listStockAgrupadoPorProducto(
+      tenantId,
+      clienteId,
+      productoId,
+      depositoId,
+    );
+  }
+
   @ApiOperation({ summary: "Formato número de remito egresos (superadmin)" })
   @Get("stock/egresos/remito-config")
   getEgresoRemitoConfig(@Query("tenantId") tenantId?: string) {

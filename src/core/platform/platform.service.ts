@@ -1089,6 +1089,21 @@ export class PlatformService {
     );
   }
 
+  listStockAgrupadoPorProducto(
+    tenantId: string | undefined,
+    clienteId?: string,
+    productoId?: string,
+    depositoId?: string,
+  ) {
+    const scopedTenantId = this.requiredTenantId(tenantId);
+    return this.stockService.listStockAgrupadoPorProducto(
+      scopedTenantId,
+      clienteId,
+      productoId,
+      depositoId,
+    );
+  }
+
   getLotesHistorico(
     tenantId: string | undefined,
     productoId: string,

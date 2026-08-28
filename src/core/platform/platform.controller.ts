@@ -1112,6 +1112,63 @@ export class PlatformController {
   }
 
   @ApiOperation({
+    summary: "Subir logo del emisor ARCA del tenant (superadmin)",
+  })
+  @Post("arca/config/logo")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadArcaLogo(
+    @Query("tenantId") tenantId: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException("Se requiere una imagen.");
+    return this.service.uploadArcaLogo(tenantId, file);
+  }
+
+  @ApiOperation({ summary: "Quitar el logo del emisor ARCA del tenant (superadmin)" })
+  @Delete("arca/config/logo")
+  removeArcaLogo(@Query("tenantId") tenantId?: string) {
+    return this.service.removeArcaLogo(tenantId);
+  }
+
+  @ApiOperation({ summary: "Listar conceptos de liquidación del tenant (superadmin)" })
+  @Get("arca/conceptos-liquidacion")
+  listArcaConceptos(
+    @Query("tenantId") tenantId: string | undefined,
+    @Query("soloActivos") soloActivos?: string,
+  ) {
+    return this.service.listArcaConceptos(
+      tenantId,
+      soloActivos === "1" || soloActivos === "true",
+    );
+  }
+
+  @ApiOperation({ summary: "Crear concepto de liquidación del tenant (superadmin)" })
+  @Post("arca/conceptos-liquidacion")
+  createArcaConcepto(
+    @Query("tenantId") tenantId: string | undefined,
+    @Body()
+    dto: import("../../modules/liquidaciones-arca/dto/concepto-liquidacion.dto").CreateConceptoLiquidacionDto,
+  ) {
+    return this.service.createArcaConcepto(tenantId, dto);
+  }
+
+  @ApiOperation({ summary: "Editar / desactivar concepto de liquidación del tenant (superadmin)" })
+  @Patch("arca/conceptos-liquidacion/:id")
+  updateArcaConcepto(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+    @Body()
+    dto: import("../../modules/liquidaciones-arca/dto/concepto-liquidacion.dto").UpdateConceptoLiquidacionDto,
+  ) {
+    return this.service.updateArcaConcepto(tenantId, id, dto);
+  }
+
+  @ApiOperation({
     summary: "Listar liquidaciones CVLP de un tenant (superadmin)",
   })
   @Get("arca/liquidaciones")

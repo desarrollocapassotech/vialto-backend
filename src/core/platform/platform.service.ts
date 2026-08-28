@@ -52,6 +52,11 @@ import { ArcaConfigService } from "../../modules/liquidaciones-arca/arca-config.
 import { LiquidacionesService } from "../../modules/liquidaciones-arca/liquidaciones.service";
 import { LiquidacionPdfService } from "../../modules/liquidaciones-arca/liquidacion-pdf.service";
 import { FacturaPdfService } from "../../modules/liquidaciones-arca/factura-pdf.service";
+import { ConceptosLiquidacionService } from "../../modules/liquidaciones-arca/conceptos-liquidacion.service";
+import {
+  CreateConceptoLiquidacionDto,
+  UpdateConceptoLiquidacionDto,
+} from "../../modules/liquidaciones-arca/dto/concepto-liquidacion.dto";
 import { PaginationQueryDto } from "shared/dto/pagination-query.dto";
 
 const TAKE = 500;
@@ -114,6 +119,7 @@ export class PlatformService {
     private readonly liquidacionPdfService: LiquidacionPdfService,
     private readonly facturaPdfService: FacturaPdfService,
     private readonly fieldConfigService: TenantFieldConfigService,
+    private readonly conceptosLiquidacionService: ConceptosLiquidacionService,
   ) {}
 
   private requiredTenantId(tenantId?: string) {
@@ -1303,6 +1309,43 @@ export class PlatformService {
     return this.arcaConfigService.upsert(id, dto, {
       allowAmbienteChange: true,
     });
+  }
+
+  uploadArcaLogo(tenantId: string | undefined, file: Express.Multer.File) {
+    const id = this.requiredTenantId(tenantId);
+    return this.arcaConfigService.uploadLogo(
+      id,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+  }
+
+  removeArcaLogo(tenantId: string | undefined) {
+    const id = this.requiredTenantId(tenantId);
+    return this.arcaConfigService.removeLogo(id);
+  }
+
+  listArcaConceptos(tenantId: string | undefined, soloActivos?: boolean) {
+    const id = this.requiredTenantId(tenantId);
+    return this.conceptosLiquidacionService.list(id, { soloActivos });
+  }
+
+  createArcaConcepto(
+    tenantId: string | undefined,
+    dto: CreateConceptoLiquidacionDto,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    return this.conceptosLiquidacionService.create(id, dto);
+  }
+
+  updateArcaConcepto(
+    tenantId: string | undefined,
+    conceptoId: string,
+    dto: UpdateConceptoLiquidacionDto,
+  ) {
+    const id = this.requiredTenantId(tenantId);
+    return this.conceptosLiquidacionService.update(id, conceptoId, dto);
   }
 
   listLiquidaciones(tenantId: string | undefined, estado?: string) {

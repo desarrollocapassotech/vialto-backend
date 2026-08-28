@@ -157,7 +157,7 @@ export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> = {
     { field: "origen", campoLabel: "Origen", type: "string", systemRequired: true, defaultExcelHeader: "Origen" },
     { field: "destino", campoLabel: "Destino", type: "string", systemRequired: true, defaultExcelHeader: "Destino" },
     { field: "fechaCarga", campoLabel: "Fecha de carga", type: "date", systemRequired: true, defaultExcelHeader: "Fecha carga" },
-    { field: "fechaDescarga", campoLabel: "Fecha de descarga", type: "date", systemRequired: true, defaultExcelHeader: "Fecha descarga" },
+    { field: "fechaDescarga", campoLabel: "Fecha de descarga", type: "date", systemRequired: false, defaultExcelHeader: "Fecha descarga" },
     { field: "detalleCarga", campoLabel: "Detalle de carga", type: "string", systemRequired: false, defaultExcelHeader: "Detalle de carga" },
     { field: "kmRecorridos", campoLabel: "Km recorridos", type: "number", systemRequired: false, defaultExcelHeader: "Km recorridos" },
     {

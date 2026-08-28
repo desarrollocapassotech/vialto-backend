@@ -102,7 +102,7 @@ export class CreateViajeDto {
   @Type(() => ViajeDestinoItemDto)
   destinos?: ViajeDestinoItemDto[];
   @IsDateString() fechaCarga: string;
-  @IsDateString() fechaDescarga: string;
+  @IsOptional() @IsDateString() fechaDescarga?: string | null;
   /** Productos a transportar (orden = orden del array). */
   @IsOptional()
   @IsArray()

@@ -62,7 +62,7 @@ export class UpdateViajeDto {
   @Type(() => ViajeDestinoItemDto)
   destinos?: ViajeDestinoItemDto[];
   @IsOptional() @IsDateString() fechaCarga?: string;
-  @IsOptional() @IsDateString() fechaDescarga?: string;
+  @IsOptional() @IsDateString() fechaDescarga?: string | null;
   /** Reemplaza todos los productos del viaje (vacío = sin productos). */
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ViajeProductoItemDto) productoItems?: ViajeProductoItemDto[];
   @IsOptional() @IsString() detalleCarga?: string;

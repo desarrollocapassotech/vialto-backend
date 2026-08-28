@@ -72,10 +72,12 @@ export class ViajesProcessor implements IImportProcessor {
    * Busca un viaje ya importado que corresponda a esta fila. Prioridad:
    * 1) ID Personalizado, si la fila lo trae (match exacto e inequívoco).
    * 2) Si no, la combinación cliente + transporte + origen + destino +
-   *    fecha de carga + fecha de descarga — todos obligatorios en el
-   *    import, así que siempre están disponibles. No es infalible: dos
-   *    viajes reales distintos con esos mismos datos (mismo cliente y
-   *    transporte, misma ruta, mismo día) se tratarían como el mismo.
+   *    fecha de carga + fecha de descarga (fecha de carga obligatoria en
+   *    el import; descarga opcional — si la fila no la trae, matchea
+   *    contra otros viajes que tampoco la tengan, vía IS NULL). No es
+   *    infalible: dos viajes reales distintos con esos mismos datos (mismo
+   *    cliente y transporte, misma ruta, mismo día) se tratarían como el
+   *    mismo.
    */
   private async findExisting(
     row: ValidatedRow,
@@ -102,7 +104,7 @@ export class ViajesProcessor implements IImportProcessor {
         origen: { equals: (row.origen as string).trim(), mode: "insensitive" },
         destino: { equals: (row.destino as string).trim(), mode: "insensitive" },
         fechaCarga: row.fechaCarga as Date,
-        fechaDescarga: row.fechaDescarga as Date,
+        fechaDescarga: row.fechaDescarga as Date | null,
       },
       select: { id: true },
     });
@@ -283,9 +285,7 @@ export class ViajesProcessor implements IImportProcessor {
       const fechaDescarga = this.toDate(row.fechaDescarga);
 
       if (!fechaCarga) throw new Error("La fecha de carga es requerida.");
-      if (!fechaDescarga)
-        throw new Error("La fecha de descarga es requerida.");
-      assertFechaDescargaValida(fechaCarga, fechaDescarga);
+      if (fechaDescarga) assertFechaDescargaValida(fechaCarga, fechaDescarga);
 
       // ── Clasificación explícita de flota ──────────────────────────────
       // No se infiere nada destructivo. Si la columna TIPO DE FLOTA no viene
@@ -492,14 +492,14 @@ export class ViajesProcessor implements IImportProcessor {
     return gastos;
   }
 
-  /** Clave normalizada para el fallback compuesto de `findExisting` — misma combinación de campos, para poder comparar en memoria sin una query por fila. */
+  /** Clave normalizada para el fallback compuesto de `findExisting` — misma combinación de campos, para poder comparar en memoria sin una query por fila. `fechaDescarga` es opcional: las filas/viajes sin ella comparten la misma clave vacía, igual que el `IS NULL` que arma la query. */
   private claveCompuesta(
     clienteId: string,
     transportistaId: string,
     origen: string,
     destino: string,
     fechaCarga: Date,
-    fechaDescarga: Date,
+    fechaDescarga: Date | null,
   ): string {
     return [
       clienteId,
@@ -507,7 +507,7 @@ export class ViajesProcessor implements IImportProcessor {
       origen.trim().toLowerCase(),
       destino.trim().toLowerCase(),
       fechaCarga.toISOString(),
-      fechaDescarga.toISOString(),
+      fechaDescarga ? fechaDescarga.toISOString() : "",
     ].join("|");
   }
 
@@ -560,7 +560,9 @@ export class ViajesProcessor implements IImportProcessor {
 
     // Fallback compuesto (cliente + transporte + origen + destino + fechas)
     // para las filas que no matchearon por ID Personalizado — mismos campos
-    // que `findExisting`, todos obligatorios en el template de Viajes.
+    // que `findExisting`. Fecha de carga es obligatoria en el template de
+    // Viajes; fecha de descarga es opcional — una fila sin ella solo
+    // matchea contra viajes que tampoco la tengan (ver `claveCompuesta`).
     type FilaCompuesta = {
       row: ValidatedRow;
       clienteId: string;
@@ -568,7 +570,7 @@ export class ViajesProcessor implements IImportProcessor {
       origen: string;
       destino: string;
       fechaCarga: Date;
-      fechaDescarga: Date;
+      fechaDescarga: Date | null;
     };
     const conDatosCompuestos: FilaCompuesta[] = [];
     for (const r of pendientes) {
@@ -578,14 +580,7 @@ export class ViajesProcessor implements IImportProcessor {
       const destino = r.destino as string | undefined;
       const fechaCarga = this.toDate(r.fechaCarga);
       const fechaDescarga = this.toDate(r.fechaDescarga);
-      if (
-        clienteId &&
-        transportistaId &&
-        origen &&
-        destino &&
-        fechaCarga &&
-        fechaDescarga
-      ) {
+      if (clienteId && transportistaId && origen && destino && fechaCarga) {
         conDatosCompuestos.push({
           row: r,
           clienteId,

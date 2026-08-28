@@ -1216,10 +1216,12 @@ export class ViajesService {
       );
       await assertProductosClientesDelViaje(this.prisma, tenantId, clientesNorm);
     }
-    assertFechaDescargaValida(
-      new Date(dto.fechaCarga),
-      new Date(dto.fechaDescarga),
-    );
+    if (dto.fechaDescarga) {
+      assertFechaDescargaValida(
+        new Date(dto.fechaCarga),
+        new Date(dto.fechaDescarga),
+      );
+    }
     const etapa = this.parseEtapaViaje(dto.etapa);
     if (esEtapaFinal(etapa)) {
       throw new BadRequestException(
@@ -1285,7 +1287,7 @@ export class ViajesService {
           origen: dto.origen ?? null,
           destino: destinoFinal,
           fechaCarga: new Date(dto.fechaCarga),
-          fechaDescarga: new Date(dto.fechaDescarga),
+          fechaDescarga: dto.fechaDescarga ? new Date(dto.fechaDescarga) : null,
           detalleCarga: dto.detalleCarga ?? null,
           kmRecorridos: dto.kmRecorridos ?? null,
           litrosConsumidos: dto.litrosConsumidos ?? null,
@@ -1471,14 +1473,15 @@ export class ViajesService {
     await this.assertRefs(tenantId, merged);
     if (dto.fechaCarga !== undefined && !dto.fechaCarga)
       throw new BadRequestException("La fecha de carga es requerida");
-    if (dto.fechaDescarga !== undefined && !dto.fechaDescarga)
-      throw new BadRequestException("La fecha de descarga es requerida");
     const fcResolved = dto.fechaCarga
       ? new Date(dto.fechaCarga)
       : current.fechaCarga;
-    const fdResolved = dto.fechaDescarga
-      ? new Date(dto.fechaDescarga)
-      : current.fechaDescarga;
+    const fdResolved =
+      dto.fechaDescarga === undefined
+        ? current.fechaDescarga
+        : dto.fechaDescarga
+          ? new Date(dto.fechaDescarga)
+          : null;
     if (fcResolved && fdResolved)
       assertFechaDescargaValida(fcResolved, fdResolved);
     if (!op.transportistaId) {

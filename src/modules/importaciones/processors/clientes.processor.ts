@@ -31,6 +31,10 @@ export class ClientesProcessor implements IImportProcessor {
       email: (row.email as string | null)?.trim() || undefined,
       telefono: (row.telefono as string | null)?.trim() || undefined,
       direccion: (row.direccion as string | null)?.trim() || undefined,
+      condicionIva:
+        row.condicionIva != null ? Number(row.condicionIva) : undefined,
+      condicionTributaria:
+        (row.condicionTributaria as string | null)?.trim() || undefined,
     };
 
     const existing = await this.prisma.cliente.findFirst({

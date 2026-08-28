@@ -8,7 +8,6 @@ export class UpdateTenantDto {
   @IsOptional() @IsInt() @Type(() => Number) maxUsers?: number;
   @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;
   @IsOptional() @IsDateString() billingRenewsAt?: string;
-  @IsOptional() @IsString() whiteLabelDomain?: string;
   @IsOptional() @IsString() labelIdentificacionPersonalizadaViajes?: string;
   /** true = el admin del tenant no ve la pantalla de import masivo (superadmin sigue pudiendo usarla). */
   @IsOptional() @IsBoolean() importacionesOcultas?: boolean;

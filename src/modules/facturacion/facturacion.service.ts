@@ -127,7 +127,7 @@ export class FacturacionService {
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    return tenant?.modules.includes("integracion-arca") ?? false;
+    return tenant?.modules.includes("emision-facturas-arca") ?? false;
   }
 
   private toShape(

@@ -58,11 +58,11 @@ export class LiquidacionesController {
     private readonly conceptosService: ConceptosLiquidacionService,
   ) {}
 
-  // ── Config (requiere integracion-arca) ────────────────────────────────────
+  // ── Config (requiere emision-facturas-arca o emision-liquido-producto-arca) ─
 
   @ApiOperation({ summary: "Obtener configuración ARCA del tenant" })
   @Get("config")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   getConfig(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
@@ -71,7 +71,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Crear / actualizar configuración ARCA del tenant" })
   @Post("config")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   upsertConfig(
     @CurrentAuth() auth: AuthPayload,
@@ -87,7 +87,7 @@ export class LiquidacionesController {
     summary: "Subir logo del emisor (embebido en los PDF de comprobantes)",
   })
   @Post("config/logo")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   @UseInterceptors(
     FileInterceptor("file", {
@@ -106,18 +106,18 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Quitar el logo del emisor" })
   @Delete("config/logo")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   removeLogo(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.removeLogo(auth.tenantId);
   }
 
-  // ── Liquidaciones CRUD (facturacion OR integracion-arca) ─────────────────
+  // ── Liquidaciones CRUD (facturacion OR emision-liquido-producto-arca) ────
 
   @ApiOperation({ summary: "Listar liquidaciones del tenant" })
   @Get("liquidaciones")
-  @RequireModule("facturacion", "integracion-arca")
+  @RequireModule("facturacion", "emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   findAll(@CurrentAuth() auth: AuthPayload, @Query("estado") estado?: string) {
     assertTenantId(auth.tenantId);
@@ -128,7 +128,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Listar conceptos de liquidación del tenant" })
   @Get("conceptos-liquidacion")
-  @RequireModule("integracion-arca", "facturacion")
+  @RequireModule("emision-liquido-producto-arca", "facturacion")
   @Roles("admin", "member", "superadmin")
   listConceptos(
     @CurrentAuth() auth: AuthPayload,
@@ -144,7 +144,7 @@ export class LiquidacionesController {
     summary: "Crear concepto de liquidación (catálogo o alta rápida)",
   })
   @Post("conceptos-liquidacion")
-  @RequireModule("integracion-arca", "facturacion")
+  @RequireModule("emision-liquido-producto-arca", "facturacion")
   @Roles("admin", "superadmin")
   createConcepto(
     @CurrentAuth() auth: AuthPayload,
@@ -156,7 +156,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Editar / desactivar concepto de liquidación" })
   @Patch("conceptos-liquidacion/:id")
-  @RequireModule("integracion-arca", "facturacion")
+  @RequireModule("emision-liquido-producto-arca", "facturacion")
   @Roles("admin", "superadmin")
   updateConcepto(
     @CurrentAuth() auth: AuthPayload,
@@ -169,7 +169,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Obtener liquidación por ID" })
   @Get("liquidaciones/:id")
-  @RequireModule("facturacion", "integracion-arca")
+  @RequireModule("facturacion", "emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   findOne(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
     assertTenantId(auth.tenantId);
@@ -181,7 +181,7 @@ export class LiquidacionesController {
       "Crear liquidación (CVLP Tipo 60) — calcula montos automáticamente",
   })
   @Post("liquidaciones")
-  @RequireModule("facturacion", "integracion-arca")
+  @RequireModule("facturacion", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   createLiquidacion(
     @CurrentAuth() auth: AuthPayload,
@@ -198,7 +198,7 @@ export class LiquidacionesController {
       "Período, comisión e IVA solo en borrador, error o pendiente_cae.",
   })
   @Patch("liquidaciones/:id")
-  @RequireModule("facturacion", "integracion-arca")
+  @RequireModule("facturacion", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   updateLiquidacion(
     @CurrentAuth() auth: AuthPayload,
@@ -212,18 +212,18 @@ export class LiquidacionesController {
   @ApiOperation({ summary: "Eliminar liquidación en borrador o con error" })
   @Delete("liquidaciones/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequireModule("facturacion", "integracion-arca")
+  @RequireModule("facturacion", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   deleteLiquidacion(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
     assertTenantId(auth.tenantId);
     return this.service.deleteLiquidacion(auth.tenantId, id);
   }
 
-  // ── Liquidaciones ARCA-específico (requiere integracion-arca) ────────────
+  // ── Liquidaciones ARCA-específico (requiere emision-liquido-producto-arca) ─
 
   @ApiOperation({ summary: "Descargar PDF de liquidación" })
   @Get("liquidaciones/:id/pdf")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   async getPdf(
     @CurrentAuth() auth: AuthPayload,
@@ -263,7 +263,7 @@ export class LiquidacionesController {
       "PDF del comprobante de anulación (Nota de Crédito o Nota de Débito) de la liquidación",
   })
   @Get("liquidaciones/:id/pdf-anulacion")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   async getPdfAnulacion(
     @CurrentAuth() auth: AuthPayload,
@@ -303,7 +303,7 @@ export class LiquidacionesController {
   })
   @Post("liquidaciones/:id/emitir")
   @HttpCode(HttpStatus.OK)
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   emitirLiquidacion(
     @CurrentAuth() auth: AuthPayload,
@@ -319,7 +319,7 @@ export class LiquidacionesController {
   })
   @Post("liquidaciones/:id/anular")
   @HttpCode(HttpStatus.OK)
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   anularLiquidacion(
     @CurrentAuth() auth: AuthPayload,
@@ -335,7 +335,7 @@ export class LiquidacionesController {
   })
   @Post("facturas/:facturaId/emitir")
   @HttpCode(HttpStatus.OK)
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca")
   @Roles("admin", "superadmin")
   emitirFactura(
     @CurrentAuth() auth: AuthPayload,
@@ -352,7 +352,7 @@ export class LiquidacionesController {
   })
   @Post("facturas/:facturaId/anular")
   @HttpCode(HttpStatus.OK)
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca")
   @Roles("admin", "superadmin")
   anularFactura(
     @CurrentAuth() auth: AuthPayload,
@@ -370,7 +370,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Descargar PDF de factura A/B" })
   @Get("facturas/:facturaId/pdf")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca")
   @Roles("admin", "member", "superadmin")
   async getFacturaPdf(
     @CurrentAuth() auth: AuthPayload,
@@ -409,7 +409,7 @@ export class LiquidacionesController {
     summary: "Descargar PDF de Nota de Crédito de anulación de factura",
   })
   @Get("facturas/:facturaId/pdf-anulacion")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca")
   @Roles("admin", "member", "superadmin")
   async getFacturaPdfAnulacion(
     @CurrentAuth() auth: AuthPayload,
@@ -449,7 +449,7 @@ export class LiquidacionesController {
     summary: "Subir comprobante adjunto (PDF o imagen) a Cloudinary",
   })
   @Post("upload-comprobante")
-  @RequireModule("facturacion", "integracion-arca")
+  @RequireModule("facturacion", "emision-facturas-arca", "emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   @UseInterceptors(
     FileInterceptor("file", {
@@ -468,7 +468,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Logs de auditoría de requests a AFIP SDK" })
   @Get("logs")
-  @RequireModule("integracion-arca")
+  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   findLogs(
     @CurrentAuth() auth: AuthPayload,

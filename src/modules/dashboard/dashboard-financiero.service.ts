@@ -194,7 +194,7 @@ export class DashboardFinancieroService {
     const mod = new Set((tenant?.modules ?? []).map((m) => m.toLowerCase()));
     const hasViajes = mod.has('viajes');
     const hasFacturacion = mod.has('facturacion') || hasViajes;
-    const hasIntegracionArca = mod.has('integracion-arca');
+    const hasIntegracionArca = mod.has('emision-liquido-producto-arca');
 
     const now = new Date();
     const start = from ? startOfDayLocal(from) : new Date(now.getFullYear(), now.getMonth(), 1);

@@ -73,7 +73,7 @@ export async function syncFacturacionEstadoViaje(
   });
   if (!viaje) return;
 
-  const tieneArca = viaje.tenant.modules.includes('integracion-arca');
+  const tieneArca = viaje.tenant.modules.includes('emision-facturas-arca');
   const cobrado =
     opts.cobrado ?? viaje.facturacionEstado === 'cobrado';
   const next = mapFacturacionEstado(viaje.factura, cobrado, tieneArca);
@@ -102,7 +102,7 @@ export async function syncFacturacionEstadoViajes(
  * salvo que sea la única existente (para poder mostrar "Anulado" en vez de
  * "Sin liquidar" cuando corresponde). `null` solo si el viaje no tiene
  * transportista externo — eso sí es "no aplica" independientemente de ARCA.
- * Tenants sin `integracion-arca` SÍ pueden tener liquidaciones reales (registro
+ * Tenants sin `emision-liquido-producto-arca` SÍ pueden tener liquidaciones reales (registro
  * manual vía `CrearLiquidacionManualModal` con `hasArca=false`), así que no hay
  * que nulear el indicador para ellos — `mapLiquidacionEstado` ya se encarga de
  * no exponer sub-estados de AFIP cuando `tieneArca` es falso.
@@ -133,7 +133,7 @@ export async function syncLiquidacionEstadoViaje(
     return;
   }
 
-  const tieneArca = viaje.tenant.modules.includes('integracion-arca');
+  const tieneArca = viaje.tenant.modules.includes('emision-liquido-producto-arca');
   const activa = viaje.liquidacionesViaje
     .map((lv) => lv.liquidacion)
     .filter((l) => l.estado !== 'anulado')

@@ -673,7 +673,7 @@ export class DashboardService {
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    const tieneArca = tenant?.modules.includes('integracion-arca') ?? false;
+    const tieneArca = tenant?.modules.includes('emision-facturas-arca') ?? false;
     const candidatas = await this.prisma.factura.findMany({
       where: {
         tenantId,

@@ -6,7 +6,8 @@ export const VIALTO_MODULES = [
   'stock',
   'combustible',
   'mantenimiento',
-  'integracion-arca',
+  'emision-facturas-arca',
+  'emision-liquido-producto-arca',
 ] as const;
 
 export type VialtoModuleName = (typeof VIALTO_MODULES)[number];

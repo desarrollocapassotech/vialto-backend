@@ -50,6 +50,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@dbml/core": "^10.1.1",
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@types/express": "^5.0.0",

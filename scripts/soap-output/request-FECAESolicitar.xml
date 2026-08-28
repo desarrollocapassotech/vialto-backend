@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">
+  <soap:Body>
+    <ar:FECAESolicitar>
+      <ar:Auth>
+        <ar:Token>PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8c3NvIHZlcnNpb249IjIuMCI+CiAgICA8aWQgc3JjPSJDTj13c2FhLCBPPUFGSVAsIEM9QVIsIFNFUklBTE5VTUJFUj1DVUlUIDMzNjkzNDUwMjM5IiBkc3Q9IkNOPXdzZmUsIE89QUZJUCwgQz1BUiIgdW5pcXVlX2lkPSIyMTUxMzc0MzkyIiBnZW5fdGltZT0iMTc4Nzg2MzI2NiIgZXhwX3RpbWU9IjE3ODc5MDY1MjYiLz4KICAgIDxvcGVyYXRpb24gdHlwZT0ibG9naW4iIHZhbHVlPSJncmFudGVkIj4KICAgICAgICA8bG9naW4gZW50aXR5PSIzMzY5MzQ1MDIzOSIgc2VydmljZT0id3NmZSIgdWlkPSJTRVJJQUxOVU1CRVI9Q1VJVCAzMDcxNjc0MTc5MiwgQ049ZmFjdHVyYWNpb24uZWxlY3Ryb25pY2EiIGF1dGhtZXRob2Q9ImNtcyIgcmVnbWV0aG9kPSIyMiI+CiAgICAgICAgICAgIDxyZWxhdGlvbnM+CiAgICAgICAgICAgICAgICA8cmVsYXRpb24ga2V5PSIzMDcxNjc0MTc5MiIgcmVsdHlwZT0iNCIvPgogICAgICAgICAgICA8L3JlbGF0aW9ucz4KICAgICAgICA8L2xvZ2luPgogICAgPC9vcGVyYXRpb24+Cjwvc3NvPgo=</ar:Token>
+        <ar:Sign>rJd2zlZQZEn/BB9shZZssPOAEKMjJWw0+8LzKUVY2mj5WvbJ6okZke6yqHz2IJ47TJ3eFWVXQpjYctlD10hfZS8c7vRXSw41T2D7fXEfy60mIfLXtL+mIwvtCQeri7mw6XaxO4uRs+g0CWuaJYVtULaGvn2rpJ/49wJJuUDDWnA=</ar:Sign>
+        <ar:Cuit>30716741792</ar:Cuit>
+      </ar:Auth>
+      <ar:FeCAEReq>
+        <ar:FeCabReq>
+          <ar:CantReg>1</ar:CantReg>
+          <ar:PtoVta>3</ar:PtoVta>
+          <ar:CbteTipo>60</ar:CbteTipo>
+        </ar:FeCabReq>
+        <ar:FeDetReq>
+          <ar:FECAEDetRequest>
+            <ar:Concepto>1</ar:Concepto>
+            <ar:DocTipo>80</ar:DocTipo>
+            <ar:DocNro>20342732578</ar:DocNro>
+            <ar:CbteDesde>4</ar:CbteDesde>
+            <ar:CbteHasta>4</ar:CbteHasta>
+            <ar:CbteFch>20260827</ar:CbteFch>
+            <ar:ImpTotal>-55.66</ar:ImpTotal>
+            <ar:ImpTotConc>0</ar:ImpTotConc>
+            <ar:ImpNeto>-46.00</ar:ImpNeto>
+            <ar:ImpOpEx>0</ar:ImpOpEx>
+            <ar:ImpIVA>-9.66</ar:ImpIVA>
+            <ar:ImpTrib>0</ar:ImpTrib>
+            <ar:MonId>PES</ar:MonId>
+            <ar:MonCotiz>1</ar:MonCotiz>
+            <ar:CondicionIVAReceptorId>1</ar:CondicionIVAReceptorId>
+          <ar:CbtesAsoc><ar:CbteAsoc><ar:Tipo>60</ar:Tipo><ar:PtoVta>3</ar:PtoVta><ar:Nro>3</ar:Nro></ar:CbteAsoc></ar:CbtesAsoc>
+          <ar:Iva><ar:AlicIva><ar:Id>5</ar:Id><ar:BaseImp>-46.00</ar:BaseImp><ar:Importe>-9.66</ar:Importe></ar:AlicIva></ar:Iva>
+          </ar:FECAEDetRequest>
+        </ar:FeDetReq>
+      </ar:FeCAEReq>
+    </ar:FECAESolicitar>
+  </soap:Body>
+</soap:Envelope>

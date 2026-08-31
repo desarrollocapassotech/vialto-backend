@@ -146,6 +146,47 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
       },
     },
   },
+  clientes: {
+    label: "Clientes",
+    formularios: {
+      alta_cliente: {
+        label: "Alta de cliente",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "direccion", label: "Dirección", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+        ]
+      },
+      edicion_cliente: {
+        label: "Edición de cliente",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "direccion", label: "Dirección", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+        ]
+      },
+      detalle_cliente: {
+        label: "Detalle de cliente",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "direccion", label: "Dirección", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+        ]
+      }
+    }
+  },
 };
 
 export function getCatalogoFormulario(modulo: string, formulario: string): CampoCatalogo[] {

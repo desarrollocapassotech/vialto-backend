@@ -19,6 +19,17 @@ export class MantenimientoService {
     if (!v) throw new BadRequestException('Vehículo inválido');
   }
 
+  private assertDescripcionSiTipoOtro(
+    tipos: string[],
+    descripcion: string | null | undefined,
+  ) {
+    if (tipos.includes('otro') && !descripcion?.trim()) {
+      throw new BadRequestException(
+        'La descripción es obligatoria cuando el tipo es "Otro"',
+      );
+    }
+  }
+
   findAll(tenantId: string, vehiculoId?: string) {
     return this.prisma.intervencion.findMany({
       where: { tenantId, ...(vehiculoId ? { vehiculoId } : {}) },
@@ -37,14 +48,16 @@ export class MantenimientoService {
 
   async create(tenantId: string, userId: string, dto: CreateIntervencionDto) {
     await this.assertVehiculo(tenantId, dto.vehiculoId);
+    this.assertDescripcionSiTipoOtro(dto.tipos, dto.descripcion);
     return this.prisma.intervencion.create({
       data: {
         tenantId,
         vehiculoId: dto.vehiculoId,
-        tipo: dto.tipo,
+        tipos: dto.tipos,
         descripcion: dto.descripcion ?? null,
         km: dto.km ?? null,
         proximoKm: dto.proximoKm ?? null,
+        proximaFecha: dto.proximaFecha ? new Date(dto.proximaFecha) : null,
         fecha: new Date(dto.fecha),
         createdBy: userId,
       },
@@ -55,12 +68,18 @@ export class MantenimientoService {
     const cur = await this.findOne(id, tenantId);
     const vid = dto.vehiculoId ?? cur.vehiculoId;
     await this.assertVehiculo(tenantId, vid);
+    const tipos = dto.tipos ?? cur.tipos;
+    const descripcion =
+      dto.descripcion !== undefined ? dto.descripcion : cur.descripcion;
+    this.assertDescripcionSiTipoOtro(tipos, descripcion);
     return this.prisma.intervencion.update({
       where: { id },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: {
         ...dto,
         fecha: dto.fecha === undefined ? undefined : new Date(dto.fecha),
+        proximaFecha:
+          dto.proximaFecha === undefined ? undefined : new Date(dto.proximaFecha),
       } as any,
     });
   }

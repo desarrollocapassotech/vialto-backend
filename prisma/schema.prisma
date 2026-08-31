@@ -928,10 +928,11 @@ model Intervencion {
   tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   vehiculoId  String
   vehiculo    Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
-  tipo        String // service | aceite | filtro | cubiertas | otro
+  tipos       String[] // catálogo por sistema del vehículo (mínimo 1) — ver src/modules/mantenimiento/tipos-intervencion.const.ts
   descripcion String?
   km          Int?
   proximoKm   Int?
+  proximaFecha DateTime?
   fecha       DateTime
   createdAt   DateTime @default(now())
   createdBy   String

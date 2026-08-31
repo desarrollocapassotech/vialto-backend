@@ -195,7 +195,8 @@ export class LiquidacionesController {
     summary: "Actualizar liquidación (comprobante diferido y datos editables)",
     description:
       "Permite adjuntar/actualizar comprobanteUrl en cualquier estado. " +
-      "Período, comisión e IVA solo en borrador, error o pendiente_cae.",
+      "Período, comisión e IVA solo en borrador, error o pendiente_cae. " +
+      "viajeIds (agregar/quitar viajes) solo en borrador.",
   })
   @Patch("liquidaciones/:id")
   @RequireModule("facturacion", "emision-liquido-producto-arca")

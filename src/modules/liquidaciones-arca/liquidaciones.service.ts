@@ -357,12 +357,22 @@ export class LiquidacionesService {
       dto.periodoHasta !== undefined ||
       dto.comisionPct !== undefined ||
       dto.ivaPct !== undefined ||
-      dto.conceptosLineas !== undefined;
+      dto.conceptosLineas !== undefined ||
+      dto.viajeIds !== undefined;
 
     const estadosEditables = new Set(['borrador', 'error', 'pendiente_cae']);
     if (wantsDatos && !estadosEditables.has(liq.estado)) {
       throw new BadRequestException(
         'Solo se pueden modificar período/comisión/IVA/conceptos en liquidaciones en borrador, error o pendiente de CAE.',
+      );
+    }
+
+    // Agregar/quitar viajes solo se permite con la liquidación en borrador —
+    // una vez que entró al circuito de emisión (pendiente_cae/error) el conjunto
+    // de viajes liquidados ya se comunicó/intentó comunicar a ARCA.
+    if (dto.viajeIds !== undefined && liq.estado !== 'borrador') {
+      throw new BadRequestException(
+        'Solo se pueden agregar o quitar viajes de una liquidación en borrador.',
       );
     }
 
@@ -388,15 +398,102 @@ export class LiquidacionesService {
       data.comprobanteUrl = dto.comprobanteUrl || null;
     }
 
+    // ── Reemplazo del conjunto de viajes (solo borrador) ────────────────────
+    let viajesVigentes = liq.viajes.map((v) => ({
+      id: v.viajeId,
+      numero: v.viaje.numero ?? '',
+    }));
+    let brutoActual = liq.bruto as number;
+    let viajeIdsParaSync = viajesVigentes.map((v) => v.id);
+
+    if (dto.viajeIds !== undefined) {
+      const nuevosIds = [...new Set(dto.viajeIds)];
+      const viajesConMeta = await this.prisma.viaje.findMany({
+        where: { id: { in: nuevosIds }, tenantId, transportistaId: liq.transportistaId },
+      });
+      if (viajesConMeta.length !== nuevosIds.length) {
+        throw new BadRequestException(
+          'Algunos viajes no existen, no pertenecen al tenant o no corresponden al transportista de la liquidación.',
+        );
+      }
+
+      const existentesSet = new Set(viajesVigentes.map((v) => v.id));
+      const agregados = viajesConMeta.filter((v) => !existentesSet.has(v.id));
+      if (agregados.length > 0) {
+        await this.assertViajesSinLiquidacionActiva(
+          tenantId,
+          liq.transportistaId,
+          agregados,
+        );
+      }
+
+      let brutoNuevo = 0;
+      const viajesDetalle = viajesConMeta.map((v) => {
+        const tnDestino = v.cantidadTransportista ?? null;
+        const tarifaTransportista = v.precioUnitarioTransportista ?? null;
+        const subtotal =
+          tnDestino != null && tarifaTransportista != null
+            ? round2(tnDestino * tarifaTransportista)
+            : round2(v.precioTransportistaExterno ?? 0);
+        brutoNuevo += subtotal;
+        return {
+          viajeId: v.id,
+          tnOrigen: null as number | null,
+          tnDestino,
+          tarifaTransportista,
+          subtotal,
+          gastosAdmin: 0,
+        };
+      });
+      brutoNuevo = round2(brutoNuevo);
+
+      // Snapshot: se borra y recrea el detalle completo por viaje.
+      await this.prisma.liquidacionViaje.deleteMany({
+        where: { liquidacionId: id },
+      });
+      await this.prisma.liquidacionViaje.createMany({
+        data: viajesDetalle.map((d) => ({
+          tenantId,
+          liquidacionId: id,
+          viajeId: d.viajeId,
+          tnOrigen: d.tnOrigen,
+          tnDestino: d.tnDestino,
+          tarifaTransportista: d.tarifaTransportista,
+          subtotal: d.subtotal,
+          gastosAdmin: d.gastosAdmin,
+        })),
+      });
+
+      // Conceptos "por viaje puntual" cuyo viaje se quitó quedan huérfanos —
+      // se degradan a GENERAL para no perder el monto cargado por el usuario.
+      if (dto.conceptosLineas === undefined) {
+        await this.db.liquidacionConceptoLinea.updateMany({
+          where: {
+            liquidacionId: id,
+            modoAplicacion: 'VIAJE_PUNTUAL',
+            viajeId: { notIn: nuevosIds },
+          },
+          data: { modoAplicacion: 'GENERAL', viajeId: null },
+        });
+      }
+
+      viajeIdsParaSync = [...new Set([...viajeIdsParaSync, ...nuevosIds])];
+      viajesVigentes = viajesConMeta.map((v) => ({ id: v.id, numero: v.numero ?? '' }));
+      brutoActual = brutoNuevo;
+      data.cantViajes = nuevosIds.length;
+      data.bruto = brutoNuevo;
+    }
+
     const needsRecalc =
       dto.comisionPct !== undefined ||
       dto.ivaPct !== undefined ||
-      dto.conceptosLineas !== undefined;
+      dto.conceptosLineas !== undefined ||
+      dto.viajeIds !== undefined;
 
     if (needsRecalc) {
       const comisionPct =
         dto.comisionPct !== undefined ? dto.comisionPct : liq.comisionPct;
-      const bruto = liq.bruto as number;
+      const bruto = brutoActual;
       const comision = round2(bruto * comisionPct / 100);
 
       let ivaPct = dto.ivaPct;
@@ -427,7 +524,7 @@ export class LiquidacionesService {
         comision,
         ivaPctDefault: ivaPct,
         lineas: lineasResueltas,
-        viajes: liq.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
+        viajes: viajesVigentes,
       });
       data.comisionPct = comisionPct;
       data.comision = comision;
@@ -463,6 +560,11 @@ export class LiquidacionesService {
     }
 
     await this.prisma.liquidacion.update({ where: { id }, data });
+
+    if (dto.viajeIds !== undefined) {
+      await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsParaSync);
+    }
+
     return this.findById(tenantId, id);
   }
 

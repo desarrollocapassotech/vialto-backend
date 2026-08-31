@@ -4,7 +4,7 @@ import * as QRCode from 'qrcode';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
 import { buildComprobanteCvlp } from './arca-cvlp.util';
-import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
+import { cvlpPdfPieFinanciero, resolveIvaPct, round2 } from './arca-iva.util';
 import {
   buildFacturaConceptosList,
   defaultFacturaLineas,
@@ -402,6 +402,19 @@ export class FacturaPdfService {
           }
           if (item.precioUnitario == null && viaje.precioUnitarioFactura != null) {
             item.precioUnitario = viaje.precioUnitarioFactura;
+          }
+          // Cantidad × precio tienen que cuadrar con el neto ya autorizado.
+          // Si el viaje quedó desfasado respecto de la línea, no mostremos un
+          // unitario que al multiplicar dé otro IVA (calculadora vs pie).
+          if (
+            item.cantidad != null &&
+            item.precioUnitario != null &&
+            round2(item.cantidad * item.precioUnitario) !== round2(item.importeBase)
+          ) {
+            item.precioUnitario =
+              item.cantidad !== 0
+                ? round2(item.importeBase / item.cantidad)
+                : item.precioUnitario;
           }
         }
       }

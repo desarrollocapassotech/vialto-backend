@@ -6,10 +6,19 @@
 /** Misma regla que `FacturacionService.computeImporte` para alinear importe con viajes. */
 export function importeOperativoFactura(
   importeGuardado: number,
-  viajes: { monto?: number | null }[],
+  viajes: Array<{
+    monto?: number | null;
+    cantidadFactura?: number | null;
+    precioUnitarioFactura?: number | null;
+  }>,
 ): number {
   if (viajes.length === 0) return importeGuardado;
-  return viajes.reduce((s, v) => s + (v.monto ?? 0), 0);
+  return viajes.reduce((s, v) => {
+    if (v.cantidadFactura != null && v.precioUnitarioFactura != null) {
+      return s + Math.round(v.cantidadFactura * v.precioUnitarioFactura * 100) / 100;
+    }
+    return s + (v.monto ?? 0);
+  }, 0);
 }
 
 /** Ciclo de vida del comprobante — un solo valor a la vez, nunca "cobrado" (ver `cobrado` abajo). */

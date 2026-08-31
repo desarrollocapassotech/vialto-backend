@@ -180,7 +180,8 @@ test('groupAlicuotasIva totaliza por Id y recalcula Importe = BaseImp × %', () 
   assert.equal(cincoY21[0].Importe, round2((900 * 21) / 100));
   assert.ok(cincoY21.every((a) => a.BaseImp > 0));
 
-  // Descuento a 0% no puede generar AlicIva con BaseImp negativo
+  // Descuento a 0% no puede generar AlicIva con BaseImp negativo, y NO se
+  // pliega a 21% (si no, el IVA baja 21% de ese descuento).
   const descExento = groupAlicuotasIva(
     [
       { importeBase: 1000, ivaPct: 21 },
@@ -190,8 +191,25 @@ test('groupAlicuotasIva totaliza por Id y recalcula Importe = BaseImp × %', () 
     { fallbackIvaPct: 21 },
   );
   assert.equal(descExento.length, 1);
-  assert.equal(descExento[0].BaseImp, 870);
+  assert.equal(descExento[0].Id, 5);
+  assert.equal(descExento[0].BaseImp, 920); // 1000 − 80; el −50 @ 0% no entra
+  assert.equal(descExento[0].Importe, round2((920 * 21) / 100));
   assert.ok(descExento[0].BaseImp > 0);
+
+  // Caso real CVLP: flete+comisión 21% y gastos/seguro 0% (base negativa).
+  const cvlpMixto = groupAlicuotasIva(
+    [
+      { importeBase: 1_102_200, ivaPct: 21 },
+      { importeBase: -88_176, ivaPct: 21 },
+      { importeBase: -1_500, ivaPct: 0 },
+      { importeBase: -3_500, ivaPct: 0 },
+    ],
+    { fallbackIvaPct: 21 },
+  );
+  assert.equal(cvlpMixto.length, 1);
+  assert.equal(cvlpMixto[0].Id, 5);
+  assert.equal(cvlpMixto[0].BaseImp, 1_014_024);
+  assert.equal(cvlpMixto[0].Importe, 212_945.04);
 });
 
 console.log('arca-iva.util.spec.ts: OK');

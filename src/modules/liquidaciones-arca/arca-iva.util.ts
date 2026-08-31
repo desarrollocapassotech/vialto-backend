@@ -1,5 +1,7 @@
 import type { AlicIva } from './types/arca.types';
 
+/** AFIP alícuota 0 % (WSFEv1 AlicIva.Id 3). */
+export const IVA_0_ID = 3;
 /** AFIP alícuota 21 % (WSFEv1). */
 export const IVA_21_ID = 5;
 
@@ -27,7 +29,7 @@ export function isAfipIvaPct(pct: number): boolean {
 
 export function ivaIdFromPct(pct: number): number {
   const p = normalizeIvaPct(pct);
-  if (p === 0) return 3;
+  if (p === 0) return IVA_0_ID;
   if (p === 2.5) return 9;
   if (p === 5) return 8;
   if (p === 10.5) return 4;
@@ -39,7 +41,7 @@ export function ivaIdFromPct(pct: number): number {
 /** Alícuota % oficial de AFIP para un AlicIva.Id (WSFEv1). */
 export function ivaPctFromId(id: number): number {
   switch (id) {
-    case 3:
+    case IVA_0_ID:
       return 0;
     case 9:
       return 2.5;
@@ -61,8 +63,11 @@ export function ivaPctFromId(id: number): number {
  * - Un solo registro por Id (AFIP rechaza Ids repetidos).
  * - Importe = BaseImp × % oficial del Id (AFIP 10051 si no cuadra).
  * - BaseImp debe ser > 0 (AFIP 10020). Descuentos/comisión (bases negativas) se
- *   netean en la misma alícuota; si quedara un Id solo con base ≤ 0, se consolida
- *   todo el neto gravado en la alícuota principal.
+ *   netean en la misma alícuota; si quedara un Id gravado solo con base ≤ 0, se
+ *   consolida el neto gravado en la alícuota principal.
+ * - Las bases a 0% (exento / no gravado) NUNCA se pliegan a 21%: no pueden ir
+ *   en AlicIva si son ≤ 0 (10020) y no deben reducir ImpIVA. Gastos/seguro a 0%
+ *   bajan el neto del pie, no el IVA de las líneas gravadas.
  */
 export function groupAlicuotasIva(
   items: Array<{ importeBase: number; ivaPct: number; importeIva?: number }>,
@@ -78,30 +83,49 @@ export function groupAlicuotasIva(
     map.set(id, round2((map.get(id) ?? 0) + it.importeBase));
   }
 
-  const positive = [...map.entries()]
+  const gravadoEntries = [...map.entries()].filter(([id]) => id !== IVA_0_ID);
+  const exentoBase = round2(map.get(IVA_0_ID) ?? 0);
+  const gravadoSum = round2(gravadoEntries.reduce((s, [, b]) => s + b, 0));
+
+  const positiveGravado = gravadoEntries
     .filter(([, base]) => base > 0)
     .sort((a, b) => b[1] - a[1]);
-  const positiveSum = round2(positive.reduce((s, [, b]) => s + b, 0));
+  const positiveGravadoSum = round2(
+    positiveGravado.reduce((s, [, b]) => s + b, 0),
+  );
 
-  // Había bases negativas en otro Id (ej. descuento a distinta alícuota): consolidar.
-  if (positive.length === 0 || positiveSum !== totalBase) {
-    const primaryId =
-      positive[0]?.[0] ??
-      ivaIdFromPct(opts?.fallbackIvaPct ?? items[0]?.ivaPct ?? 21);
-    return [
-      {
-        Id: primaryId,
-        BaseImp: totalBase,
-        Importe: round2((totalBase * ivaPctFromId(primaryId)) / 100),
-      },
-    ];
+  let alic: AlicIva[] = [];
+
+  if (gravadoSum > 0) {
+    // Descuento gravado a otra alícuota (ej. 21% + 10.5% negativo): consolidar
+    // solo lo gravado. El 0% no entra a esta cuenta.
+    if (positiveGravado.length === 0 || positiveGravadoSum !== gravadoSum) {
+      const primaryId =
+        positiveGravado[0]?.[0] ??
+        ivaIdFromPct(opts?.fallbackIvaPct ?? items[0]?.ivaPct ?? 21);
+      alic = [
+        {
+          Id: primaryId,
+          BaseImp: gravadoSum,
+          Importe: round2((gravadoSum * ivaPctFromId(primaryId)) / 100),
+        },
+      ];
+    } else {
+      alic = positiveGravado.map(([Id, BaseImp]) => ({
+        Id,
+        BaseImp,
+        Importe: round2((BaseImp * ivaPctFromId(Id)) / 100),
+      }));
+    }
   }
 
-  return positive.map(([Id, BaseImp]) => ({
-    Id,
-    BaseImp,
-    Importe: round2((BaseImp * ivaPctFromId(Id)) / 100),
-  }));
+  // AlicIva 0% solo si la base neta es > 0 (AFIP 10020). Un descuento a 0% se
+  // omite del array; no se absorbe en 21%.
+  if (exentoBase > 0) {
+    alic.push({ Id: IVA_0_ID, BaseImp: exentoBase, Importe: 0 });
+  }
+
+  return alic;
 }
 
 /** Alícuota del emisor (`ArcaConfig.ivaGastosAdmin`); default 21 si no hay config. */

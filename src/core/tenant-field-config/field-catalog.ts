@@ -237,6 +237,56 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
       }
     }
   },
+  vehiculos: {
+    label: "Vehículos",
+    formularios: {
+      alta_vehiculo: {
+        label: "Alta de vehículo",
+        campos: [
+          { campo: "patente", label: "Patente", obligatorioSistema: true },
+          { campo: "tipo", label: "Tipo", obligatorioSistema: false },
+          { campo: "marca", label: "Marca", obligatorioSistema: false },
+          { campo: "modelo", label: "Modelo", obligatorioSistema: false },
+          { campo: "anio", label: "Año", obligatorioSistema: false },
+          { campo: "nroChasis", label: "Nro. de chasis", obligatorioSistema: false },
+          { campo: "poliza", label: "Póliza", obligatorioSistema: false },
+          { campo: "vencimientoPoliza", label: "Vencimiento de póliza", obligatorioSistema: false },
+          { campo: "tara", label: "Tara", obligatorioSistema: false },
+          { campo: "precinto", label: "Precinto", obligatorioSistema: false },
+        ]
+      },
+      edicion_vehiculo: {
+        label: "Edición de vehículo",
+        campos: [
+          { campo: "patente", label: "Patente", obligatorioSistema: true },
+          { campo: "tipo", label: "Tipo", obligatorioSistema: false },
+          { campo: "marca", label: "Marca", obligatorioSistema: false },
+          { campo: "modelo", label: "Modelo", obligatorioSistema: false },
+          { campo: "anio", label: "Año", obligatorioSistema: false },
+          { campo: "nroChasis", label: "Nro. de chasis", obligatorioSistema: false },
+          { campo: "poliza", label: "Póliza", obligatorioSistema: false },
+          { campo: "vencimientoPoliza", label: "Vencimiento de póliza", obligatorioSistema: false },
+          { campo: "tara", label: "Tara", obligatorioSistema: false },
+          { campo: "precinto", label: "Precinto", obligatorioSistema: false },
+          { campo: "activo", label: "Estado (Activo)", obligatorioSistema: false },
+        ]
+      },
+      detalle_vehiculo: {
+        label: "Detalle de vehículo",
+        campos: [
+          { campo: "patente", label: "Patente", obligatorioSistema: true },
+          { campo: "tipo", label: "Tipo", obligatorioSistema: false },
+          { campo: "marca", label: "Marca", obligatorioSistema: false },
+          { campo: "modelo", label: "Modelo", obligatorioSistema: false },
+          { campo: "poliza", label: "Póliza", obligatorioSistema: false },
+          { campo: "activo", label: "Estado", obligatorioSistema: false },
+          { campo: "anio", label: "Año", obligatorioSistema: false },
+          { campo: "kmActual", label: "Km. Actual", obligatorioSistema: false },
+          { campo: "createdAt", label: "Alta", obligatorioSistema: false },
+        ]
+      }
+    }
+  },
 };
 
 export function getCatalogoFormulario(modulo: string, formulario: string): CampoCatalogo[] {

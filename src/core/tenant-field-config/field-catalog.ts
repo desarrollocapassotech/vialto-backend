@@ -187,6 +187,56 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
       }
     }
   },
+  transportistas: {
+    label: "Transportistas",
+    formularios: {
+      alta_transportista: {
+        label: "Alta de transportista",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "domicilio", label: "Domicilio", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "paut", label: "PAUT", obligatorioSistema: false },
+          { campo: "permisoInternacional", label: "Permiso Internacional", obligatorioSistema: false },
+          { campo: "fechaVencimientoPermiso", label: "Vto. Permiso Internacional", obligatorioSistema: false },
+        ]
+      },
+      edicion_transportista: {
+        label: "Edición de transportista",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "domicilio", label: "Domicilio", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "paut", label: "PAUT", obligatorioSistema: false },
+          { campo: "permisoInternacional", label: "Permiso Internacional", obligatorioSistema: false },
+          { campo: "fechaVencimientoPermiso", label: "Vto. Permiso Internacional", obligatorioSistema: false },
+        ]
+      },
+      detalle_transportista: {
+        label: "Detalle de transportista",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "domicilio", label: "Domicilio", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "paut", label: "PAUT", obligatorioSistema: false },
+          { campo: "permisoInternacional", label: "Permiso Internacional", obligatorioSistema: false },
+          { campo: "fechaVencimientoPermiso", label: "Vto. Permiso Internacional", obligatorioSistema: false },
+        ]
+      }
+    }
+  },
 };
 
 export function getCatalogoFormulario(modulo: string, formulario: string): CampoCatalogo[] {

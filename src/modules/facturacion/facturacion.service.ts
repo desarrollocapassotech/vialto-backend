@@ -12,8 +12,11 @@ import { FacturaTramoDto } from "./dto/factura-tramo.dto";
 import { CreatePagoDto } from "./dto/create-pago.dto";
 import { FacturasPaginatedQueryDto } from "./dto/facturas-paginated-query.dto";
 import {
+  cobroOptsDeFactura,
   computeEstadoFacturaLectura,
+  importeNetoFactura,
   importeOperativoFactura,
+  roundMoney2,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
@@ -171,6 +174,7 @@ export class FacturacionService {
       ambiente: string | null;
       anuladoPor: string | null;
       diferencia: number | null;
+      ivaPct?: number | null;
       facturarPorTramo?: boolean;
       createdAt: Date;
       viajes: ViajeSnap[];
@@ -180,7 +184,13 @@ export class FacturacionService {
     tieneArca: boolean,
   ) {
     const { viajes, pagos = [], tramos = [], ...f } = row;
-    const importe = importeOperativoFactura(f.importe, viajes);
+    const cobroOpts = cobroOptsDeFactura(
+      { facturarPorTramo: f.facturarPorTramo, ivaPct: f.ivaPct, tramos },
+      tieneArca,
+    );
+    const importe = importeNetoFactura(f.importe, viajes, cobroOpts);
+    const importeACobrar = importeOperativoFactura(f.importe, viajes, cobroOpts);
+    const totalPagado = pagos.reduce((s, p) => s + p.importe, 0);
     const { estado, cobrado, vencida } = computeEstadoFacturaLectura({
       viajes,
       fechaVencimiento: f.fechaVencimiento,
@@ -188,6 +198,9 @@ export class FacturacionService {
       pagos,
       arcaEstado: f.arcaEstado,
       tieneArca,
+      facturarPorTramo: cobroOpts.facturarPorTramo,
+      tramos,
+      ivaPctCabecera: f.ivaPct,
     });
     const tramosOrdenados = [...tramos].sort((a, b) => a.orden - b.orden);
     return {
@@ -203,6 +216,8 @@ export class FacturacionService {
         orden: t.orden,
       })),
       importe,
+      importeACobrar,
+      saldoPendiente: Math.max(0, roundMoney2(importeACobrar - totalPagado)),
       estado,
       cobrado,
       vencida,
@@ -214,8 +229,10 @@ export class FacturacionService {
     row: Parameters<FacturacionService["toShape"]>[0],
     tieneArca: boolean,
   ) {
+    const shaped = this.toShape(row, tieneArca);
+    await this.alignViajesCobroPorTramo(row, tieneArca, shaped.cobrado);
     const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [
-      this.toShape(row, tieneArca),
+      shaped,
     ]);
     return withNombre;
   }
@@ -224,9 +241,36 @@ export class FacturacionService {
     rows: Parameters<FacturacionService["toShape"]>[0][],
     tieneArca: boolean,
   ) {
-    return attachAnuladoPorNombres(
-      this.clerkUsers,
-      rows.map((r) => this.toShape(r, tieneArca)),
+    const shaped = rows.map((r) => this.toShape(r, tieneArca));
+    await Promise.all(
+      rows.map((row, i) =>
+        this.alignViajesCobroPorTramo(row, tieneArca, shaped[i].cobrado),
+      ),
+    );
+    return attachAnuladoPorNombres(this.clerkUsers, shaped);
+  }
+
+  /** Recalcula viajes de facturas por tramo (sin ARCA) según pagos vs. total con IVA. */
+  private async alignViajesCobroPorTramo(
+    row: Parameters<FacturacionService["toShape"]>[0],
+    tieneArca: boolean,
+    cobrado: boolean,
+  ): Promise<void> {
+    if (tieneArca || !row.facturarPorTramo || (row.tramos?.length ?? 0) === 0) {
+      return;
+    }
+    const allCobrado =
+      row.viajes.length > 0 &&
+      row.viajes.every((v) => v.facturacionEstado === "cobrado");
+    const noneCobrado = row.viajes.every(
+      (v) => v.facturacionEstado !== "cobrado",
+    );
+    if ((cobrado && allCobrado) || (!cobrado && noneCobrado)) return;
+    await syncFacturacionEstadoViajes(
+      this.prisma,
+      row.tenantId,
+      row.viajes.map((v) => v.id),
+      { cobrado },
     );
   }
 
@@ -441,17 +485,17 @@ export class FacturacionService {
         orderBy: { fechaEmision: "desc" },
         include,
       });
-      const filtered = rows.map((r) => this.toShape(r, tieneArca)).filter((f) => {
+      const shaped = await this.shapeManyConNombre(rows, tieneArca);
+      const filtered = shaped.filter((f) => {
         if (query.estado === "cobrado") return f.cobrado;
         if (query.estado === "vencida") return f.vencida;
         return f.estado === query.estado;
       });
       const total = filtered.length;
-      const items = await attachAnuladoPorNombres(
-        this.clerkUsers,
-        filtered.slice((page - 1) * pageSize, page * pageSize),
-      );
-      return { items, meta: this.paginatedMeta(page, pageSize, total) };
+      return {
+        items: filtered.slice((page - 1) * pageSize, page * pageSize),
+        meta: this.paginatedMeta(page, pageSize, total),
+      };
     }
 
     const [total, rows] = await this.prisma.$transaction([
@@ -797,9 +841,10 @@ export class FacturacionService {
     const importeOperativo = importeOperativoFactura(
       factura.importe,
       factura.viajes,
+      cobroOptsDeFactura(factura, tieneArca),
     );
     const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
-    const saldo = Math.round((importeOperativo - totalPagado) * 100) / 100;
+    const saldo = roundMoney2(importeOperativo - totalPagado);
 
     if (saldo <= 0.005) {
       return { yaCobrada: true, factura: await this.shapeConNombre(factura, tieneArca) };
@@ -850,6 +895,9 @@ export class FacturacionService {
       pagos: factura.pagos,
       arcaEstado: factura.arcaEstado,
       tieneArca,
+      facturarPorTramo: factura.facturarPorTramo,
+      tramos: factura.tramos,
+      ivaPctCabecera: factura.ivaPct,
     });
 
     await syncFacturacionEstadoViajes(

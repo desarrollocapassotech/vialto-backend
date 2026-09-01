@@ -5,7 +5,7 @@ import {
   engrosarConIva,
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
-import { importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
+import { cobroOptsDeFactura, importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { TenantFieldConfigService } from '../../core/tenant-field-config/tenant-field-config.service';
 
@@ -218,7 +218,9 @@ export class DashboardFinancieroService {
       hasViajes && hasIntegracionArca
         ? this.buildLiquidaciones(tenantId, start, end, whereViajeAtribuido)
         : null,
-      hasFacturacion ? this.buildFacturacion(tenantId, start, end) : null,
+      hasFacturacion
+        ? this.buildFacturacion(tenantId, start, end, mod.has('emision-facturas-arca'))
+        : null,
     ]);
 
     if (margen) out.margen = margen;
@@ -723,6 +725,7 @@ export class DashboardFinancieroService {
     tenantId: string,
     start: Date,
     end: Date,
+    tieneArca: boolean,
   ): Promise<NonNullable<FinancieroDashboardResponse['facturacion']>> {
     const facturas = await this.prisma.factura.findMany({
       where: { tenantId, tipo: 'cliente', fechaEmision: { gte: start, lte: end } },
@@ -734,8 +737,11 @@ export class DashboardFinancieroService {
         moneda: true,
         cbteTipo: true,
         fechaVencimiento: true,
+        facturarPorTramo: true,
+        ivaPct: true,
         pagos: { select: { importe: true, fecha: true } },
-        viajes: { select: { monto: true } },
+        viajes: { select: { id: true, monto: true } },
+        tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
       },
     });
 
@@ -749,7 +755,11 @@ export class DashboardFinancieroService {
     const porClienteMap = new Map<string, { facturado: Money; cobrado: Money; cant: number }>();
 
     for (const f of facturas) {
-      const importeOp = importeOperativoFactura(f.importe, f.viajes);
+      const importeOp = importeOperativoFactura(
+        f.importe,
+        f.viajes,
+        cobroOptsDeFactura(f, tieneArca),
+      );
       const moneda = f.moneda === 'USD' ? 'USD' : 'ARS';
       addMoney(facturadoTotal, moneda, importeOp);
 
@@ -816,13 +826,20 @@ export class DashboardFinancieroService {
       select: {
         importe: true,
         moneda: true,
+        facturarPorTramo: true,
+        ivaPct: true,
         pagos: { select: { importe: true } },
-        viajes: { select: { monto: true } },
+        viajes: { select: { id: true, monto: true } },
+        tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
       },
     });
     const pendienteCobroTotal = emptyMoney();
     for (const f of facturasPendientesSnapshot) {
-      const importeOp = importeOperativoFactura(f.importe, f.viajes);
+      const importeOp = importeOperativoFactura(
+        f.importe,
+        f.viajes,
+        cobroOptsDeFactura(f, tieneArca),
+      );
       const pagado = f.pagos.reduce((s, p) => s + p.importe, 0);
       const pend = Math.max(0, roundMoney(importeOp - pagado));
       if (pend > 0) addMoney(pendienteCobroTotal, f.moneda === 'USD' ? 'USD' : 'ARS', pend);

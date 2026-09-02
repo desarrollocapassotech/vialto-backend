@@ -1465,6 +1465,7 @@ export class LiquidacionesService {
                     idFiscal: true,
                     direccion: true,
                     pais: true,
+                    condicionIva: true,
                     condicionTributaria: true,
                   },
                 },

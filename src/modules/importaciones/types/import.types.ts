@@ -111,6 +111,20 @@ export interface PreviewEntidad {
   esNuevo: boolean;
 }
 
+export interface PreviewFilaCampo {
+  campo: string;
+  label: string;
+  valor: string;
+}
+
+/** Detalle fila por fila de un módulo "simple" (Clientes/Transportistas/Choferes/Vehículos): todas las columnas configuradas con su valor tal como viene del Excel, no solo el nombre. */
+export interface PreviewFilaEntidad {
+  fila: number;
+  /** true = alta nueva, false = actualiza un registro ya existente (ver `IImportProcessor.filasNuevas`). */
+  esNuevo: boolean;
+  campos: PreviewFilaCampo[];
+}
+
 export interface PreviewCambioCampo {
   campo: string;
   antes: string | number | null;
@@ -188,4 +202,12 @@ export interface PreviewResult {
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];
   transportistas?: PreviewEntidad[];
+  /**
+   * Solo módulos "simples" (Clientes, Transportistas, Choferes, Vehículos):
+   * detalle fila por fila con TODAS las columnas configuradas (no solo el
+   * nombre) tal como vienen del Excel, + si esa fila es alta nueva o
+   * actualiza un registro existente. Viajes no lo usa — ya tiene
+   * `viajes`/`clientes`/`transportistas` arriba.
+   */
+  filasDetalle?: PreviewFilaEntidad[];
 }

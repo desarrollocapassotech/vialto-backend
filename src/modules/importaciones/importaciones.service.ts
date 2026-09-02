@@ -202,6 +202,25 @@ export class ImportacionesService {
       );
       result.advertenciasFacturasDuplicadas =
         await this.viajesProcessor.detectarFacturasDuplicadas(valid, tenantId);
+    } else if (processorModulo?.filasNuevas) {
+      const nuevas = await processorModulo.filasNuevas(valid, tenantId);
+      const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
+      result.filasDetalle = valid.map((v) => {
+        const raw = parsedByRow.get(v._rowNum);
+        const campos = config.columns
+          .filter(
+            (c) =>
+              raw &&
+              raw[c.field] != null &&
+              String(raw[c.field]).trim() !== "",
+          )
+          .map((c) => ({
+            campo: c.field,
+            label: c.excelHeader,
+            valor: String(raw![c.field]).trim(),
+          }));
+        return { fila: v._rowNum, esNuevo: nuevas.has(v._rowNum), campos };
+      });
     }
 
     return result;

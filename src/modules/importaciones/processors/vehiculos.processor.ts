@@ -118,4 +118,27 @@ export class VehiculosProcessor implements IImportProcessor {
       return partes.some((p) => patentesExistentes.has(p.toUpperCase()));
     }).length;
   }
+
+  async filasNuevas(rows: ValidatedRow[], tenantId: string): Promise<Set<number>> {
+    const existentes = await this.prisma.vehiculo.findMany({
+      where: { tenantId },
+      select: { patente: true },
+    });
+    const patentesExistentes = new Set(
+      existentes
+        .map((v) => v.patente?.trim().toUpperCase())
+        .filter((p): p is string => !!p),
+    );
+    // Fila "nueva" si CUALQUIERA de sus patentes (tractor y/o semirremolque,
+    // ver `partesPatente`) todavía no existe — mismo criterio que ya usa
+    // `insert()` para decidir si la fila cuenta como alta en el resumen.
+    const nuevas = new Set<number>();
+    for (const r of rows) {
+      const partes = this.partesPatente(r);
+      if (partes.some((p) => !patentesExistentes.has(p.toUpperCase()))) {
+        nuevas.add(r._rowNum);
+      }
+    }
+    return nuevas;
+  }
 }

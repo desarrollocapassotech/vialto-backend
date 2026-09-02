@@ -58,4 +58,22 @@ export class ClientesProcessor implements IImportProcessor {
       nombresExistentes.has(String(r.nombre ?? '').trim().toLowerCase()),
     ).length;
   }
+
+  async filasNuevas(rows: ValidatedRow[], tenantId: string): Promise<Set<number>> {
+    const existentes = await this.prisma.cliente.findMany({
+      where: { tenantId },
+      select: { nombre: true },
+    });
+    const nombresExistentes = new Set(
+      existentes.map((c) => c.nombre.trim().toLowerCase()),
+    );
+    const nuevas = new Set<number>();
+    for (const r of rows) {
+      const nombre = String(r.nombre ?? '').trim();
+      if (nombre && !nombresExistentes.has(nombre.toLowerCase())) {
+        nuevas.add(r._rowNum);
+      }
+    }
+    return nuevas;
+  }
 }

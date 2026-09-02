@@ -589,6 +589,78 @@ export class ImportacionesService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /**
+   * Nombres reales de Cliente/Transportista/Chofer para los ids ya resueltos
+   * por el lookup (`ValidatedRow.clienteId`/`transportistaId`/`choferId`) —
+   * usado por `buildViajesPreview` para mostrar el NOMBRE en el preview en
+   * vez del texto crudo de la celda (que puede ser un CUIT/DNI, ver
+   * `nombreLookupResuelto`). Ids `__pending__...` (entidad que se va a crear
+   * recién al confirmar) se resuelven aparte, no llegan a esta consulta.
+   */
+  private async resolverNombresLookup(
+    valid: ValidatedRow[],
+    tenantId: string,
+  ): Promise<{
+    clientes: Map<string, string>;
+    transportistas: Map<string, string>;
+    choferes: Map<string, string>;
+  }> {
+    const esIdReal = (v: unknown): v is string =>
+      typeof v === "string" && v !== "" && !v.startsWith("__pending__");
+
+    const idsClientes = new Set<string>();
+    const idsTransportistas = new Set<string>();
+    const idsChoferes = new Set<string>();
+    for (const row of valid) {
+      if (esIdReal(row.clienteId)) idsClientes.add(row.clienteId);
+      if (esIdReal(row.transportistaId)) idsTransportistas.add(row.transportistaId);
+      if (esIdReal(row.transportistaEfectivoId))
+        idsTransportistas.add(row.transportistaEfectivoId as string);
+      if (esIdReal(row.choferId)) idsChoferes.add(row.choferId);
+    }
+
+    const [clientesRows, transportistasRows, choferesRows] = await Promise.all([
+      idsClientes.size > 0
+        ? this.prisma.cliente.findMany({
+            where: { tenantId, id: { in: [...idsClientes] } },
+            select: { id: true, nombre: true },
+          })
+        : Promise.resolve([]),
+      idsTransportistas.size > 0
+        ? this.prisma.transportista.findMany({
+            where: { tenantId, id: { in: [...idsTransportistas] } },
+            select: { id: true, nombre: true },
+          })
+        : Promise.resolve([]),
+      idsChoferes.size > 0
+        ? this.prisma.chofer.findMany({
+            where: { tenantId, id: { in: [...idsChoferes] } },
+            select: { id: true, nombre: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      clientes: new Map(clientesRows.map((c) => [c.id, c.nombre])),
+      transportistas: new Map(transportistasRows.map((t) => [t.id, t.nombre])),
+      choferes: new Map(choferesRows.map((c) => [c.id, c.nombre])),
+    };
+  }
+
+  /** Resuelve el id de un lookup (o placeholder `__pending__<modelo>__<original>` de una entidad a crear) a su nombre para mostrar. */
+  private nombreLookupResuelto(
+    valor: unknown,
+    nombresPorId: Map<string, string>,
+  ): string | null {
+    if (valor == null || typeof valor !== "string" || valor === "") return null;
+    if (valor.startsWith("__pending__")) {
+      const resto = valor.slice("__pending__".length);
+      const idx = resto.indexOf("__");
+      return (idx >= 0 ? resto.slice(idx + 2) : resto) || null;
+    }
+    return nombresPorId.get(valor) ?? null;
+  }
+
   private async buildViajesPreview(
     parsed: ParsedRow[],
     valid: ValidatedRow[],
@@ -608,6 +680,7 @@ export class ImportacionesService {
       valid,
       tenantId,
     );
+    const nombresLookup = await this.resolverNombresLookup(valid, tenantId);
     const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
     const newClienteNames = new Set(
       created.clientes.map((n) => n.toLowerCase()),
@@ -624,9 +697,6 @@ export class ImportacionesService {
     const toStr = (v: unknown): string | null =>
       v != null && String(v).trim() ? String(v).trim() : null;
 
-    const toNum = (v: unknown): number | null =>
-      v != null && !isNaN(Number(v)) ? Number(v) : null;
-
     const toDateStr = (v: unknown): string | null => {
       if (!v) return null;
       if (v instanceof Date) return v.toLocaleDateString("es-AR");
@@ -637,19 +707,42 @@ export class ImportacionesService {
       const p = parsedByRow.get(validRow._rowNum);
       if (!p) continue;
 
-      const cliente = toStr(p.clienteId) ?? "";
-      const transporte = toStr(p.transportistaId);
+      // Cliente/Transporte/Chofer se muestran por su NOMBRE resuelto (el que
+      // realmente matcheó el lookup), no el texto crudo de la celda — algunos
+      // tenants (ej. NyM) tipean el CUIT/DNI ahí en vez del nombre (ver
+      // LOOKUP_CLIENTE_VIAJE/LOOKUP_TRANSPORTISTA_VIAJE/LOOKUP_CHOFER en
+      // template-catalogo.ts), y mostrar la celda cruda comparaba "Nombre
+      // actual → CUIT" en el diff, como si el nombre hubiera cambiado a un
+      // número. Bug real reportado por el usuario, ago 2026.
+      const cliente =
+        this.nombreLookupResuelto(validRow.clienteId, nombresLookup.clientes) ??
+        "";
+      const transporte = this.nombreLookupResuelto(
+        validRow.transportistaId,
+        nombresLookup.transportistas,
+      );
       if (cliente) clienteNamesSet.add(cliente);
       if (transporte) transportistaNamesSet.add(transporte);
 
-      const monto = toNum(p.monto);
-      const precioTransp = toNum(p.precioTransportistaExterno);
+      // Igual que Cliente/Transporte/Chofer: se muestra el valor REALMENTE
+      // calculado (mismo método que usa el processor al guardar), no la
+      // celda cruda de "Monto"/"Flete" — con templates de desglose
+      // (cantidadFactura × precioUnitarioFactura, o su equivalente del
+      // transportista) esas columnas ni existen en el Excel, así que leerlas
+      // crudas mostraba "— " como si el import fuera a borrar el monto de un
+      // viaje existente. Bug real reportado por el usuario, ago 2026.
+      const monto = this.viajesProcessor.resolveMonto(validRow);
+      const precioTransp =
+        this.viajesProcessor.resolvePrecioTransportistaExterno(validRow);
       const nroFactura = toStr(p.nroFactura);
 
       const nuevoValor = {
         cliente,
         transporte,
-        chofer: toStr(p.choferId),
+        chofer: this.nombreLookupResuelto(
+          validRow.choferId,
+          nombresLookup.choferes,
+        ),
         vehiculo: toStr(p.vehiculoId),
         origen: toStr(p.origen),
         destino: toStr(p.destino),

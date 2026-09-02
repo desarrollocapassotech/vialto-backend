@@ -32,8 +32,16 @@ export class ViajesProcessor implements IImportProcessor {
     return isNaN(d.getTime()) ? null : d;
   }
 
-  /** cantidadFactura × precioUnitarioFactura tiene prioridad sobre `monto` directo (retrocompatible con templates viejos que solo mandan MONTO). */
-  private resolveMonto(row: ValidatedRow): number | null {
+  /**
+   * cantidadFactura × precioUnitarioFactura tiene prioridad sobre `monto`
+   * directo (retrocompatible con templates viejos que solo mandan MONTO).
+   * Público: `ImportacionesService.buildViajesPreview` lo reusa para que el
+   * preview muestre el mismo valor que se va a guardar — antes mostraba la
+   * celda cruda de "Monto" (vacía en templates de desglose) como si el
+   * import fuera a borrar el monto de un viaje existente. Bug real
+   * reportado ago 2026.
+   */
+  resolveMonto(row: ValidatedRow): number | null {
     const cantidad =
       row.cantidadFactura != null ? Number(row.cantidadFactura) : null;
     const precioUnit =
@@ -44,6 +52,24 @@ export class ViajesProcessor implements IImportProcessor {
       return Math.round(cantidad * precioUnit * 100) / 100;
     }
     return row.monto != null ? Number(row.monto) : null;
+  }
+
+  /** Mismo criterio que `resolveMonto`, del lado del transportista: cantidadTransportista × precioUnitarioTransportista tiene prioridad sobre `precioTransportistaExterno` directo. Público por el mismo motivo. */
+  resolvePrecioTransportistaExterno(row: ValidatedRow): number | null {
+    const cantidad =
+      row.cantidadTransportista != null
+        ? Number(row.cantidadTransportista)
+        : null;
+    const precioUnit =
+      row.precioUnitarioTransportista != null
+        ? Number(row.precioUnitarioTransportista)
+        : null;
+    if (cantidad != null && precioUnit != null) {
+      return Math.round(cantidad * precioUnit * 100) / 100;
+    }
+    return row.precioTransportistaExterno != null
+      ? Number(row.precioTransportistaExterno)
+      : null;
   }
 
   /**
@@ -210,6 +236,18 @@ export class ViajesProcessor implements IImportProcessor {
       });
     }
 
+    // Mismo criterio que create(): la columna Observaciones del Excel +
+    // las columnas sin mapeo (`_unmappedText`, "Header: valor" una por
+    // línea) se concatenan en un solo campo. Va en `especiales` (no en
+    // `extras` vía scalarDataFromRow) para no perder la concatenación —
+    // scalarDataFromRow solo copiaría el valor crudo de la columna
+    // Observaciones, sin las columnas sin mapear.
+    const observacionesParts: string[] = [];
+    if (row.observaciones) observacionesParts.push(row.observaciones as string);
+    if (row._unmappedText) observacionesParts.push(row._unmappedText as string);
+    const observaciones =
+      observacionesParts.length > 0 ? observacionesParts.join("\n") : undefined;
+
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que reimportar el mismo ID Personalizado con un Excel más acotado
     // no borre datos ya cargados que esa fila no trae. Scalars nuevos del
@@ -224,6 +262,9 @@ export class ViajesProcessor implements IImportProcessor {
       fechaCarga,
       fechaDescarga,
       monto: this.resolveMonto(row) ?? undefined,
+      precioTransportistaExterno:
+        this.resolvePrecioTransportistaExterno(row) ?? undefined,
+      observaciones,
     };
     const extras = scalarDataFromRow(row, "Viaje", {
       skip: Object.keys(especiales),
@@ -286,10 +327,7 @@ export class ViajesProcessor implements IImportProcessor {
           contratanteRealizaFlete: false,
         });
       }
-      const precioFlete =
-        row.precioTransportistaExterno != null
-          ? Number(row.precioTransportistaExterno)
-          : null;
+      const precioFlete = this.resolvePrecioTransportistaExterno(row);
 
       if (tipoFlota === "TERCERO") {
         if (!transportistaId)
@@ -312,7 +350,7 @@ export class ViajesProcessor implements IImportProcessor {
       let facturaClienteId: string | null = null;
       if (row.nroFactura) {
         const numeroFactura = row.nroFactura as string;
-        const montoFila = row.monto != null ? Number(row.monto) : 0;
+        const montoFila = this.resolveMonto(row) ?? 0;
 
         // Si ya existe una factura con el mismo número para este cliente
         // (de una fila anterior de este mismo import, o de un import

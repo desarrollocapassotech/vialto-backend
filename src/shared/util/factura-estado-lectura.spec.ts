@@ -94,6 +94,40 @@ test('por tramo sin ARCA: cobrada al cubrir neto + IVA', () => {
   assert.equal(cobrado, true);
 });
 
+test('por tramo parcial: el neto es el viaje completo, no solo el tramo cargado', () => {
+  const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1500 }];
+  const tramos = [{ viajeId: 'v1', monto: 700, ivaPct: 22 }];
+  const neto = importeNetoFactura(0, viajes, {
+    facturarPorTramo: true,
+    tramos,
+  });
+  assert.equal(neto, 1500);
+  // 700 gravado 22% = 154; resto 800 con IVA cabecera 0% = 0 → total 1654
+  assert.equal(importeTotalConIvaPorTramo(neto, tramos, 0), 1654);
+  assert.equal(
+    importeOperativoFactura(0, viajes, {
+      facturarPorTramo: true,
+      tramos,
+      ivaPctCabecera: 0,
+    }),
+    1654,
+  );
+});
+
+test('ivaMonto guardado: el cobro usa el valor persistido, no recalcula', () => {
+  const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1500 }];
+  const tramos = [{ viajeId: 'v1', monto: 700, ivaPct: 22 }];
+  assert.equal(
+    importeOperativoFactura(1500, viajes, {
+      facturarPorTramo: true,
+      tramos,
+      ivaPctCabecera: 0,
+      ivaMontoGuardado: 154,
+    }),
+    1654,
+  );
+});
+
 test('sin tramo: pagos = neto alcanza (comportamiento actual)', () => {
   const { cobrado } = computeEstadoFacturaLectura({
     viajes: viajes3100,

@@ -14,6 +14,7 @@ import { FacturasPaginatedQueryDto } from "./dto/facturas-paginated-query.dto";
 import {
   cobroOptsDeFactura,
   computeEstadoFacturaLectura,
+  FacturaTramoCobro,
   importeNetoFactura,
   importeOperativoFactura,
   ivaMontoDeTramos,
@@ -83,7 +84,7 @@ export class FacturacionService {
       cantidadFactura?: number | null;
       precioUnitarioFactura?: number | null;
     }>,
-    tramos: { monto: number; ivaPct: number }[],
+    tramos: FacturaTramoCobro[],
     facturarPorTramo: boolean,
     ivaPctCabecera: number | null | undefined,
     tieneArca: boolean,
@@ -748,8 +749,7 @@ export class FacturacionService {
       });
       const viajeIdsActuales = viajes.map((v) => v.id);
 
-      let tramosForImporte: { viajeId: string; monto: number; ivaPct: number }[] =
-        [];
+      let tramosForImporte: FacturaTramoCobro[] = [];
       if (facturarPorTramo) {
         const turningOn =
           dto.facturarPorTramo === true && !existing.facturarPorTramo;

@@ -5,6 +5,7 @@
 export {
   cobroOptsDeFactura,
   computeEstadoFacturaLectura,
+  FacturaTramoCobro,
   importeNetoFactura,
   importeOperativoFactura,
   ivaMontoDeTramos,

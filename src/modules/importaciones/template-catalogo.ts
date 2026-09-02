@@ -60,6 +60,16 @@ type FieldOverlay = Partial<
 type ModuloDef = {
   prismaModel: string;
   altaFormulario?: { modulo: string; formulario: string };
+  /**
+   * Nombre de hoja sugerido cuando todavía no hay `ImportTemplate` propio del
+   * tenant (ver `construirConfigPorDefecto`). El wizard de carga masiva sube
+   * un único Excel con una hoja por módulo (Clientes/Transportes/Choferes/
+   * Vehículos/Viajes) y llama preview/confirm una vez por módulo reusando el
+   * mismo archivo — sin esto, el parser no tiene forma de saber qué hoja le
+   * corresponde a cada módulo y cae en la primera hoja del archivo para
+   * todos, duplicando datos de una hoja en las demás.
+   */
+  sheetDefault: string;
   /** Orden histórico de la planilla; campos nuevos (no listados) van al final. */
   ordenPreferido: string[];
   overlays: Record<string, FieldOverlay>;
@@ -90,6 +100,7 @@ const MODULOS: Record<string, ModuloDef> = {
   clientes: {
     prismaModel: "Cliente",
     altaFormulario: { modulo: "clientes", formulario: "alta_cliente" },
+    sheetDefault: "Clientes",
     ordenPreferido: [
       "nombre",
       "idFiscal",
@@ -121,6 +132,7 @@ const MODULOS: Record<string, ModuloDef> = {
   transportistas: {
     prismaModel: "Transportista",
     altaFormulario: { modulo: "transportistas", formulario: "alta_transportista" },
+    sheetDefault: "Transportes",
     ordenPreferido: [
       "nombre",
       "idFiscal",
@@ -162,6 +174,7 @@ const MODULOS: Record<string, ModuloDef> = {
   },
   choferes: {
     prismaModel: "Chofer",
+    sheetDefault: "Choferes",
     ordenPreferido: [
       "nombre",
       "dni",
@@ -188,6 +201,7 @@ const MODULOS: Record<string, ModuloDef> = {
   vehiculos: {
     prismaModel: "Vehiculo",
     altaFormulario: { modulo: "vehiculos", formulario: "alta_vehiculo" },
+    sheetDefault: "Vehículos",
     ordenPreferido: [
       "patente",
       "tipo",
@@ -222,6 +236,7 @@ const MODULOS: Record<string, ModuloDef> = {
   viajes: {
     prismaModel: "Viaje",
     altaFormulario: { modulo: "viajes", formulario: "alta_viaje" },
+    sheetDefault: "Viajes",
     ordenPreferido: [
       "numeroIdentificacionPersonalizado",
       "clienteId",
@@ -485,6 +500,7 @@ export function construirConfigPorDefecto(modulo: string): TemplateConfig | null
   if (columnas.length === 0) return null;
 
   return {
+    sheet: MODULOS[modulo]?.sheetDefault,
     headerRow: 1,
     columns: columnas.map((c): ColumnConfig => {
       const col: ColumnConfig = {

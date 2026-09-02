@@ -30,6 +30,13 @@ model Tenant {
    * true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla).
    */
   importacionesOcultas                   Boolean   @default(false)
+  /**
+   * Método de anulación del comprobante CVLP (060) — configurable solo desde superadmin (panel Empresas).
+   * 'nota_credito_debito' (default, todo tenant nuevo): anulación emitiendo NC/ND asociada vía AFIP SDK,
+   * comportamiento histórico. 'manual': sin emisión a ARCA — anulación en 2 pasos (pendiente_anulacion →
+   * anulado) con comprobante pre-impreso adjunto por el usuario. Ver Liquidacion.estado y CLAUDE.md.
+   */
+  liquidacionAnulacionMetodo             String    @default("nota_credito_debito")
   createdAt                              DateTime  @default(now())
 
   clientes                   Cliente[]
@@ -923,19 +930,19 @@ model CombustibleSyncErrorLog {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Intervencion {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  vehiculoId  String
-  vehiculo    Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
-  tipos       String[] // catálogo por sistema del vehículo (mínimo 1) — ver src/modules/mantenimiento/tipos-intervencion.const.ts
-  descripcion String?
-  km          Int?
-  proximoKm   Int?
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  vehiculoId   String
+  vehiculo     Vehiculo  @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
+  tipos        String[] // catálogo por sistema del vehículo (mínimo 1) — ver src/modules/mantenimiento/tipos-intervencion.const.ts
+  descripcion  String?
+  km           Int?
+  proximoKm    Int?
   proximaFecha DateTime?
-  fecha       DateTime
-  createdAt   DateTime @default(now())
-  createdBy   String
+  fecha        DateTime
+  createdAt    DateTime  @default(now())
+  createdBy    String
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
@@ -1159,6 +1166,7 @@ model Liquidacion {
   ambiente    String?
 
   // Nota de crédito 065 emitida al anular (el CVLP original se conserva arriba)
+  // — solo aplica al método 'nota_credito_debito' (ver Tenant.liquidacionAnulacionMetodo)
   anulacionCbteTipo    Int?
   anulacionCbteNro     Int?
   anulacionPtoVenta    Int?
@@ -1168,17 +1176,29 @@ model Liquidacion {
 
   // Estado de la integración ARCA
   estado           String  @default("borrador")
-  // borrador | pendiente_cae | autorizado | error | anulado
+  // borrador | pendiente_cae | autorizado | error | anulado | pendiente_anulacion
+  // pendiente_anulacion: solo con Tenant.liquidacionAnulacionMetodo = 'manual' — paso intermedio
+  // entre 'autorizado' y 'anulado', sin emisión a ARCA (ver anulación manual más abajo).
   arcaError        String? // mensaje amigable del último error de ARCA
   arcaErrorDetalle String? // detalle técnico crudo de AFIP SDK (para "ver error completo")
   reintentos       Int     @default(0)
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
 
-  // Auditoría de anulación (solo cuando estado = anulado)
+  // Auditoría de anulación (solo cuando estado = anulado). anuladoPor/anuladoAt se completan
+  // en ambos métodos de anulación; motivoAnulacion también. Los campos anulacionCbte*/anulacionCae*
+  // de arriba solo se completan en el método 'nota_credito_debito'.
   motivoAnulacion String?
   anuladoPor      String? // Clerk userId
   anuladoAt       DateTime?
+
+  // Anulación manual (Tenant.liquidacionAnulacionMetodo = 'manual'): snapshot del método usado en
+  // esta anulación puntual + auditoría del paso intermedio "pendiente_anulacion" + comprobante
+  // pre-impreso adjunto por el usuario al confirmar. Nunca se emite nada a ARCA en este flujo.
+  anulacionMetodo               String? // 'nota_credito_debito' | 'manual' — snapshot al anular
+  anulacionPendienteDesde       DateTime? // cuándo se marcó pendiente_anulacion
+  anulacionPendientePor         String? // Clerk userId que marcó pendiente_anulacion
+  anulacionManualComprobanteUrl String? // URL Cloudinary del comprobante pre-impreso (PDF o foto)
 
   // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
   payloadHash String?

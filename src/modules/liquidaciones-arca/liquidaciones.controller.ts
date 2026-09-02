@@ -34,6 +34,7 @@ import { FacturaPdfService } from "./factura-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
 import { AnularLiquidacionDto } from "./dto/anular-liquidacion.dto";
+import { ConfirmarAnulacionManualDto } from "./dto/confirmar-anulacion-manual.dto";
 import { AnularFacturaDto } from "./dto/anular-factura.dto";
 import { EmitirFacturaArcaDto } from "./dto/emitir-factura-arca.dto";
 import { EmitirLiquidacionDto } from "./dto/emitir-liquidacion.dto";
@@ -329,6 +330,43 @@ export class LiquidacionesController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.anularLiquidacion(auth.tenantId, id, auth.userId, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      "Anulación manual (paso 1): marca la liquidación como pendiente de anulación, sin emitir nada a ARCA",
+    description:
+      "Solo disponible si el tenant tiene Tenant.liquidacionAnulacionMetodo = 'manual' (configurable desde superadmin, panel Empresas).",
+  })
+  @Post("liquidaciones/:id/marcar-pendiente-anulacion")
+  @HttpCode(HttpStatus.OK)
+  @RequireModule("emision-liquido-producto-arca")
+  @Roles("admin", "superadmin")
+  marcarPendienteAnulacionManual(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.marcarPendienteAnulacionManual(auth.tenantId, id, auth.userId);
+  }
+
+  @ApiOperation({
+    summary:
+      "Anulación manual (paso 2): confirma la anulación con el comprobante pre-impreso adjunto",
+    description:
+      "Solo disponible si el tenant tiene Tenant.liquidacionAnulacionMetodo = 'manual'. No emite nada a ARCA.",
+  })
+  @Post("liquidaciones/:id/confirmar-anulacion-manual")
+  @HttpCode(HttpStatus.OK)
+  @RequireModule("emision-liquido-producto-arca")
+  @Roles("admin", "superadmin")
+  confirmarAnulacionManual(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Body() dto: ConfirmarAnulacionManualDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.confirmarAnulacionManual(auth.tenantId, id, auth.userId, dto);
   }
 
   @ApiOperation({
@@ -643,6 +681,45 @@ export class LiquidacionesPlatformController {
   ) {
     const tid = this.requiredTenantId(tenantId);
     return this.service.anularLiquidacion(tid, id, auth.userId, dto);
+  }
+
+  @Post("liquidaciones/:id/marcar-pendiente-anulacion")
+  @HttpCode(HttpStatus.OK)
+  marcarPendienteAnulacionManual(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    return this.service.marcarPendienteAnulacionManual(tid, id, auth.userId);
+  }
+
+  @Post("liquidaciones/:id/confirmar-anulacion-manual")
+  @HttpCode(HttpStatus.OK)
+  confirmarAnulacionManual(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Body() dto: ConfirmarAnulacionManualDto,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    return this.service.confirmarAnulacionManual(tid, id, auth.userId, dto);
+  }
+
+  @Post("upload-comprobante")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadComprobante(
+    @Query("tenantId") tenantId: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    if (!file) throw new BadRequestException("Se requiere un archivo.");
+    return this.service.uploadComprobante(tid, file);
   }
 
   @Get("facturas/:facturaId/pdf")

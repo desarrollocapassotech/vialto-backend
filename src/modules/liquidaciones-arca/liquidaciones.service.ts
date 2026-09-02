@@ -27,6 +27,7 @@ import {
   syncLiquidacionEstadoViajes,
 } from '../viajes/viaje-estado-financiero';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
+import { ConfirmarAnulacionManualDto } from './dto/confirmar-anulacion-manual.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import {
   getCbteTipoCvlp,
@@ -156,6 +157,19 @@ export class LiquidacionesService {
       `La alícuota IVA ${invalidas.join(', ')}% no es válida para AFIP. ` +
         `Usá una de: ${AFIP_IVA_PCTS.join(', ')}.`,
     );
+  }
+
+  /**
+   * Método configurado por superadmin (panel Empresas, `Tenant.liquidacionAnulacionMetodo`)
+   * para anular un CVLP (060): 'nota_credito_debito' (default) emite NC/ND vía AFIP SDK;
+   * 'manual' registra la anulación en 2 pasos sin tocar ARCA (ver métodos más abajo).
+   */
+  private async getLiquidacionAnulacionMetodo(tenantId: string): Promise<'nota_credito_debito' | 'manual'> {
+    const tenant = await this.db.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { liquidacionAnulacionMetodo: true },
+    });
+    return tenant?.liquidacionAnulacionMetodo === 'manual' ? 'manual' : 'nota_credito_debito';
   }
 
   async uploadComprobante(tenantId: string, file: Express.Multer.File): Promise<{ url: string }> {
@@ -613,6 +627,9 @@ export class LiquidacionesService {
     if (liquidacion.estado === 'anulado') {
       throw new BadRequestException('La liquidación está anulada');
     }
+    if (liquidacion.estado === 'pendiente_anulacion') {
+      throw new BadRequestException('La liquidación está pendiente de anulación');
+    }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
     // Punto de venta editable por operación; si no se envía, se usa el de ArcaConfig.
@@ -859,6 +876,14 @@ export class LiquidacionesService {
       throw new BadRequestException('Esta liquidación ya tiene un comprobante de anulación.');
     }
 
+    const metodoAnulacion = await this.getLiquidacionAnulacionMetodo(tenantId);
+    if (metodoAnulacion === 'manual') {
+      throw new BadRequestException(
+        'Este tenant tiene configurada la anulación manual del CVLP (060). ' +
+          'Usá "Marcar pendiente de anulación" y después "Confirmar anulación" en vez de este endpoint.',
+      );
+    }
+
     const config = await this.arcaConfig.findWithApiKey(tenantId);
     const transportista = await (this.prisma as PrismaAny).transportista.findUnique({
       where: { id: liquidacion.transportistaId },
@@ -1013,6 +1038,118 @@ export class LiquidacionesService {
         detalle: err instanceof ArcaException ? err.detalle : undefined,
       });
     }
+  }
+
+  /**
+   * Paso 1 de la anulación manual (Tenant.liquidacionAnulacionMetodo = 'manual'): marca la
+   * liquidación como `pendiente_anulacion`, sin emitir nada a ARCA. El CVLP original (CAE/PDF)
+   * se conserva íntegro. Los viajes siguen considerados liquidados (no disponibles para
+   * re-liquidar) hasta que se confirme la anulación con `confirmarAnulacionManual`.
+   */
+  async marcarPendienteAnulacionManual(tenantId: string, liquidacionId: string, userId: string) {
+    const metodo = await this.getLiquidacionAnulacionMetodo(tenantId);
+    if (metodo !== 'manual') {
+      throw new BadRequestException(
+        'Este tenant no tiene configurada la anulación manual del CVLP (060).',
+      );
+    }
+
+    const liquidacion = await this.prisma.liquidacion.findUnique({
+      where: { id: liquidacionId },
+      include: { viajes: { select: { viajeId: true } } },
+    });
+    if (!liquidacion || liquidacion.tenantId !== tenantId) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+    if (liquidacion.estado !== 'autorizado') {
+      throw new BadRequestException(
+        'Solo se pueden marcar como pendientes de anulación liquidaciones con CAE autorizado.',
+      );
+    }
+
+    const now = new Date();
+    await this.db.liquidacion.update({
+      where: { id: liquidacionId },
+      data: {
+        estado: 'pendiente_anulacion',
+        anulacionMetodo: 'manual',
+        anulacionPendienteDesde: now,
+        anulacionPendientePor: userId,
+        updatedAt: now,
+      },
+    });
+
+    const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
+    await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+
+    return this.findById(tenantId, liquidacionId);
+  }
+
+  /**
+   * Paso 2 de la anulación manual: confirma la anulación de una liquidación en
+   * `pendiente_anulacion`, con el comprobante pre-impreso (PDF o foto, subido antes vía
+   * `uploadComprobante`) como respaldo. No emite nada a ARCA — el CVLP original (CAE/PDF)
+   * se conserva. Tras la confirmación, los viajes quedan disponibles para re-liquidar.
+   */
+  async confirmarAnulacionManual(
+    tenantId: string,
+    liquidacionId: string,
+    userId: string,
+    dto: ConfirmarAnulacionManualDto,
+  ) {
+    const metodo = await this.getLiquidacionAnulacionMetodo(tenantId);
+    if (metodo !== 'manual') {
+      throw new BadRequestException(
+        'Este tenant no tiene configurada la anulación manual del CVLP (060).',
+      );
+    }
+
+    const motivo = String(dto?.motivo ?? '').trim();
+    if (!motivo) {
+      throw new BadRequestException('El motivo de anulación es obligatorio.');
+    }
+    const comprobanteUrl = String(dto?.comprobanteUrl ?? '').trim();
+    if (!comprobanteUrl) {
+      throw new BadRequestException('El comprobante de anulación es obligatorio.');
+    }
+
+    const liquidacion = await this.prisma.liquidacion.findUnique({
+      where: { id: liquidacionId },
+      include: { viajes: { select: { viajeId: true } } },
+    });
+    if (!liquidacion || liquidacion.tenantId !== tenantId) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+    if (liquidacion.estado !== 'pendiente_anulacion') {
+      throw new BadRequestException(
+        'Solo se puede confirmar la anulación de una liquidación pendiente de anulación.',
+      );
+    }
+
+    const anuladoAt = new Date();
+    const anuladoPorLabel =
+      (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || userId;
+
+    await this.db.liquidacion.update({
+      where: { id: liquidacionId },
+      data: {
+        estado: 'anulado',
+        anulacionMetodo: 'manual',
+        anulacionManualComprobanteUrl: comprobanteUrl,
+        motivoAnulacion: motivo,
+        anuladoPor: userId,
+        anuladoAt,
+        updatedAt: anuladoAt,
+      },
+    });
+
+    // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada, el sync
+    // recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
+    const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
+    await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+
+    const updated = await this.findById(tenantId, liquidacionId);
+    return { ...updated, anuladoPorNombre: anuladoPorLabel };
   }
 
   /**
@@ -1408,9 +1545,13 @@ export class LiquidacionesService {
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    if (liq.estado === 'autorizado' || liq.estado === 'anulado') {
+    if (
+      liq.estado === 'autorizado' ||
+      liq.estado === 'anulado' ||
+      liq.estado === 'pendiente_anulacion'
+    ) {
       throw new BadRequestException(
-        'No se puede eliminar una liquidación autorizada o anulada',
+        'No se puede eliminar una liquidación autorizada, pendiente de anulación o anulada',
       );
     }
     const viajeIds = liq.viajes.map((v) => v.viajeId);
@@ -1465,6 +1606,7 @@ export class LiquidacionesService {
                     idFiscal: true,
                     direccion: true,
                     pais: true,
+                    condicionIva: true,
                     condicionTributaria: true,
                   },
                 },

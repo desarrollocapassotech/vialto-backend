@@ -48,6 +48,7 @@ export class FacturaPorVencerEvaluator implements NotificacionEvaluator {
         arcaEstado: true,
         facturarPorTramo: true,
         ivaPct: true,
+        ivaMonto: true,
         clienteId: true,
         pagos: { select: { importe: true } },
         viajes: { select: { id: true, facturacionEstado: true, monto: true } },
@@ -78,6 +79,7 @@ export class FacturaPorVencerEvaluator implements NotificacionEvaluator {
         facturarPorTramo: opts.facturarPorTramo,
         tramos: f.tramos,
         ivaPctCabecera: f.ivaPct,
+        ivaMontoGuardado: opts.ivaMontoGuardado,
       });
       if (estado.cobrado || estado.estado === 'anulado') continue;
 

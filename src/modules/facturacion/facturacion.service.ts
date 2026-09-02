@@ -14,8 +14,10 @@ import { FacturasPaginatedQueryDto } from "./dto/facturas-paginated-query.dto";
 import {
   cobroOptsDeFactura,
   computeEstadoFacturaLectura,
+  FacturaTramoCobro,
   importeNetoFactura,
   importeOperativoFactura,
+  ivaMontoDeTramos,
   roundMoney2,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
@@ -73,23 +75,28 @@ export class FacturacionService {
   }
 
   /**
-   * Importe con tramos: suma montos de tramos + monto de viajes que no tienen ningún tramo.
+   * Neto = suma completa de viajes. IVA persistido solo en por-tramo sin ARCA.
+   * La parte no cubierta por tramos usa el IVA de cabecera (0% = exento).
    */
-  private computeImporteConTramos(
+  private montosParaGuardar(
     viajes: Array<{
-      id: string;
       monto: number | null;
       cantidadFactura?: number | null;
       precioUnitarioFactura?: number | null;
     }>,
-    tramos: { viajeId: string; monto: number }[],
-  ): number {
-    const viajeIdsConTramo = new Set(tramos.map((t) => t.viajeId));
-    const sumaTramos = tramos.reduce((sum, t) => sum + (t.monto ?? 0), 0);
-    const sumaViajesSinTramo = viajes
-      .filter((v) => !viajeIdsConTramo.has(v.id))
-      .reduce((sum, v) => sum + importeNetoViaje(v), 0);
-    return sumaTramos + sumaViajesSinTramo;
+    tramos: FacturaTramoCobro[],
+    facturarPorTramo: boolean,
+    ivaPctCabecera: number | null | undefined,
+    tieneArca: boolean,
+  ): { importe: number; ivaMonto: number | null } {
+    const importe = roundMoney2(this.computeImporte(viajes));
+    if (!facturarPorTramo || tieneArca || tramos.length === 0) {
+      return { importe, ivaMonto: null };
+    }
+    return {
+      importe,
+      ivaMonto: ivaMontoDeTramos(importe, tramos, ivaPctCabecera),
+    };
   }
 
   private assertTramosValidos(
@@ -175,6 +182,7 @@ export class FacturacionService {
       anuladoPor: string | null;
       diferencia: number | null;
       ivaPct?: number | null;
+      ivaMonto?: number | null;
       facturarPorTramo?: boolean;
       createdAt: Date;
       viajes: ViajeSnap[];
@@ -185,7 +193,12 @@ export class FacturacionService {
   ) {
     const { viajes, pagos = [], tramos = [], ...f } = row;
     const cobroOpts = cobroOptsDeFactura(
-      { facturarPorTramo: f.facturarPorTramo, ivaPct: f.ivaPct, tramos },
+      {
+        facturarPorTramo: f.facturarPorTramo,
+        ivaPct: f.ivaPct,
+        tramos,
+        ivaMonto: f.ivaMonto,
+      },
       tieneArca,
     );
     const importe = importeNetoFactura(f.importe, viajes, cobroOpts);
@@ -201,11 +214,13 @@ export class FacturacionService {
       facturarPorTramo: cobroOpts.facturarPorTramo,
       tramos,
       ivaPctCabecera: f.ivaPct,
+      ivaMontoGuardado: f.ivaMonto,
     });
     const tramosOrdenados = [...tramos].sort((a, b) => a.orden - b.orden);
     return {
       ...f,
       facturarPorTramo: f.facturarPorTramo ?? false,
+      ivaMonto: f.ivaMonto ?? null,
       viajeIds: viajes.map((v) => v.id),
       tramos: tramosOrdenados.map((t) => ({
         id: t.id,
@@ -602,9 +617,14 @@ export class FacturacionService {
       dto.tramos,
       facturarPorTramo,
     );
-    const importe = facturarPorTramo
-      ? this.computeImporteConTramos(viajes, tramosValidos)
-      : this.computeImporte(viajes);
+    const ivaPct = dto.ivaPct ?? 21;
+    const { importe, ivaMonto } = this.montosParaGuardar(
+      viajes,
+      tramosValidos,
+      facturarPorTramo,
+      ivaPct,
+      tieneArca,
+    );
 
     try {
       // Retornamos el resultado de la transacción esperando su resolución con 'await'
@@ -617,6 +637,7 @@ export class FacturacionService {
             clienteId: dto.clienteId ?? null,
             transportistaId: dto.transportistaId ?? null,
             importe,
+            ivaMonto,
             moneda,
             fechaEmision: new Date(dto.fechaEmision),
             fechaVencimiento: dto.fechaVencimiento
@@ -624,7 +645,7 @@ export class FacturacionService {
               : null,
             estado: "pendiente",
             diferencia: dto.diferencia ?? null,
-            ivaPct: dto.ivaPct ?? 21,
+            ivaPct,
             facturarPorTramo,
             comprobanteUrl: dto.comprobanteUrl ?? null,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -696,7 +717,7 @@ export class FacturacionService {
   async updateFactura(id: string, tenantId: string, dto: UpdateFacturaDto) {
     const existing = await this.prisma.factura.findFirst({
       where: { id, tenantId },
-      select: { facturarPorTramo: true, clienteId: true },
+      select: { facturarPorTramo: true, clienteId: true, ivaPct: true },
     });
     if (!existing) throw new NotFoundException("Factura no encontrada");
 
@@ -829,7 +850,7 @@ export class FacturacionService {
       
       const viajes = await this.resolveViajes(tenantId, viajeIdsActuales, dto.clienteId ?? existing.clienteId ?? undefined);
 
-      let tramosForImporte: { viajeId: string; monto: number }[] = [];
+      let tramosForImporte: FacturaTramoCobro[] = [];
       if (facturarPorTramo) {
         const turningOn =
           dto.facturarPorTramo === true && !existing.facturarPorTramo;
@@ -869,14 +890,19 @@ export class FacturacionService {
         await this.replaceTramos(tx, tenantId, id, []);
       }
 
-      const importe = facturarPorTramo
-        ? this.computeImporteConTramos(viajes, tramosForImporte)
-        : this.computeImporte(viajes);
+      const { importe, ivaMonto } = this.montosParaGuardar(
+        viajes,
+        tramosForImporte,
+        facturarPorTramo,
+        dto.ivaPct !== undefined ? dto.ivaPct : existing.ivaPct,
+        tieneArca,
+      );
 
       const updated = await tx.factura.update({
         where: { id },
         data: {
           importe,
+          ivaMonto,
           ...(monedaNueva !== undefined ? { moneda: monedaNueva } : {}),
         },
         include: this.FACTURA_INCLUDE,
@@ -999,6 +1025,7 @@ export class FacturacionService {
       facturarPorTramo: factura.facturarPorTramo,
       tramos: factura.tramos,
       ivaPctCabecera: factura.ivaPct,
+      ivaMontoGuardado: factura.ivaMonto,
     });
 
     await syncFacturacionEstadoViajes(

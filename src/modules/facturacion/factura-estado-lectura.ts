@@ -5,8 +5,10 @@
 export {
   cobroOptsDeFactura,
   computeEstadoFacturaLectura,
+  FacturaTramoCobro,
   importeNetoFactura,
   importeOperativoFactura,
+  ivaMontoDeTramos,
   roundMoney2,
 } from '../../shared/util/factura-estado-lectura';
 

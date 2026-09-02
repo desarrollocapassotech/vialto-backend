@@ -3,6 +3,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { validarIdFiscal } from '../../../shared/util/validar-id-fiscal';
 import type { IImportProcessor, InsertResult } from './import-processor.interface';
 import type { ValidatedRow } from '../types/import.types';
+import { scalarDataFromRow } from '../prisma-import-fields';
 
 @Injectable()
 export class ClientesProcessor implements IImportProcessor {
@@ -23,19 +24,9 @@ export class ClientesProcessor implements IImportProcessor {
       validarIdFiscal(pais, idFiscal);
     }
 
-    // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
-    // para que un reimport no borre datos ya cargados que ese Excel no trae.
-    const data = {
-      idFiscal: idFiscal || undefined,
-      pais: pais || undefined,
-      email: (row.email as string | null)?.trim() || undefined,
-      telefono: (row.telefono as string | null)?.trim() || undefined,
-      direccion: (row.direccion as string | null)?.trim() || undefined,
-      condicionIva:
-        row.condicionIva != null ? Number(row.condicionIva) : undefined,
-      condicionTributaria:
-        (row.condicionTributaria as string | null)?.trim() || undefined,
-    };
+    // Scalars del modelo: un campo nuevo en Prisma se copia solo. Vacío =
+    // omitido, para que un reimport no borre datos que ese Excel no trae.
+    const data = scalarDataFromRow(row, 'Cliente', { skip: ['nombre'] });
 
     const existing = await this.prisma.cliente.findFirst({
       where: { tenantId, nombre: { equals: nombre, mode: 'insensitive' } },
@@ -66,5 +57,23 @@ export class ClientesProcessor implements IImportProcessor {
     return rows.filter((r) =>
       nombresExistentes.has(String(r.nombre ?? '').trim().toLowerCase()),
     ).length;
+  }
+
+  async filasNuevas(rows: ValidatedRow[], tenantId: string): Promise<Set<number>> {
+    const existentes = await this.prisma.cliente.findMany({
+      where: { tenantId },
+      select: { nombre: true },
+    });
+    const nombresExistentes = new Set(
+      existentes.map((c) => c.nombre.trim().toLowerCase()),
+    );
+    const nuevas = new Set<number>();
+    for (const r of rows) {
+      const nombre = String(r.nombre ?? '').trim();
+      if (nombre && !nombresExistentes.has(nombre.toLowerCase())) {
+        nuevas.add(r._rowNum);
+      }
+    }
+    return nuevas;
   }
 }

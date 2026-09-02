@@ -3,6 +3,7 @@
  * Ejecutar: npm run test:arca-iva
  */
 import * as assert from 'node:assert/strict';
+import { buildComprobanteCvlp } from './arca-cvlp.util';
 import {
   computeAfipGravadoIva,
   cvlpPdfPieFinanciero,
@@ -210,6 +211,33 @@ test('groupAlicuotasIva totaliza por Id y recalcula Importe = BaseImp × %', () 
   assert.equal(cvlpMixto[0].Id, 5);
   assert.equal(cvlpMixto[0].BaseImp, 1_014_024);
   assert.equal(cvlpMixto[0].Importe, 212_945.04);
+});
+
+test('buildComprobanteCvlp AFIP 10061: ImpNeto = suma BaseImp (0% en contra no descuadra)', () => {
+  const cvlp = buildComprobanteCvlp(
+    {
+      cuit: '20111111112',
+      ptoVenta: 2,
+      cbteTipo: 60,
+      cbteNro: 1,
+      fechaCbte: '20260721',
+      concepto: 1,
+      docTipo: 80,
+      docNro: 30111111118,
+      condicionIvaReceptorId: 1,
+    },
+    [
+      { descripcion: 'Fletes', importe: 1000, ivaPct: 21 },
+      { descripcion: 'Comisión', importe: -80, ivaPct: 21 },
+      { descripcion: 'Gastos', importe: -50, ivaPct: 0 },
+    ],
+    21,
+  );
+  const sumaBase = round2(cvlp.alicuotasIva.reduce((s, a) => s + a.BaseImp, 0));
+  assert.equal(cvlp.impNeto, sumaBase);
+  assert.equal(cvlp.impNeto, 920);
+  assert.equal(cvlp.impIva, 193.2);
+  assert.equal(cvlp.impTotal, 1113.2);
 });
 
 console.log('arca-iva.util.spec.ts: OK');

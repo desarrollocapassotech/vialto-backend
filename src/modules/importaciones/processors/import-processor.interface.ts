@@ -18,4 +18,17 @@ export interface IImportProcessor {
    * para no obligar a implementarlo en processors nuevos.
    */
   contarExistentes?(rows: ValidatedRow[], tenantId: string): Promise<number>;
+  /**
+   * Números de fila (`ValidatedRow._rowNum`) que son alta nueva (no existen
+   * todavía) — el preview lo usa para marcar "Nuevo"/"Actualiza" en el
+   * detalle fila por fila de los módulos "simples" (Clientes, Transportistas,
+   * Choferes, Vehículos). El resto de los datos de cada fila (todas las
+   * columnas configuradas) lo arma `ImportacionesService.preview()` a partir
+   * del Excel crudo — este método solo resuelve el criterio de "existe o
+   * no", que es específico de cada processor (nombre insensible a mayúsculas
+   * para la mayoría, patente con posible split tractor/semirremolque en
+   * Vehículos). Viajes no lo implementa: arma su propio detalle
+   * (`ImportacionesService.buildViajesPreview`).
+   */
+  filasNuevas?(rows: ValidatedRow[], tenantId: string): Promise<Set<number>>;
 }

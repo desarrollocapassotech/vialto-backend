@@ -40,12 +40,22 @@ export function buildComprobanteCvlp(
     });
   }
 
-  const impNeto = round2(items.reduce((s, i) => s + i.importeBase, 0));
+  const impNetoItems = round2(items.reduce((s, i) => s + i.importeBase, 0));
 
   // AlicIva para WSFEv1: Importe = BaseImp neta × % oficial (AFIP 10051).
   const alicuotasIva = groupAlicuotasIva(items, {
     fallbackIvaPct: ivaPctDefault,
   });
+
+  // AFIP 10061: ImpNeto DEBE ser la suma de AlicIva.BaseImp.
+  // Conceptos a 0% con base neta ≤ 0 (gastos/seguro en contra) no entran a
+  // AlicIva (10020: BaseImp > 0) ni a ImpOpEx (tampoco puede ser negativo).
+  // Si se suman al neto del pie, ImpNeto ≠ Σ BaseImp y AFIP rechaza.
+  // El IVA de las gravadas no cambia: esos descuentos no van en el WS.
+  const impNeto =
+    alicuotasIva.length > 0
+      ? round2(alicuotasIva.reduce((s, a) => s + a.BaseImp, 0))
+      : impNetoItems;
 
   // AFIP 10023: ImpIVA DEBE ser la suma de AlicIva.Importe.
   // La suma de IVAs redondeados por línea puede diferir en centavos

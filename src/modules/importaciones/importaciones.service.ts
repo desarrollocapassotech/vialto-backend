@@ -27,7 +27,7 @@ import type {
   EntidadesFaltantesModelo,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
-import { TEMPLATE_CATALOGO, construirConfigPorDefecto } from "./template-catalogo";
+import { getCatalogoColumnas, construirConfigPorDefecto } from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 
@@ -202,6 +202,25 @@ export class ImportacionesService {
       );
       result.advertenciasFacturasDuplicadas =
         await this.viajesProcessor.detectarFacturasDuplicadas(valid, tenantId);
+    } else if (processorModulo?.filasNuevas) {
+      const nuevas = await processorModulo.filasNuevas(valid, tenantId);
+      const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
+      result.filasDetalle = valid.map((v) => {
+        const raw = parsedByRow.get(v._rowNum);
+        const campos = config.columns
+          .filter(
+            (c) =>
+              raw &&
+              raw[c.field] != null &&
+              String(raw[c.field]).trim() !== "",
+          )
+          .map((c) => ({
+            campo: c.field,
+            label: c.excelHeader,
+            valor: String(raw![c.field]).trim(),
+          }));
+        return { fila: v._rowNum, esNuevo: nuevas.has(v._rowNum), campos };
+      });
     }
 
     return result;
@@ -443,9 +462,9 @@ export class ImportacionesService {
     });
   }
 
-  /** Catálogo fijo de campos importables de un módulo — fuente de verdad para la UI de configuración de templates. */
+  /** Catálogo de campos importables de un módulo — se arma desde Prisma + overlays. */
   getCatalogoCampos(modulo: string) {
-    return TEMPLATE_CATALOGO[modulo] ?? [];
+    return getCatalogoColumnas(modulo);
   }
 
   /**

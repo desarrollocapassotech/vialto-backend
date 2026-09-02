@@ -134,7 +134,24 @@ export class ParserService {
     workbook: XLSX.WorkBook,
     sheet?: string | number,
   ): string {
-    if (sheet == null) return workbook.SheetNames[0];
+    if (sheet == null) {
+      // Sin hoja configurada en el template: si el archivo tiene una sola
+      // hoja no hay ambigüedad posible. Si tiene varias (ej. el Excel único
+      // multi-hoja del wizard de carga masiva: Clientes/Transportes/
+      // Choferes/Vehículos/Viajes, subido una vez y reusado para el
+      // preview/confirm de cada módulo) asumir la primera sería leer la hoja
+      // de otro módulo — causa real detectada: clientes duplicados como
+      // transportistas/choferes porque todos terminaban leyendo la hoja
+      // Clientes. Mejor fallar claro que importar datos de la hoja
+      // equivocada en silencio.
+      if (workbook.SheetNames.length > 1) {
+        throw new BadRequestException(
+          "El archivo tiene varias hojas y la plantilla de importación de este módulo no especifica cuál usar. " +
+            'Configurá el campo "Hoja del Excel" en la plantilla (pestaña Templates).',
+        );
+      }
+      return workbook.SheetNames[0];
+    }
     if (typeof sheet === "number") {
       const name = workbook.SheetNames[sheet];
       if (!name) {
@@ -142,13 +159,26 @@ export class ParserService {
       }
       return name;
     }
-    if (!workbook.SheetNames.includes(sheet)) {
+    // Comparación insensible a mayúsculas/acentos: el nombre de hoja real del
+    // tenant puede no coincidir carácter a carácter con el configurado
+    // ("Transportes" vs "TRANSPORTES" vs "Tránsportes").
+    const target = normalizeSheetName(sheet);
+    const name = workbook.SheetNames.find((n) => normalizeSheetName(n) === target);
+    if (!name) {
       throw new BadRequestException(
         `Hoja "${sheet}" no encontrada en el archivo`,
       );
     }
-    return sheet;
+    return name;
   }
+}
+
+function normalizeSheetName(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .toLowerCase();
 }
 
 function normalizeExcelDate(value: unknown, format?: string): Date | null {

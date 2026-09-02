@@ -43,7 +43,10 @@ export function mapLiquidacionEstado(
   if (estado === 'anulado') return 'anulado';
   if (!tieneArca) return 'liquidado';
   if (estado === 'borrador' || estado === 'pendiente_cae') return 'esperando_afip';
-  if (estado === 'autorizado') return 'liquidado';
+  // pendiente_anulacion (método manual, ver Tenant.liquidacionAnulacionMetodo): la
+  // liquidación sigue vigente hasta que se confirma la anulación — mismo indicador que
+  // 'autorizado', el viaje NO queda disponible para re-liquidar todavía.
+  if (estado === 'autorizado' || estado === 'pendiente_anulacion') return 'liquidado';
   if (estado === 'error') return 'error_afip';
   return 'sin_liquidar';
 }

@@ -210,14 +210,15 @@ describe("arca-cvlp.util", () => {
 
     const cvlp = buildComprobanteCvlp(baseCabecera, conceptos, 21);
 
-    expect(cvlp.impNeto).toBe(1_009_024);
+    expect(cvlp.impNeto).toBe(1_014_024);
     expect(cvlp.impIva).toBe(212_945.04);
-    expect(cvlp.impTotal).toBe(1_221_969.04);
+    expect(cvlp.impTotal).toBe(1_227_969.08);
 
     expect(cvlp.alicuotasIva).toHaveLength(1);
     expect(cvlp.alicuotasIva[0].Id).toBe(5);
     expect(cvlp.alicuotasIva[0].BaseImp).toBe(1_014_024);
     expect(cvlp.alicuotasIva[0].Importe).toBe(212_945.04);
+    expect(cvlp.impNeto).toBe(cvlp.alicuotasIva[0].BaseImp);
 
     const gastos = cvlp.items.find((i) => i.descripcion === "GASTOS ADMINISTRATIVOS");
     const seguro = cvlp.items.find((i) => i.descripcion === "SEGURO DE CARGA");
@@ -227,5 +228,19 @@ describe("arca-cvlp.util", () => {
     // No inyectar en el flete el IVA "faltante" de las líneas a 0%
     const flete = cvlp.items.find((i) => i.descripcion === "SERVICIOS LOGISTICOS");
     expect(flete?.importeIva).toBe(231_462);
+  });
+
+  it("AFIP 10061: ImpNeto = suma de AlicIva.BaseImp aunque haya conceptos a 0%", () => {
+    const conceptos: ConceptoFacturable[] = [
+      { descripcion: "Fletes", importe: 1000, ivaPct: 21 },
+      { descripcion: "Comisión", importe: -80, ivaPct: 21 },
+      { descripcion: "Gastos", importe: -50, ivaPct: 0 },
+    ];
+    const cvlp = buildComprobanteCvlp(baseCabecera, conceptos, 21);
+    const sumaBase = cvlp.alicuotasIva.reduce((s, a) => s + a.BaseImp, 0);
+    expect(cvlp.impNeto).toBe(sumaBase);
+    expect(cvlp.impNeto).toBe(920);
+    expect(cvlp.impIva).toBe(193.2);
+    expect(cvlp.impTotal).toBe(1113.2);
   });
 });

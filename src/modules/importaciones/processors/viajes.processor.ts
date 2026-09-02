@@ -11,6 +11,7 @@ import {
 } from "../../viajes/viaje-estados";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
+import { scalarDataFromRow } from "../prisma-import-fields";
 
 @Injectable()
 export class ViajesProcessor implements IImportProcessor {
@@ -211,48 +212,26 @@ export class ViajesProcessor implements IImportProcessor {
 
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que reimportar el mismo ID Personalizado con un Excel más acotado
-    // no borre datos ya cargados que esa fila no trae.
+    // no borre datos ya cargados que esa fila no trae. Scalars nuevos del
+    // modelo Prisma se copian solos (litrosConsumidos, etc.).
+    const especiales = {
+      clienteId,
+      transportistaId: (row.transportistaId as string | null) ?? undefined,
+      transportistaEfectivoId,
+      choferId: (row.choferId as string | null) ?? undefined,
+      origen: (row.origen as string | null) ?? undefined,
+      destino: (row.destino as string | null) ?? undefined,
+      fechaCarga,
+      fechaDescarga,
+      monto: this.resolveMonto(row) ?? undefined,
+    };
+    const extras = scalarDataFromRow(row, "Viaje", {
+      skip: Object.keys(especiales),
+    });
     await this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id: viajeId },
-        data: {
-          clienteId,
-          transportistaId: (row.transportistaId as string | null) ?? undefined,
-          transportistaEfectivoId,
-          choferId: (row.choferId as string | null) ?? undefined,
-          origen: (row.origen as string | null) ?? undefined,
-          destino: (row.destino as string | null) ?? undefined,
-          fechaCarga,
-          fechaDescarga,
-          detalleCarga: (row.detalleCarga as string | null) ?? undefined,
-          kmRecorridos:
-            row.kmRecorridos != null ? Number(row.kmRecorridos) : undefined,
-          monto: this.resolveMonto(row) ?? undefined,
-          monedaMonto: (row.monedaMonto as string | null) ?? undefined,
-          cantidadFactura:
-            row.cantidadFactura != null
-              ? Number(row.cantidadFactura)
-              : undefined,
-          precioUnitarioFactura:
-            row.precioUnitarioFactura != null
-              ? Number(row.precioUnitarioFactura)
-              : undefined,
-          cantidadTransportista:
-            row.cantidadTransportista != null
-              ? Number(row.cantidadTransportista)
-              : undefined,
-          precioUnitarioTransportista:
-            row.precioUnitarioTransportista != null
-              ? Number(row.precioUnitarioTransportista)
-              : undefined,
-          precioTransportistaExterno:
-            row.precioTransportistaExterno != null
-              ? Number(row.precioTransportistaExterno)
-              : undefined,
-          monedaPrecioTransportistaExterno:
-            (row.monedaPrecioTransportistaExterno as string | null) ??
-            undefined,
-        },
+        data: { ...extras, ...especiales },
       });
       // El transportista puede haber cambiado — resincronizar.
       await syncLiquidacionEstadoViaje(tx, tenantId, viajeId);
@@ -385,9 +364,7 @@ export class ViajesProcessor implements IImportProcessor {
           ?.toString()
           .trim() || null;
 
-      // Usamos tx para el viaje
-      const viaje = await tx.viaje.create({
-        data: {
+      const especialesCreate = {
           tenantId,
           numero,
           numeroIdentificacionPersonalizado,
@@ -401,25 +378,8 @@ export class ViajesProcessor implements IImportProcessor {
           destino: (row.destino as string | null) ?? null,
           fechaCarga,
           fechaDescarga,
-          detalleCarga: (row.detalleCarga as string | null) ?? null,
-          kmRecorridos:
-            row.kmRecorridos != null ? Number(row.kmRecorridos) : null,
           monto: this.resolveMonto(row),
           monedaMonto: (row.monedaMonto as string | null) ?? "ARS",
-          cantidadFactura:
-            row.cantidadFactura != null ? Number(row.cantidadFactura) : null,
-          precioUnitarioFactura:
-            row.precioUnitarioFactura != null
-              ? Number(row.precioUnitarioFactura)
-              : null,
-          cantidadTransportista:
-            row.cantidadTransportista != null
-              ? Number(row.cantidadTransportista)
-              : null,
-          precioUnitarioTransportista:
-            row.precioUnitarioTransportista != null
-              ? Number(row.precioUnitarioTransportista)
-              : null,
           precioTransportistaExterno: precioFlete,
           monedaPrecioTransportistaExterno:
             (row.monedaPrecioTransportistaExterno as string | null) ?? "ARS",
@@ -427,7 +387,14 @@ export class ViajesProcessor implements IImportProcessor {
           observaciones,
           otrosGastos: this.extractOtrosGastos(row),
           createdBy,
-        },
+      };
+      const extrasCreate = scalarDataFromRow(row, "Viaje", {
+        skip: Object.keys(especialesCreate),
+      });
+
+      // Usamos tx para el viaje. Scalars nuevos del modelo se copian solos.
+      const viaje = await tx.viaje.create({
+        data: { ...extrasCreate, ...especialesCreate },
         select: { id: true },
       });
       // Igual que en la creación manual: sin esto, un viaje con transportista en un

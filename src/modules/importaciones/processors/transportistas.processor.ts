@@ -3,6 +3,7 @@ import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { validarIdFiscal } from "../../../shared/util/validar-id-fiscal";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
+import { scalarDataFromRow } from "../prisma-import-fields";
 
 @Injectable()
 export class TransportistasProcessor implements IImportProcessor {
@@ -32,28 +33,7 @@ export class TransportistasProcessor implements IImportProcessor {
     // confirmó explícitamente que quiere importar igual (ver
     // ImportacionesService.confirm).
 
-    // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
-    // para que un reimport no borre datos ya cargados que ese Excel no trae.
-    const data = {
-      idFiscal,
-      email: (row.email as string | null)?.toString().trim() || undefined,
-      telefono: (row.telefono as string | null)?.toString().trim() || undefined,
-      pais,
-      domicilio: (row.domicilio as string | null)?.toString().trim() || undefined,
-      condicionIva:
-        row.condicionIva != null ? Number(row.condicionIva) : undefined,
-      condicionTributaria:
-        (row.condicionTributaria as string | null)?.toString().trim() ||
-        undefined,
-      comisionPct:
-        row.comisionPct != null ? Number(row.comisionPct) : undefined,
-      paut: (row.paut as string | null)?.toString().trim() || undefined,
-      permisoInternacional:
-        (row.permisoInternacional as string | null)?.toString().trim() ||
-        undefined,
-      fechaVencimientoPermiso:
-        (row.fechaVencimientoPermiso as Date | null) ?? undefined,
-    };
+    const data = scalarDataFromRow(row, "Transportista", { skip: ["nombre"] });
 
     if (existing) {
       await this.prisma.transportista.update({

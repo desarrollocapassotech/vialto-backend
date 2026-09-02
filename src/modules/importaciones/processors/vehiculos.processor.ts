@@ -3,15 +3,7 @@ import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { VehiculosService } from "../../../core/vehiculos/vehiculos.service";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
-
-type CamposComunes = {
-  marca?: string;
-  modelo?: string;
-  anio?: number;
-  poliza?: string;
-  vencimientoPoliza?: string;
-  transportistaId?: string;
-};
+import { scalarDataFromRow } from "../prisma-import-fields";
 
 /**
  * Reutiliza VehiculosService (no reimplementa la generación de patente
@@ -35,6 +27,19 @@ export class VehiculosProcessor implements IImportProcessor {
       .filter((p) => p !== "");
   }
 
+  private camposComunes(row: ValidatedRow): Record<string, unknown> {
+    const campos = scalarDataFromRow(row, "Vehiculo", {
+      skip: ["patente", "tipo"],
+    });
+    // CreateVehiculoDto espera ISO date string, no Date.
+    if (campos.vencimientoPoliza instanceof Date) {
+      campos.vencimientoPoliza = campos.vencimientoPoliza
+        .toISOString()
+        .slice(0, 10);
+    }
+    return campos;
+  }
+
   async insert(
     row: ValidatedRow,
     tenantId: string,
@@ -42,17 +47,7 @@ export class VehiculosProcessor implements IImportProcessor {
   ): Promise<InsertResult> {
     const partes = this.partesPatente(row);
     const tipoFila = String(row.tipo ?? "").trim();
-    const campos: CamposComunes = {
-      marca: (row.marca as string | null)?.toString().trim() || undefined,
-      modelo: (row.modelo as string | null)?.toString().trim() || undefined,
-      anio: row.anio != null ? Number(row.anio) : undefined,
-      poliza: (row.poliza as string | null)?.toString().trim() || undefined,
-      vencimientoPoliza:
-        row.vencimientoPoliza instanceof Date
-          ? row.vencimientoPoliza.toISOString().slice(0, 10)
-          : undefined,
-      transportistaId: (row.transportistaId as string | null) ?? undefined,
-    };
+    const campos = this.camposComunes(row);
 
     // Celda con dos patentes juntas (ej. "AC359ES/LHT523" = tractor +
     // semirremolque, mismo formato que la columna PATENTE de Viajes) — se
@@ -89,7 +84,7 @@ export class VehiculosProcessor implements IImportProcessor {
     tenantId: string,
     patente: string | undefined,
     tipo: string,
-    campos: CamposComunes,
+    campos: Record<string, unknown>,
   ): Promise<InsertResult> {
     const dto = { patente, tipo, ...campos };
 

@@ -196,7 +196,7 @@ export class ImportacionesController {
     return this.service.getTemplates(tenantId);
   }
 
-  /** Catálogo fijo de campos importables de un módulo — arma el dropdown de la UI de templates. */
+  /** Catálogo de campos importables de un módulo — se arma desde el modelo Prisma (un campo nuevo aparece solo). */
   @ApiOperation({ summary: 'Catálogo de campos importables de un módulo' })
   @Get('templates/catalogo')
   @Roles('superadmin')

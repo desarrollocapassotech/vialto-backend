@@ -27,7 +27,7 @@ import type {
   EntidadesFaltantesModelo,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
-import { TEMPLATE_CATALOGO, construirConfigPorDefecto } from "./template-catalogo";
+import { getCatalogoColumnas, construirConfigPorDefecto } from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 
@@ -443,9 +443,9 @@ export class ImportacionesService {
     });
   }
 
-  /** Catálogo fijo de campos importables de un módulo — fuente de verdad para la UI de configuración de templates. */
+  /** Catálogo de campos importables de un módulo — se arma desde Prisma + overlays. */
   getCatalogoCampos(modulo: string) {
-    return TEMPLATE_CATALOGO[modulo] ?? [];
+    return getCatalogoColumnas(modulo);
   }
 
   /**

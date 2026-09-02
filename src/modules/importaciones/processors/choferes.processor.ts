@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
+import { scalarDataFromRow } from "../prisma-import-fields";
 
 @Injectable()
 export class ChoferesProcessor implements IImportProcessor {
@@ -17,16 +18,7 @@ export class ChoferesProcessor implements IImportProcessor {
       throw new Error("El nombre del chofer es obligatorio.");
     }
 
-    // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
-    // para que un reimport no borre datos ya cargados que ese Excel no trae.
-    const data = {
-      dni: (row.dni as string | null)?.toString().trim() || undefined,
-      cuit: (row.cuit as string | null)?.toString().trim() || undefined,
-      licencia: (row.licencia as string | null)?.toString().trim() || undefined,
-      licenciaVence: (row.licenciaVence as Date | null) ?? undefined,
-      telefono: (row.telefono as string | null)?.toString().trim() || undefined,
-      transportistaId: (row.transportistaId as string | null) ?? undefined,
-    };
+    const data = scalarDataFromRow(row, "Chofer", { skip: ["nombre"] });
 
     const existing = await this.prisma.chofer.findFirst({
       where: { tenantId, nombre: { equals: nombre, mode: "insensitive" } },

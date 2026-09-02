@@ -90,10 +90,31 @@ const LOOKUP_TRANSPORTISTA: LookupOverlay = {
   createIfNotFoundSoportado: true,
 };
 
+// Solo se usa en la columna Chofer de la hoja de Viajes (mismo motivo que
+// LOOKUP_CLIENTE_VIAJE/LOOKUP_TRANSPORTISTA_VIAJE): algunos tenants tipean
+// ahí el DNI del chofer, no el nombre — matchear por DNI primero.
 const LOOKUP_CHOFER: LookupOverlay = {
   lookupModel: "choferes",
-  lookupFields: ["nombre", "dni"],
+  lookupFields: ["dni", "nombre"],
   createIfNotFoundSoportado: true,
+};
+
+/**
+ * Solo para las columnas Cliente/Transporte de la hoja de Viajes: algunos
+ * tenants (ej. NyM) tipean ahí el CUIT del cliente/transportista, no el
+ * nombre — matchear primero por `idFiscal` y usar `nombre` como respaldo
+ * para los tenants que sí tipean el nombre. No se reutiliza para
+ * Choferes/Vehículos (columna "Transporte" de esas hojas), que siguen
+ * matcheando por nombre primero vía `LOOKUP_TRANSPORTISTA`.
+ */
+const LOOKUP_CLIENTE_VIAJE: LookupOverlay = {
+  ...LOOKUP_CLIENTE,
+  lookupFields: ["idFiscal", "nombre"],
+};
+
+const LOOKUP_TRANSPORTISTA_VIAJE: LookupOverlay = {
+  ...LOOKUP_TRANSPORTISTA,
+  lookupFields: ["idFiscal", "nombre"],
 };
 
 const MODULOS: Record<string, ModuloDef> = {
@@ -268,9 +289,9 @@ const MODULOS: Record<string, ModuloDef> = {
       "monedaMonto",
     ],
     lookups: {
-      clienteId: LOOKUP_CLIENTE,
-      transportistaId: LOOKUP_TRANSPORTISTA,
-      transportistaEfectivoId: LOOKUP_TRANSPORTISTA,
+      clienteId: LOOKUP_CLIENTE_VIAJE,
+      transportistaId: LOOKUP_TRANSPORTISTA_VIAJE,
+      transportistaEfectivoId: LOOKUP_TRANSPORTISTA_VIAJE,
       choferId: LOOKUP_CHOFER,
     },
     overlays: {

@@ -319,6 +319,7 @@ export class FacturacionService {
   private async resolveViajes(
     tenantId: string,
     viajeIds: string[],
+    clienteId?: string,
   ): Promise<ViajeSnap[]> {
     if (viajeIds.length === 0) return [];
     const rows = await this.prisma.viaje.findMany({
@@ -330,6 +331,16 @@ export class FacturacionService {
         monedaMonto: true,
         cantidadFactura: true,
         precioUnitarioFactura: true,
+        clienteId: true,
+        clientesViaje: {
+          select: {
+            clienteId: true,
+            monto: true,
+            monedaMonto: true,
+            cantidad: true,
+            precioUnitario: true,
+          }
+        }
       },
     });
     if (rows.length !== viajeIds.length) {
@@ -337,7 +348,31 @@ export class FacturacionService {
         "Uno o más viajes inválidos para este tenant",
       );
     }
-    return rows;
+    
+    return rows.map(r => {
+      // Si el clienteId solicitado pertenece a un cliente secundario del viaje, usamos sus montos.
+      if (clienteId && r.clienteId !== clienteId && r.clientesViaje) {
+        const vc = r.clientesViaje.find(c => c.clienteId === clienteId);
+        if (vc) {
+          return {
+            id: r.id,
+            facturacionEstado: r.facturacionEstado,
+            monto: vc.monto,
+            monedaMonto: vc.monedaMonto,
+            cantidadFactura: vc.cantidad,
+            precioUnitarioFactura: vc.precioUnitario,
+          };
+        }
+      }
+      return {
+        id: r.id,
+        facturacionEstado: r.facturacionEstado,
+        monto: r.monto,
+        monedaMonto: r.monedaMonto,
+        cantidadFactura: r.cantidadFactura,
+        precioUnitarioFactura: r.precioUnitarioFactura,
+      };
+    });
   }
 
   private assertMonedaUnica(viajes: { monedaMonto: string }[]): string {
@@ -404,6 +439,7 @@ export class FacturacionService {
       | "numero"
       | "tipo"
       | "clienteId"
+      | "viajeId"
       | "emisionDesde"
       | "emisionHasta"
       | "vencimientoDesde"
@@ -444,6 +480,15 @@ export class FacturacionService {
           `${query.vencimientoHasta}T23:59:59.999Z`,
         );
       }
+    }
+
+    if (query.viajeId) {
+      const vid = query.viajeId;
+      where.OR = [
+        { viajes: { some: { id: vid } } },
+        { clientesViaje: { some: { viajeId: vid } } },
+        { tramos: { some: { viajeId: vid } } },
+      ];
     }
 
     return where;
@@ -549,7 +594,7 @@ export class FacturacionService {
     }
 
     const viajeIds = dto.viajeIds ?? [];
-    const viajes = await this.resolveViajes(tenantId, viajeIds);
+    const viajes = await this.resolveViajes(tenantId, viajeIds, dto.clienteId);
     const moneda = this.assertMonedaUnica(viajes);
     const facturarPorTramo = dto.facturarPorTramo === true;
     const tramosValidos = this.assertTramosValidos(
@@ -587,11 +632,36 @@ export class FacturacionService {
         });
 
         if (viajeIds.length > 0) {
-          // Vincular viajes y guardar nro de factura
-          await tx.viaje.updateMany({
+          if (dto.clienteId) {
+            await tx.viajeCliente.updateMany({
+              where: {
+                tenantId,
+                viajeId: { in: viajeIds },
+                clienteId: dto.clienteId,
+              },
+              data: {
+                facturaId: factura.id,
+                facturacionEstado: "facturado",
+              },
+            });
+          }
+
+          const viajesInvolucrados = await tx.viaje.findMany({
             where: { id: { in: viajeIds }, tenantId },
-            data: { facturaId: factura.id },
+            select: { id: true, clienteId: true, facturaId: true },
           });
+
+          for (const v of viajesInvolucrados) {
+            // Actualizar la cabecera del viaje si el cliente facturado es el principal
+            // o si el viaje no tenía ninguna factura asignada aún (retrocompatibilidad).
+            if (v.clienteId === dto.clienteId || !v.facturaId) {
+              await tx.viaje.update({
+                where: { id: v.id },
+                data: { facturaId: factura.id },
+              });
+            }
+          }
+
           await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
         }
 
@@ -626,7 +696,7 @@ export class FacturacionService {
   async updateFactura(id: string, tenantId: string, dto: UpdateFacturaDto) {
     const existing = await this.prisma.factura.findFirst({
       where: { id, tenantId },
-      select: { facturarPorTramo: true },
+      select: { facturarPorTramo: true, clienteId: true },
     });
     if (!existing) throw new NotFoundException("Factura no encontrada");
 
@@ -710,23 +780,54 @@ export class FacturacionService {
             where: { id: { in: idsDesvinculados }, tenantId },
             data: { facturaId: null },
           });
+          await tx.viajeCliente.updateMany({
+            where: { viajeId: { in: idsDesvinculados }, tenantId, facturaId: id },
+            data: { facturaId: null, facturacionEstado: "sin_facturar" },
+          });
           await syncFacturacionEstadoViajes(tx, tenantId, idsDesvinculados);
         }
 
         if (newIds.length > 0) {
-          await tx.viaje.updateMany({
+          const targetClienteId = dto.clienteId ?? existing.clienteId ?? undefined;
+          if (targetClienteId) {
+            await tx.viajeCliente.updateMany({
+              where: {
+                tenantId,
+                viajeId: { in: newIds },
+                clienteId: targetClienteId,
+              },
+              data: {
+                facturaId: id,
+                facturacionEstado: "facturado",
+              },
+            });
+          }
+
+          const viajesInvolucrados = await tx.viaje.findMany({
             where: { id: { in: newIds }, tenantId },
-            data: { facturaId: id },
+            select: { id: true, clienteId: true, facturaId: true },
           });
+
+          for (const v of viajesInvolucrados) {
+            if (v.clienteId === targetClienteId || !v.facturaId || v.facturaId === id) {
+              await tx.viaje.update({
+                where: { id: v.id },
+                data: { facturaId: id },
+              });
+            }
+          }
+
           await syncFacturacionEstadoViajes(tx, tenantId, newIds);
         }
       }
 
-      const viajes = await tx.viaje.findMany({
+      const viajeIdsActualesRows = await tx.viaje.findMany({
         where: { facturaId: id, tenantId },
-        select: this.VIAJE_SELECT,
+        select: { id: true },
       });
-      const viajeIdsActuales = viajes.map((v) => v.id);
+      const viajeIdsActuales = viajeIdsActualesRows.map((v) => v.id);
+      
+      const viajes = await this.resolveViajes(tenantId, viajeIdsActuales, dto.clienteId ?? existing.clienteId ?? undefined);
 
       let tramosForImporte: { viajeId: string; monto: number }[] = [];
       if (facturarPorTramo) {

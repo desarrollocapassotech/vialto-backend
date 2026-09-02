@@ -69,6 +69,13 @@ export async function syncFacturacionEstadoViaje(
       facturaId: true,
       factura: { select: { arcaEstado: true } },
       tenant: { select: { modules: true } },
+      clientesViaje: {
+        select: {
+          id: true,
+          facturacionEstado: true,
+          factura: { select: { arcaEstado: true } },
+        },
+      },
     },
   });
   if (!viaje) return;
@@ -82,6 +89,18 @@ export async function syncFacturacionEstadoViaje(
       where: { id: viajeId },
       data: { facturacionEstado: next },
     });
+  }
+
+  for (const vc of viaje.clientesViaje) {
+    // ViajeCliente no trackea cobrado de forma independiente hoy (solo el viaje general).
+    // Usamos cobrado=false y dependemos del arcaEstado.
+    const nextVc = mapFacturacionEstado(vc.factura, false, tieneArca);
+    if (nextVc !== vc.facturacionEstado) {
+      await tx.viajeCliente.update({
+        where: { id: vc.id },
+        data: { facturacionEstado: nextVc },
+      });
+    }
   }
 }
 

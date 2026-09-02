@@ -51,6 +51,11 @@ export class FacturasPaginatedQueryDto {
   clienteId?: string;
 
   @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
+  @IsString()
+  viajeId?: string;
+
+  @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   emisionDesde?: string;
 

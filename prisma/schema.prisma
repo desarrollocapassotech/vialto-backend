@@ -484,6 +484,11 @@ model Factura {
   transportista    Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   viajes           Viaje[]
   importe          Float
+  /**
+   * IVA total persistido al guardar (solo facturas por tramo de tenants sin ARCA).
+   * Null = no aplica o todavía no backfilleado; el cobro recalcula en ese caso.
+   */
+  ivaMonto         Float?
   moneda           String         @default("ARS") // ARS | USD
   fechaEmision     DateTime
   fechaVencimiento DateTime?
@@ -491,7 +496,8 @@ model Factura {
   diferencia       Float?
   ivaPct           Float?         @default(21)
   /**
-   * Si true, el importe se arma con tramos (+ monto de viajes sin tramos).
+   * Si true, el IVA se arma por tramo; el neto (`importe`) sigue siendo la
+   * suma completa de los viajes (la parte no cubierta por tramos usa `ivaPct`).
    */
   facturarPorTramo Boolean        @default(false)
   comprobanteUrl   String? // URL Cloudinary del comprobante adjunto (PDF o imagen)

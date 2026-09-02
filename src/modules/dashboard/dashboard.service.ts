@@ -690,6 +690,7 @@ export class DashboardService {
         arcaEstado: true,
         facturarPorTramo: true,
         ivaPct: true,
+        ivaMonto: true,
         pagos: { select: { importe: true } },
         viajes: { select: { id: true, facturacionEstado: true, monto: true } },
         tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
@@ -707,6 +708,7 @@ export class DashboardService {
         facturarPorTramo: opts.facturarPorTramo,
         tramos: f.tramos,
         ivaPctCabecera: f.ivaPct,
+        ivaMontoGuardado: opts.ivaMontoGuardado,
       }).vencida;
     });
     let montoVencidas = 0;

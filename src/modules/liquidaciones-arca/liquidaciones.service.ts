@@ -1643,6 +1643,11 @@ export class LiquidacionesService {
             fechaCarga: true,
           },
         },
+        clientesViaje: {
+          select: {
+            viajeId: true,
+          },
+        },
         cliente: {
           select: {
             id: true,
@@ -1729,7 +1734,10 @@ export class LiquidacionesService {
         importe: importeNeto,
       },
     });
-    const viajeIdsFactura = facturaRaw.viajes.map((v) => v.id);
+    const viajeIdsFactura = Array.from(new Set([
+      ...facturaRaw.viajes.map((v) => v.id),
+      ...facturaRaw.clientesViaje.map((vc) => vc.viajeId),
+    ]));
     await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
 
     try {

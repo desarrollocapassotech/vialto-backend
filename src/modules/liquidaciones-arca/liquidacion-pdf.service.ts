@@ -1005,6 +1005,7 @@ export class LiquidacionPdfService {
     }
 
     // Procesamiento de Conceptos Adicionales
+    // Procesamiento de Conceptos Adicionales
     const otrosItems = cvlp.items.filter(
       (i) => i.descripcion.toUpperCase() !== "FLETES",
     );
@@ -1018,7 +1019,9 @@ export class LiquidacionPdfService {
       gruposOtros[baseName].push(item);
     }
 
+    // 1. Agregamos "prod" a la interfaz del array
     const conceptosProcesados: {
+      prod: string;
       desc: string;
       tripId: string;
       qty: number;
@@ -1027,11 +1030,23 @@ export class LiquidacionPdfService {
       ivaPct: number;
       subtotal: number;
     }[] = [];
+
     for (const baseName in gruposOtros) {
       const group = gruposOtros[baseName];
       const allSameAmount = group.every(
         (i) => i.importeBase === group[0].importeBase,
       );
+
+      // 2. Determinamos qué mostrar en la columna "Producto"
+      let prodText = baseName;
+      // Si el concepto es la comisión, en la columna producto dejamos solo el título base
+      if (
+        baseName.includes("COMISIÓN TRANSPORTE") ||
+        baseName.includes("COMISION TRANSPORTE")
+      ) {
+        prodText = "COMISIÓN TRANSPORTE";
+      }
+
       // Si son varios viajes y tienen el mismo monto, se consolidan
       if (group.length > 1 && allSameAmount) {
         let totalBase = 0;
@@ -1041,6 +1056,7 @@ export class LiquidacionPdfService {
           totalSub += i.subtotal;
         }
         conceptosProcesados.push({
+          prod: prodText,
           desc: baseName,
           tripId: "",
           qty: group.length,
@@ -1065,8 +1081,11 @@ export class LiquidacionPdfService {
               .toString()
               .toUpperCase();
           }
+          // Aquí la descripción final (con viaje) se mapea a 'desc', pero mantenemos el 'prodText' limpio
+          const descText = match ? item.descripcion.toUpperCase() : baseName;
           conceptosProcesados.push({
-            desc: baseName,
+            prod: prodText,
+            desc: descText,
             tripId: tripIdText,
             qty: 1,
             precio: item.importeBase,
@@ -1082,12 +1101,13 @@ export class LiquidacionPdfService {
       doc.fontSize(6.5).font("Helvetica");
       let rowH = 16;
       if (isSingleTrip) {
-        const hProd = doc.heightOfString(cp.desc, { width: colWidths[0] - 4 });
+        // 3. Calculamos la altura separando cp.prod y cp.desc
+        const hProd = doc.heightOfString(cp.prod, { width: colWidths[0] - 4 });
         const hDesc = doc.heightOfString(cp.desc, { width: colWidths[1] - 4 });
         rowH = Math.max(16, hProd + 8, hDesc + 8);
       } else {
         const hId = doc.heightOfString(cp.tripId, { width: colWidths[0] - 4 });
-        const hProd = doc.heightOfString(cp.desc, { width: colWidths[1] - 4 });
+        const hProd = doc.heightOfString(cp.prod, { width: colWidths[1] - 4 });
         const hDesc = doc.heightOfString(cp.desc, { width: colWidths[2] - 4 });
         rowH = Math.max(16, hId + 8, hProd + 8, hDesc + 8);
       }
@@ -1101,9 +1121,10 @@ export class LiquidacionPdfService {
 
       doc.rect(M, y, CW, rowH).stroke("#ddd");
 
+      // 4. Asignamos cp.prod a la primera columna, y cp.desc a la segunda
       const cells = isSingleTrip
         ? [
-            cp.desc,
+            cp.prod,
             cp.desc,
             fmtNum(cp.qty),
             fmtNum(cp.precio),
@@ -1113,7 +1134,7 @@ export class LiquidacionPdfService {
           ]
         : [
             cp.tripId,
-            cp.desc,
+            cp.prod,
             cp.desc,
             fmtNum(cp.qty),
             fmtNum(cp.precio),

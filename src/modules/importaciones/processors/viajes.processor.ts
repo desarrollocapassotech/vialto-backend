@@ -236,17 +236,9 @@ export class ViajesProcessor implements IImportProcessor {
       });
     }
 
-    // Mismo criterio que create(): la columna Observaciones del Excel +
-    // las columnas sin mapeo (`_unmappedText`, "Header: valor" una por
-    // línea) se concatenan en un solo campo. Va en `especiales` (no en
-    // `extras` vía scalarDataFromRow) para no perder la concatenación —
-    // scalarDataFromRow solo copiaría el valor crudo de la columna
-    // Observaciones, sin las columnas sin mapear.
-    const observacionesParts: string[] = [];
-    if (row.observaciones) observacionesParts.push(row.observaciones as string);
-    if (row._unmappedText) observacionesParts.push(row._unmappedText as string);
-    const observaciones =
-      observacionesParts.length > 0 ? observacionesParts.join("\n") : undefined;
+    // Las columnas sin mapeo (`_unmappedText`) ya no se concatenan a la fuerza
+    // en Observaciones para evitar ensuciar la información del viaje.
+    const observaciones = (row.observaciones as string | undefined) ?? undefined;
 
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que reimportar el mismo ID Personalizado con un Excel más acotado
@@ -293,12 +285,7 @@ export class ViajesProcessor implements IImportProcessor {
       // (Forzamos el tipo con 'as any' en caso de que generateNumeroViaje espere estrictamente PrismaService en tu tipado)
       const numero = await generateNumeroViaje(tx as any, tenantId);
 
-      const observacionesParts: string[] = [];
-      if (row.observaciones)
-        observacionesParts.push(row.observaciones as string);
-      if (row._unmappedText)
-        observacionesParts.push(row._unmappedText as string);
-      const observaciones = observacionesParts.join("\n") || null;
+      const observaciones = (row.observaciones as string | undefined) ?? null;
 
       const clienteId = row.clienteId as string;
       const fechaCarga = this.toDate(row.fechaCarga);

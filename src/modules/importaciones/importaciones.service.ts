@@ -138,12 +138,17 @@ export class ImportacionesService {
     const headersNoMapeados = headersExcel.filter(
       (h) =>
         !config.columns.some(
-          (c) => c.excelHeader.toLowerCase() === h.toLowerCase(),
+          (c) =>
+            c.excelHeader.toLowerCase() === h.toLowerCase() ||
+            c.excelHeaderAliases?.some((a) => a.toLowerCase() === h.toLowerCase()),
         ),
     );
     const columnasOpcionalesFaltantes = config.columns
       .filter(
-        (c) => !c.required && !headersExcelLower.has(c.excelHeader.toLowerCase()),
+        (c) =>
+          !c.required &&
+          !headersExcelLower.has(c.excelHeader.toLowerCase()) &&
+          !(c.excelHeaderAliases?.some((a) => headersExcelLower.has(a.toLowerCase()))),
       )
       .map((c) => c.excelHeader);
 
@@ -297,8 +302,8 @@ export class ImportacionesService {
       if (faltan) {
         throw new BadRequestException(
           "Hay filas sin " +
-            columnasAdvertencia.map((c) => c.excelHeader).join("/") +
-            " — confirmá que querés importarlas igual.",
+          columnasAdvertencia.map((c) => c.excelHeader).join("/") +
+          " — confirmá que querés importarlas igual.",
         );
       }
     }
@@ -315,8 +320,8 @@ export class ImportacionesService {
       if (duplicadas.length > 0) {
         throw new BadRequestException(
           "Hay números de factura repetidos entre varios viajes nuevos (" +
-            duplicadas.map((d) => d.numero).join(", ") +
-            ") — confirmá que querés unificarlos en una sola factura.",
+          duplicadas.map((d) => d.numero).join(", ") +
+          ") — confirmá que querés unificarlos en una sola factura.",
         );
       }
     }
@@ -622,21 +627,21 @@ export class ImportacionesService {
     const [clientesRows, transportistasRows, choferesRows] = await Promise.all([
       idsClientes.size > 0
         ? this.prisma.cliente.findMany({
-            where: { tenantId, id: { in: [...idsClientes] } },
-            select: { id: true, nombre: true },
-          })
+          where: { tenantId, id: { in: [...idsClientes] } },
+          select: { id: true, nombre: true },
+        })
         : Promise.resolve([]),
       idsTransportistas.size > 0
         ? this.prisma.transportista.findMany({
-            where: { tenantId, id: { in: [...idsTransportistas] } },
-            select: { id: true, nombre: true },
-          })
+          where: { tenantId, id: { in: [...idsTransportistas] } },
+          select: { id: true, nombre: true },
+        })
         : Promise.resolve([]),
       idsChoferes.size > 0
         ? this.prisma.chofer.findMany({
-            where: { tenantId, id: { in: [...idsChoferes] } },
-            select: { id: true, nombre: true },
-          })
+          where: { tenantId, id: { in: [...idsChoferes] } },
+          select: { id: true, nombre: true },
+        })
         : Promise.resolve([]),
     ]);
 
@@ -856,32 +861,65 @@ export class ImportacionesService {
   }
 
   private async getActiveTemplate(tenantId: string, modulo: string) {
-    const template = await this.prisma.importTemplate.findFirst({
+    let template = await this.prisma.importTemplate.findFirst({
       where: { tenantId, modulo, activo: true },
     });
-    if (template) return template;
 
-    // Sin template propio todavía: se genera uno por defecto a partir del
-    // catálogo fijo (mismos encabezados sugeridos que ve el superadmin), para
-    // que ningún módulo quede bloqueado por falta de configuración. Queda
-    // guardado como un ImportTemplate real, editable después desde la pestaña
-    // Templates igual que cualquier otro.
-    const config = construirConfigPorDefecto(modulo);
-    if (!config) {
-      throw new NotFoundException(
-        `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
-      );
+    if (!template) {
+      // Sin template propio todavía: se genera uno por defecto a partir del
+      // catálogo fijo (mismos encabezados sugeridos que ve el superadmin), para
+      // que ningún módulo quede bloqueado por falta de configuración. Queda
+      // guardado como un ImportTemplate real, editable después desde la pestaña
+      // Templates igual que cualquier otro.
+      const config = construirConfigPorDefecto(modulo);
+      if (!config) {
+        throw new NotFoundException(
+          `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
+        );
+      }
+      template = await this.prisma.importTemplate.upsert({
+        where: { tenantId_modulo: { tenantId, modulo } },
+        create: {
+          tenantId,
+          modulo,
+          nombre: `Template ${modulo} (por defecto)`,
+          config: config as unknown as object,
+          activo: true,
+        },
+        update: {},
+      });
     }
-    return this.prisma.importTemplate.upsert({
-      where: { tenantId_modulo: { tenantId, modulo } },
-      create: {
-        tenantId,
-        modulo,
-        nombre: `Template ${modulo} (por defecto)`,
-        config: config as unknown as object,
-        activo: true,
-      },
-      update: {},
-    });
+
+    // Inyectar columnas faltantes y alias desde el catálogo en tiempo de ejecución
+    const configData = template.config as unknown as TemplateConfig;
+    if (configData && configData.columns) {
+      const catalogo = getCatalogoColumnas(modulo);
+
+      // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
+      for (const catCol of catalogo) {
+        if (!configData.columns.some((c) => c.field === catCol.field)) {
+          configData.columns.push({
+            field: catCol.field,
+            excelHeader: catCol.defaultExcelHeader,
+            excelHeaderAliases: catCol.excelHeaderAliases,
+            type: catCol.type,
+            required: catCol.systemRequired,
+          });
+        }
+      }
+
+      // 2. Inyectar alias a las columnas existentes (en caso de que hayan sido actualizadas en el código)
+      for (const col of configData.columns) {
+        const catCol = catalogo.find((c) => c.field === col.field);
+        if (
+          catCol?.excelHeaderAliases &&
+          (!col.excelHeaderAliases || col.excelHeaderAliases.length === 0)
+        ) {
+          col.excelHeaderAliases = catCol.excelHeaderAliases;
+        }
+      }
+    }
+
+    return template;
   }
 }

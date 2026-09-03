@@ -67,6 +67,22 @@ export class ImportacionesController {
   }
 
   /**
+   * Columnas esperadas por módulo (encabezado, obligatoria/opcional, tipo de
+   * dato) según el template activo del tenant, o el default si todavía no
+   * configuró uno — para mostrarle al usuario antes de armar su Excel.
+   */
+  @ApiOperation({ summary: 'Columnas esperadas por módulo para armar el Excel de importación' })
+  @Get('columnas-esperadas')
+  @Roles('admin', 'superadmin')
+  columnasEsperadas(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') queryTenantId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(auth, queryTenantId);
+    return this.service.getColumnasEsperadas(tenantId);
+  }
+
+  /**
    * Sube un archivo Excel, lo valida y devuelve una previsualización.
    * No guarda nada en las tablas de negocio.
    */

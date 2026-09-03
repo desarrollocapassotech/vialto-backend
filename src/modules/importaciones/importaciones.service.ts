@@ -25,11 +25,22 @@ import type {
   PreviewEntidad,
   RowError,
   EntidadesFaltantesModelo,
+  ColumnaEsperada,
+  ColumnasEsperadasModulo,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
 import { getCatalogoColumnas, construirConfigPorDefecto } from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
+
+/** Nombre de hoja sugerido cuando el template (propio o default) no trae uno explícito — mismo criterio que `sheetDefault` en template-catalogo.ts. */
+const SHEET_LABEL_DEFAULT: Record<string, string> = {
+  clientes: "Clientes",
+  transportistas: "Transportes",
+  choferes: "Choferes",
+  vehiculos: "Vehículos",
+  viajes: "Viajes",
+};
 
 @Injectable()
 export class ImportacionesService {
@@ -465,6 +476,54 @@ export class ImportacionesService {
   /** Catálogo de campos importables de un módulo — se arma desde Prisma + overlays. */
   getCatalogoCampos(modulo: string) {
     return getCatalogoColumnas(modulo);
+  }
+
+  /**
+   * Columnas que el importador va a esperar de cada módulo si el tenant
+   * sube un Excel ahora mismo — usa el template propio si ya configuró uno
+   * (`ImportTemplate` activo), o el default si no. A diferencia de
+   * `getActiveTemplate()` (usada por `preview()`), esta consulta es de solo
+   * lectura: no crea ningún `ImportTemplate` — se llama antes de que el
+   * usuario suba nada, no tiene sentido dejar filas de más en la tabla por
+   * módulos que capaz nunca termine importando.
+   */
+  async getColumnasEsperadas(tenantId: string): Promise<ColumnasEsperadasModulo[]> {
+    const modulos = ["clientes", "transportistas", "choferes", "vehiculos", "viajes"];
+    const templates = await this.prisma.importTemplate.findMany({
+      where: { tenantId, modulo: { in: modulos }, activo: true },
+    });
+    const templatePorModulo = new Map(templates.map((t) => [t.modulo, t]));
+
+    return modulos.map((modulo) => {
+      const template = templatePorModulo.get(modulo);
+      const config = template
+        ? (template.config as unknown as TemplateConfig)
+        : construirConfigPorDefecto(modulo);
+      const catalogo = getCatalogoColumnas(modulo);
+
+      const columnas: ColumnaEsperada[] = (config?.columns ?? []).map((c) => {
+        const enCatalogo = catalogo.find((cat) => cat.field === c.field);
+        const col: ColumnaEsperada = {
+          excelHeader: c.excelHeader,
+          campoLabel: enCatalogo?.campoLabel ?? c.field,
+          tipo: c.type,
+          requerido: !!c.required,
+        };
+        if (c.warnIfEmpty) col.recomendado = true;
+        if (c.allowedValues) col.allowedValues = c.allowedValues;
+        if (c.lookupModel) col.lookupModel = c.lookupModel;
+        return col;
+      });
+
+      return {
+        modulo,
+        sheet:
+          (typeof config?.sheet === "string" ? config.sheet : undefined) ??
+          SHEET_LABEL_DEFAULT[modulo] ??
+          modulo,
+        columnas,
+      };
+    });
   }
 
   /**

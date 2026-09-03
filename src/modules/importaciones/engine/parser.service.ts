@@ -98,15 +98,14 @@ export class ParserService {
 
       const row: ParsedRow = { _rowNum: headerRowIndex + 2 + i }; // número de fila en el Excel (1-based)
 
-      const mappedHeadersLower = new Set(
-        config.columns.map((c) => c.excelHeader.toLowerCase()),
-      );
+      const mappedHeadersLower = new Set<string>();
 
       for (const col of config.columns) {
-        const colIndex = headers.findIndex(
-          (h) => h.toLowerCase() === col.excelHeader.toLowerCase(),
-        );
+        const validHeaders = [col.excelHeader, ...(col.excelHeaderAliases || [])].map(h => h.toLowerCase());
+        const colIndex = headers.findIndex((h) => validHeaders.includes(h.toLowerCase()));
+        
         if (colIndex >= 0) {
+          mappedHeadersLower.add(headers[colIndex].toLowerCase());
           const cell = raw[colIndex] ?? null;
           row[col.field] =
             col.type === "date" ? normalizeExcelDate(cell, col.format) : cell;

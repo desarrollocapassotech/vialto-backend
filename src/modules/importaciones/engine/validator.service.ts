@@ -428,6 +428,12 @@ export class ValidatorService {
         return r.id;
       }
       case "transportistas": {
+        const justDigits = nombre.replace(/[^\d]/g, "");
+        if (justDigits.length >= 7 && /^[\d\-\.\s]+$/.test(nombre)) {
+          throw new BadRequestException(
+            "No se puede crear automáticamente un transportista usando solo un DNI/CUIT. Por favor, importá los transportistas primero o proveé el Nombre en esta columna.",
+          );
+        }
         const r = await this.prisma.transportista.create({
           data: { tenantId, nombre },
           select: { id: true },

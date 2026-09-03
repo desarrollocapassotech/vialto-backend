@@ -505,6 +505,18 @@ export function getCatalogoColumnas(modulo: string): CatalogoColumn[] {
   return catalogoPorModulo()[modulo] ?? [];
 }
 
+/**
+ * Formulario de alta (catálogo de `tenant-field-config`) que decide, para un
+ * módulo de importación, qué campos están visibles para un tenant puntual.
+ * `undefined` = el módulo no tiene contraparte en `FIELD_CATALOG` (ej.
+ * `choferes`) — en ese caso no hay nada que filtrar.
+ */
+export function getAltaFormularioDeModulo(
+  modulo: string,
+): { modulo: string; formulario: string } | undefined {
+  return MODULOS[modulo]?.altaFormulario;
+}
+
 /** Snapshot lazy del catálogo (misma fuente que `getCatalogoColumnas`). */
 export const TEMPLATE_CATALOGO: Record<string, CatalogoColumn[]> =
   catalogoPorModulo();

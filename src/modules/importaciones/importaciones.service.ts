@@ -29,9 +29,10 @@ import type {
   ColumnasEsperadasModulo,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
-import { getCatalogoColumnas, construirConfigPorDefecto } from "./template-catalogo";
+import { getCatalogoColumnas, getAltaFormularioDeModulo, construirConfigPorDefecto } from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
+import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
 
 /** Nombre de hoja sugerido cuando el template (propio o default) no trae uno explícito — mismo criterio que `sheetDefault` en template-catalogo.ts. */
 const SHEET_LABEL_DEFAULT: Record<string, string> = {
@@ -57,6 +58,7 @@ export class ImportacionesService {
     private readonly vehiculosProcessor: VehiculosProcessor,
     private readonly iaTemplateSuggestion: IaTemplateSuggestionService,
     private readonly vehiculosService: VehiculosService,
+    private readonly tenantFieldConfig: TenantFieldConfigService,
   ) {
     this.processors = {
       viajes: this.viajesProcessor,
@@ -473,9 +475,24 @@ export class ImportacionesService {
     });
   }
 
-  /** Catálogo de campos importables de un módulo — se arma desde Prisma + overlays. */
-  getCatalogoCampos(modulo: string) {
-    return getCatalogoColumnas(modulo);
+  /**
+   * Catálogo de campos importables de un módulo — se arma desde Prisma +
+   * overlays, y se filtra con los campos que el tenant tiene visibles en su
+   * formulario de alta correspondiente (`tenant-field-config`). Módulos sin
+   * contraparte ahí (ej. `choferes`) no se filtran — se muestran todos.
+   */
+  async getCatalogoCampos(modulo: string, tenantId: string) {
+    const columnas = getCatalogoColumnas(modulo);
+    const altaFormulario = getAltaFormularioDeModulo(modulo);
+    if (!altaFormulario) return columnas;
+
+    const config = await this.tenantFieldConfig.getConfigEfectiva(
+      tenantId,
+      altaFormulario.modulo,
+      altaFormulario.formulario,
+    );
+    const ocultos = new Set(config.filter((c) => !c.visible).map((c) => c.campo));
+    return columnas.filter((c) => !ocultos.has(c.field));
   }
 
   /**
@@ -534,7 +551,7 @@ export class ImportacionesService {
     modulo: string,
     buffer: Buffer,
   ): Promise<SugerenciaTemplate> {
-    const catalogo = this.getCatalogoCampos(modulo);
+    const catalogo = getCatalogoColumnas(modulo);
     if (catalogo.length === 0) {
       throw new BadRequestException(
         `No hay catálogo de campos definido para el módulo "${modulo}".`,

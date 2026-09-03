@@ -212,12 +212,21 @@ export class ImportacionesController {
     return this.service.getTemplates(tenantId);
   }
 
-  /** Catálogo de campos importables de un módulo — se arma desde el modelo Prisma (un campo nuevo aparece solo). */
+  /**
+   * Catálogo de campos importables de un módulo — se arma desde el modelo
+   * Prisma (un campo nuevo aparece solo) y se filtra por los campos visibles
+   * del tenant en `tenant-field-config`.
+   */
   @ApiOperation({ summary: 'Catálogo de campos importables de un módulo' })
   @Get('templates/catalogo')
   @Roles('superadmin')
-  getCatalogoCampos(@Query('modulo') modulo: string) {
-    return this.service.getCatalogoCampos(modulo);
+  getCatalogoCampos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('modulo') modulo: string,
+    @Query('tenantId') queryTenantId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(auth, queryTenantId);
+    return this.service.getCatalogoCampos(modulo, tenantId);
   }
 
   /**

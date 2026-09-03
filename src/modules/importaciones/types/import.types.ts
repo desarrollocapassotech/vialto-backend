@@ -10,6 +10,8 @@ export type ColumnType = 'string' | 'number' | 'date' | 'boolean' | 'lookup' | '
 export interface ColumnConfig {
   /** Nombre del encabezado en el Excel del cliente */
   excelHeader: string;
+  /** Nombres alternativos del encabezado (sinónimos). Si el Excel trae alguno de estos, se mapea automáticamente. */
+  excelHeaderAliases?: string[];
   /** Nombre del campo en el sistema */
   field: string;
   type: ColumnType;

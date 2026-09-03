@@ -258,7 +258,23 @@ export class ValidatorService {
         }
 
         const id = this.lookupOne(str, model, fields, caches);
-        if (id) return { value: id };
+        if (id) {
+          if (id.startsWith("__pending__") && model === "transportistas") {
+            const justDigits = str.replace(/[^\d]/g, "");
+            if (justDigits.length >= 7 && /^[\d\-\.\s]+$/.test(str)) {
+              return {
+                error: {
+                  fila: rowNum,
+                  campo: col.excelHeader,
+                  error:
+                    "El transportista no existe en la base de datos. No se puede crear automáticamente usando solo un DNI/CUIT. Proveé su Nombre completo (o importalo antes).",
+                  valor: raw,
+                },
+              };
+            }
+          }
+          return { value: id };
+        }
 
         return {
           error: {
@@ -428,6 +444,12 @@ export class ValidatorService {
         return r.id;
       }
       case "transportistas": {
+        const justDigits = nombre.replace(/[^\d]/g, "");
+        if (justDigits.length >= 7 && /^[\d\-\.\s]+$/.test(nombre)) {
+          throw new BadRequestException(
+            "No se puede crear automáticamente un transportista usando solo un DNI/CUIT. Por favor, importá los transportistas primero o proveé el Nombre en esta columna.",
+          );
+        }
         const r = await this.prisma.transportista.create({
           data: { tenantId, nombre },
           select: { id: true },

@@ -28,6 +28,8 @@ export interface CatalogoColumn {
   systemRequired: boolean;
   /** Sugerencia inicial de excelHeader, editable por el superadmin. */
   defaultExcelHeader: string;
+  /** Nombres alternativos del encabezado (sinónimos). Si el Excel trae alguno de estos, se mapea automáticamente. */
+  excelHeaderAliases?: string[];
   lookupModel?: LookupModel;
   lookupFields?: string[];
   /** true = tiene sentido mostrar el toggle "Crear automáticamente si no existe". */
@@ -329,6 +331,7 @@ const MODULOS: Record<string, ModuloDef> = {
       precioTransportistaExterno: {
         campoLabel: "Monto total a transportista (flete)",
         defaultExcelHeader: "Monto total a transportista (flete)",
+        excelHeaderAliases: ["Pago neto"],
       },
       monedaPrecioTransportistaExterno: {
         campoLabel: "Moneda flete",
@@ -449,6 +452,7 @@ function columnaDesdePrisma(
   if (overlay.warnIfEmpty) col.warnIfEmpty = true;
   if (overlay.format) col.format = overlay.format;
   if (overlay.allowedValues) col.allowedValues = overlay.allowedValues;
+  if (overlay.excelHeaderAliases) col.excelHeaderAliases = overlay.excelHeaderAliases;
   if (lookup) {
     col.lookupModel = lookup.lookupModel;
     col.lookupFields = lookup.lookupFields;
@@ -549,6 +553,7 @@ export function construirConfigPorDefecto(modulo: string): TemplateConfig | null
       if (c.allowedValues) col.allowedValues = c.allowedValues;
       if (c.format) col.format = c.format;
       if (c.warnIfEmpty) col.warnIfEmpty = true;
+      if (c.excelHeaderAliases) col.excelHeaderAliases = c.excelHeaderAliases;
       return col;
     }),
   };

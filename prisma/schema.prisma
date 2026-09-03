@@ -30,6 +30,12 @@ model Tenant {
    * true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla).
    */
   importacionesOcultas                   Boolean   @default(false)
+
+  /**
+   * Habilita la opción de exportar el reporte PAUT / MIC CRT en el módulo de Viajes.
+   * Por defecto desactivado para nuevas empresas.
+   */
+  habilitarExportacionPautMicCrt         Boolean   @default(false)
   /**
    * Método de anulación del comprobante CVLP (060) — configurable solo desde superadmin (panel Empresas).
    * 'nota_credito_debito' (default, todo tenant nuevo): anulación emitiendo NC/ND asociada vía AFIP SDK,

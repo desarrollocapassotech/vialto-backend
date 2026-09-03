@@ -61,7 +61,7 @@ export async function syncFacturacionEstadoViaje(
   tx: Tx,
   tenantId: string,
   viajeId: string,
-  opts: { cobrado?: boolean } = {},
+  opts: { cobrado?: boolean; facturaId?: string } = {},
 ): Promise<void> {
   const viaje = await tx.viaje.findFirst({
     where: { id: viajeId, tenantId },
@@ -75,6 +75,7 @@ export async function syncFacturacionEstadoViaje(
       clientesViaje: {
         select: {
           id: true,
+          facturaId: true,
           facturacionEstado: true,
           factura: { select: { arcaEstado: true } },
         },
@@ -85,7 +86,10 @@ export async function syncFacturacionEstadoViaje(
 
   const tieneArca = viaje.tenant.modules.includes('emision-facturas-arca');
   const cobrado =
-    opts.cobrado ?? viaje.facturacionEstado === 'cobrado';
+    opts.facturaId && opts.facturaId === viaje.facturaId && opts.cobrado !== undefined
+      ? opts.cobrado
+      : opts.cobrado ?? viaje.facturacionEstado === 'cobrado'; // fallback si no mandaron facturaId pero sí cobrado
+  
   const next = mapFacturacionEstado(viaje.factura, cobrado, tieneArca);
   if (next !== viaje.facturacionEstado) {
     await tx.viaje.update({
@@ -95,9 +99,12 @@ export async function syncFacturacionEstadoViaje(
   }
 
   for (const vc of viaje.clientesViaje) {
-    // ViajeCliente no trackea cobrado de forma independiente hoy (solo el viaje general).
-    // Usamos cobrado=false y dependemos del arcaEstado.
-    const nextVc = mapFacturacionEstado(vc.factura, false, tieneArca);
+    const vcCobrado =
+      opts.facturaId && opts.facturaId === vc.facturaId && opts.cobrado !== undefined
+        ? opts.cobrado
+        : vc.facturacionEstado === 'cobrado';
+        
+    const nextVc = mapFacturacionEstado(vc.factura, vcCobrado, tieneArca);
     if (nextVc !== vc.facturacionEstado) {
       await tx.viajeCliente.update({
         where: { id: vc.id },
@@ -111,7 +118,7 @@ export async function syncFacturacionEstadoViajes(
   tx: Tx,
   tenantId: string,
   viajeIds: string[],
-  opts: { cobrado?: boolean } = {},
+  opts: { cobrado?: boolean; facturaId?: string } = {},
 ): Promise<void> {
   for (const id of viajeIds) {
     await syncFacturacionEstadoViaje(tx, tenantId, id, opts);

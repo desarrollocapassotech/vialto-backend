@@ -420,6 +420,7 @@ export class FacturacionService {
   } as const;
   private readonly FACTURA_INCLUDE = {
     viajes: { select: this.VIAJE_SELECT },
+    clientesViaje: { select: { viajeId: true } },
     pagos: { select: this.PAGO_SELECT },
     tramos: { select: this.TRAMO_SELECT, orderBy: { orden: "asc" as const } },
   };
@@ -1028,11 +1029,16 @@ export class FacturacionService {
       ivaMontoGuardado: factura.ivaMonto,
     });
 
+    const viajeIds = Array.from(new Set([
+      ...factura.viajes.map((v) => v.id),
+      ...factura.clientesViaje.map((vc) => vc.viajeId),
+    ]));
+
     await syncFacturacionEstadoViajes(
       this.prisma,
       tenantId,
-      factura.viajes.map((v) => v.id),
-      { cobrado },
+      viajeIds,
+      { cobrado, facturaId },
     );
   }
 }

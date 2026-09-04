@@ -223,6 +223,15 @@ export class ImportacionesService {
     } else if (processorModulo?.filasNuevas) {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
       const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
+      // `raw[c.field]` viene de ParserService.parse(), que para columnas de
+      // fecha ya convierte la celda a un objeto Date real (ver
+      // normalizeExcelDate en parser.service.ts) — stringificarlo con
+      // `String()` a secas usa el formato nativo de JS ("Sat May 10 2025
+      // 03:00:00 GMT+0000...") en vez de una fecha legible. Bug real
+      // encontrado en QA: todas las columnas de fecha del detalle de
+      // filas (Choferes, Vehículos, Transportistas) mostraban ese texto.
+      const valorLegible = (v: unknown): string =>
+        v instanceof Date ? v.toLocaleDateString("es-AR") : String(v).trim();
       result.filasDetalle = valid.map((v) => {
         const raw = parsedByRow.get(v._rowNum);
         const campos = config.columns
@@ -235,7 +244,7 @@ export class ImportacionesService {
           .map((c) => ({
             campo: c.field,
             label: c.excelHeader,
-            valor: String(raw![c.field]).trim(),
+            valor: valorLegible(raw![c.field]),
           }));
         return { fila: v._rowNum, esNuevo: nuevas.has(v._rowNum), campos };
       });

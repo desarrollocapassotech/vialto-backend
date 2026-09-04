@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -86,13 +87,30 @@ export class ChoferesService {
     }
   }
 
+  private async assertDniDisponible(
+    tenantId: string,
+    dni: string | null,
+    excludeId?: string,
+  ) {
+    if (!dni) return;
+    const existente = await this.prisma.chofer.findFirst({
+      where: { tenantId, dni, ...(excludeId ? { id: { not: excludeId } } : {}) },
+      select: { id: true },
+    });
+    if (existente) {
+      throw new ConflictException('Ya existe un chofer con ese DNI');
+    }
+  }
+
   async create(tenantId: string, dto: CreateChoferDto) {
     await this.assertTransportista(tenantId, dto.transportistaId);
+    const dni = dto.dni ?? null;
+    await this.assertDniDisponible(tenantId, dni);
     const row = await this.prisma.chofer.create({
       data: {
         tenantId,
         nombre: dto.nombre,
-        dni: dto.dni ?? null,
+        dni,
         cuit: dto.cuit?.trim() || null,
         licencia: dto.licencia ?? null,
         licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
@@ -108,6 +126,9 @@ export class ChoferesService {
     await this.findOne(id, tenantId);
     if (dto.transportistaId !== undefined) {
       await this.assertTransportista(tenantId, dto.transportistaId ?? undefined);
+    }
+    if (dto.dni !== undefined) {
+      await this.assertDniDisponible(tenantId, dto.dni ?? null, id);
     }
     const row = await this.prisma.chofer.update({
       where: { id },

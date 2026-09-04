@@ -1,4 +1,4 @@
-import type { IdFiscalConflicto, ValidatedRow } from '../types/import.types';
+import type { CampoUnicoConflicto, ValidatedRow } from '../types/import.types';
 
 export interface InsertResult {
   id: string;
@@ -32,13 +32,13 @@ export interface IImportProcessor {
    */
   filasNuevas?(rows: ValidatedRow[], tenantId: string): Promise<Set<number>>;
   /**
-   * Solo Clientes: detecta filas cuyo ID Fiscal ya pertenece a otro cliente
-   * existente (nombre distinto) — ver `IdFiscalConflicto`. El preview lo
-   * muestra y `confirm()` exige una decisión por fila (ignorar/actualizar)
-   * antes de importar.
+   * Clientes/Transportistas (ID Fiscal), Choferes (DNI): detecta filas cuyo
+   * campo único ya pertenece a otra entidad existente (nombre distinto) —
+   * ver `CampoUnicoConflicto`. El preview lo muestra y `confirm()` exige una
+   * decisión por fila (ignorar/actualizar) antes de importar.
    */
-  detectarIdFiscalDuplicado?(
+  detectarCampoUnicoDuplicado?(
     rows: ValidatedRow[],
     tenantId: string,
-  ): Promise<IdFiscalConflicto[]>;
+  ): Promise<CampoUnicoConflicto[]>;
 }

@@ -23,7 +23,7 @@ export class CiudadNormalizadaImportDto {
   destino?: string | null;
 }
 
-export class IdFiscalDuplicadoDecisionDto {
+export class CampoUnicoDuplicadoDecisionDto {
   @IsNumber()
   fila: number;
 
@@ -64,10 +64,10 @@ export class ConfirmImportDto {
   @IsBoolean()
   confirmarFacturasDuplicadas?: boolean;
 
-  /** Solo clientes: decisión por fila ("ignorar" o "actualizar") para cada conflicto de ID Fiscal detectado en el preview (ver `PreviewResult.advertenciasIdFiscalDuplicado`). */
+  /** Clientes/Transportistas/Choferes: decisión por fila ("ignorar" o "actualizar") para cada conflicto de campo único (ID Fiscal/DNI) detectado en el preview (ver `PreviewResult.advertenciasCampoUnicoDuplicado`). */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => IdFiscalDuplicadoDecisionDto)
-  decisionesIdFiscalDuplicado?: IdFiscalDuplicadoDecisionDto[];
+  @Type(() => CampoUnicoDuplicadoDecisionDto)
+  decisionesCampoUnicoDuplicado?: CampoUnicoDuplicadoDecisionDto[];
 }

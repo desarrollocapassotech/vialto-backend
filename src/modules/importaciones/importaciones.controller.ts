@@ -125,7 +125,7 @@ export class ImportacionesController {
       dto.filasExcluidas,
       dto.confirmarCamposFaltantes,
       dto.confirmarFacturasDuplicadas,
-      dto.decisionesIdFiscalDuplicado,
+      dto.decisionesCampoUnicoDuplicado,
     );
   }
 

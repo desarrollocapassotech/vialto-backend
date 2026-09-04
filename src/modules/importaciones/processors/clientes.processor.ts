@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { validarIdFiscal } from '../../../shared/util/validar-id-fiscal';
 import type { IImportProcessor, InsertResult } from './import-processor.interface';
-import type { IdFiscalConflicto, ValidatedRow } from '../types/import.types';
+import type { CampoUnicoConflicto, ValidatedRow } from '../types/import.types';
 import { scalarDataFromRow } from '../prisma-import-fields';
 
 @Injectable()
@@ -28,15 +28,15 @@ export class ClientesProcessor implements IImportProcessor {
     // preview (conflicto de ID Fiscal resuelto en ImportacionesService.confirm)
     // — se pisa directo el registro que ya tenía ese CUIT, incluido el
     // nombre (a diferencia del upsert por nombre de abajo, que lo deja fijo).
-    const idFiscalClienteId =
-      typeof row._idFiscalClienteId === 'string' ? row._idFiscalClienteId : null;
-    if (idFiscalClienteId) {
+    const duplicadoEntidadId =
+      typeof row._duplicadoEntidadId === 'string' ? row._duplicadoEntidadId : null;
+    if (duplicadoEntidadId) {
       const dataActualizar = scalarDataFromRow(row, 'Cliente');
       await this.prisma.cliente.update({
-        where: { id: idFiscalClienteId },
+        where: { id: duplicadoEntidadId },
         data: dataActualizar,
       });
-      return { id: idFiscalClienteId, creado: false };
+      return { id: duplicadoEntidadId, creado: false };
     }
 
     // Scalars del modelo: un campo nuevo en Prisma se copia solo. Vacío =
@@ -50,7 +50,7 @@ export class ClientesProcessor implements IImportProcessor {
 
     // Mismo criterio que el alta/edición manual (ClientesService): un CUIT no
     // puede pertenecer a dos clientes distintos del mismo tenant. El preview
-    // ya detecta este caso (`detectarIdFiscalDuplicado`) y le hace elegir al
+    // ya detecta este caso (`detectarCampoUnicoDuplicado`) y le hace elegir al
     // usuario ignorar/actualizar antes de confirmar — esto es la red de
     // seguridad final para lo que se cuele sin pasar por esa decisión (ej.
     // dos filas del mismo Excel con igual CUIT nuevo, ninguna existente
@@ -91,10 +91,10 @@ export class ClientesProcessor implements IImportProcessor {
    * y recalculado en vivo por `confirm()` porque la base puede haber
    * cambiado desde que se armó el preview.
    */
-  async detectarIdFiscalDuplicado(
+  async detectarCampoUnicoDuplicado(
     rows: ValidatedRow[],
     tenantId: string,
-  ): Promise<IdFiscalConflicto[]> {
+  ): Promise<CampoUnicoConflicto[]> {
     const candidatas = rows.filter(
       (r) => typeof r.idFiscal === 'string' && r.idFiscal.trim(),
     );
@@ -111,7 +111,7 @@ export class ClientesProcessor implements IImportProcessor {
       existentes.map((e) => [e.idFiscal as string, e]),
     );
 
-    const conflictos: IdFiscalConflicto[] = [];
+    const conflictos: CampoUnicoConflicto[] = [];
     for (const row of candidatas) {
       const idFiscal = String(row.idFiscal).trim();
       const match = porIdFiscal.get(idFiscal);
@@ -120,9 +120,10 @@ export class ClientesProcessor implements IImportProcessor {
       if (match.nombre.trim().toLowerCase() === nombreFila) continue;
       conflictos.push({
         fila: row._rowNum,
-        idFiscal,
-        clienteExistenteId: match.id,
-        clienteExistenteNombre: match.nombre,
+        campoLabel: 'ID Fiscal',
+        valor: idFiscal,
+        entidadExistenteId: match.id,
+        entidadExistenteNombre: match.nombre,
       });
     }
     return conflictos;

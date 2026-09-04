@@ -214,9 +214,9 @@ export class ImportacionesService {
       entidadesActualizadas,
     };
 
-    if (processorModulo?.detectarIdFiscalDuplicado) {
-      result.advertenciasIdFiscalDuplicado =
-        await processorModulo.detectarIdFiscalDuplicado(valid, tenantId);
+    if (processorModulo?.detectarCampoUnicoDuplicado) {
+      result.advertenciasCampoUnicoDuplicado =
+        await processorModulo.detectarCampoUnicoDuplicado(valid, tenantId);
     }
 
     if (modulo === "viajes") {
@@ -274,7 +274,7 @@ export class ImportacionesService {
     filasExcluidas?: number[],
     confirmarCamposFaltantes?: boolean,
     confirmarFacturasDuplicadas?: boolean,
-    decisionesIdFiscalDuplicado?: { fila: number; accion: "ignorar" | "actualizar" }[],
+    decisionesCampoUnicoDuplicado?: { fila: number; accion: "ignorar" | "actualizar" }[],
   ) {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
@@ -305,37 +305,40 @@ export class ImportacionesService {
     // como error, quedan registradas aparte en el log.
     const excluidas = new Set(filasExcluidas ?? []);
 
-    // Clientes: filas cuyo ID Fiscal ya pertenece a OTRO cliente existente —
-    // el usuario elige por fila "ignorar" (se suma a `excluidas`, mismo
-    // camino que una exclusión manual) o "actualizar" (se guarda el id del
-    // cliente existente para que el processor lo pise en vez de crear uno
-    // nuevo o chocar). Se recalcula acá en vivo, no se reusa el preview,
-    // porque la base puede haber cambiado desde entonces — mismo criterio
-    // que `detectarFacturasDuplicadas` en Viajes más abajo.
-    const actualizarClientePorFila = new Map<number, string>();
-    if (processor.detectarIdFiscalDuplicado) {
+    // Clientes/Transportistas (ID Fiscal), Choferes (DNI): filas cuyo campo
+    // único ya pertenece a OTRA entidad existente — el usuario elige por
+    // fila "ignorar" (se suma a `excluidas`, mismo camino que una exclusión
+    // manual) o "actualizar" (se guarda el id de la entidad existente para
+    // que el processor la pise en vez de crear una nueva o chocar). Se
+    // recalcula acá en vivo, no se reusa el preview, porque la base puede
+    // haber cambiado desde entonces — mismo criterio que
+    // `detectarFacturasDuplicadas` en Viajes más abajo.
+    const actualizarEntidadPorFila = new Map<number, string>();
+    let campoLabelConflicto = "campo único";
+    if (processor.detectarCampoUnicoDuplicado) {
       const candidatas = todasLasFilas.filter((f) => !excluidas.has(f._rowNum));
-      const conflictosIdFiscal = await processor.detectarIdFiscalDuplicado(
+      const conflictos = await processor.detectarCampoUnicoDuplicado(
         candidatas,
         tenantId,
       );
-      if (conflictosIdFiscal.length > 0) {
+      if (conflictos.length > 0) {
+        campoLabelConflicto = [
+          ...new Set(conflictos.map((c) => c.campoLabel)),
+        ].join("/");
         const decididas = new Map(
-          (decisionesIdFiscalDuplicado ?? []).map((d) => [d.fila, d.accion]),
+          (decisionesCampoUnicoDuplicado ?? []).map((d) => [d.fila, d.accion]),
         );
-        const sinResolver = conflictosIdFiscal.filter(
-          (c) => !decididas.has(c.fila),
-        );
+        const sinResolver = conflictos.filter((c) => !decididas.has(c.fila));
         if (sinResolver.length > 0) {
           throw new BadRequestException(
-            `Hay ${sinResolver.length} fila(s) cuyo ID Fiscal ya pertenece a otro cliente — elegí "ignorar" o "actualizar" para cada una antes de confirmar.`,
+            `Hay ${sinResolver.length} fila(s) cuyo ${campoLabelConflicto} ya pertenece a otro registro — elegí "ignorar" o "actualizar" para cada una antes de confirmar.`,
           );
         }
-        for (const c of conflictosIdFiscal) {
+        for (const c of conflictos) {
           if (decididas.get(c.fila) === "ignorar") {
             excluidas.add(c.fila);
           } else {
-            actualizarClientePorFila.set(c.fila, c.clienteExistenteId);
+            actualizarEntidadPorFila.set(c.fila, c.entidadExistenteId);
           }
         }
       }
@@ -351,12 +354,12 @@ export class ImportacionesService {
         estado: "omitida",
         mensaje: filasExcluidas?.includes(f._rowNum)
           ? "Fila omitida por el usuario antes de confirmar."
-          : "Fila omitida: el ID Fiscal ya pertenece a otro cliente.",
+          : `Fila omitida: el ${campoLabelConflicto} ya pertenece a otro registro.`,
       }));
 
     for (const fila of filasValidas) {
-      const clienteExistenteId = actualizarClientePorFila.get(fila._rowNum);
-      if (clienteExistenteId) fila._idFiscalClienteId = clienteExistenteId;
+      const entidadExistenteId = actualizarEntidadPorFila.get(fila._rowNum);
+      if (entidadExistenteId) fila._duplicadoEntidadId = entidadExistenteId;
     }
 
     // Campos "recomendados pero no bloqueantes" (ej. CUIT/país de cliente):

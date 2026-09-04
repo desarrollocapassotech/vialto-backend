@@ -98,16 +98,19 @@ export interface RowError {
 }
 
 /**
- * Solo Clientes: una fila cuyo ID Fiscal ya pertenece a OTRO cliente del
- * tenant (nombre distinto) — el import no puede decidir solo si hay que
- * crear un cliente nuevo o actualizar el existente. El usuario elige por
- * fila (ignorar / actualizar) antes de poder confirmar.
+ * Clientes/Transportistas/Choferes: una fila cuyo campo único (ID Fiscal en
+ * Clientes/Transportistas, DNI en Choferes) ya pertenece a OTRA entidad
+ * existente del tenant (nombre distinto) — el import no puede decidir solo
+ * si hay que crear una entidad nueva o actualizar la existente. El usuario
+ * elige por fila (ignorar / actualizar) antes de poder confirmar.
  */
-export interface IdFiscalConflicto {
+export interface CampoUnicoConflicto {
   fila: number;
-  idFiscal: string;
-  clienteExistenteId: string;
-  clienteExistenteNombre: string;
+  /** Nombre del campo en conflicto, para mostrar (ej. "ID Fiscal", "DNI"). */
+  campoLabel: string;
+  valor: string;
+  entidadExistenteId: string;
+  entidadExistenteNombre: string;
 }
 
 export interface EntidadFaltante {
@@ -214,11 +217,12 @@ export interface PreviewResult {
    */
   advertenciasFacturasDuplicadas?: { numero: string; filas: number[] }[];
   /**
-   * Solo Clientes: filas con un conflicto de ID Fiscal — ver
-   * `IdFiscalConflicto`. `confirm()` exige una decisión por cada una
-   * (`ConfirmImportDto.decisionesIdFiscalDuplicado`) antes de importar.
+   * Clientes/Transportistas/Choferes: filas con un conflicto de campo único
+   * (ID Fiscal o DNI) — ver `CampoUnicoConflicto`. `confirm()` exige una
+   * decisión por cada una (`ConfirmImportDto.decisionesCampoUnicoDuplicado`)
+   * antes de importar.
    */
-  advertenciasIdFiscalDuplicado?: IdFiscalConflicto[];
+  advertenciasCampoUnicoDuplicado?: CampoUnicoConflicto[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

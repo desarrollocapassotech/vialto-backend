@@ -16,6 +16,7 @@ import { VehiculosProcessor } from "./processors/vehiculos.processor";
 import type { IImportProcessor } from "./processors/import-processor.interface";
 import type {
   TemplateConfig,
+  ColumnConfig,
   ValidatedRow,
   ParsedRow,
   PreviewResult,
@@ -983,13 +984,31 @@ export class ImportacionesService {
       // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
       for (const catCol of catalogo) {
         if (!configData.columns.some((c) => c.field === catCol.field)) {
-          configData.columns.push({
+          const nueva: ColumnConfig = {
             field: catCol.field,
             excelHeader: catCol.defaultExcelHeader,
             excelHeaderAliases: catCol.excelHeaderAliases,
             type: catCol.type,
             required: catCol.systemRequired,
-          });
+          };
+          // Bug real (QA, ago 2026): esto solo copiaba los 5 campos de
+          // arriba — una columna "enum" inyectada así (ej. tipoFlota) queda
+          // sin `allowedValues`, y el validador rechaza cualquier valor con
+          // "Los valores permitidos son: undefined" para las 5 filas. Faltaba
+          // copiar el resto de las propiedades que definen cómo se valida la
+          // columna, no solo su nombre/tipo.
+          if (catCol.allowedValues) nueva.allowedValues = catCol.allowedValues;
+          if (catCol.format) nueva.format = catCol.format;
+          if (catCol.warnIfEmpty) nueva.warnIfEmpty = true;
+          if (catCol.type === "lookup") {
+            nueva.lookupModel = catCol.lookupModel;
+            if (catCol.lookupFields) nueva.lookupFields = catCol.lookupFields;
+            if (catCol.multiple) {
+              nueva.multiple = true;
+              nueva.separador = catCol.separador ?? "/";
+            }
+          }
+          configData.columns.push(nueva);
         }
       }
 

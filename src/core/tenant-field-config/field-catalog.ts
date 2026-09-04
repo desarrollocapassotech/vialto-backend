@@ -32,9 +32,9 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "precioTransportistaExterno", label: "Precio transporte", obligatorioSistema: true },
           { campo: "realizaFlete", label: "¿Realiza el flete?", obligatorioSistema: true },
           { campo: "transportistaEfectivoId", label: "Transportista que realiza el flete", obligatorioSistema: true },
-          { campo: "choferId", label: "Chofer (flota propia)", obligatorioSistema: true },
-          { campo: "choferExternoId", label: "Chofer (externo)", obligatorioSistema: true },
-          { campo: "vehiculosRows", label: "Vehículos", obligatorioSistema: true },
+          { campo: "choferId", label: "Chofer (flota propia)", obligatorioSistema: false },
+          { campo: "choferExternoId", label: "Chofer (externo)", obligatorioSistema: false },
+          { campo: "vehiculosRows", label: "Vehículos", obligatorioSistema: false },
           { campo: "fechaCarga", label: "Fecha de carga", obligatorioSistema: true },
           { campo: "fechaDescarga", label: "Fecha de descarga", obligatorioSistema: true },
           { campo: "productoItems", label: "Productos", obligatorioSistema: false },
@@ -61,9 +61,9 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "precioTransportistaExterno", label: "Precio transporte", obligatorioSistema: true },
           { campo: "realizaFlete", label: "¿Realiza el flete?", obligatorioSistema: true },
           { campo: "transportistaEfectivoId", label: "Transportista que realiza el flete", obligatorioSistema: true },
-          { campo: "choferId", label: "Chofer (flota propia)", obligatorioSistema: true },
-          { campo: "choferExternoId", label: "Chofer (externo)", obligatorioSistema: true },
-          { campo: "vehiculosRows", label: "Vehículos", obligatorioSistema: true },
+          { campo: "choferId", label: "Chofer (flota propia)", obligatorioSistema: false },
+          { campo: "choferExternoId", label: "Chofer (externo)", obligatorioSistema: false },
+          { campo: "vehiculosRows", label: "Vehículos", obligatorioSistema: false },
           { campo: "fechaCarga", label: "Fecha de carga", obligatorioSistema: true },
           { campo: "fechaDescarga", label: "Fecha de descarga", obligatorioSistema: true },
           { campo: "productoItems", label: "Productos", obligatorioSistema: false },
@@ -145,6 +145,147 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
         ],
       },
     },
+  },
+  clientes: {
+    label: "Clientes",
+    formularios: {
+      alta_cliente: {
+        label: "Alta de cliente",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "direccion", label: "Dirección", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+        ]
+      },
+      edicion_cliente: {
+        label: "Edición de cliente",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "direccion", label: "Dirección", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+        ]
+      },
+      detalle_cliente: {
+        label: "Detalle de cliente",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "direccion", label: "Dirección", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+        ]
+      }
+    }
+  },
+  transportistas: {
+    label: "Transportistas",
+    formularios: {
+      alta_transportista: {
+        label: "Alta de transportista",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "domicilio", label: "Domicilio", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "paut", label: "PAUT", obligatorioSistema: false },
+          { campo: "permisoInternacional", label: "Permiso Internacional", obligatorioSistema: false },
+          { campo: "fechaVencimientoPermiso", label: "Vto. Permiso Internacional", obligatorioSistema: false },
+        ]
+      },
+      edicion_transportista: {
+        label: "Edición de transportista",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "domicilio", label: "Domicilio", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "paut", label: "PAUT", obligatorioSistema: false },
+          { campo: "permisoInternacional", label: "Permiso Internacional", obligatorioSistema: false },
+          { campo: "fechaVencimientoPermiso", label: "Vto. Permiso Internacional", obligatorioSistema: false },
+        ]
+      },
+      detalle_transportista: {
+        label: "Detalle de transportista",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "pais", label: "País", obligatorioSistema: false },
+          { campo: "idFiscal", label: "Documento/ID Fiscal", obligatorioSistema: false },
+          { campo: "condicionIvaTributaria", label: "Condición IVA/Tributaria", obligatorioSistema: false },
+          { campo: "domicilio", label: "Domicilio", obligatorioSistema: false },
+          { campo: "email", label: "Email", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "paut", label: "PAUT", obligatorioSistema: false },
+          { campo: "permisoInternacional", label: "Permiso Internacional", obligatorioSistema: false },
+          { campo: "fechaVencimientoPermiso", label: "Vto. Permiso Internacional", obligatorioSistema: false },
+        ]
+      }
+    }
+  },
+  vehiculos: {
+    label: "Vehículos",
+    formularios: {
+      alta_vehiculo: {
+        label: "Alta de vehículo",
+        campos: [
+          { campo: "patente", label: "Patente", obligatorioSistema: true },
+          { campo: "tipo", label: "Tipo", obligatorioSistema: false },
+          { campo: "marca", label: "Marca", obligatorioSistema: false },
+          { campo: "modelo", label: "Modelo", obligatorioSistema: false },
+          { campo: "anio", label: "Año", obligatorioSistema: false },
+          { campo: "nroChasis", label: "Nro. de chasis", obligatorioSistema: false },
+          { campo: "poliza", label: "Póliza", obligatorioSistema: false },
+          { campo: "vencimientoPoliza", label: "Vencimiento de póliza", obligatorioSistema: false },
+          { campo: "tara", label: "Tara", obligatorioSistema: false },
+          { campo: "precinto", label: "Precinto", obligatorioSistema: false },
+        ]
+      },
+      edicion_vehiculo: {
+        label: "Edición de vehículo",
+        campos: [
+          { campo: "patente", label: "Patente", obligatorioSistema: true },
+          { campo: "tipo", label: "Tipo", obligatorioSistema: false },
+          { campo: "marca", label: "Marca", obligatorioSistema: false },
+          { campo: "modelo", label: "Modelo", obligatorioSistema: false },
+          { campo: "anio", label: "Año", obligatorioSistema: false },
+          { campo: "nroChasis", label: "Nro. de chasis", obligatorioSistema: false },
+          { campo: "poliza", label: "Póliza", obligatorioSistema: false },
+          { campo: "vencimientoPoliza", label: "Vencimiento de póliza", obligatorioSistema: false },
+          { campo: "tara", label: "Tara", obligatorioSistema: false },
+          { campo: "precinto", label: "Precinto", obligatorioSistema: false },
+          { campo: "activo", label: "Estado (Activo)", obligatorioSistema: false },
+        ]
+      },
+      detalle_vehiculo: {
+        label: "Detalle de vehículo",
+        campos: [
+          { campo: "patente", label: "Patente", obligatorioSistema: true },
+          { campo: "tipo", label: "Tipo", obligatorioSistema: false },
+          { campo: "marca", label: "Marca", obligatorioSistema: false },
+          { campo: "modelo", label: "Modelo", obligatorioSistema: false },
+          { campo: "poliza", label: "Póliza", obligatorioSistema: false },
+          { campo: "activo", label: "Estado", obligatorioSistema: false },
+          { campo: "anio", label: "Año", obligatorioSistema: false },
+          { campo: "kmActual", label: "Km. Actual", obligatorioSistema: false },
+          { campo: "createdAt", label: "Alta", obligatorioSistema: false },
+        ]
+      }
+    }
   },
 };
 

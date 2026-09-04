@@ -27,20 +27,33 @@ export class NotificacionesController {
     private readonly prisma: PrismaService,
   ) {}
 
+  /** Resuelve el tenantId efectivo: superadmin puede operar sobre cualquier tenant. */
+  private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
+    const tenantId =
+      auth.role === 'superadmin' && overrideTenantId
+        ? overrideTenantId
+        : auth.tenantId;
+    assertTenantId(tenantId);
+    return tenantId as string;
+  }
+
   @ApiOperation({ summary: 'Catálogo de notificaciones aplicables al tenant + estado activo/inactivo' })
   @Get('config')
   @Roles('admin', 'member', 'superadmin')
-  getConfig(@CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.configService.getConfigEfectiva(auth.tenantId);
+  getConfig(@CurrentAuth() auth: AuthPayload, @Query('tenantId') tenantId?: string) {
+    return this.configService.getConfigEfectiva(this.resolveTenantId(auth, tenantId));
   }
 
   @ApiOperation({ summary: 'Activa/desactiva un tipo de notificación para el tenant actual' })
   @Post('config/toggle')
   @Roles('admin', 'superadmin')
-  async toggle(@Body() dto: ToggleNotificacionConfigDto, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    await this.configService.toggle(auth.tenantId, dto.tipo, dto.activo, auth.userId);
+  async toggle(
+    @Body() dto: ToggleNotificacionConfigDto,
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    const tid = this.resolveTenantId(auth, tenantId);
+    await this.configService.toggle(tid, dto.tipo, dto.activo, auth.userId);
     return { ok: true };
   }
 
@@ -50,9 +63,13 @@ export class NotificacionesController {
   })
   @Post('config/destinatarios')
   @Roles('admin', 'superadmin')
-  async setDestinatarios(@Body() dto: SetDestinatariosDto, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    await this.configService.setDestinatarios(auth.tenantId, dto.tipo, dto.destinatarios, auth.userId);
+  async setDestinatarios(
+    @Body() dto: SetDestinatariosDto,
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    const tid = this.resolveTenantId(auth, tenantId);
+    await this.configService.setDestinatarios(tid, dto.tipo, dto.destinatarios, auth.userId);
     return { ok: true };
   }
 

@@ -16,6 +16,7 @@ import { normalizarEtapaViaje, VIAJE_ETAPAS } from '../viaje-estados';
 import { normalizeOptionalId, OtroGastoDto, PagoTransportistaDto } from './create-viaje.dto';
 import { ViajeProductoItemDto } from './viaje-producto-item.dto';
 import { ViajeDestinoItemDto } from './viaje-destino-item.dto';
+import { ViajeClienteItemDto } from './viaje-cliente-item.dto';
 
 export { PagoTransportistaDto };
 
@@ -61,7 +62,7 @@ export class UpdateViajeDto {
   @Type(() => ViajeDestinoItemDto)
   destinos?: ViajeDestinoItemDto[];
   @IsOptional() @IsDateString() fechaCarga?: string;
-  @IsOptional() @IsDateString() fechaDescarga?: string;
+  @IsOptional() @IsDateString() fechaDescarga?: string | null;
   /** Reemplaza todos los productos del viaje (vacío = sin productos). */
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ViajeProductoItemDto) productoItems?: ViajeProductoItemDto[];
   @IsOptional() @IsString() detalleCarga?: string;
@@ -106,4 +107,6 @@ export class UpdateViajeDto {
   @IsOptional() @IsString() observaciones?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OtroGastoDto) otrosGastos?: OtroGastoDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PagoTransportistaDto) pagosTransportista?: PagoTransportistaDto[];
+  /** Reemplaza todos los clientes adicionales del viaje (multi-cliente, opcional); si no se envía, no se tocan. */
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ViajeClienteItemDto) clientes?: ViajeClienteItemDto[];
 }

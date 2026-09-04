@@ -12,8 +12,13 @@ import { FacturaTramoDto } from "./dto/factura-tramo.dto";
 import { CreatePagoDto } from "./dto/create-pago.dto";
 import { FacturasPaginatedQueryDto } from "./dto/facturas-paginated-query.dto";
 import {
+  cobroOptsDeFactura,
   computeEstadoFacturaLectura,
+  FacturaTramoCobro,
+  importeNetoFactura,
   importeOperativoFactura,
+  ivaMontoDeTramos,
+  roundMoney2,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
@@ -27,7 +32,20 @@ type ViajeSnap = {
   facturacionEstado: string;
   monto: number | null;
   monedaMonto: string;
+  cantidadFactura: number | null;
+  precioUnitarioFactura: number | null;
 };
+
+function importeNetoViaje(v: {
+  monto: number | null;
+  cantidadFactura?: number | null;
+  precioUnitarioFactura?: number | null;
+}): number {
+  if (v.cantidadFactura != null && v.precioUnitarioFactura != null) {
+    return Math.round(v.cantidadFactura * v.precioUnitarioFactura * 100) / 100;
+  }
+  return v.monto ?? 0;
+}
 
 type TramoSnap = {
   id: string;
@@ -46,23 +64,39 @@ export class FacturacionService {
     private readonly clerkUsers: ClerkVialtoRoleService,
   ) {}
 
-  private computeImporte(viajes: { monto: number | null }[]): number {
-    return viajes.reduce((sum, v) => sum + (v.monto ?? 0), 0);
+  private computeImporte(
+    viajes: Array<{
+      monto: number | null;
+      cantidadFactura?: number | null;
+      precioUnitarioFactura?: number | null;
+    }>,
+  ): number {
+    return viajes.reduce((sum, v) => sum + importeNetoViaje(v), 0);
   }
 
   /**
-   * Importe con tramos: suma montos de tramos + monto de viajes que no tienen ningún tramo.
+   * Neto = suma completa de viajes. IVA persistido solo en por-tramo sin ARCA.
+   * La parte no cubierta por tramos usa el IVA de cabecera (0% = exento).
    */
-  private computeImporteConTramos(
-    viajes: { id: string; monto: number | null }[],
-    tramos: { viajeId: string; monto: number }[],
-  ): number {
-    const viajeIdsConTramo = new Set(tramos.map((t) => t.viajeId));
-    const sumaTramos = tramos.reduce((sum, t) => sum + (t.monto ?? 0), 0);
-    const sumaViajesSinTramo = viajes
-      .filter((v) => !viajeIdsConTramo.has(v.id))
-      .reduce((sum, v) => sum + (v.monto ?? 0), 0);
-    return sumaTramos + sumaViajesSinTramo;
+  private montosParaGuardar(
+    viajes: Array<{
+      monto: number | null;
+      cantidadFactura?: number | null;
+      precioUnitarioFactura?: number | null;
+    }>,
+    tramos: FacturaTramoCobro[],
+    facturarPorTramo: boolean,
+    ivaPctCabecera: number | null | undefined,
+    tieneArca: boolean,
+  ): { importe: number; ivaMonto: number | null } {
+    const importe = roundMoney2(this.computeImporte(viajes));
+    if (!facturarPorTramo || tieneArca || tramos.length === 0) {
+      return { importe, ivaMonto: null };
+    }
+    return {
+      importe,
+      ivaMonto: ivaMontoDeTramos(importe, tramos, ivaPctCabecera),
+    };
   }
 
   private assertTramosValidos(
@@ -127,7 +161,7 @@ export class FacturacionService {
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    return tenant?.modules.includes("integracion-arca") ?? false;
+    return tenant?.modules.includes("emision-facturas-arca") ?? false;
   }
 
   private toShape(
@@ -147,6 +181,8 @@ export class FacturacionService {
       ambiente: string | null;
       anuladoPor: string | null;
       diferencia: number | null;
+      ivaPct?: number | null;
+      ivaMonto?: number | null;
       facturarPorTramo?: boolean;
       createdAt: Date;
       viajes: ViajeSnap[];
@@ -156,7 +192,18 @@ export class FacturacionService {
     tieneArca: boolean,
   ) {
     const { viajes, pagos = [], tramos = [], ...f } = row;
-    const importe = importeOperativoFactura(f.importe, viajes);
+    const cobroOpts = cobroOptsDeFactura(
+      {
+        facturarPorTramo: f.facturarPorTramo,
+        ivaPct: f.ivaPct,
+        tramos,
+        ivaMonto: f.ivaMonto,
+      },
+      tieneArca,
+    );
+    const importe = importeNetoFactura(f.importe, viajes, cobroOpts);
+    const importeACobrar = importeOperativoFactura(f.importe, viajes, cobroOpts);
+    const totalPagado = pagos.reduce((s, p) => s + p.importe, 0);
     const { estado, cobrado, vencida } = computeEstadoFacturaLectura({
       viajes,
       fechaVencimiento: f.fechaVencimiento,
@@ -164,11 +211,16 @@ export class FacturacionService {
       pagos,
       arcaEstado: f.arcaEstado,
       tieneArca,
+      facturarPorTramo: cobroOpts.facturarPorTramo,
+      tramos,
+      ivaPctCabecera: f.ivaPct,
+      ivaMontoGuardado: f.ivaMonto,
     });
     const tramosOrdenados = [...tramos].sort((a, b) => a.orden - b.orden);
     return {
       ...f,
       facturarPorTramo: f.facturarPorTramo ?? false,
+      ivaMonto: f.ivaMonto ?? null,
       viajeIds: viajes.map((v) => v.id),
       tramos: tramosOrdenados.map((t) => ({
         id: t.id,
@@ -179,6 +231,8 @@ export class FacturacionService {
         orden: t.orden,
       })),
       importe,
+      importeACobrar,
+      saldoPendiente: Math.max(0, roundMoney2(importeACobrar - totalPagado)),
       estado,
       cobrado,
       vencida,
@@ -190,8 +244,10 @@ export class FacturacionService {
     row: Parameters<FacturacionService["toShape"]>[0],
     tieneArca: boolean,
   ) {
+    const shaped = this.toShape(row, tieneArca);
+    await this.alignViajesCobroPorTramo(row, tieneArca, shaped.cobrado);
     const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [
-      this.toShape(row, tieneArca),
+      shaped,
     ]);
     return withNombre;
   }
@@ -200,9 +256,36 @@ export class FacturacionService {
     rows: Parameters<FacturacionService["toShape"]>[0][],
     tieneArca: boolean,
   ) {
-    return attachAnuladoPorNombres(
-      this.clerkUsers,
-      rows.map((r) => this.toShape(r, tieneArca)),
+    const shaped = rows.map((r) => this.toShape(r, tieneArca));
+    await Promise.all(
+      rows.map((row, i) =>
+        this.alignViajesCobroPorTramo(row, tieneArca, shaped[i].cobrado),
+      ),
+    );
+    return attachAnuladoPorNombres(this.clerkUsers, shaped);
+  }
+
+  /** Recalcula viajes de facturas por tramo (sin ARCA) según pagos vs. total con IVA. */
+  private async alignViajesCobroPorTramo(
+    row: Parameters<FacturacionService["toShape"]>[0],
+    tieneArca: boolean,
+    cobrado: boolean,
+  ): Promise<void> {
+    if (tieneArca || !row.facturarPorTramo || (row.tramos?.length ?? 0) === 0) {
+      return;
+    }
+    const allCobrado =
+      row.viajes.length > 0 &&
+      row.viajes.every((v) => v.facturacionEstado === "cobrado");
+    const noneCobrado = row.viajes.every(
+      (v) => v.facturacionEstado !== "cobrado",
+    );
+    if ((cobrado && allCobrado) || (!cobrado && noneCobrado)) return;
+    await syncFacturacionEstadoViajes(
+      this.prisma,
+      row.tenantId,
+      row.viajes.map((v) => v.id),
+      { cobrado },
     );
   }
 
@@ -251,18 +334,60 @@ export class FacturacionService {
   private async resolveViajes(
     tenantId: string,
     viajeIds: string[],
+    clienteId?: string,
   ): Promise<ViajeSnap[]> {
     if (viajeIds.length === 0) return [];
     const rows = await this.prisma.viaje.findMany({
       where: { id: { in: viajeIds }, tenantId },
-      select: { id: true, facturacionEstado: true, monto: true, monedaMonto: true },
+      select: {
+        id: true,
+        facturacionEstado: true,
+        monto: true,
+        monedaMonto: true,
+        cantidadFactura: true,
+        precioUnitarioFactura: true,
+        clienteId: true,
+        clientesViaje: {
+          select: {
+            clienteId: true,
+            monto: true,
+            monedaMonto: true,
+            cantidad: true,
+            precioUnitario: true,
+          }
+        }
+      },
     });
     if (rows.length !== viajeIds.length) {
       throw new BadRequestException(
         "Uno o más viajes inválidos para este tenant",
       );
     }
-    return rows;
+    
+    return rows.map(r => {
+      // Si el clienteId solicitado pertenece a un cliente secundario del viaje, usamos sus montos.
+      if (clienteId && r.clienteId !== clienteId && r.clientesViaje) {
+        const vc = r.clientesViaje.find(c => c.clienteId === clienteId);
+        if (vc) {
+          return {
+            id: r.id,
+            facturacionEstado: r.facturacionEstado,
+            monto: vc.monto,
+            monedaMonto: vc.monedaMonto,
+            cantidadFactura: vc.cantidad,
+            precioUnitarioFactura: vc.precioUnitario,
+          };
+        }
+      }
+      return {
+        id: r.id,
+        facturacionEstado: r.facturacionEstado,
+        monto: r.monto,
+        monedaMonto: r.monedaMonto,
+        cantidadFactura: r.cantidadFactura,
+        precioUnitarioFactura: r.precioUnitarioFactura,
+      };
+    });
   }
 
   private assertMonedaUnica(viajes: { monedaMonto: string }[]): string {
@@ -281,6 +406,8 @@ export class FacturacionService {
     facturacionEstado: true,
     monto: true,
     monedaMonto: true,
+    cantidadFactura: true,
+    precioUnitarioFactura: true,
   } as const;
   private readonly PAGO_SELECT = { importe: true } as const;
   private readonly TRAMO_SELECT = {
@@ -293,6 +420,7 @@ export class FacturacionService {
   } as const;
   private readonly FACTURA_INCLUDE = {
     viajes: { select: this.VIAJE_SELECT },
+    clientesViaje: { select: { viajeId: true } },
     pagos: { select: this.PAGO_SELECT },
     tramos: { select: this.TRAMO_SELECT, orderBy: { orden: "asc" as const } },
   };
@@ -327,6 +455,7 @@ export class FacturacionService {
       | "numero"
       | "tipo"
       | "clienteId"
+      | "viajeId"
       | "emisionDesde"
       | "emisionHasta"
       | "vencimientoDesde"
@@ -369,6 +498,15 @@ export class FacturacionService {
       }
     }
 
+    if (query.viajeId) {
+      const vid = query.viajeId;
+      where.OR = [
+        { viajes: { some: { id: vid } } },
+        { clientesViaje: { some: { viajeId: vid } } },
+        { tramos: { some: { viajeId: vid } } },
+      ];
+    }
+
     return where;
   }
 
@@ -408,17 +546,17 @@ export class FacturacionService {
         orderBy: { fechaEmision: "desc" },
         include,
       });
-      const filtered = rows.map((r) => this.toShape(r, tieneArca)).filter((f) => {
+      const shaped = await this.shapeManyConNombre(rows, tieneArca);
+      const filtered = shaped.filter((f) => {
         if (query.estado === "cobrado") return f.cobrado;
         if (query.estado === "vencida") return f.vencida;
         return f.estado === query.estado;
       });
       const total = filtered.length;
-      const items = await attachAnuladoPorNombres(
-        this.clerkUsers,
-        filtered.slice((page - 1) * pageSize, page * pageSize),
-      );
-      return { items, meta: this.paginatedMeta(page, pageSize, total) };
+      return {
+        items: filtered.slice((page - 1) * pageSize, page * pageSize),
+        meta: this.paginatedMeta(page, pageSize, total),
+      };
     }
 
     const [total, rows] = await this.prisma.$transaction([
@@ -472,7 +610,7 @@ export class FacturacionService {
     }
 
     const viajeIds = dto.viajeIds ?? [];
-    const viajes = await this.resolveViajes(tenantId, viajeIds);
+    const viajes = await this.resolveViajes(tenantId, viajeIds, dto.clienteId);
     const moneda = this.assertMonedaUnica(viajes);
     const facturarPorTramo = dto.facturarPorTramo === true;
     const tramosValidos = this.assertTramosValidos(
@@ -480,9 +618,14 @@ export class FacturacionService {
       dto.tramos,
       facturarPorTramo,
     );
-    const importe = facturarPorTramo
-      ? this.computeImporteConTramos(viajes, tramosValidos)
-      : this.computeImporte(viajes);
+    const ivaPct = dto.ivaPct ?? 21;
+    const { importe, ivaMonto } = this.montosParaGuardar(
+      viajes,
+      tramosValidos,
+      facturarPorTramo,
+      ivaPct,
+      tieneArca,
+    );
 
     try {
       // Retornamos el resultado de la transacción esperando su resolución con 'await'
@@ -495,6 +638,7 @@ export class FacturacionService {
             clienteId: dto.clienteId ?? null,
             transportistaId: dto.transportistaId ?? null,
             importe,
+            ivaMonto,
             moneda,
             fechaEmision: new Date(dto.fechaEmision),
             fechaVencimiento: dto.fechaVencimiento
@@ -502,7 +646,7 @@ export class FacturacionService {
               : null,
             estado: "pendiente",
             diferencia: dto.diferencia ?? null,
-            ivaPct: dto.ivaPct ?? 21,
+            ivaPct,
             facturarPorTramo,
             comprobanteUrl: dto.comprobanteUrl ?? null,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -510,11 +654,36 @@ export class FacturacionService {
         });
 
         if (viajeIds.length > 0) {
-          // Vincular viajes y guardar nro de factura
-          await tx.viaje.updateMany({
+          if (dto.clienteId) {
+            await tx.viajeCliente.updateMany({
+              where: {
+                tenantId,
+                viajeId: { in: viajeIds },
+                clienteId: dto.clienteId,
+              },
+              data: {
+                facturaId: factura.id,
+                facturacionEstado: "facturado",
+              },
+            });
+          }
+
+          const viajesInvolucrados = await tx.viaje.findMany({
             where: { id: { in: viajeIds }, tenantId },
-            data: { facturaId: factura.id },
+            select: { id: true, clienteId: true, facturaId: true },
           });
+
+          for (const v of viajesInvolucrados) {
+            // Actualizar la cabecera del viaje si el cliente facturado es el principal
+            // o si el viaje no tenía ninguna factura asignada aún (retrocompatibilidad).
+            if (v.clienteId === dto.clienteId || !v.facturaId) {
+              await tx.viaje.update({
+                where: { id: v.id },
+                data: { facturaId: factura.id },
+              });
+            }
+          }
+
           await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
         }
 
@@ -549,7 +718,7 @@ export class FacturacionService {
   async updateFactura(id: string, tenantId: string, dto: UpdateFacturaDto) {
     const existing = await this.prisma.factura.findFirst({
       where: { id, tenantId },
-      select: { facturarPorTramo: true },
+      select: { facturarPorTramo: true, clienteId: true, ivaPct: true },
     });
     if (!existing) throw new NotFoundException("Factura no encontrada");
 
@@ -633,25 +802,56 @@ export class FacturacionService {
             where: { id: { in: idsDesvinculados }, tenantId },
             data: { facturaId: null },
           });
+          await tx.viajeCliente.updateMany({
+            where: { viajeId: { in: idsDesvinculados }, tenantId, facturaId: id },
+            data: { facturaId: null, facturacionEstado: "sin_facturar" },
+          });
           await syncFacturacionEstadoViajes(tx, tenantId, idsDesvinculados);
         }
 
         if (newIds.length > 0) {
-          await tx.viaje.updateMany({
+          const targetClienteId = dto.clienteId ?? existing.clienteId ?? undefined;
+          if (targetClienteId) {
+            await tx.viajeCliente.updateMany({
+              where: {
+                tenantId,
+                viajeId: { in: newIds },
+                clienteId: targetClienteId,
+              },
+              data: {
+                facturaId: id,
+                facturacionEstado: "facturado",
+              },
+            });
+          }
+
+          const viajesInvolucrados = await tx.viaje.findMany({
             where: { id: { in: newIds }, tenantId },
-            data: { facturaId: id },
+            select: { id: true, clienteId: true, facturaId: true },
           });
+
+          for (const v of viajesInvolucrados) {
+            if (v.clienteId === targetClienteId || !v.facturaId || v.facturaId === id) {
+              await tx.viaje.update({
+                where: { id: v.id },
+                data: { facturaId: id },
+              });
+            }
+          }
+
           await syncFacturacionEstadoViajes(tx, tenantId, newIds);
         }
       }
 
-      const viajes = await tx.viaje.findMany({
+      const viajeIdsActualesRows = await tx.viaje.findMany({
         where: { facturaId: id, tenantId },
-        select: this.VIAJE_SELECT,
+        select: { id: true },
       });
-      const viajeIdsActuales = viajes.map((v) => v.id);
+      const viajeIdsActuales = viajeIdsActualesRows.map((v) => v.id);
+      
+      const viajes = await this.resolveViajes(tenantId, viajeIdsActuales, dto.clienteId ?? existing.clienteId ?? undefined);
 
-      let tramosForImporte: { viajeId: string; monto: number }[] = [];
+      let tramosForImporte: FacturaTramoCobro[] = [];
       if (facturarPorTramo) {
         const turningOn =
           dto.facturarPorTramo === true && !existing.facturarPorTramo;
@@ -691,14 +891,19 @@ export class FacturacionService {
         await this.replaceTramos(tx, tenantId, id, []);
       }
 
-      const importe = facturarPorTramo
-        ? this.computeImporteConTramos(viajes, tramosForImporte)
-        : this.computeImporte(viajes);
+      const { importe, ivaMonto } = this.montosParaGuardar(
+        viajes,
+        tramosForImporte,
+        facturarPorTramo,
+        dto.ivaPct !== undefined ? dto.ivaPct : existing.ivaPct,
+        tieneArca,
+      );
 
       const updated = await tx.factura.update({
         where: { id },
         data: {
           importe,
+          ivaMonto,
           ...(monedaNueva !== undefined ? { moneda: monedaNueva } : {}),
         },
         include: this.FACTURA_INCLUDE,
@@ -764,9 +969,10 @@ export class FacturacionService {
     const importeOperativo = importeOperativoFactura(
       factura.importe,
       factura.viajes,
+      cobroOptsDeFactura(factura, tieneArca),
     );
     const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
-    const saldo = Math.round((importeOperativo - totalPagado) * 100) / 100;
+    const saldo = roundMoney2(importeOperativo - totalPagado);
 
     if (saldo <= 0.005) {
       return { yaCobrada: true, factura: await this.shapeConNombre(factura, tieneArca) };
@@ -817,13 +1023,22 @@ export class FacturacionService {
       pagos: factura.pagos,
       arcaEstado: factura.arcaEstado,
       tieneArca,
+      facturarPorTramo: factura.facturarPorTramo,
+      tramos: factura.tramos,
+      ivaPctCabecera: factura.ivaPct,
+      ivaMontoGuardado: factura.ivaMonto,
     });
+
+    const viajeIds = Array.from(new Set([
+      ...factura.viajes.map((v) => v.id),
+      ...factura.clientesViaje.map((vc) => vc.viajeId),
+    ]));
 
     await syncFacturacionEstadoViajes(
       this.prisma,
       tenantId,
-      factura.viajes.map((v) => v.id),
-      { cobrado },
+      viajeIds,
+      { cobrado, facturaId },
     );
   }
 }

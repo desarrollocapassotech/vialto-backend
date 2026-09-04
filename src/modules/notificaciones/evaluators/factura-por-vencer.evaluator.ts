@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import {
+  cobroOptsDeFactura,
   computeEstadoFacturaLectura,
   importeOperativoFactura,
 } from '../../../shared/util/factura-estado-lectura';
@@ -30,7 +31,7 @@ export class FacturaPorVencerEvaluator implements NotificacionEvaluator {
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    const tieneArca = tenant?.modules.includes('integracion-arca') ?? false;
+    const tieneArca = tenant?.modules.includes('emision-facturas-arca') ?? false;
 
     const facturas = await this.prisma.factura.findMany({
       where: {
@@ -45,9 +46,13 @@ export class FacturaPorVencerEvaluator implements NotificacionEvaluator {
         moneda: true,
         fechaVencimiento: true,
         arcaEstado: true,
+        facturarPorTramo: true,
+        ivaPct: true,
+        ivaMonto: true,
         clienteId: true,
         pagos: { select: { importe: true } },
-        viajes: { select: { facturacionEstado: true, monto: true } },
+        viajes: { select: { id: true, facturacionEstado: true, monto: true } },
+        tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
       },
     });
     if (facturas.length === 0) return [];
@@ -63,6 +68,7 @@ export class FacturaPorVencerEvaluator implements NotificacionEvaluator {
 
     const items: NotificacionItem[] = [];
     for (const f of facturas) {
+      const opts = cobroOptsDeFactura(f, tieneArca);
       const estado = computeEstadoFacturaLectura({
         viajes: f.viajes,
         fechaVencimiento: f.fechaVencimiento,
@@ -70,10 +76,14 @@ export class FacturaPorVencerEvaluator implements NotificacionEvaluator {
         pagos: f.pagos,
         arcaEstado: f.arcaEstado,
         tieneArca,
+        facturarPorTramo: opts.facturarPorTramo,
+        tramos: f.tramos,
+        ivaPctCabecera: f.ivaPct,
+        ivaMontoGuardado: opts.ivaMontoGuardado,
       });
       if (estado.cobrado || estado.estado === 'anulado') continue;
 
-      const importeOp = importeOperativoFactura(f.importe, f.viajes);
+      const importeOp = importeOperativoFactura(f.importe, f.viajes, opts);
       const pagado = f.pagos.reduce((s, p) => s + p.importe, 0);
       const saldo = roundMoney(importeOp - pagado);
       if (saldo <= 0) continue;

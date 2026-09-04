@@ -3,64 +3,209 @@
  * Usadas por: facturacion, dashboard, platform.
  */
 
-/** Misma regla que `FacturacionService.computeImporte` para alinear importe con viajes. */
-export function importeOperativoFactura(
+export function roundMoney2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function importeNetoViaje(v: {
+  monto?: number | null;
+  cantidadFactura?: number | null;
+  precioUnitarioFactura?: number | null;
+}): number {
+  if (v.cantidadFactura != null && v.precioUnitarioFactura != null) {
+    return roundMoney2(v.cantidadFactura * v.precioUnitarioFactura);
+  }
+  return v.monto ?? 0;
+}
+
+export type FacturaTramoCobro = {
+  viajeId: string;
+  monto: number;
+  ivaPct: number;
+};
+
+export type FacturaCobroOpts = {
+  /**
+   * Tenant con `emision-facturas-arca`: el cobro sigue midiendo el neto.
+   * El IVA de tramos solo entra al cobro en facturas por tramo de tenants
+   * que no emiten ante AFIP (caso Uruguay).
+   */
+  tieneArca?: boolean;
+  facturarPorTramo?: boolean;
+  tramos?: FacturaTramoCobro[];
+  ivaPctCabecera?: number | null;
+  /**
+   * IVA persistido al guardar la factura (`Factura.ivaMonto`).
+   * Si viene, el cobro no reconstruye la cuenta tramo a tramo.
+   * `null`/`undefined` = factura vieja todavía no backfilleada: se calcula.
+   */
+  ivaMontoGuardado?: number | null;
+};
+
+export function cobroOptsDeFactura(
+  f: {
+    facturarPorTramo?: boolean | null;
+    ivaPct?: number | null;
+    tramos?: FacturaTramoCobro[] | null;
+    ivaMonto?: number | null;
+  },
+  tieneArca: boolean,
+): FacturaCobroOpts {
+  return {
+    tieneArca,
+    facturarPorTramo: Boolean(f.facturarPorTramo),
+    tramos: f.tramos ?? undefined,
+    ivaPctCabecera: f.ivaPct,
+    ivaMontoGuardado: f.ivaMonto,
+  };
+}
+
+type ViajeCobro = {
+  id?: string;
+  monto?: number | null;
+  cantidadFactura?: number | null;
+  precioUnitarioFactura?: number | null;
+};
+
+/**
+ * Neto sin IVA. Siempre es la suma de los viajes (cantidad×precio si hay).
+ * Los tramos NO reemplazan el monto del viaje: si un viaje tiene tramos
+ * parciales, el resto queda en el neto y se trata como tramo implícito
+ * con el IVA de cabecera (0% en LSF = parte exenta).
+ */
+export function importeNetoFactura(
   importeGuardado: number,
-  viajes: { monto?: number | null }[],
+  viajes: ViajeCobro[],
+  _opts?: Pick<FacturaCobroOpts, "facturarPorTramo" | "tramos">,
 ): number {
   if (viajes.length === 0) return importeGuardado;
-  return viajes.reduce((s, v) => s + (v.monto ?? 0), 0);
+  return roundMoney2(viajes.reduce((s, v) => s + importeNetoViaje(v), 0));
+}
+
+/**
+ * IVA de una factura por tramo: suma el IVA de cada tramo cargado, y la
+ * parte del neto no cubierta por tramos usa el IVA de cabecera.
+ */
+export function ivaMontoDeTramos(
+  importeNeto: number,
+  tramos: FacturaTramoCobro[],
+  ivaPctCabecera?: number | null,
+): number {
+  const sumaTramos = roundMoney2(tramos.reduce((s, t) => s + t.monto, 0));
+  const undivided = Math.max(0, roundMoney2(importeNeto - sumaTramos));
+  const ivaTramos = tramos.reduce(
+    (s, t) => roundMoney2(s + roundMoney2((t.monto * t.ivaPct) / 100)),
+    0,
+  );
+  const ivaUndivided = roundMoney2(
+    (undivided * (Number(ivaPctCabecera) || 0)) / 100,
+  );
+  return roundMoney2(ivaTramos + ivaUndivided);
+}
+
+/** Total con IVA de una factura por tramo. */
+export function importeTotalConIvaPorTramo(
+  importeNeto: number,
+  tramos: FacturaTramoCobro[],
+  ivaPctCabecera?: number | null,
+): number {
+  return roundMoney2(
+    importeNeto + ivaMontoDeTramos(importeNeto, tramos, ivaPctCabecera),
+  );
+}
+
+/**
+ * Monto contra el que se mide el cobro.
+ * Sin tramos / tenant ARCA: neto. Por tramo sin ARCA: neto + IVA persistido
+ * (o recalculado si todavía no hay `ivaMonto` guardado).
+ */
+export function importeOperativoFactura(
+  importeGuardado: number,
+  viajes: ViajeCobro[],
+  opts?: FacturaCobroOpts,
+): number {
+  const neto = importeNetoFactura(importeGuardado, viajes, opts);
+  if (
+    opts?.tieneArca ||
+    !opts?.facturarPorTramo ||
+    !(opts.tramos && opts.tramos.length > 0)
+  ) {
+    return neto;
+  }
+  if (opts.ivaMontoGuardado != null && Number.isFinite(opts.ivaMontoGuardado)) {
+    return roundMoney2(neto + opts.ivaMontoGuardado);
+  }
+  return importeTotalConIvaPorTramo(neto, opts.tramos, opts.ivaPctCabecera);
 }
 
 /** Ciclo de vida del comprobante — un solo valor a la vez, nunca "cobrado" (ver `cobrado` abajo). */
 export type FacturaEstadoLectura =
-  | 'borrador'
-  | 'esperando_afip'
-  | 'facturado'
-  | 'error_afip'
-  | 'anulado';
+  | "borrador"
+  | "esperando_afip"
+  | "facturado"
+  | "error_afip"
+  | "anulado";
 
 export interface FacturaEstadoResult {
   estado: FacturaEstadoLectura;
-  /** Eje independiente del ciclo de vida: se puede estar cobrado en cualquier estado (ej. cobrado antes de anular). */
   cobrado: boolean;
-  /** Solo relevante mientras no está cobrado y ya se llegó a "facturado" (con CAE si aplica). */
   vencida: boolean;
 }
 
-/**
- * Estado de negocio de la factura en lectura. `estado` (ciclo de vida) y `cobrado`/
- * `vencida` (cobro) son ejes independientes — la UI los muestra como badges separados,
- * uno nunca reemplaza al otro. Sigue el mismo orden de prioridad para `estado` que
- * `mapFacturacionEstado` en `modules/viajes/viaje-estado-financiero.ts` — mantener
- * ambos sincronizados si cambia la regla.
- */
 export function computeEstadoFacturaLectura(args: {
-  viajes: { facturacionEstado: string; monto?: number | null }[];
+  viajes: Array<{
+    id?: string;
+    facturacionEstado: string;
+    monto?: number | null;
+    cantidadFactura?: number | null;
+    precioUnitarioFactura?: number | null;
+  }>;
   fechaVencimiento: Date | null;
   importeGuardado: number;
   pagos: { importe: number }[];
   arcaEstado: string | null;
   tieneArca: boolean;
+  facturarPorTramo?: boolean;
+  tramos?: FacturaTramoCobro[];
+  ivaPctCabecera?: number | null;
+  ivaMontoGuardado?: number | null;
 }): FacturaEstadoResult {
-  let estado: FacturaEstadoLectura = 'facturado';
+  let estado: FacturaEstadoLectura = "facturado";
   if (args.tieneArca) {
-    if (args.arcaEstado == null) estado = 'borrador';
-    else if (args.arcaEstado === 'pendiente_cae') estado = 'esperando_afip';
-    else if (args.arcaEstado === 'error') estado = 'error_afip';
-    else if (args.arcaEstado === 'anulado') estado = 'anulado';
+    if (args.arcaEstado == null) estado = "borrador";
+    else if (args.arcaEstado === "pendiente_cae") estado = "esperando_afip";
+    else if (args.arcaEstado === "error") estado = "error_afip";
+    else if (args.arcaEstado === "anulado") estado = "anulado";
   }
 
-  const importe = importeOperativoFactura(args.importeGuardado, args.viajes);
+  const cobroOpts: FacturaCobroOpts = {
+    tieneArca: args.tieneArca,
+    facturarPorTramo: args.facturarPorTramo,
+    tramos: args.tramos,
+    ivaPctCabecera: args.ivaPctCabecera,
+    ivaMontoGuardado: args.ivaMontoGuardado,
+  };
+  const importe = importeOperativoFactura(
+    args.importeGuardado,
+    args.viajes,
+    cobroOpts,
+  );
   const totalPagado = args.pagos.reduce((s, p) => s + p.importe, 0);
-  const cobrado =
-    (args.viajes.length > 0 &&
-      args.viajes.every((v) => v.facturacionEstado === 'cobrado')) ||
-    (importe > 0 && totalPagado + 0.005 >= importe);
+  const cobradoPorPagos = importe > 0 && totalPagado + 0.005 >= importe;
+  const cobradoPorViajes =
+    args.viajes.length > 0 &&
+    args.viajes.every((v) => v.facturacionEstado === "cobrado");
+  const porTramoSinArca =
+    !args.tieneArca &&
+    Boolean(args.facturarPorTramo) &&
+    (args.tramos?.length ?? 0) > 0;
+  const cobrado = porTramoSinArca
+    ? cobradoPorPagos
+    : cobradoPorViajes || cobradoPorPagos;
 
   const vencida =
     !cobrado &&
-    estado === 'facturado' &&
+    estado === "facturado" &&
     args.fechaVencimiento != null &&
     new Date(args.fechaVencimiento) <= new Date();
 

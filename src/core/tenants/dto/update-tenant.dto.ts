@@ -8,8 +8,16 @@ export class UpdateTenantDto {
   @IsOptional() @IsInt() @Type(() => Number) maxUsers?: number;
   @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;
   @IsOptional() @IsDateString() billingRenewsAt?: string;
-  @IsOptional() @IsString() whiteLabelDomain?: string;
   @IsOptional() @IsString() labelIdentificacionPersonalizadaViajes?: string;
   /** true = el admin del tenant no ve la pantalla de import masivo (superadmin sigue pudiendo usarla). */
   @IsOptional() @IsBoolean() importacionesOcultas?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  habilitarExportacionPautMicCrt?: boolean;
+  /**
+   * Método de anulación del CVLP (060) — 'nota_credito_debito' (default) | 'manual'.
+   * Solo editable desde superadmin (panel Empresas). Ver Liquidacion.estado en schema.prisma.
+   */
+  @IsOptional() @IsIn(['nota_credito_debito', 'manual']) liquidacionAnulacionMetodo?: string;
 }

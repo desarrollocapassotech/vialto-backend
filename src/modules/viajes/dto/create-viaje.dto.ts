@@ -16,6 +16,7 @@ import { Transform, Type } from "class-transformer";
 import { normalizarEtapaViaje, VIAJE_ETAPAS } from "../viaje-estados";
 import { ViajeProductoItemDto } from "./viaje-producto-item.dto";
 import { ViajeDestinoItemDto } from "./viaje-destino-item.dto";
+import { ViajeClienteItemDto } from "./viaje-cliente-item.dto";
 
 /** Normaliza ids opcionales del body: trim y convierte "" en null. */
 export function normalizeOptionalId({
@@ -101,7 +102,7 @@ export class CreateViajeDto {
   @Type(() => ViajeDestinoItemDto)
   destinos?: ViajeDestinoItemDto[];
   @IsDateString() fechaCarga: string;
-  @IsDateString() fechaDescarga: string;
+  @IsOptional() @IsDateString() fechaDescarga?: string | null;
   /** Productos a transportar (orden = orden del array). */
   @IsOptional()
   @IsArray()
@@ -162,4 +163,10 @@ export class CreateViajeDto {
   @ValidateNested({ each: true })
   @Type(() => PagoTransportistaDto)
   pagosTransportista?: PagoTransportistaDto[];
+  /** Clientes adicionales del viaje (multi-cliente, opcional) — convive con `clienteId`, no lo reemplaza. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ViajeClienteItemDto)
+  clientes?: ViajeClienteItemDto[];
 }

@@ -21,8 +21,11 @@
     "migrate:bressan:dry": "ts-node scripts/migrate-bressan-cargas.ts --dry-run",
     "fix:combustible": "ts-node scripts/fix-combustible-cargas-sospechosas.ts",
     "fix:combustible:dry": "ts-node scripts/fix-combustible-cargas-sospechosas.ts --dry-run",
+    "backfill:factura-iva-tramos": "ts-node --transpile-only scripts/backfill-factura-iva-tramos.ts --apply",
+    "backfill:factura-iva-tramos:dry": "ts-node --transpile-only scripts/backfill-factura-iva-tramos.ts",
     "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts",
-    "test:viaje-estado-financiero": "ts-node src/modules/viajes/viaje-estado-financiero.spec.ts"
+    "test:viaje-estado-financiero": "ts-node src/modules/viajes/viaje-estado-financiero.spec.ts",
+    "test:importaciones": "ts-node src/modules/importaciones/engine/importaciones.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",
@@ -50,6 +53,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@dbml/core": "^10.1.1",
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@types/express": "^5.0.0",

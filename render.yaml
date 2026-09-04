@@ -30,3 +30,9 @@ services:
         sync: false
       - key: AFIP_SDK_API_KEY
         sync: false
+      # Notificaciones por email (Resend) — sin RESEND_API_KEY el cron corre pero no manda
+      # nada (solo loguea, ver ResendEmailService). Dominio remitente verificado: vialto.uno.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        value: "Vialto <notificaciones@vialto.uno>"

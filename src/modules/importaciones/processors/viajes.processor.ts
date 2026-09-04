@@ -11,6 +11,7 @@ import {
 } from "../../viajes/viaje-estados";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
+import { scalarDataFromRow } from "../prisma-import-fields";
 
 @Injectable()
 export class ViajesProcessor implements IImportProcessor {
@@ -31,8 +32,16 @@ export class ViajesProcessor implements IImportProcessor {
     return isNaN(d.getTime()) ? null : d;
   }
 
-  /** cantidadFactura × precioUnitarioFactura tiene prioridad sobre `monto` directo (retrocompatible con templates viejos que solo mandan MONTO). */
-  private resolveMonto(row: ValidatedRow): number | null {
+  /**
+   * cantidadFactura × precioUnitarioFactura tiene prioridad sobre `monto`
+   * directo (retrocompatible con templates viejos que solo mandan MONTO).
+   * Público: `ImportacionesService.buildViajesPreview` lo reusa para que el
+   * preview muestre el mismo valor que se va a guardar — antes mostraba la
+   * celda cruda de "Monto" (vacía en templates de desglose) como si el
+   * import fuera a borrar el monto de un viaje existente. Bug real
+   * reportado ago 2026.
+   */
+  resolveMonto(row: ValidatedRow): number | null {
     const cantidad =
       row.cantidadFactura != null ? Number(row.cantidadFactura) : null;
     const precioUnit =
@@ -40,9 +49,27 @@ export class ViajesProcessor implements IImportProcessor {
         ? Number(row.precioUnitarioFactura)
         : null;
     if (cantidad != null && precioUnit != null) {
-      return cantidad * precioUnit;
+      return Math.round(cantidad * precioUnit * 100) / 100;
     }
     return row.monto != null ? Number(row.monto) : null;
+  }
+
+  /** Mismo criterio que `resolveMonto`, del lado del transportista: cantidadTransportista × precioUnitarioTransportista tiene prioridad sobre `precioTransportistaExterno` directo. Público por el mismo motivo. */
+  resolvePrecioTransportistaExterno(row: ValidatedRow): number | null {
+    const cantidad =
+      row.cantidadTransportista != null
+        ? Number(row.cantidadTransportista)
+        : null;
+    const precioUnit =
+      row.precioUnitarioTransportista != null
+        ? Number(row.precioUnitarioTransportista)
+        : null;
+    if (cantidad != null && precioUnit != null) {
+      return Math.round(cantidad * precioUnit * 100) / 100;
+    }
+    return row.precioTransportistaExterno != null
+      ? Number(row.precioTransportistaExterno)
+      : null;
   }
 
   /**
@@ -72,10 +99,12 @@ export class ViajesProcessor implements IImportProcessor {
    * Busca un viaje ya importado que corresponda a esta fila. Prioridad:
    * 1) ID Personalizado, si la fila lo trae (match exacto e inequívoco).
    * 2) Si no, la combinación cliente + transporte + origen + destino +
-   *    fecha de carga + fecha de descarga — todos obligatorios en el
-   *    import, así que siempre están disponibles. No es infalible: dos
-   *    viajes reales distintos con esos mismos datos (mismo cliente y
-   *    transporte, misma ruta, mismo día) se tratarían como el mismo.
+   *    fecha de carga + fecha de descarga (fecha de carga obligatoria en
+   *    el import; descarga opcional — si la fila no la trae, matchea
+   *    contra otros viajes que tampoco la tengan, vía IS NULL). No es
+   *    infalible: dos viajes reales distintos con esos mismos datos (mismo
+   *    cliente y transporte, misma ruta, mismo día) se tratarían como el
+   *    mismo.
    */
   private async findExisting(
     row: ValidatedRow,
@@ -102,7 +131,7 @@ export class ViajesProcessor implements IImportProcessor {
         origen: { equals: (row.origen as string).trim(), mode: "insensitive" },
         destino: { equals: (row.destino as string).trim(), mode: "insensitive" },
         fechaCarga: row.fechaCarga as Date,
-        fechaDescarga: row.fechaDescarga as Date,
+        fechaDescarga: row.fechaDescarga as Date | null,
       },
       select: { id: true },
     });
@@ -207,50 +236,35 @@ export class ViajesProcessor implements IImportProcessor {
       });
     }
 
+    // Las columnas sin mapeo (`_unmappedText`) ya no se concatenan a la fuerza
+    // en Observaciones para evitar ensuciar la información del viaje.
+    const observaciones = (row.observaciones as string | undefined) ?? undefined;
+
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que reimportar el mismo ID Personalizado con un Excel más acotado
-    // no borre datos ya cargados que esa fila no trae.
+    // no borre datos ya cargados que esa fila no trae. Scalars nuevos del
+    // modelo Prisma se copian solos (litrosConsumidos, etc.).
+    const especiales = {
+      clienteId,
+      transportistaId: (row.transportistaId as string | null) ?? undefined,
+      transportistaEfectivoId,
+      choferId: (row.choferId as string | null) ?? undefined,
+      origen: (row.origen as string | null) ?? undefined,
+      destino: (row.destino as string | null) ?? undefined,
+      fechaCarga,
+      fechaDescarga,
+      monto: this.resolveMonto(row) ?? undefined,
+      precioTransportistaExterno:
+        this.resolvePrecioTransportistaExterno(row) ?? undefined,
+      observaciones,
+    };
+    const extras = scalarDataFromRow(row, "Viaje", {
+      skip: Object.keys(especiales),
+    });
     await this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id: viajeId },
-        data: {
-          clienteId,
-          transportistaId: (row.transportistaId as string | null) ?? undefined,
-          transportistaEfectivoId,
-          choferId: (row.choferId as string | null) ?? undefined,
-          origen: (row.origen as string | null) ?? undefined,
-          destino: (row.destino as string | null) ?? undefined,
-          fechaCarga,
-          fechaDescarga,
-          detalleCarga: (row.detalleCarga as string | null) ?? undefined,
-          kmRecorridos:
-            row.kmRecorridos != null ? Number(row.kmRecorridos) : undefined,
-          monto: this.resolveMonto(row) ?? undefined,
-          monedaMonto: (row.monedaMonto as string | null) ?? undefined,
-          cantidadFactura:
-            row.cantidadFactura != null
-              ? Number(row.cantidadFactura)
-              : undefined,
-          precioUnitarioFactura:
-            row.precioUnitarioFactura != null
-              ? Number(row.precioUnitarioFactura)
-              : undefined,
-          cantidadTransportista:
-            row.cantidadTransportista != null
-              ? Number(row.cantidadTransportista)
-              : undefined,
-          precioUnitarioTransportista:
-            row.precioUnitarioTransportista != null
-              ? Number(row.precioUnitarioTransportista)
-              : undefined,
-          precioTransportistaExterno:
-            row.precioTransportistaExterno != null
-              ? Number(row.precioTransportistaExterno)
-              : undefined,
-          monedaPrecioTransportistaExterno:
-            (row.monedaPrecioTransportistaExterno as string | null) ??
-            undefined,
-        },
+        data: { ...extras, ...especiales },
       });
       // El transportista puede haber cambiado — resincronizar.
       await syncLiquidacionEstadoViaje(tx, tenantId, viajeId);
@@ -271,21 +285,14 @@ export class ViajesProcessor implements IImportProcessor {
       // (Forzamos el tipo con 'as any' en caso de que generateNumeroViaje espere estrictamente PrismaService en tu tipado)
       const numero = await generateNumeroViaje(tx as any, tenantId);
 
-      const observacionesParts: string[] = [];
-      if (row.observaciones)
-        observacionesParts.push(row.observaciones as string);
-      if (row._unmappedText)
-        observacionesParts.push(row._unmappedText as string);
-      const observaciones = observacionesParts.join("\n") || null;
+      const observaciones = (row.observaciones as string | undefined) ?? null;
 
       const clienteId = row.clienteId as string;
       const fechaCarga = this.toDate(row.fechaCarga);
       const fechaDescarga = this.toDate(row.fechaDescarga);
 
       if (!fechaCarga) throw new Error("La fecha de carga es requerida.");
-      if (!fechaDescarga)
-        throw new Error("La fecha de descarga es requerida.");
-      assertFechaDescargaValida(fechaCarga, fechaDescarga);
+      if (fechaDescarga) assertFechaDescargaValida(fechaCarga, fechaDescarga);
 
       // ── Clasificación explícita de flota ──────────────────────────────
       // No se infiere nada destructivo. Si la columna TIPO DE FLOTA no viene
@@ -307,10 +314,7 @@ export class ViajesProcessor implements IImportProcessor {
           contratanteRealizaFlete: false,
         });
       }
-      const precioFlete =
-        row.precioTransportistaExterno != null
-          ? Number(row.precioTransportistaExterno)
-          : null;
+      const precioFlete = this.resolvePrecioTransportistaExterno(row);
 
       if (tipoFlota === "TERCERO") {
         if (!transportistaId)
@@ -333,7 +337,7 @@ export class ViajesProcessor implements IImportProcessor {
       let facturaClienteId: string | null = null;
       if (row.nroFactura) {
         const numeroFactura = row.nroFactura as string;
-        const montoFila = row.monto != null ? Number(row.monto) : 0;
+        const montoFila = this.resolveMonto(row) ?? 0;
 
         // Si ya existe una factura con el mismo número para este cliente
         // (de una fila anterior de este mismo import, o de un import
@@ -385,9 +389,7 @@ export class ViajesProcessor implements IImportProcessor {
           ?.toString()
           .trim() || null;
 
-      // Usamos tx para el viaje
-      const viaje = await tx.viaje.create({
-        data: {
+      const especialesCreate = {
           tenantId,
           numero,
           numeroIdentificacionPersonalizado,
@@ -401,25 +403,8 @@ export class ViajesProcessor implements IImportProcessor {
           destino: (row.destino as string | null) ?? null,
           fechaCarga,
           fechaDescarga,
-          detalleCarga: (row.detalleCarga as string | null) ?? null,
-          kmRecorridos:
-            row.kmRecorridos != null ? Number(row.kmRecorridos) : null,
           monto: this.resolveMonto(row),
           monedaMonto: (row.monedaMonto as string | null) ?? "ARS",
-          cantidadFactura:
-            row.cantidadFactura != null ? Number(row.cantidadFactura) : null,
-          precioUnitarioFactura:
-            row.precioUnitarioFactura != null
-              ? Number(row.precioUnitarioFactura)
-              : null,
-          cantidadTransportista:
-            row.cantidadTransportista != null
-              ? Number(row.cantidadTransportista)
-              : null,
-          precioUnitarioTransportista:
-            row.precioUnitarioTransportista != null
-              ? Number(row.precioUnitarioTransportista)
-              : null,
           precioTransportistaExterno: precioFlete,
           monedaPrecioTransportistaExterno:
             (row.monedaPrecioTransportistaExterno as string | null) ?? "ARS",
@@ -427,7 +412,14 @@ export class ViajesProcessor implements IImportProcessor {
           observaciones,
           otrosGastos: this.extractOtrosGastos(row),
           createdBy,
-        },
+      };
+      const extrasCreate = scalarDataFromRow(row, "Viaje", {
+        skip: Object.keys(especialesCreate),
+      });
+
+      // Usamos tx para el viaje. Scalars nuevos del modelo se copian solos.
+      const viaje = await tx.viaje.create({
+        data: { ...extrasCreate, ...especialesCreate },
         select: { id: true },
       });
       // Igual que en la creación manual: sin esto, un viaje con transportista en un
@@ -492,14 +484,14 @@ export class ViajesProcessor implements IImportProcessor {
     return gastos;
   }
 
-  /** Clave normalizada para el fallback compuesto de `findExisting` — misma combinación de campos, para poder comparar en memoria sin una query por fila. */
+  /** Clave normalizada para el fallback compuesto de `findExisting` — misma combinación de campos, para poder comparar en memoria sin una query por fila. `fechaDescarga` es opcional: las filas/viajes sin ella comparten la misma clave vacía, igual que el `IS NULL` que arma la query. */
   private claveCompuesta(
     clienteId: string,
     transportistaId: string,
     origen: string,
     destino: string,
     fechaCarga: Date,
-    fechaDescarga: Date,
+    fechaDescarga: Date | null,
   ): string {
     return [
       clienteId,
@@ -507,7 +499,7 @@ export class ViajesProcessor implements IImportProcessor {
       origen.trim().toLowerCase(),
       destino.trim().toLowerCase(),
       fechaCarga.toISOString(),
-      fechaDescarga.toISOString(),
+      fechaDescarga ? fechaDescarga.toISOString() : "",
     ].join("|");
   }
 
@@ -560,7 +552,9 @@ export class ViajesProcessor implements IImportProcessor {
 
     // Fallback compuesto (cliente + transporte + origen + destino + fechas)
     // para las filas que no matchearon por ID Personalizado — mismos campos
-    // que `findExisting`, todos obligatorios en el template de Viajes.
+    // que `findExisting`. Fecha de carga es obligatoria en el template de
+    // Viajes; fecha de descarga es opcional — una fila sin ella solo
+    // matchea contra viajes que tampoco la tengan (ver `claveCompuesta`).
     type FilaCompuesta = {
       row: ValidatedRow;
       clienteId: string;
@@ -568,7 +562,7 @@ export class ViajesProcessor implements IImportProcessor {
       origen: string;
       destino: string;
       fechaCarga: Date;
-      fechaDescarga: Date;
+      fechaDescarga: Date | null;
     };
     const conDatosCompuestos: FilaCompuesta[] = [];
     for (const r of pendientes) {
@@ -578,14 +572,7 @@ export class ViajesProcessor implements IImportProcessor {
       const destino = r.destino as string | undefined;
       const fechaCarga = this.toDate(r.fechaCarga);
       const fechaDescarga = this.toDate(r.fechaDescarga);
-      if (
-        clienteId &&
-        transportistaId &&
-        origen &&
-        destino &&
-        fechaCarga &&
-        fechaDescarga
-      ) {
+      if (clienteId && transportistaId && origen && destino && fechaCarga) {
         conDatosCompuestos.push({
           row: r,
           clienteId,

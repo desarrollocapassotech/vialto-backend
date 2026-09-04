@@ -1,4 +1,5 @@
 import {
+  ArrayMinSize,
   IsArray,
   IsDateString,
   IsNumber,
@@ -47,6 +48,16 @@ export class UpdateLiquidacionDto {
   @ValidateNested({ each: true })
   @Type(() => LiquidacionConceptoLineaDto)
   conceptosLineas?: LiquidacionConceptoLineaDto[];
+
+  /**
+   * Reemplaza por completo el conjunto de viajes incluidos en la liquidación.
+   * Solo se acepta con la liquidación en estado "borrador".
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  viajeIds?: string[];
 
   /** URL Cloudinary del comprobante; `null` limpia el adjunto. */
   @IsOptional()

@@ -1,17 +1,21 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import * as PDFDocument from 'pdfkit';
-import * as QRCode from 'qrcode';
-import { PrismaService } from '../../shared/prisma/prisma.service';
-import { ArcaConfigService } from './arca-config.service';
-import { buildComprobanteCvlp } from './arca-cvlp.util';
-import { cvlpPdfPieFinanciero, resolveIvaPct } from './arca-iva.util';
-import { buildCvlpConceptosList } from './cvlp-conceptos.util';
-import { CBTE_TIPO_NC_CVLP, esNotaDebitoAnulacion } from './arca.util';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from "@nestjs/common";
+import * as PDFDocument from "pdfkit";
+import * as QRCode from "qrcode";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+import { ArcaConfigService } from "./arca-config.service";
+import { buildComprobanteCvlp } from "./arca-cvlp.util";
+import { cvlpPdfPieFinanciero, resolveIvaPct } from "./arca-iva.util";
+import { buildCvlpConceptosList } from "./cvlp-conceptos.util";
+import { CBTE_TIPO_NC_CVLP, esNotaDebitoAnulacion } from "./arca.util";
 import {
   drawHomologacionWatermark,
   shouldShowHomologacionWatermark,
-} from './pdf-homologacion-watermark';
-import { ArcaComprobanteCvlp } from './types/arca.types';
+} from "./pdf-homologacion-watermark";
+import { ArcaComprobanteCvlp } from "./types/arca.types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -19,7 +23,7 @@ type PrismaAny = any;
 type PdfCbteAsoc = { tipo: number; ptoVenta: number; nro: number };
 
 type PdfDrawOpts = {
-  kind: 'cvlp' | 'nc';
+  kind: "cvlp" | "nc";
   title: string;
   cbteTipo: number;
   cbteNro: number | null;
@@ -31,48 +35,100 @@ type PdfDrawOpts = {
 };
 
 const CONDICION_IVA_LABEL: Record<number, string> = {
-  1: 'RESP. INSCRIPTO',
-  4: 'IVA SUJETO EXENTO',
-  5: 'CONSUMIDOR FINAL',
-  6: 'RESP. MONOTRIBUTO',
+  1: "RESP. INSCRIPTO",
+  4: "IVA SUJETO EXENTO",
+  5: "CONSUMIDOR FINAL",
+  6: "RESP. MONOTRIBUTO",
 };
 
 // Letra mostrada en el recuadro grande del comprobante. CVLP (60/61) se factura
 // fiscalmente como A/B según el destinatario, por eso comparte letra con Factura A/B.
 const LETRA_POR_TIPO: Record<number, string> = {
-  1: 'A',
-  6: 'B',
-  11: 'C',
+  1: "A",
+  6: "B",
+  11: "C",
 };
 
 // ── Helpers numéricos ─────────────────────────────────────────────────────────
 
 function fmtNum(n: number, decimals = 2): string {
-  return n.toLocaleString('es-AR', {
+  return n.toLocaleString("es-AR", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
 }
 
 function fmtDate(d: Date | string | null | undefined): string {
-  if (!d) return '';
-  const dt = typeof d === 'string' ? new Date(d) : d;
-  const dd = String(dt.getUTCDate()).padStart(2, '0');
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  if (!d) return "";
+  const dt = typeof d === "string" ? new Date(d) : d;
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
   const yy = dt.getUTCFullYear();
   return `${dd}/${mm}/${yy}`;
 }
 
-const UNIDADES = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE',
-  'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
+const UNIDADES = [
+  "",
+  "UN",
+  "DOS",
+  "TRES",
+  "CUATRO",
+  "CINCO",
+  "SEIS",
+  "SIETE",
+  "OCHO",
+  "NUEVE",
+  "DIEZ",
+  "ONCE",
+  "DOCE",
+  "TRECE",
+  "CATORCE",
+  "QUINCE",
+  "DIECISÉIS",
+  "DIECISIETE",
+  "DIECIOCHO",
+  "DIECINUEVE",
+];
 // El 20 se escribe como palabra única igual que el 11-19 ("veintiuno", no "veinte y uno").
-const VEINTES = ['VEINTE', 'VEINTIUNO', 'VEINTIDÓS', 'VEINTITRÉS', 'VEINTICUATRO', 'VEINTICINCO',
-  'VEINTISÉIS', 'VEINTISIETE', 'VEINTIOCHO', 'VEINTINUEVE'];
-const DECENAS = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
-const CENTENAS = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+const VEINTES = [
+  "VEINTE",
+  "VEINTIUNO",
+  "VEINTIDÓS",
+  "VEINTITRÉS",
+  "VEINTICUATRO",
+  "VEINTICINCO",
+  "VEINTISÉIS",
+  "VEINTISIETE",
+  "VEINTIOCHO",
+  "VEINTINUEVE",
+];
+const DECENAS = [
+  "",
+  "DIEZ",
+  "VEINTE",
+  "TREINTA",
+  "CUARENTA",
+  "CINCUENTA",
+  "SESENTA",
+  "SETENTA",
+  "OCHENTA",
+  "NOVENTA",
+];
+const CENTENAS = [
+  "",
+  "CIENTO",
+  "DOSCIENTOS",
+  "TRESCIENTOS",
+  "CUATROCIENTOS",
+  "QUINIENTOS",
+  "SEISCIENTOS",
+  "SETECIENTOS",
+  "OCHOCIENTOS",
+  "NOVECIENTOS",
+];
 
 function dosDigitos(n: number): string {
-  if (n === 0) return '';
+  if (n === 0) return "";
   if (n < 20) return UNIDADES[n];
   const d = Math.floor(n / 10);
   const u = n % 10;
@@ -82,18 +138,18 @@ function dosDigitos(n: number): string {
 }
 
 function tresDigitos(n: number): string {
-  if (n === 0) return '';
-  if (n === 100) return 'CIEN';
+  if (n === 0) return "";
+  if (n === 100) return "CIEN";
   const c = Math.floor(n / 100);
   const resto = n % 100;
-  const centStr = c > 0 ? CENTENAS[c] : '';
-  return [centStr, dosDigitos(resto)].filter(Boolean).join(' ');
+  const centStr = c > 0 ? CENTENAS[c] : "";
+  return [centStr, dosDigitos(resto)].filter(Boolean).join(" ");
 }
 
 function numeroALetras(n: number): string {
   const entero = Math.floor(n);
   const centavos = Math.round((n - entero) * 100);
-  const centavosStr = centavos === 0 ? 'CERO' : dosDigitos(centavos);
+  const centavosStr = centavos === 0 ? "CERO" : dosDigitos(centavos);
 
   if (entero === 0) return `CERO CON ${centavosStr} CENTAVO(S)`;
 
@@ -102,28 +158,32 @@ function numeroALetras(n: number): string {
   const resto = entero % 1000;
 
   const partes: string[] = [];
-  if (millones > 0) partes.push(`${tresDigitos(millones)} ${millones === 1 ? 'MILLÓN' : 'MILLONES'}`);
-  if (miles > 0) partes.push(`${miles === 1 ? 'MIL' : `${tresDigitos(miles)} MIL`}`);
+  if (millones > 0)
+    partes.push(
+      `${tresDigitos(millones)} ${millones === 1 ? "MILLÓN" : "MILLONES"}`,
+    );
+  if (miles > 0)
+    partes.push(`${miles === 1 ? "MIL" : `${tresDigitos(miles)} MIL`}`);
   if (resto > 0) partes.push(tresDigitos(resto));
 
-  const letras = partes.join(' ');
+  const letras = partes.join(" ");
   return `${letras} CON ${centavosStr} CENTAVO(S)`;
 }
 
 /** Nombre de archivo legible: quita acentos y caracteres no válidos para un filesystem. */
 function slugify(text: string): string {
   const withoutDiacritics = text
-    .normalize('NFD')
-    .split('')
+    .normalize("NFD")
+    .split("")
     .filter((ch) => {
       const code = ch.codePointAt(0) ?? 0;
       return code < 0x0300 || code > 0x036f;
     })
-    .join('');
+    .join("");
   const clean = withoutDiacritics
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return clean.slice(0, 60) || 'liquidacion';
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return clean.slice(0, 60) || "liquidacion";
 }
 
 // ── PDF builder ───────────────────────────────────────────────────────────────
@@ -138,7 +198,7 @@ export class LiquidacionPdfService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly arcaConfig: ArcaConfigService,
-  ) { }
+  ) {}
 
   private get db(): PrismaAny {
     return this.prisma as PrismaAny;
@@ -148,7 +208,7 @@ export class LiquidacionPdfService {
     tenantId: string,
     liquidacionId: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
-    return this.generateInternal(tenantId, liquidacionId, 'cvlp');
+    return this.generateInternal(tenantId, liquidacionId, "cvlp");
   }
 
   /** PDF del comprobante de anulación (Nota de Crédito o Nota de Débito), con comprobantes asociados en el detalle. */
@@ -156,30 +216,50 @@ export class LiquidacionPdfService {
     tenantId: string,
     liquidacionId: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
-    return this.generateInternal(tenantId, liquidacionId, 'nc');
+    return this.generateInternal(tenantId, liquidacionId, "nc");
   }
 
   private async generateInternal(
     tenantId: string,
     liquidacionId: string,
-    kind: 'cvlp' | 'nc',
+    kind: "cvlp" | "nc",
   ): Promise<{ buffer: Buffer; filename: string }> {
     const liq = await this.db.liquidacion.findUnique({
       where: { id: liquidacionId },
       include: {
         transportista: {
-          select: { id: true, nombre: true, idFiscal: true, condicionIva: true, domicilio: true, pais: true },
+          select: {
+            id: true,
+            nombre: true,
+            idFiscal: true,
+            condicionIva: true,
+            domicilio: true,
+            pais: true,
+          },
         },
         viajes: {
           include: {
             viaje: {
               select: {
-                id: true, numero: true, fechaCarga: true, fechaDescarga: true,
-                origen: true, destino: true,
-                cliente: { select: { id: true, nombre: true, idFiscal: true, direccion: true } },
+                id: true,
+                numero: true,
+                fechaCarga: true,
+                fechaDescarga: true,
+                origen: true,
+                destino: true,
+                cliente: {
+                  select: {
+                    id: true,
+                    nombre: true,
+                    idFiscal: true,
+                    direccion: true,
+                  },
+                },
                 chofer: { select: { nombre: true } },
                 numeroIdentificacionPersonalizado: true,
-                productosViaje: { select: { producto: { select: { nombre: true } } } },
+                productosViaje: {
+                  select: { producto: { select: { nombre: true } } },
+                },
               },
             },
           },
@@ -188,69 +268,84 @@ export class LiquidacionPdfService {
     });
 
     if (!liq || liq.tenantId !== tenantId) {
-      throw new NotFoundException('Liquidación no encontrada');
+      throw new NotFoundException("Liquidación no encontrada");
     }
 
-    if (kind === 'nc') {
-      if (liq.estado !== 'anulado' || !liq.anulacionCae || !liq.anulacionCbteNro) {
+    if (kind === "nc") {
+      if (
+        liq.estado !== "anulado" ||
+        !liq.anulacionCae ||
+        !liq.anulacionCbteNro
+      ) {
         throw new BadRequestException(
-          'No hay comprobante de anulación para esta liquidación.',
+          "No hay comprobante de anulación para esta liquidación.",
         );
       }
     }
 
     const drawOpts: PdfDrawOpts =
-      kind === 'nc'
+      kind === "nc"
         ? {
-          kind: 'nc',
-          title: esNotaDebitoAnulacion(liq.anulacionCbteTipo)
-            ? 'NOTA DE DEBITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO'
-            : 'NOTA DE CREDITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO',
-          cbteTipo: liq.anulacionCbteTipo ?? CBTE_TIPO_NC_CVLP,
-          cbteNro: liq.anulacionCbteNro,
-          ptoVenta: liq.anulacionPtoVenta ?? liq.ptoVenta,
-          cae: liq.anulacionCae,
-          caeFechaVto: liq.anulacionCaeFechaVto,
-          fecha: liq.anulacionFecha ?? liq.updatedAt,
-          asociados:
-            liq.cbteNro != null && liq.ptoVenta != null
-              ? [{ tipo: liq.cbteTipo, ptoVenta: liq.ptoVenta, nro: liq.cbteNro }]
-              : [],
-        }
+            kind: "nc",
+            title: esNotaDebitoAnulacion(liq.anulacionCbteTipo)
+              ? "NOTA DE DEBITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO"
+              : "NOTA DE CREDITO - CUENTA DE VENTA Y LIQUIDO PRODUCTO",
+            cbteTipo: liq.anulacionCbteTipo ?? CBTE_TIPO_NC_CVLP,
+            cbteNro: liq.anulacionCbteNro,
+            ptoVenta: liq.anulacionPtoVenta ?? liq.ptoVenta,
+            cae: liq.anulacionCae,
+            caeFechaVto: liq.anulacionCaeFechaVto,
+            fecha: liq.anulacionFecha ?? liq.updatedAt,
+            asociados:
+              liq.cbteNro != null && liq.ptoVenta != null
+                ? [
+                    {
+                      tipo: liq.cbteTipo,
+                      ptoVenta: liq.ptoVenta,
+                      nro: liq.cbteNro,
+                    },
+                  ]
+                : [],
+          }
         : {
-          kind: 'cvlp',
-          title: 'CUENTA DE VENTA Y LIQUIDO PRODUCTO',
-          cbteTipo: liq.cbteTipo,
-          cbteNro: liq.cbteNro,
-          ptoVenta: liq.ptoVenta,
-          cae: liq.cae,
-          caeFechaVto: liq.caeFechaVto,
-          fecha: liq.createdAt,
-        };
+            kind: "cvlp",
+            title: "CUENTA DE VENTA Y LIQUIDO PRODUCTO",
+            cbteTipo: liq.cbteTipo,
+            cbteNro: liq.cbteNro,
+            ptoVenta: liq.ptoVenta,
+            cae: liq.cae,
+            caeFechaVto: liq.caeFechaVto,
+            fecha: liq.createdAt,
+          };
 
     const config = await this.arcaConfig.findPublic(tenantId);
 
     // QR solo si tiene CAE
     let qrBuffer: Buffer | null = null;
     if (drawOpts.cae && drawOpts.cbteNro && drawOpts.ptoVenta) {
-      const cuitNum = Number(String(liq.transportista?.idFiscal ?? '0').replace(/-/g, ''));
+      const cuitNum = Number(
+        String(liq.transportista?.idFiscal ?? "0").replace(/-/g, ""),
+      );
       const payload = {
         ver: 1,
         fecha: drawOpts.fecha.toISOString().slice(0, 10),
-        cuit: Number(String(config?.cuitEmisor ?? '0').replace(/-/g, '')),
+        cuit: Number(String(config?.cuitEmisor ?? "0").replace(/-/g, "")),
         ptoVta: drawOpts.ptoVenta,
         tipoCmp: drawOpts.cbteTipo,
         nroCmp: drawOpts.cbteNro,
         importe: Math.round(liq.liquido * 100) / 100,
-        moneda: 'PES',
+        moneda: "PES",
         ctz: 1,
         tipoDocRec: 80,
         nroDocRec: cuitNum,
-        tipoCodAut: 'E',
+        tipoCodAut: "E",
         codAut: Number(drawOpts.cae),
       };
-      const qrUrl = `https://www.afip.gob.ar/fe/qr/?p=${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
-      qrBuffer = await QRCode.toBuffer(qrUrl, { width: 72, margin: 1 }) as Buffer;
+      const qrUrl = `https://www.afip.gob.ar/fe/qr/?p=${Buffer.from(JSON.stringify(payload)).toString("base64")}`;
+      qrBuffer = (await QRCode.toBuffer(qrUrl, {
+        width: 72,
+        margin: 1,
+      })) as Buffer;
     }
 
     // Logo del emisor, descargado una sola vez (se reutiliza en ORIGINAL y DUPLICADO)
@@ -268,8 +363,8 @@ export class LiquidacionPdfService {
     let cvlp: ArcaComprobanteCvlp;
     if (drawOpts.cae) {
       const logs = await this.db.arcaLog.findMany({
-        where: { liquidacionId, exitoso: true, method: 'FECAESolicitar' },
-        orderBy: { createdAt: kind === 'nc' ? 'desc' : 'asc' },
+        where: { liquidacionId, exitoso: true, method: "FECAESolicitar" },
+        orderBy: { createdAt: kind === "nc" ? "desc" : "asc" },
         take: 5,
       });
       for (const log of logs) {
@@ -292,7 +387,7 @@ export class LiquidacionPdfService {
     if (!cvlp) {
       const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
         where: { liquidacionId },
-        orderBy: { orden: 'asc' },
+        orderBy: { orden: "asc" },
       });
       const ivaDefault = resolveIvaPct(
         (liq as { ivaPct?: number | null }).ivaPct ?? config?.ivaGastosAdmin,
@@ -301,30 +396,34 @@ export class LiquidacionPdfService {
         bruto: liq.bruto,
         comision: liq.comision,
         ivaPctDefault: ivaDefault,
-        lineas: (lineasDb ?? []).map((r: {
-          nombreSnapshot: string;
-          signo: string;
-          ivaPct: number;
-          monto: number;
-          orden?: number;
-        }) => ({
-          nombreSnapshot: r.nombreSnapshot,
-          signo: r.signo as 'favor' | 'contra',
-          ivaPct: r.ivaPct,
-          monto: r.monto,
-          orden: r.orden,
-        })),
+        lineas: (lineasDb ?? []).map(
+          (r: {
+            nombreSnapshot: string;
+            signo: string;
+            ivaPct: number;
+            monto: number;
+            orden?: number;
+          }) => ({
+            nombreSnapshot: r.nombreSnapshot,
+            signo: r.signo as "favor" | "contra",
+            ivaPct: r.ivaPct,
+            monto: r.monto,
+            orden: r.orden,
+          }),
+        ),
       });
 
-      const docNro = liq.transportista?.idFiscal ? Number(liq.transportista.idFiscal.replace(/-/g, '')) : 0;
+      const docNro = liq.transportista?.idFiscal
+        ? Number(liq.transportista.idFiscal.replace(/-/g, ""))
+        : 0;
       const docTipo = docNro ? 80 : 99;
 
       const baseCabecera = {
-        cuit: config?.cuitEmisor ?? '',
+        cuit: config?.cuitEmisor ?? "",
         ptoVenta: drawOpts.ptoVenta ?? config?.ptoVentaCvlp ?? 0,
         cbteTipo: drawOpts.cbteTipo,
         cbteNro: drawOpts.cbteNro ?? 0,
-        fechaCbte: drawOpts.fecha.toISOString().slice(0, 10).replace(/-/g, ''),
+        fechaCbte: drawOpts.fecha.toISOString().slice(0, 10).replace(/-/g, ""),
         concepto: 1,
         docTipo,
         docNro,
@@ -334,23 +433,60 @@ export class LiquidacionPdfService {
       cvlp = buildComprobanteCvlp(baseCabecera, conceptos, ivaDefault);
     }
 
-    const buffer = await this.buildPdf(liq, config, qrBuffer, logoBuffer, cvlp, drawOpts);
+    const pctComision = liq.comisionPct ?? liq.porcentajeComision;
+
+    if (cvlp && cvlp.items) {
+      cvlp.items = cvlp.items.map((item) => {
+        const match = item.descripcion.match(
+          /^(COMISIÓ?N)(?:\s*\(Viaje #([^)]+)\))?$/i,
+        );
+
+        if (match) {
+          const viajeSufijo = match[2] ? ` (Viaje #${match[2]})` : "";
+
+          const nuevaDescripcion =
+            pctComision != null
+              ? `Comisión Transporte - ${pctComision}%${viajeSufijo}`
+              : `Comisión Transporte${viajeSufijo}`;
+
+          return {
+            ...item,
+            descripcion: nuevaDescripcion,
+          };
+        }
+        return item;
+      });
+    }
+
+    const buffer = await this.buildPdf(
+      liq,
+      config,
+      qrBuffer,
+      logoBuffer,
+      cvlp,
+      drawOpts,
+    );
 
     const cbteNroStr = drawOpts.cbteNro
-      ? `${String(drawOpts.ptoVenta).padStart(4, '0')}-${String(drawOpts.cbteNro).padStart(8, '0')}`
+      ? `${String(drawOpts.ptoVenta).padStart(4, "0")}-${String(drawOpts.cbteNro).padStart(8, "0")}`
       : liquidacionId.slice(0, 8);
-    const transportistaSlug = slugify(liq.transportista?.nombre ?? '');
+    const transportistaSlug = slugify(liq.transportista?.nombre ?? "");
     const anulPrefix = (() => {
       switch (drawOpts.cbteTipo) {
-        case 3: return 'NC_A';
-        case 8: return 'NC_B';
-        case 2: return 'ND_A';
-        case 7: return 'ND_B';
-        default: return `Comp${String(drawOpts.cbteTipo).padStart(3, '0')}`;
+        case 3:
+          return "NC_A";
+        case 8:
+          return "NC_B";
+        case 2:
+          return "ND_A";
+        case 7:
+          return "ND_B";
+        default:
+          return `Comp${String(drawOpts.cbteTipo).padStart(3, "0")}`;
       }
     })();
     const filename =
-      kind === 'nc'
+      kind === "nc"
         ? `${anulPrefix}_${cbteNroStr}_${transportistaSlug}.pdf`
         : `CVLP_${cbteNroStr}_${transportistaSlug}.pdf`;
 
@@ -369,14 +505,38 @@ export class LiquidacionPdfService {
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
     return new Promise((resolve, reject) => {
       try {
-        const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: true });
+        const doc = new PDFDocument({
+          size: "A4",
+          margin: 0,
+          autoFirstPage: true,
+        });
         const chunks: Buffer[] = [];
-        doc.on('data', (c: Buffer) => chunks.push(c));
-        doc.on('end', () => resolve(Buffer.concat(chunks)));
-        doc.on('error', reject);
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'ORIGINAL', cvlp, drawOpts, showTestWatermark);
+        doc.on("data", (c: Buffer) => chunks.push(c));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+        this.draw(
+          doc,
+          liq,
+          config,
+          qrBuffer,
+          logoBuffer,
+          "ORIGINAL",
+          cvlp,
+          drawOpts,
+          showTestWatermark,
+        );
         doc.addPage();
-        this.draw(doc, liq, config, qrBuffer, logoBuffer, 'DUPLICADO', cvlp, drawOpts, showTestWatermark);
+        this.draw(
+          doc,
+          liq,
+          config,
+          qrBuffer,
+          logoBuffer,
+          "DUPLICADO",
+          cvlp,
+          drawOpts,
+          showTestWatermark,
+        );
         doc.end();
       } catch (e) {
         reject(e);
@@ -390,7 +550,7 @@ export class LiquidacionPdfService {
     config: PrismaAny,
     qrBuffer: Buffer | null,
     logoBuffer: Buffer | null,
-    copia: 'ORIGINAL' | 'DUPLICADO',
+    copia: "ORIGINAL" | "DUPLICADO",
     cvlp: ArcaComprobanteCvlp,
     opts: PdfDrawOpts,
     showTestWatermark = false,
@@ -400,23 +560,29 @@ export class LiquidacionPdfService {
     let y = M;
 
     // ── Barra superior ORIGINAL/DUPLICADO (caja con borde, sin relleno) ───────
-    doc.rect(M, y, CW, 18).stroke('#000');
+    doc.rect(M, y, CW, 18).stroke("#000");
     doc
       .fontSize(9)
-      .font('Helvetica-Bold')
-      .fillColor('#000')
-      .text(copia, M, y + 5, { width: CW, align: 'center' });
+      .font("Helvetica-Bold")
+      .fillColor("#000")
+      .text(copia, M, y + 5, { width: CW, align: "center" });
     y += 22;
 
     // ── Sección 1: emisor | tipo | título ────────────────────────────────────
     const hdrH = 108;
-    doc.rect(M, y, CW, hdrH).stroke('#aaa');
+    doc.rect(M, y, CW, hdrH).stroke("#aaa");
 
     // Líneas divisoras verticales
-    const c1x = M + 160;  // fin col emisor
-    const c2x = M + 230;  // fin col tipo
-    doc.moveTo(c1x, y).lineTo(c1x, y + hdrH).stroke('#aaa');
-    doc.moveTo(c2x, y).lineTo(c2x, y + hdrH).stroke('#aaa');
+    const c1x = M + 160; // fin col emisor
+    const c2x = M + 230; // fin col tipo
+    doc
+      .moveTo(c1x, y)
+      .lineTo(c1x, y + hdrH)
+      .stroke("#aaa");
+    doc
+      .moveTo(c2x, y)
+      .lineTo(c2x, y + hdrH)
+      .stroke("#aaa");
 
     // Col 1: logo (si existe) + razón social + domicilio + condición IVA
     {
@@ -428,10 +594,15 @@ export class LiquidacionPdfService {
 
       if (hasLogo) {
         try {
-          doc.image(logoBuffer as Buffer, M + (160 - LOGO_SIZE) / 2, cy, { fit: [LOGO_SIZE, LOGO_SIZE] });
+          doc.image(logoBuffer as Buffer, M + (160 - LOGO_SIZE) / 2, cy, {
+            fit: [LOGO_SIZE, LOGO_SIZE],
+          });
           cy += LOGO_SIZE + 4;
-          doc.fontSize(6).font('Helvetica-Oblique').fillColor('#555')
-            .text('de', colX, cy, { width: colW, align: 'center' });
+          doc
+            .fontSize(6)
+            .font("Helvetica-Oblique")
+            .fillColor("#555")
+            .text("de", colX, cy, { width: colW, align: "center" });
           cy += 9;
         } catch (e) {
           console.error("LOGO ERROR:", e);
@@ -439,73 +610,119 @@ export class LiquidacionPdfService {
         }
       }
 
-      const align = hasLogo ? 'center' : 'left';
-      const emisor = config?.razonSocial ?? 'NyM Logística';
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#000')
+      const align = hasLogo ? "center" : "left";
+      const emisor = config?.razonSocial ?? "NyM Logística";
+      doc
+        .fontSize(9)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
         .text(emisor, colX, cy, { width: colW, align });
       cy += doc.heightOfString(emisor, { width: colW }) + 3;
 
-      const domicilioTxt = config?.domicilioEmisor ?? '';
-      doc.fontSize(6.5).font('Helvetica').fillColor('#333')
+      const domicilioTxt = config?.domicilioEmisor ?? "";
+      doc
+        .fontSize(6.5)
+        .font("Helvetica")
+        .fillColor("#333")
         .text(domicilioTxt, colX, cy, { width: colW, align });
       cy += doc.heightOfString(domicilioTxt, { width: colW }) + 3;
 
       const condEmisorLabel = config?.condicionIvaEmisor
-        ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ?? config.condicionIvaEmisor)
-        : '';
-      doc.fontSize(6.5).font('Helvetica').fillColor('#333')
+        ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ??
+          config.condicionIvaEmisor)
+        : "";
+      doc
+        .fontSize(6.5)
+        .font("Helvetica")
+        .fillColor("#333")
         .text(condEmisorLabel, colX, cy, { width: colW, align });
     }
 
     // Col 2: letra + tipo
-    const isLetter = opts.cbteTipo === 1 || opts.cbteTipo === 6 || opts.cbteTipo === 11;
+    const isLetter =
+      opts.cbteTipo === 1 || opts.cbteTipo === 6 || opts.cbteTipo === 11;
     const isCodBox =
       opts.cbteTipo === 60 ||
       opts.cbteTipo === 61 ||
       opts.cbteTipo === CBTE_TIPO_NC_CVLP ||
-      opts.kind === 'nc';
+      opts.kind === "nc";
 
     if (isLetter) {
       const tipoStr = LETRA_POR_TIPO[opts.cbteTipo] ?? String(opts.cbteTipo);
-      doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
-      doc.fontSize(36).font('Helvetica-Bold').fillColor('#000')
-        .text(tipoStr, c1x + 4, y + 14, { width: 60, align: 'center' });
+      doc.rect(c1x + 4, y + 6, 60, 60).stroke("#000");
+      doc
+        .fontSize(36)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
+        .text(tipoStr, c1x + 4, y + 14, { width: 60, align: "center" });
 
-      const codLabel = `COD. ${String(opts.cbteTipo).padStart(3, '0')}`;
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
-        .text(codLabel, c1x + 4, y + 72, { width: 60, align: 'center' });
+      const codLabel = `COD. ${String(opts.cbteTipo).padStart(3, "0")}`;
+      doc
+        .fontSize(10)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
+        .text(codLabel, c1x + 4, y + 72, { width: 60, align: "center" });
     } else if (isCodBox) {
       // Diseño con "COD." arriba y el número grande abajo (CVLP y anulaciones)
-      doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#000')
-        .text('COD.', c1x + 4, y + 16, { width: 60, align: 'center' });
-      doc.fontSize(28).font('Helvetica-Bold').fillColor('#000')
-        .text(String(opts.cbteTipo).padStart(3, '0'), c1x + 4, y + 32, { width: 60, align: 'center' });
+      doc.rect(c1x + 4, y + 6, 60, 60).stroke("#000");
+      doc
+        .fontSize(12)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
+        .text("COD.", c1x + 4, y + 16, { width: 60, align: "center" });
+      doc
+        .fontSize(28)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
+        .text(String(opts.cbteTipo).padStart(3, "0"), c1x + 4, y + 32, {
+          width: 60,
+          align: "center",
+        });
     }
 
     // Col 3: título + datos del comprobante (Número/Fecha a la izq., CUIT/Ing.Brutos/Inic.Act a la der.)
     {
       const titleX = c2x + 6;
       const titleW = CW - (c2x - M) - 6;
-      doc.fontSize(opts.kind === 'nc' ? 10 : 13).font('Helvetica-Bold').fillColor('#000')
+      doc
+        .fontSize(opts.kind === "nc" ? 10 : 13)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
         .text(opts.title, titleX, y + 6, { width: titleW });
 
       const cbteNroStr = opts.cbteNro
-        ? `${String(opts.ptoVenta).padStart(4, '0')}-${String(opts.cbteNro).padStart(8, '0')}`
-        : 'BORRADOR';
+        ? `${String(opts.ptoVenta).padStart(4, "0")}-${String(opts.cbteNro).padStart(8, "0")}`
+        : "BORRADOR";
 
       const dataY = y + 42;
       const subColW = titleW / 2 - 6;
       const rColX = titleX + subColW + 10;
 
-      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#000")
         .text(`Número: ${cbteNroStr}`, titleX, dataY, { width: subColW })
-        .text(`Fecha: ${fmtDate(opts.fecha)}`, titleX, dataY + 13, { width: subColW });
+        .text(`Fecha: ${fmtDate(opts.fecha)}`, titleX, dataY + 13, {
+          width: subColW,
+        });
 
-      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
-        .text(`CUIT: ${config?.cuitEmisor ?? ''}`, rColX, dataY, { width: subColW })
-        .text(`Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ''}`, rColX, dataY + 13, { width: subColW })
-        .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, rColX, dataY + 26, { width: subColW });
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#000")
+        .text(`CUIT: ${config?.cuitEmisor ?? ""}`, rColX, dataY, {
+          width: subColW,
+        })
+        .text(
+          `Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ""}`,
+          rColX,
+          dataY + 13,
+          { width: subColW },
+        )
+        .text(`Inic. Act.: ${config?.inicActEmisor ?? ""}`, rColX, dataY + 26, {
+          width: subColW,
+        });
     }
 
     y += hdrH + 2;
@@ -513,10 +730,12 @@ export class LiquidacionPdfService {
     // ── Sección 2: receptor (transportista) ──────────────────────────────────
     {
       const t = liq.transportista;
-      const condLabel = t?.condicionIva ? (CONDICION_IVA_LABEL[t.condicionIva] ?? String(t.condicionIva)) : '';
+      const condLabel = t?.condicionIva
+        ? (CONDICION_IVA_LABEL[t.condicionIva] ?? String(t.condicionIva))
+        : "";
       const colW = CW / 2 - 8;
-      const nameText = `Sr.(es): ${t?.nombre ?? ''}`;
-      const domText = `Domicilio: ${t?.domicilio ?? ''}`;
+      const nameText = `Sr.(es): ${t?.nombre ?? ""}`;
+      const domText = `Domicilio: ${t?.domicilio ?? ""}`;
 
       const nameH = doc.heightOfString(nameText, { width: colW });
       const domH = doc.heightOfString(domText, { width: colW });
@@ -524,27 +743,39 @@ export class LiquidacionPdfService {
       const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
       const rcpH = Math.max(leftTotalH, 48);
 
-      doc.rect(M, y, CW, rcpH).stroke('#aaa');
-      doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke('#aaa');
+      doc.rect(M, y, CW, rcpH).stroke("#aaa");
+      doc
+        .moveTo(M + CW / 2, y)
+        .lineTo(M + CW / 2, y + rcpH)
+        .stroke("#aaa");
 
       let ly = y + 5;
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
+      doc
+        .fontSize(8)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
         .text(nameText, M + 4, ly, { width: colW });
       ly += nameH + 2;
 
-      doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#333")
         .text(domText, M + 4, ly, { width: colW });
       ly += domH + 2;
 
       doc.text(`Cond. IVA: ${condLabel}`, M + 4, ly, { width: colW });
       ly += 12;
 
-      doc.text(`C.U.I.T.: ${t?.idFiscal ?? ''}`, M + 4, ly, { width: colW });
+      doc.text(`C.U.I.T.: ${t?.idFiscal ?? ""}`, M + 4, ly, { width: colW });
 
       const rx = M + CW / 2 + 4;
-      doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-        .text('Condición de Venta: CTA CTE', rx, y + 5, { width: colW })
-        .text('Moneda: Pesos', rx, y + 17, { width: colW });
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#333")
+        .text("Condición de Venta: CTA CTE", rx, y + 5, { width: colW })
+        .text("Moneda: Pesos", rx, y + 17, { width: colW });
 
       y += rcpH + 2;
     }
@@ -554,10 +785,13 @@ export class LiquidacionPdfService {
       const isSingleTrip = liq.viajes?.length === 1;
       const firstViaje = liq.viajes?.[0]?.viaje;
       const cliente = firstViaje?.cliente;
-      if (isSingleTrip && (cliente || firstViaje?.origen || firstViaje?.destino)) {
+      if (
+        isSingleTrip &&
+        (cliente || firstViaje?.origen || firstViaje?.destino)
+      ) {
         const colW = CW / 2 - 8;
-        const clienteNameText = `Sr.(es): ${cliente?.nombre ?? ''}`;
-        const clienteDomText = `Domicilio: ${cliente?.direccion ?? ''}`;
+        const clienteNameText = `Sr.(es): ${cliente?.nombre ?? ""}`;
+        const clienteDomText = `Domicilio: ${cliente?.direccion ?? ""}`;
 
         const nameH = doc.heightOfString(clienteNameText, { width: colW });
         const domH = doc.heightOfString(clienteDomText, { width: colW });
@@ -565,24 +799,42 @@ export class LiquidacionPdfService {
         const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 5;
         const odH = Math.max(leftTotalH, 40);
 
-        doc.rect(M, y, CW, odH).stroke('#aaa');
-        doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + odH).stroke('#aaa');
+        doc.rect(M, y, CW, odH).stroke("#aaa");
+        doc
+          .moveTo(M + CW / 2, y)
+          .lineTo(M + CW / 2, y + odH)
+          .stroke("#aaa");
 
         let ly = y + 5;
-        doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
+        doc
+          .fontSize(8)
+          .font("Helvetica-Bold")
+          .fillColor("#000")
           .text(clienteNameText, M + 4, ly, { width: colW });
         ly += nameH + 2;
 
-        doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+        doc
+          .fontSize(7.5)
+          .font("Helvetica")
+          .fillColor("#333")
           .text(clienteDomText, M + 4, ly, { width: colW });
         ly += domH + 2;
 
-        doc.text(`C.U.I.T.: ${cliente?.idFiscal ?? ''}`, M + 4, ly, { width: colW });
+        doc.text(`C.U.I.T.: ${cliente?.idFiscal ?? ""}`, M + 4, ly, {
+          width: colW,
+        });
 
         const rx = M + CW / 2 + 4;
-        doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-          .text(`Origen: ${firstViaje?.origen ?? ''}`, rx, y + 5, { width: colW })
-          .text(`Destino: ${firstViaje?.destino ?? ''}`, rx, y + 17, { width: colW });
+        doc
+          .fontSize(7.5)
+          .font("Helvetica")
+          .fillColor("#333")
+          .text(`Origen: ${firstViaje?.origen ?? ""}`, rx, y + 5, {
+            width: colW,
+          })
+          .text(`Destino: ${firstViaje?.destino ?? ""}`, rx, y + 17, {
+            width: colW,
+          });
 
         y += odH + 2;
       }
@@ -598,23 +850,58 @@ export class LiquidacionPdfService {
 
     if (isSingleTrip) {
       colWidths = [100, 157.28, 40, 65, 65, 42, 70];
-      tHeaders = ['Producto', 'Descripción', 'Cantidad', 'Precio', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
-      aligns = ['left', 'left', 'right', 'right', 'right', 'right', 'right'];
+      tHeaders = [
+        "Producto",
+        "Descripción",
+        "Cantidad",
+        "Precio",
+        "SubTotal",
+        "IVA %",
+        "SubTotal c/IVA",
+      ];
+      aligns = ["left", "left", "right", "right", "right", "right", "right"];
     } else {
       colWidths = [60, 70, 127.28, 40, 60, 60, 42, 80];
-      tHeaders = ['ID de Viaje', 'Producto', 'Descripción', 'Cantidad', 'Precio', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
-      aligns = ['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right'];
+      tHeaders = [
+        "ID de Viaje",
+        "Producto",
+        "Descripción",
+        "Cantidad",
+        "Precio",
+        "SubTotal",
+        "IVA %",
+        "SubTotal c/IVA",
+      ];
+      aligns = [
+        "left",
+        "left",
+        "left",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+      ];
     }
 
     const colX: number[] = [];
     let cx = M;
-    for (const w of colWidths) { colX.push(cx); cx += w; }
+    for (const w of colWidths) {
+      colX.push(cx);
+      cx += w;
+    }
 
     const drawHeader = () => {
-      doc.rect(M, y, CW, 16).fill('#e8e8e8').stroke('#aaa');
+      doc.rect(M, y, CW, 16).fill("#e8e8e8").stroke("#aaa");
       tHeaders.forEach((h, i) => {
-        doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
-          .text(h, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: aligns[i] as any });
+        doc
+          .fontSize(6.5)
+          .font("Helvetica-Bold")
+          .fillColor("#000")
+          .text(h, colX[i] + 2, y + 4, {
+            width: colWidths[i] - 4,
+            align: aligns[i] as any,
+          });
       });
       y += 16;
     };
@@ -623,36 +910,52 @@ export class LiquidacionPdfService {
     drawHeader();
 
     for (const item of cvlp.items) {
-      if (item.descripcion.toUpperCase() === 'FLETES' && liq.viajes?.length > 0) {
+      if (
+        item.descripcion.toUpperCase() === "FLETES" &&
+        liq.viajes?.length > 0
+      ) {
         for (const lViaje of liq.viajes) {
           const v = lViaje.viaje;
 
-          const idViajeText = (v.numeroIdentificacionPersonalizado ?? v.numero).toString().toUpperCase();
-          const prodText = 'SERVICIOS LOGISTICOS';
+          const idViajeText = (v.numeroIdentificacionPersonalizado ?? v.numero)
+            .toString()
+            .toUpperCase();
+          const prodText = "SERVICIOS LOGISTICOS";
 
           const descParts = [];
           if (isSingleTrip) descParts.push(`ID: ${idViajeText}`);
-          const ruta = [v.origen, v.destino].filter(Boolean).join(' - ');
+          const ruta = [v.origen, v.destino].filter(Boolean).join(" - ");
           if (ruta) descParts.push(`${ruta}`);
 
-          const descText = descParts.join('\n').toUpperCase();
+          const descText = descParts.join("\n").toUpperCase();
 
-          const qty = lViaje.tnDestino != null ? fmtNum(lViaje.tnDestino) : '1,00';
-          const precio = lViaje.tarifaTransportista ?? (lViaje.subtotal ?? 0);
+          const qty =
+            lViaje.tnDestino != null ? fmtNum(lViaje.tnDestino) : "1,00";
+          const precio = lViaje.tarifaTransportista ?? lViaje.subtotal ?? 0;
           const base = lViaje.subtotal ?? 0;
           const subtotalCiva = base * (1 + item.ivaPct / 100);
 
-          doc.fontSize(6.5).font('Helvetica');
+          doc.fontSize(6.5).font("Helvetica");
 
           let rowH = 16;
           if (isSingleTrip) {
-            const hProd = doc.heightOfString(prodText, { width: colWidths[0] - 4 });
-            const hDesc = doc.heightOfString(descText, { width: colWidths[1] - 4 });
+            const hProd = doc.heightOfString(prodText, {
+              width: colWidths[0] - 4,
+            });
+            const hDesc = doc.heightOfString(descText, {
+              width: colWidths[1] - 4,
+            });
             rowH = Math.max(16, hProd + 8, hDesc + 8);
           } else {
-            const hId = doc.heightOfString(idViajeText, { width: colWidths[0] - 4 });
-            const hProd = doc.heightOfString(prodText, { width: colWidths[1] - 4 });
-            const hDesc = doc.heightOfString(descText, { width: colWidths[2] - 4 });
+            const hId = doc.heightOfString(idViajeText, {
+              width: colWidths[0] - 4,
+            });
+            const hProd = doc.heightOfString(prodText, {
+              width: colWidths[1] - 4,
+            });
+            const hDesc = doc.heightOfString(descText, {
+              width: colWidths[2] - 4,
+            });
             rowH = Math.max(16, hId + 8, hProd + 8, hDesc + 8);
           }
 
@@ -663,15 +966,38 @@ export class LiquidacionPdfService {
             drawHeader();
           }
 
-          doc.rect(M, y, CW, rowH).stroke('#ddd');
+          doc.rect(M, y, CW, rowH).stroke("#ddd");
 
           const cells = isSingleTrip
-            ? [prodText, descText, qty, fmtNum(precio), fmtNum(base), fmtNum(item.ivaPct), fmtNum(subtotalCiva)]
-            : [idViajeText, prodText, descText, qty, fmtNum(precio), fmtNum(base), fmtNum(item.ivaPct), fmtNum(subtotalCiva)];
+            ? [
+                prodText,
+                descText,
+                qty,
+                fmtNum(precio),
+                fmtNum(base),
+                fmtNum(item.ivaPct),
+                fmtNum(subtotalCiva),
+              ]
+            : [
+                idViajeText,
+                prodText,
+                descText,
+                qty,
+                fmtNum(precio),
+                fmtNum(base),
+                fmtNum(item.ivaPct),
+                fmtNum(subtotalCiva),
+              ];
 
           cells.forEach((text, i) => {
-            doc.fontSize(6.5).font('Helvetica').fillColor('#000')
-              .text(text, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: aligns[i] as any });
+            doc
+              .fontSize(6.5)
+              .font("Helvetica")
+              .fillColor("#000")
+              .text(text, colX[i] + 2, y + 4, {
+                width: colWidths[i] - 4,
+                align: aligns[i] as any,
+              });
           });
           y += rowH;
         }
@@ -679,50 +1005,109 @@ export class LiquidacionPdfService {
     }
 
     // Procesamiento de Conceptos Adicionales
-    const otrosItems = cvlp.items.filter(i => i.descripcion.toUpperCase() !== 'FLETES');
+    // Procesamiento de Conceptos Adicionales
+    const otrosItems = cvlp.items.filter(
+      (i) => i.descripcion.toUpperCase() !== "FLETES",
+    );
     const gruposOtros: { [baseName: string]: typeof otrosItems } = {};
     for (const item of otrosItems) {
       const match = item.descripcion.match(/^(.*?)\s*\(Viaje #([^)]+)\)$/i);
-      const baseName = match ? match[1].trim().toUpperCase() : item.descripcion.toUpperCase();
+      const baseName = match
+        ? match[1].trim().toUpperCase()
+        : item.descripcion.toUpperCase();
       if (!gruposOtros[baseName]) gruposOtros[baseName] = [];
       gruposOtros[baseName].push(item);
     }
 
-    const conceptosProcesados: { desc: string; tripId: string; qty: number; precio: number; base: number; ivaPct: number; subtotal: number }[] = [];
+    // 1. Agregamos "prod" a la interfaz del array
+    const conceptosProcesados: {
+      prod: string;
+      desc: string;
+      tripId: string;
+      qty: number;
+      precio: number;
+      base: number;
+      ivaPct: number;
+      subtotal: number;
+    }[] = [];
+
     for (const baseName in gruposOtros) {
       const group = gruposOtros[baseName];
-      const allSameAmount = group.every(i => i.importeBase === group[0].importeBase);
+      const allSameAmount = group.every(
+        (i) => i.importeBase === group[0].importeBase,
+      );
+
+      // 2. Determinamos qué mostrar en la columna "Producto"
+      let prodText = baseName;
+      // Si el concepto es la comisión, en la columna producto dejamos solo el título base
+      if (
+        baseName.includes("COMISIÓN TRANSPORTE") ||
+        baseName.includes("COMISION TRANSPORTE")
+      ) {
+        prodText = "COMISIÓN TRANSPORTE";
+      }
+
       // Si son varios viajes y tienen el mismo monto, se consolidan
       if (group.length > 1 && allSameAmount) {
         let totalBase = 0;
         let totalSub = 0;
-        for (const i of group) { totalBase += i.importeBase; totalSub += i.subtotal; }
-        conceptosProcesados.push({ desc: baseName, tripId: '', qty: group.length, precio: group[0].importeBase, base: totalBase, ivaPct: group[0].ivaPct, subtotal: totalSub });
+        for (const i of group) {
+          totalBase += i.importeBase;
+          totalSub += i.subtotal;
+        }
+        conceptosProcesados.push({
+          prod: prodText,
+          desc: baseName,
+          tripId: "",
+          qty: group.length,
+          precio: group[0].importeBase,
+          base: totalBase,
+          ivaPct: group[0].ivaPct,
+          subtotal: totalSub,
+        });
       } else {
         // Se desglosan
         for (const item of group) {
           const match = item.descripcion.match(/^(.*?)\s*\(Viaje #([^)]+)\)$/i);
-          let tripIdText = '';
+          let tripIdText = "";
           if (match && !isSingleTrip) {
             const internalId = match[2].trim();
-            const tripMatch = liq.viajes?.find(lv => String(lv.viaje.numero) === internalId);
-            tripIdText = (tripMatch?.viaje.numeroIdentificacionPersonalizado ?? internalId).toString().toUpperCase();
+            const tripMatch = liq.viajes?.find(
+              (lv) => String(lv.viaje.numero) === internalId,
+            );
+            tripIdText = (
+              tripMatch?.viaje.numeroIdentificacionPersonalizado ?? internalId
+            )
+              .toString()
+              .toUpperCase();
           }
-          conceptosProcesados.push({ desc: baseName, tripId: tripIdText, qty: 1, precio: item.importeBase, base: item.importeBase, ivaPct: item.ivaPct, subtotal: item.subtotal });
+          // Aquí la descripción final (con viaje) se mapea a 'desc', pero mantenemos el 'prodText' limpio
+          const descText = match ? item.descripcion.toUpperCase() : baseName;
+          conceptosProcesados.push({
+            prod: prodText,
+            desc: descText,
+            tripId: tripIdText,
+            qty: 1,
+            precio: item.importeBase,
+            base: item.importeBase,
+            ivaPct: item.ivaPct,
+            subtotal: item.subtotal,
+          });
         }
       }
     }
 
     for (const cp of conceptosProcesados) {
-      doc.fontSize(6.5).font('Helvetica');
+      doc.fontSize(6.5).font("Helvetica");
       let rowH = 16;
       if (isSingleTrip) {
-        const hProd = doc.heightOfString(cp.desc, { width: colWidths[0] - 4 });
+        // 3. Calculamos la altura separando cp.prod y cp.desc
+        const hProd = doc.heightOfString(cp.prod, { width: colWidths[0] - 4 });
         const hDesc = doc.heightOfString(cp.desc, { width: colWidths[1] - 4 });
         rowH = Math.max(16, hProd + 8, hDesc + 8);
       } else {
         const hId = doc.heightOfString(cp.tripId, { width: colWidths[0] - 4 });
-        const hProd = doc.heightOfString(cp.desc, { width: colWidths[1] - 4 });
+        const hProd = doc.heightOfString(cp.prod, { width: colWidths[1] - 4 });
         const hDesc = doc.heightOfString(cp.desc, { width: colWidths[2] - 4 });
         rowH = Math.max(16, hId + 8, hProd + 8, hDesc + 8);
       }
@@ -734,15 +1119,39 @@ export class LiquidacionPdfService {
         drawHeader();
       }
 
-      doc.rect(M, y, CW, rowH).stroke('#ddd');
+      doc.rect(M, y, CW, rowH).stroke("#ddd");
 
+      // 4. Asignamos cp.prod a la primera columna, y cp.desc a la segunda
       const cells = isSingleTrip
-        ? [cp.desc, cp.desc, fmtNum(cp.qty), fmtNum(cp.precio), fmtNum(cp.base), fmtNum(cp.ivaPct), fmtNum(cp.subtotal)]
-        : [cp.tripId, cp.desc, cp.desc, fmtNum(cp.qty), fmtNum(cp.precio), fmtNum(cp.base), fmtNum(cp.ivaPct), fmtNum(cp.subtotal)];
+        ? [
+            cp.prod,
+            cp.desc,
+            fmtNum(cp.qty),
+            fmtNum(cp.precio),
+            fmtNum(cp.base),
+            fmtNum(cp.ivaPct),
+            fmtNum(cp.subtotal),
+          ]
+        : [
+            cp.tripId,
+            cp.prod,
+            cp.desc,
+            fmtNum(cp.qty),
+            fmtNum(cp.precio),
+            fmtNum(cp.base),
+            fmtNum(cp.ivaPct),
+            fmtNum(cp.subtotal),
+          ];
 
       cells.forEach((text, i) => {
-        doc.fontSize(6.5).font('Helvetica').fillColor('#000')
-          .text(text, colX[i] + 2, y + 4, { width: colWidths[i] - 4, align: aligns[i] as any });
+        doc
+          .fontSize(6.5)
+          .font("Helvetica")
+          .fillColor("#000")
+          .text(text, colX[i] + 2, y + 4, {
+            width: colWidths[i] - 4,
+            align: aligns[i] as any,
+          });
       });
       y += rowH;
     }
@@ -750,13 +1159,19 @@ export class LiquidacionPdfService {
     // Comprobantes asociados (comprobante de anulación → CVLP original)
     if (opts.asociados?.length) {
       y += 8;
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
-        .text('Comprobantes asociados', M, y, { width: CW });
+      doc
+        .fontSize(8)
+        .font("Helvetica-Bold")
+        .fillColor("#000")
+        .text("Comprobantes asociados", M, y, { width: CW });
       y += 14;
       for (const asoc of opts.asociados) {
-        const nro = `${String(asoc.ptoVenta).padStart(4, '0')}-${String(asoc.nro).padStart(8, '0')}`;
-        const label = `Tipo ${String(asoc.tipo).padStart(3, '0')}  N° ${nro}`;
-        doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+        const nro = `${String(asoc.ptoVenta).padStart(4, "0")}-${String(asoc.nro).padStart(8, "0")}`;
+        const label = `Tipo ${String(asoc.tipo).padStart(3, "0")}  N° ${nro}`;
+        doc
+          .fontSize(7.5)
+          .font("Helvetica")
+          .fillColor("#333")
           .text(label, M + 4, y, { width: CW - 8 });
         y += 12;
       }
@@ -764,17 +1179,25 @@ export class LiquidacionPdfService {
 
     // ── Footer ────────────────────────────────────────────────────────────────
     // Línea divisora
-    doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke('#aaa');
+    doc
+      .moveTo(M, footerY - 4)
+      .lineTo(M + CW, footerY - 4)
+      .stroke("#aaa");
 
     // Pie: totales del comprobante armado (incluye conceptos configurables).
     const pie = cvlpPdfPieFinanciero(liq, cvlp);
     const impTotal = pie.total;
-    doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(`Son: ${numeroALetras(impTotal).toLowerCase()}`, M, footerY, { width: CW });
+    doc
+      .fontSize(7)
+      .font("Helvetica")
+      .fillColor("#333")
+      .text(`Son: ${numeroALetras(impTotal).toLowerCase()}`, M, footerY, {
+        width: CW,
+      });
 
     const footerBoxY = footerY + 12;
     const footerBoxH = 70;
-    doc.rect(M, footerBoxY, CW, footerBoxH).stroke('#aaa');
+    doc.rect(M, footerBoxY, CW, footerBoxH).stroke("#aaa");
 
     // QR
     if (qrBuffer) {
@@ -782,22 +1205,28 @@ export class LiquidacionPdfService {
     }
 
     // ARCA text
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
-      .text('ARCA', M + 72, footerBoxY + 14, { width: 150 });
-    doc.fontSize(6).font('Helvetica').fillColor('#555')
-      .text('AGENCIA DE RECAUDACIÓN', M + 72, footerBoxY + 27, { width: 150 })
-      .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 150 });
+    doc
+      .fontSize(10)
+      .font("Helvetica-Bold")
+      .fillColor("#000")
+      .text("ARCA", M + 72, footerBoxY + 14, { width: 150 });
+    doc
+      .fontSize(6)
+      .font("Helvetica")
+      .fillColor("#555")
+      .text("AGENCIA DE RECAUDACIÓN", M + 72, footerBoxY + 27, { width: 150 })
+      .text("Y CONTROL ADUANERO", M + 72, footerBoxY + 34, { width: 150 });
 
     // Totales (derecha)
     const totX = M + CW - 200;
     const labelW = 120;
     const valW = 70;
-    doc.fontSize(7.5).font('Helvetica').fillColor('#000');
+    doc.fontSize(7.5).font("Helvetica").fillColor("#000");
     const totRows: [string, string][] = [
-      ['Importe Neto Gravado: $', fmtNum(pie.netoGravado)],
-      ['Importe Otros Tributos: $', fmtNum(pie.otrosTributos)],
-      ['IVA: $', fmtNum(pie.iva)],
-      ['Importe Total: $', fmtNum(impTotal)],
+      ["Importe Neto Gravado: $", fmtNum(pie.netoGravado)],
+      ["Importe Otros Tributos: $", fmtNum(pie.otrosTributos)],
+      ["IVA: $", fmtNum(pie.iva)],
+      ["Importe Total: $", fmtNum(impTotal)],
     ];
 
     let currentY = footerBoxY + 6;
@@ -806,9 +1235,15 @@ export class LiquidacionPdfService {
       const valHeight = doc.heightOfString(val, { width: valW });
       const rowHeight = Math.max(labelHeight, valHeight, 10);
 
-      doc.text(label, totX, currentY, { width: labelW, align: 'left', lineBreak: true });
-      doc.font('Helvetica-Bold').text(val, totX + labelW, currentY, { width: valW, align: 'right' });
-      doc.font('Helvetica');
+      doc.text(label, totX, currentY, {
+        width: labelW,
+        align: "left",
+        lineBreak: true,
+      });
+      doc
+        .font("Helvetica-Bold")
+        .text(val, totX + labelW, currentY, { width: valW, align: "right" });
+      doc.font("Helvetica");
 
       currentY += rowHeight + 1.5;
     });
@@ -816,12 +1251,20 @@ export class LiquidacionPdfService {
     currentY = Math.max(currentY, footerBoxY + 52);
 
     if (opts.cae) {
-      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#000")
         .text(`CAE N°: ${opts.cae}`, totX, currentY, { width: 190 })
-        .text(`Vto CAE: ${fmtDate(opts.caeFechaVto)}`, totX, currentY + 10, { width: 190 });
+        .text(`Vto CAE: ${fmtDate(opts.caeFechaVto)}`, totX, currentY + 10, {
+          width: 190,
+        });
     } else {
-      doc.fontSize(7.5).font('Helvetica').fillColor('#999')
-        .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#999")
+        .text("Pendiente de emisión (sin CAE)", totX, currentY, { width: 190 });
     }
 
     // Al final de la página: encima del contenido, sin taparlo (opacity).

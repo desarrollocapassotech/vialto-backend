@@ -96,9 +96,14 @@ export class ImportacionesPostViajesService {
     tenantId: string,
     viajeIds: string[],
   ): Promise<LiquidacionPreviewGrupo[]> {
-    if (!(await this.tieneModulo(tenantId, "integracion-arca"))) {
+    const tieneFacturacion = await this.tieneModulo(tenantId, "facturacion");
+    const tieneLiquidoProductoArca = await this.tieneModulo(
+      tenantId,
+      "emision-liquido-producto-arca",
+    );
+    if (!tieneFacturacion && !tieneLiquidoProductoArca) {
       throw new BadRequestException(
-        "Este tenant no tiene integración con ARCA — no aplica generar liquidaciones.",
+        "Este tenant no tiene facturación ni emisión de líquido producto ARCA — no aplica generar liquidaciones.",
       );
     }
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);
@@ -141,9 +146,14 @@ export class ImportacionesPostViajesService {
     userId: string,
     viajeIds: string[],
   ) {
-    if (!(await this.tieneModulo(tenantId, "integracion-arca"))) {
+    const tieneFacturacion = await this.tieneModulo(tenantId, "facturacion");
+    const tieneLiquidoProductoArca = await this.tieneModulo(
+      tenantId,
+      "emision-liquido-producto-arca",
+    );
+    if (!tieneFacturacion && !tieneLiquidoProductoArca) {
       throw new BadRequestException(
-        "Este tenant no tiene integración con ARCA — no aplica generar liquidaciones.",
+        "Este tenant no tiene facturación ni emisión de líquido producto ARCA — no aplica generar liquidaciones.",
       );
     }
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);
@@ -176,7 +186,7 @@ export class ImportacionesPostViajesService {
     tenantId: string,
     viajeIds: string[],
   ): Promise<FacturaClientePreviewGrupo[]> {
-    const tieneArca = await this.tieneModulo(tenantId, "integracion-arca");
+    const tieneArca = await this.tieneModulo(tenantId, "emision-facturas-arca");
     const tieneFacturacion = await this.tieneModulo(tenantId, "facturacion");
     if (!tieneArca && !tieneFacturacion) {
       throw new BadRequestException(
@@ -212,7 +222,7 @@ export class ImportacionesPostViajesService {
     viajeIds: string[],
     numerosPorCliente: Record<string, string> | undefined,
   ) {
-    const tieneArca = await this.tieneModulo(tenantId, "integracion-arca");
+    const tieneArca = await this.tieneModulo(tenantId, "emision-facturas-arca");
     const tieneFacturacion = await this.tieneModulo(tenantId, "facturacion");
     if (!tieneArca && !tieneFacturacion) {
       throw new BadRequestException(

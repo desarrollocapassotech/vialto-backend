@@ -43,7 +43,10 @@ export function mapLiquidacionEstado(
   if (estado === 'anulado') return 'anulado';
   if (!tieneArca) return 'liquidado';
   if (estado === 'borrador' || estado === 'pendiente_cae') return 'esperando_afip';
-  if (estado === 'autorizado') return 'liquidado';
+  // pendiente_anulacion (método manual, ver Tenant.liquidacionAnulacionMetodo): la
+  // liquidación sigue vigente hasta que se confirma la anulación — mismo indicador que
+  // 'autorizado', el viaje NO queda disponible para re-liquidar todavía.
+  if (estado === 'autorizado' || estado === 'pendiente_anulacion') return 'liquidado';
   if (estado === 'error') return 'error_afip';
   return 'sin_liquidar';
 }
@@ -58,7 +61,7 @@ export async function syncFacturacionEstadoViaje(
   tx: Tx,
   tenantId: string,
   viajeId: string,
-  opts: { cobrado?: boolean } = {},
+  opts: { cobrado?: boolean; facturaId?: string } = {},
 ): Promise<void> {
   const viaje = await tx.viaje.findFirst({
     where: { id: viajeId, tenantId },
@@ -69,13 +72,24 @@ export async function syncFacturacionEstadoViaje(
       facturaId: true,
       factura: { select: { arcaEstado: true } },
       tenant: { select: { modules: true } },
+      clientesViaje: {
+        select: {
+          id: true,
+          facturaId: true,
+          facturacionEstado: true,
+          factura: { select: { arcaEstado: true } },
+        },
+      },
     },
   });
   if (!viaje) return;
 
-  const tieneArca = viaje.tenant.modules.includes('integracion-arca');
+  const tieneArca = viaje.tenant.modules.includes('emision-facturas-arca');
   const cobrado =
-    opts.cobrado ?? viaje.facturacionEstado === 'cobrado';
+    opts.facturaId && opts.facturaId === viaje.facturaId && opts.cobrado !== undefined
+      ? opts.cobrado
+      : opts.cobrado ?? viaje.facturacionEstado === 'cobrado'; // fallback si no mandaron facturaId pero sí cobrado
+  
   const next = mapFacturacionEstado(viaje.factura, cobrado, tieneArca);
   if (next !== viaje.facturacionEstado) {
     await tx.viaje.update({
@@ -83,13 +97,28 @@ export async function syncFacturacionEstadoViaje(
       data: { facturacionEstado: next },
     });
   }
+
+  for (const vc of viaje.clientesViaje) {
+    const vcCobrado =
+      opts.facturaId && opts.facturaId === vc.facturaId && opts.cobrado !== undefined
+        ? opts.cobrado
+        : vc.facturacionEstado === 'cobrado';
+        
+    const nextVc = mapFacturacionEstado(vc.factura, vcCobrado, tieneArca);
+    if (nextVc !== vc.facturacionEstado) {
+      await tx.viajeCliente.update({
+        where: { id: vc.id },
+        data: { facturacionEstado: nextVc },
+      });
+    }
+  }
 }
 
 export async function syncFacturacionEstadoViajes(
   tx: Tx,
   tenantId: string,
   viajeIds: string[],
-  opts: { cobrado?: boolean } = {},
+  opts: { cobrado?: boolean; facturaId?: string } = {},
 ): Promise<void> {
   for (const id of viajeIds) {
     await syncFacturacionEstadoViaje(tx, tenantId, id, opts);
@@ -102,7 +131,7 @@ export async function syncFacturacionEstadoViajes(
  * salvo que sea la única existente (para poder mostrar "Anulado" en vez de
  * "Sin liquidar" cuando corresponde). `null` solo si el viaje no tiene
  * transportista externo — eso sí es "no aplica" independientemente de ARCA.
- * Tenants sin `integracion-arca` SÍ pueden tener liquidaciones reales (registro
+ * Tenants sin `emision-liquido-producto-arca` SÍ pueden tener liquidaciones reales (registro
  * manual vía `CrearLiquidacionManualModal` con `hasArca=false`), así que no hay
  * que nulear el indicador para ellos — `mapLiquidacionEstado` ya se encarga de
  * no exponer sub-estados de AFIP cuando `tieneArca` es falso.
@@ -133,7 +162,7 @@ export async function syncLiquidacionEstadoViaje(
     return;
   }
 
-  const tieneArca = viaje.tenant.modules.includes('integracion-arca');
+  const tieneArca = viaje.tenant.modules.includes('emision-liquido-producto-arca');
   const activa = viaje.liquidacionesViaje
     .map((lv) => lv.liquidacion)
     .filter((l) => l.estado !== 'anulado')

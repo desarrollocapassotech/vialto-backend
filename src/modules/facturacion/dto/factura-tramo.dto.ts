@@ -4,6 +4,7 @@ import {
   IsArray,
   IsNotEmpty,
   IsNumber,
+  IsOptional,
   IsString,
   Min,
   ValidateNested,
@@ -14,6 +15,11 @@ export class FacturaTramoDto {
   @IsString()
   @IsNotEmpty()
   viajeId: string;
+
+  /** Si viene, este tramo factura específicamente a ese ViajeCliente (viaje multi-cliente) — debe pertenecer al `viajeId` de arriba y a `clienteId` de la factura. */
+  @IsOptional()
+  @IsString()
+  viajeClienteId?: string;
 
   @IsString()
   @IsNotEmpty()

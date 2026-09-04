@@ -10,6 +10,8 @@ export type ColumnType = 'string' | 'number' | 'date' | 'boolean' | 'lookup' | '
 export interface ColumnConfig {
   /** Nombre del encabezado en el Excel del cliente */
   excelHeader: string;
+  /** Nombres alternativos del encabezado (sinónimos). Si el Excel trae alguno de estos, se mapea automáticamente. */
+  excelHeaderAliases?: string[];
   /** Nombre del campo en el sistema */
   field: string;
   type: ColumnType;
@@ -111,6 +113,20 @@ export interface PreviewEntidad {
   esNuevo: boolean;
 }
 
+export interface PreviewFilaCampo {
+  campo: string;
+  label: string;
+  valor: string;
+}
+
+/** Detalle fila por fila de un módulo "simple" (Clientes/Transportistas/Choferes/Vehículos): todas las columnas configuradas con su valor tal como viene del Excel, no solo el nombre. */
+export interface PreviewFilaEntidad {
+  fila: number;
+  /** true = alta nueva, false = actualiza un registro ya existente (ver `IImportProcessor.filasNuevas`). */
+  esNuevo: boolean;
+  campos: PreviewFilaCampo[];
+}
+
 export interface PreviewCambioCampo {
   campo: string;
   antes: string | number | null;
@@ -188,4 +204,36 @@ export interface PreviewResult {
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];
   transportistas?: PreviewEntidad[];
+  /**
+   * Solo módulos "simples" (Clientes, Transportistas, Choferes, Vehículos):
+   * detalle fila por fila con TODAS las columnas configuradas (no solo el
+   * nombre) tal como vienen del Excel, + si esa fila es alta nueva o
+   * actualiza un registro existente. Viajes no lo usa — ya tiene
+   * `viajes`/`clientes`/`transportistas` arriba.
+   */
+  filasDetalle?: PreviewFilaEntidad[];
+}
+
+/** Una columna esperada por el template activo (propio del tenant, o el default si no configuró uno). */
+export interface ColumnaEsperada {
+  /** Nombre de encabezado que el Excel del tenant debe tener, tal cual (case-insensitive al parsear). */
+  excelHeader: string;
+  /** Nombre legible del campo del sistema (para mostrar junto al encabezado, no para escribir en el Excel). */
+  campoLabel: string;
+  tipo: ColumnType;
+  requerido: boolean;
+  /** Recomendado pero no bloqueante — ver `ColumnConfig.warnIfEmpty`. */
+  recomendado?: boolean;
+  /** Para tipo='enum': valores permitidos. */
+  allowedValues?: string[];
+  /** Para tipo='lookup': contra qué entidad busca. */
+  lookupModel?: LookupModel;
+}
+
+/** Columnas esperadas de un módulo, para mostrarle al usuario antes de armar su Excel. */
+export interface ColumnasEsperadasModulo {
+  modulo: string;
+  /** Hoja sugerida del Excel para este módulo (nombre por defecto — el template del tenant puede tener otro). */
+  sheet: string;
+  columnas: ColumnaEsperada[];
 }

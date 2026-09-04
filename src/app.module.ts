@@ -20,9 +20,6 @@ import { CuentaCorrienteModule } from './modules/cuenta-corriente/cuenta-corrien
 import { StockModule } from './modules/stock/stock.module';
 import { CombustibleModule } from './modules/combustible/combustible.module';
 import { MantenimientoModule } from './modules/mantenimiento/mantenimiento.module';
-import { RemitosModule } from './modules/remitos/remitos.module';
-import { TurnosModule } from './modules/turnos/turnos.module';
-import { ReportesModule } from './modules/reportes/reportes.module';
 import { ImportacionesModule } from './modules/importaciones/importaciones.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { IntegracionArcaModule } from './modules/liquidaciones-arca/liquidaciones-arca.module';
@@ -55,9 +52,6 @@ import { NotificacionesModule } from './modules/notificaciones/notificaciones.mo
     StockModule,
     CombustibleModule,
     MantenimientoModule,
-    RemitosModule,
-    TurnosModule,
-    ReportesModule,
     ImportacionesModule,
     DashboardModule,
     IntegracionArcaModule,

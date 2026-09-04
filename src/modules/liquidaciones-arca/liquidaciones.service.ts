@@ -27,6 +27,7 @@ import {
   syncLiquidacionEstadoViajes,
 } from '../viajes/viaje-estado-financiero';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
+import { ConfirmarAnulacionManualDto } from './dto/confirmar-anulacion-manual.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import {
   getCbteTipoCvlp,
@@ -156,6 +157,19 @@ export class LiquidacionesService {
       `La alícuota IVA ${invalidas.join(', ')}% no es válida para AFIP. ` +
         `Usá una de: ${AFIP_IVA_PCTS.join(', ')}.`,
     );
+  }
+
+  /**
+   * Método configurado por superadmin (panel Empresas, `Tenant.liquidacionAnulacionMetodo`)
+   * para anular un CVLP (060): 'nota_credito_debito' (default) emite NC/ND vía AFIP SDK;
+   * 'manual' registra la anulación en 2 pasos sin tocar ARCA (ver métodos más abajo).
+   */
+  private async getLiquidacionAnulacionMetodo(tenantId: string): Promise<'nota_credito_debito' | 'manual'> {
+    const tenant = await this.db.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { liquidacionAnulacionMetodo: true },
+    });
+    return tenant?.liquidacionAnulacionMetodo === 'manual' ? 'manual' : 'nota_credito_debito';
   }
 
   async uploadComprobante(tenantId: string, file: Express.Multer.File): Promise<{ url: string }> {
@@ -357,12 +371,22 @@ export class LiquidacionesService {
       dto.periodoHasta !== undefined ||
       dto.comisionPct !== undefined ||
       dto.ivaPct !== undefined ||
-      dto.conceptosLineas !== undefined;
+      dto.conceptosLineas !== undefined ||
+      dto.viajeIds !== undefined;
 
     const estadosEditables = new Set(['borrador', 'error', 'pendiente_cae']);
     if (wantsDatos && !estadosEditables.has(liq.estado)) {
       throw new BadRequestException(
         'Solo se pueden modificar período/comisión/IVA/conceptos en liquidaciones en borrador, error o pendiente de CAE.',
+      );
+    }
+
+    // Agregar/quitar viajes solo se permite con la liquidación en borrador —
+    // una vez que entró al circuito de emisión (pendiente_cae/error) el conjunto
+    // de viajes liquidados ya se comunicó/intentó comunicar a ARCA.
+    if (dto.viajeIds !== undefined && liq.estado !== 'borrador') {
+      throw new BadRequestException(
+        'Solo se pueden agregar o quitar viajes de una liquidación en borrador.',
       );
     }
 
@@ -388,15 +412,102 @@ export class LiquidacionesService {
       data.comprobanteUrl = dto.comprobanteUrl || null;
     }
 
+    // ── Reemplazo del conjunto de viajes (solo borrador) ────────────────────
+    let viajesVigentes = liq.viajes.map((v) => ({
+      id: v.viajeId,
+      numero: v.viaje.numero ?? '',
+    }));
+    let brutoActual = liq.bruto as number;
+    let viajeIdsParaSync = viajesVigentes.map((v) => v.id);
+
+    if (dto.viajeIds !== undefined) {
+      const nuevosIds = [...new Set(dto.viajeIds)];
+      const viajesConMeta = await this.prisma.viaje.findMany({
+        where: { id: { in: nuevosIds }, tenantId, transportistaId: liq.transportistaId },
+      });
+      if (viajesConMeta.length !== nuevosIds.length) {
+        throw new BadRequestException(
+          'Algunos viajes no existen, no pertenecen al tenant o no corresponden al transportista de la liquidación.',
+        );
+      }
+
+      const existentesSet = new Set(viajesVigentes.map((v) => v.id));
+      const agregados = viajesConMeta.filter((v) => !existentesSet.has(v.id));
+      if (agregados.length > 0) {
+        await this.assertViajesSinLiquidacionActiva(
+          tenantId,
+          liq.transportistaId,
+          agregados,
+        );
+      }
+
+      let brutoNuevo = 0;
+      const viajesDetalle = viajesConMeta.map((v) => {
+        const tnDestino = v.cantidadTransportista ?? null;
+        const tarifaTransportista = v.precioUnitarioTransportista ?? null;
+        const subtotal =
+          tnDestino != null && tarifaTransportista != null
+            ? round2(tnDestino * tarifaTransportista)
+            : round2(v.precioTransportistaExterno ?? 0);
+        brutoNuevo += subtotal;
+        return {
+          viajeId: v.id,
+          tnOrigen: null as number | null,
+          tnDestino,
+          tarifaTransportista,
+          subtotal,
+          gastosAdmin: 0,
+        };
+      });
+      brutoNuevo = round2(brutoNuevo);
+
+      // Snapshot: se borra y recrea el detalle completo por viaje.
+      await this.prisma.liquidacionViaje.deleteMany({
+        where: { liquidacionId: id },
+      });
+      await this.prisma.liquidacionViaje.createMany({
+        data: viajesDetalle.map((d) => ({
+          tenantId,
+          liquidacionId: id,
+          viajeId: d.viajeId,
+          tnOrigen: d.tnOrigen,
+          tnDestino: d.tnDestino,
+          tarifaTransportista: d.tarifaTransportista,
+          subtotal: d.subtotal,
+          gastosAdmin: d.gastosAdmin,
+        })),
+      });
+
+      // Conceptos "por viaje puntual" cuyo viaje se quitó quedan huérfanos —
+      // se degradan a GENERAL para no perder el monto cargado por el usuario.
+      if (dto.conceptosLineas === undefined) {
+        await this.db.liquidacionConceptoLinea.updateMany({
+          where: {
+            liquidacionId: id,
+            modoAplicacion: 'VIAJE_PUNTUAL',
+            viajeId: { notIn: nuevosIds },
+          },
+          data: { modoAplicacion: 'GENERAL', viajeId: null },
+        });
+      }
+
+      viajeIdsParaSync = [...new Set([...viajeIdsParaSync, ...nuevosIds])];
+      viajesVigentes = viajesConMeta.map((v) => ({ id: v.id, numero: v.numero ?? '' }));
+      brutoActual = brutoNuevo;
+      data.cantViajes = nuevosIds.length;
+      data.bruto = brutoNuevo;
+    }
+
     const needsRecalc =
       dto.comisionPct !== undefined ||
       dto.ivaPct !== undefined ||
-      dto.conceptosLineas !== undefined;
+      dto.conceptosLineas !== undefined ||
+      dto.viajeIds !== undefined;
 
     if (needsRecalc) {
       const comisionPct =
         dto.comisionPct !== undefined ? dto.comisionPct : liq.comisionPct;
-      const bruto = liq.bruto as number;
+      const bruto = brutoActual;
       const comision = round2(bruto * comisionPct / 100);
 
       let ivaPct = dto.ivaPct;
@@ -427,7 +538,7 @@ export class LiquidacionesService {
         comision,
         ivaPctDefault: ivaPct,
         lineas: lineasResueltas,
-        viajes: liq.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
+        viajes: viajesVigentes,
       });
       data.comisionPct = comisionPct;
       data.comision = comision;
@@ -463,6 +574,11 @@ export class LiquidacionesService {
     }
 
     await this.prisma.liquidacion.update({ where: { id }, data });
+
+    if (dto.viajeIds !== undefined) {
+      await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsParaSync);
+    }
+
     return this.findById(tenantId, id);
   }
 
@@ -510,6 +626,9 @@ export class LiquidacionesService {
     }
     if (liquidacion.estado === 'anulado') {
       throw new BadRequestException('La liquidación está anulada');
+    }
+    if (liquidacion.estado === 'pendiente_anulacion') {
+      throw new BadRequestException('La liquidación está pendiente de anulación');
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
@@ -757,6 +876,14 @@ export class LiquidacionesService {
       throw new BadRequestException('Esta liquidación ya tiene un comprobante de anulación.');
     }
 
+    const metodoAnulacion = await this.getLiquidacionAnulacionMetodo(tenantId);
+    if (metodoAnulacion === 'manual') {
+      throw new BadRequestException(
+        'Este tenant tiene configurada la anulación manual del CVLP (060). ' +
+          'Usá "Marcar pendiente de anulación" y después "Confirmar anulación" en vez de este endpoint.',
+      );
+    }
+
     const config = await this.arcaConfig.findWithApiKey(tenantId);
     const transportista = await (this.prisma as PrismaAny).transportista.findUnique({
       where: { id: liquidacion.transportistaId },
@@ -911,6 +1038,118 @@ export class LiquidacionesService {
         detalle: err instanceof ArcaException ? err.detalle : undefined,
       });
     }
+  }
+
+  /**
+   * Paso 1 de la anulación manual (Tenant.liquidacionAnulacionMetodo = 'manual'): marca la
+   * liquidación como `pendiente_anulacion`, sin emitir nada a ARCA. El CVLP original (CAE/PDF)
+   * se conserva íntegro. Los viajes siguen considerados liquidados (no disponibles para
+   * re-liquidar) hasta que se confirme la anulación con `confirmarAnulacionManual`.
+   */
+  async marcarPendienteAnulacionManual(tenantId: string, liquidacionId: string, userId: string) {
+    const metodo = await this.getLiquidacionAnulacionMetodo(tenantId);
+    if (metodo !== 'manual') {
+      throw new BadRequestException(
+        'Este tenant no tiene configurada la anulación manual del CVLP (060).',
+      );
+    }
+
+    const liquidacion = await this.prisma.liquidacion.findUnique({
+      where: { id: liquidacionId },
+      include: { viajes: { select: { viajeId: true } } },
+    });
+    if (!liquidacion || liquidacion.tenantId !== tenantId) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+    if (liquidacion.estado !== 'autorizado') {
+      throw new BadRequestException(
+        'Solo se pueden marcar como pendientes de anulación liquidaciones con CAE autorizado.',
+      );
+    }
+
+    const now = new Date();
+    await this.db.liquidacion.update({
+      where: { id: liquidacionId },
+      data: {
+        estado: 'pendiente_anulacion',
+        anulacionMetodo: 'manual',
+        anulacionPendienteDesde: now,
+        anulacionPendientePor: userId,
+        updatedAt: now,
+      },
+    });
+
+    const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
+    await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+
+    return this.findById(tenantId, liquidacionId);
+  }
+
+  /**
+   * Paso 2 de la anulación manual: confirma la anulación de una liquidación en
+   * `pendiente_anulacion`, con el comprobante pre-impreso (PDF o foto, subido antes vía
+   * `uploadComprobante`) como respaldo. No emite nada a ARCA — el CVLP original (CAE/PDF)
+   * se conserva. Tras la confirmación, los viajes quedan disponibles para re-liquidar.
+   */
+  async confirmarAnulacionManual(
+    tenantId: string,
+    liquidacionId: string,
+    userId: string,
+    dto: ConfirmarAnulacionManualDto,
+  ) {
+    const metodo = await this.getLiquidacionAnulacionMetodo(tenantId);
+    if (metodo !== 'manual') {
+      throw new BadRequestException(
+        'Este tenant no tiene configurada la anulación manual del CVLP (060).',
+      );
+    }
+
+    const motivo = String(dto?.motivo ?? '').trim();
+    if (!motivo) {
+      throw new BadRequestException('El motivo de anulación es obligatorio.');
+    }
+    const comprobanteUrl = String(dto?.comprobanteUrl ?? '').trim();
+    if (!comprobanteUrl) {
+      throw new BadRequestException('El comprobante de anulación es obligatorio.');
+    }
+
+    const liquidacion = await this.prisma.liquidacion.findUnique({
+      where: { id: liquidacionId },
+      include: { viajes: { select: { viajeId: true } } },
+    });
+    if (!liquidacion || liquidacion.tenantId !== tenantId) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+    if (liquidacion.estado !== 'pendiente_anulacion') {
+      throw new BadRequestException(
+        'Solo se puede confirmar la anulación de una liquidación pendiente de anulación.',
+      );
+    }
+
+    const anuladoAt = new Date();
+    const anuladoPorLabel =
+      (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || userId;
+
+    await this.db.liquidacion.update({
+      where: { id: liquidacionId },
+      data: {
+        estado: 'anulado',
+        anulacionMetodo: 'manual',
+        anulacionManualComprobanteUrl: comprobanteUrl,
+        motivoAnulacion: motivo,
+        anuladoPor: userId,
+        anuladoAt,
+        updatedAt: anuladoAt,
+      },
+    });
+
+    // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada, el sync
+    // recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
+    const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
+    await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+
+    const updated = await this.findById(tenantId, liquidacionId);
+    return { ...updated, anuladoPorNombre: anuladoPorLabel };
   }
 
   /**
@@ -1306,9 +1545,13 @@ export class LiquidacionesService {
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    if (liq.estado === 'autorizado' || liq.estado === 'anulado') {
+    if (
+      liq.estado === 'autorizado' ||
+      liq.estado === 'anulado' ||
+      liq.estado === 'pendiente_anulacion'
+    ) {
       throw new BadRequestException(
-        'No se puede eliminar una liquidación autorizada o anulada',
+        'No se puede eliminar una liquidación autorizada, pendiente de anulación o anulada',
       );
     }
     const viajeIds = liq.viajes.map((v) => v.viajeId);
@@ -1363,6 +1606,7 @@ export class LiquidacionesService {
                     idFiscal: true,
                     direccion: true,
                     pais: true,
+                    condicionIva: true,
                     condicionTributaria: true,
                   },
                 },
@@ -1397,6 +1641,11 @@ export class LiquidacionesService {
             origen: true,
             destino: true,
             fechaCarga: true,
+          },
+        },
+        clientesViaje: {
+          select: {
+            viajeId: true,
           },
         },
         cliente: {
@@ -1485,7 +1734,10 @@ export class LiquidacionesService {
         importe: importeNeto,
       },
     });
-    const viajeIdsFactura = facturaRaw.viajes.map((v) => v.id);
+    const viajeIdsFactura = Array.from(new Set([
+      ...facturaRaw.viajes.map((v) => v.id),
+      ...facturaRaw.clientesViaje.map((vc) => vc.viajeId),
+    ]));
     await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
 
     try {

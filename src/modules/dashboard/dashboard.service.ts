@@ -12,6 +12,7 @@ import {
   type SinFacturarArHalfOpen,
 } from './dashboard-sin-facturar-ar-range';
 import {
+  cobroOptsDeFactura,
   computeEstadoFacturaLectura,
   importeOperativoFactura,
 } from '../../shared/util/factura-estado-lectura';
@@ -673,7 +674,7 @@ export class DashboardService {
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    const tieneArca = tenant?.modules.includes('integracion-arca') ?? false;
+    const tieneArca = tenant?.modules.includes('emision-facturas-arca') ?? false;
     const candidatas = await this.prisma.factura.findMany({
       where: {
         tenantId,
@@ -687,27 +688,39 @@ export class DashboardService {
         moneda: true,
         fechaVencimiento: true,
         arcaEstado: true,
+        facturarPorTramo: true,
+        ivaPct: true,
+        ivaMonto: true,
         pagos: { select: { importe: true } },
-        viajes: { select: { facturacionEstado: true, monto: true } },
+        viajes: { select: { id: true, facturacionEstado: true, monto: true } },
+        tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
       },
     });
-    const vencidas = candidatas.filter(
-      (f) =>
-        computeEstadoFacturaLectura({
-          viajes: f.viajes,
-          fechaVencimiento: f.fechaVencimiento,
-          importeGuardado: f.importe,
-          pagos: f.pagos,
-          arcaEstado: f.arcaEstado,
-          tieneArca,
-        }).vencida,
-    );
+    const vencidas = candidatas.filter((f) => {
+      const opts = cobroOptsDeFactura(f, tieneArca);
+      return computeEstadoFacturaLectura({
+        viajes: f.viajes,
+        fechaVencimiento: f.fechaVencimiento,
+        importeGuardado: f.importe,
+        pagos: f.pagos,
+        arcaEstado: f.arcaEstado,
+        tieneArca,
+        facturarPorTramo: opts.facturarPorTramo,
+        tramos: f.tramos,
+        ivaPctCabecera: f.ivaPct,
+        ivaMontoGuardado: opts.ivaMontoGuardado,
+      }).vencida;
+    });
     let montoVencidas = 0;
     let montoVencidasARS = 0;
     let montoVencidasUSD = 0;
     for (const f of vencidas) {
       const paid = f.pagos.reduce((s, p) => s + p.importe, 0);
-      const importeOp = importeOperativoFactura(f.importe, f.viajes);
+      const importeOp = importeOperativoFactura(
+        f.importe,
+        f.viajes,
+        cobroOptsDeFactura(f, tieneArca),
+      );
       const pend = Math.max(0, roundMoney(importeOp - paid));
       if (pend > 0) {
         montoVencidas += pend;
@@ -718,9 +731,13 @@ export class DashboardService {
     const itemsVencidas: { id: string; numero: string }[] = [];
     for (const f of vencidas) {
       const paid = f.pagos.reduce((s, p) => s + p.importe, 0);
-      const importeOp = importeOperativoFactura(f.importe, f.viajes);
+      const importeOp = importeOperativoFactura(
+        f.importe,
+        f.viajes,
+        cobroOptsDeFactura(f, tieneArca),
+      );
       if (importeOp - paid > 0.0001) {
-        itemsVencidas.push({ id: f.id, numero: f.numero });
+        itemsVencidas.push({ id: f.id, numero: f.numero ?? '' });
       }
     }
     const cantVencidas = itemsVencidas.length;

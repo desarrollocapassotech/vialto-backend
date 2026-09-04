@@ -5,6 +5,7 @@ import { NOTIFICACIONES_CATALOG } from './notificaciones-catalog';
 export type NotificacionFeedItem = {
   id: string;
   tipo: string;
+  entidadId: string;
   label: string;
   titulo: string;
   detalle: string;
@@ -43,6 +44,7 @@ export class NotificacionesFeedService {
       items: envios.map((e) => ({
         id: e.id,
         tipo: e.tipo,
+        entidadId: e.entidadId,
         label: labelDeTipo(e.tipo),
         titulo: e.titulo,
         detalle: e.detalle,

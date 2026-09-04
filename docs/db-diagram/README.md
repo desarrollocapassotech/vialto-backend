@@ -37,7 +37,14 @@ Esquema PostgreSQL (Neon) + módulos del roadmap. **Sin cuenta, sin tarjeta, sin
 Tras cambios en `prisma/schema.prisma`:
 
 1. Actualizá tablas, campos, FK e índices en `vialto.dbml`.
-2. Reflejá los mismos cambios en `index.html` (sección del módulo correspondiente), o pedí regenerar el HTML al equipo.
+2. Regenerá `index.html` automáticamente desde `vialto.dbml` (no editarlo a mano):
+
+   ```bash
+   npx --package=@dbml/core -- node docs/db-diagram/generate-html.js
+   ```
+
+   El script (`generate-html.js`) parsea `vialto.dbml` y reescribe el array `MODULES` de `index.html`, así los dos archivos nunca quedan desincronizados. Si agregás una tabla nueva, sumala también al `MODULE_DEFS` del script (qué módulo/sección le corresponde) — si te olvidás, el script avisa por consola qué tabla quedó sin asignar.
+   `@dbml/core` no es una dependencia del proyecto (es solo para este script de docs) — por eso se resuelve con `npx --package=...` en vez de tenerlo instalado.
 
 ## Referencias
 

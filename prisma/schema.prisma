@@ -13,20 +13,37 @@ datasource db {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Tenant {
-  id               String    @id @default(cuid())
-  clerkOrgId       String    @unique
-  name             String
-  idFiscal         String?   @unique
-  modules          String[]  @default([])
-  maxUsers         Int       @default(10)
-  billingStatus    String    @default("trial") // trial | active | suspended | expired
-  billingRenewsAt  DateTime?
-  whiteLabelDomain String?
-  /** Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG"). */
-  labelIdentificacionPersonalizadaViajes String? @default("ID propio")
-  /** true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla). */
-  importacionesOcultas Boolean @default(false)
-  createdAt        DateTime  @default(now())
+  id                                     String    @id @default(cuid())
+  clerkOrgId                             String    @unique
+  name                                   String
+  idFiscal                               String?   @unique
+  modules                                String[]  @default([])
+  maxUsers                               Int       @default(10)
+  billingStatus                          String    @default("trial") // trial | active | suspended | expired
+  billingRenewsAt                        DateTime?
+  whiteLabelDomain                       String?
+  /**
+   * Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG").
+   */
+  labelIdentificacionPersonalizadaViajes String?   @default("ID propio")
+  /**
+   * true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla).
+   */
+  importacionesOcultas                   Boolean   @default(false)
+
+  /**
+   * Habilita la opción de exportar el reporte PAUT / MIC CRT en el módulo de Viajes.
+   * Por defecto desactivado para nuevas empresas.
+   */
+  habilitarExportacionPautMicCrt         Boolean   @default(false)
+  /**
+   * Método de anulación del comprobante CVLP (060) — configurable solo desde superadmin (panel Empresas).
+   * 'nota_credito_debito' (default, todo tenant nuevo): anulación emitiendo NC/ND asociada vía AFIP SDK,
+   * comportamiento histórico. 'manual': sin emisión a ARCA — anulación en 2 pasos (pendiente_anulacion →
+   * anulado) con comprobante pre-impreso adjunto por el usuario. Ver Liquidacion.estado y CLAUDE.md.
+   */
+  liquidacionAnulacionMetodo             String    @default("nota_credito_debito")
+  createdAt                              DateTime  @default(now())
 
   clientes                   Cliente[]
   transportistas             Transportista[]
@@ -50,7 +67,6 @@ model Tenant {
   cargasCombustible          CargaCombustible[]
   combustibleSyncErrorLogs   CombustibleSyncErrorLog[]
   intervenciones             Intervencion[]
-  remitos                    Remito[]
   importTemplates            ImportTemplate[]
   importLogs                 ImportLog[]
   importSessions             ImportSession[]
@@ -87,11 +103,11 @@ model Cliente {
   createdAt           DateTime @default(now())
 
   viajes           Viaje[]
+  viajesCliente    ViajeCliente[]
   facturas         Factura[]
   movimientosCc    MovimientoCuentaCorriente[]
   stockOperaciones StockOperacion[]
   stockItems       StockItem[]
-  remitos          Remito[]
 
   @@index([tenantId])
   @@map("clientes")
@@ -152,7 +168,6 @@ model Chofer {
   viajes                   Viaje[]
   cargasCombustible        CargaCombustible[]
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
-  remitos                  Remito[]
 
   @@index([tenantId])
   @@index([tenantId, activo])
@@ -214,7 +229,9 @@ model Vehiculo {
   transportistaId   String?
   transportista     Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   activo            Boolean        @default(true)
-  /** true si `patente` es un placeholder autogenerado (PENDIENTE-xxxxxx) porque todavía no se cargó la patente real. */
+  /**
+   * true si `patente` es un placeholder autogenerado (PENDIENTE-xxxxxx) porque todavía no se cargó la patente real.
+   */
   patentePendiente  Boolean        @default(false)
   createdAt         DateTime       @default(now())
 
@@ -222,7 +239,6 @@ model Vehiculo {
   cargasCombustible        CargaCombustible[]
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
   intervenciones           Intervencion[]
-  remitos                  Remito[]
 
   @@unique([tenantId, patente])
   @@index([tenantId])
@@ -279,54 +295,143 @@ model ViajeDestino {
   @@map("viajes_destinos")
 }
 
+/**
+ * Cliente adicional de un viaje multi-cliente: origen/destino/carga y forma de
+ * cobro propios, independientes del `clienteId`/`monto` "principal" del Viaje
+ * (que sigue siendo el único dato para un viaje de un solo cliente — este
+ * modelo es 100% opcional y convive con ese flujo legacy sin reemplazarlo).
+ * Tiene su propio `facturaId`/`facturacionEstado` porque un viaje puede
+ * facturarse a varios clientes en facturas distintas y simultáneas — el
+ * `Viaje.facturaId` (columna simple, un viaje = una factura a la vez) no
+ * alcanza para eso.
+ */
+model ViajeCliente {
+  id                String                 @id @default(cuid())
+  tenantId          String
+  viajeId           String
+  viaje             Viaje                  @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  clienteId         String
+  cliente           Cliente                @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  orden             Int                    @default(0)
+  origen            String?
+  /**
+   * Denormalizado: último destino de la ruta de este cliente (legacy/compat, mismo criterio que Viaje.destino).
+   */
+  destino           String?
+  destinosCliente   ViajeClienteDestino[]
+  productosCliente  ViajeClienteProducto[]
+  /**
+   * Igual que Viaje.cantidadFactura/precioUnitarioFactura: si ambos vienen, `monto` = cantidad × precioUnitario.
+   */
+  cantidad          Float?
+  precioUnitario    Float?
+  monto             Float?
+  monedaMonto       String                 @default("ARS") // ARS | USD
+  facturaId         String?
+  factura           Factura?               @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  facturacionEstado String                 @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturaTramos     FacturaTramo[]
+  createdAt         DateTime               @default(now())
+
+  @@unique([viajeId, clienteId])
+  @@index([tenantId])
+  @@index([tenantId, viajeId])
+  @@index([tenantId, clienteId])
+  @@index([tenantId, facturaId])
+  @@map("viajes_clientes")
+}
+
+model ViajeClienteDestino {
+  id             String       @id @default(cuid())
+  tenantId       String
+  viajeClienteId String
+  viajeCliente   ViajeCliente @relation(fields: [viajeClienteId], references: [id], onDelete: Cascade)
+  orden          Int          @default(0)
+  etiqueta       String
+  createdAt      DateTime     @default(now())
+
+  @@unique([viajeClienteId, orden])
+  @@index([tenantId])
+  @@index([viajeClienteId])
+  @@map("viajes_clientes_destinos")
+}
+
+model ViajeClienteProducto {
+  id             String       @id @default(cuid())
+  tenantId       String
+  viajeClienteId String
+  viajeCliente   ViajeCliente @relation(fields: [viajeClienteId], references: [id], onDelete: Cascade)
+  productoId     String
+  producto       Producto     @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  orden          Int          @default(0)
+  cantidad       Float?
+  pesoKg         Float?
+
+  @@unique([viajeClienteId, productoId])
+  @@index([tenantId])
+  @@index([viajeClienteId])
+  @@index([productoId])
+  @@map("viajes_clientes_productos")
+}
+
 model Viaje {
-  id                               String          @id @default(cuid())
-  tenantId                         String
-  tenant                           Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero                           String
-  /** ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna. */
+  id                                String          @id @default(cuid())
+  tenantId                          String
+  tenant                            Tenant          @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero                            String
+  /**
+   * ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna.
+   */
   numeroIdentificacionPersonalizado String?
-  /** @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura. */
-  estado                           String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
+  /**
+   * @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura.
+   */
+  estado                            String          @default("pendiente") // pendiente | en_curso | finalizado_sin_facturar | facturado_sin_cobrar | cobrado | cancelado
   /**
    * Etapa operativa del viaje, editable a mano y por fecha (ver ViajesAutoEstadoService).
    */
-  etapa                            String          @default("pendiente") // pendiente | en_curso | finalizado | cancelado
+  etapa                             String          @default("pendiente") // pendiente | en_curso | finalizado | cancelado
   /**
    * Estado de facturación al cliente, sincronizado automáticamente — no editable a mano.
    */
-  facturacionEstado                String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturacionEstado                 String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
   /**
    * Estado de liquidación al transportista externo (null si no aplica: sin transportista externo o tenant sin integracion-arca).
    */
-  liquidacionEstado                String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
-  clienteId                        String
-  cliente                          Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  transportistaId                  String?
-  transportista                    Transportista?  @relation("ViajeTransportistaPrincipal", fields: [transportistaId], references: [id], onDelete: SetNull)
+  liquidacionEstado                 String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
+  clienteId                         String
+  cliente                           Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  transportistaId                   String?
+  transportista                     Transportista?  @relation("ViajeTransportistaPrincipal", fields: [transportistaId], references: [id], onDelete: SetNull)
   /**
    * Transportista que efectivamente realiza el flete (puede diferir del contratante).
    */
-  transportistaEfectivoId          String?
-  transportistaEfectivo            Transportista?  @relation("ViajeTransportistaEfectivo", fields: [transportistaEfectivoId], references: [id], onDelete: SetNull)
-  choferId                         String?
-  chofer                           Chofer?         @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  vehiculosViaje                   ViajeVehiculo[]
-  origen                           String?
-  destino                          String?
-  destinosViaje                    ViajeDestino[]
-  fechaCarga                       DateTime?
-  fechaDescarga                    DateTime?
-  productosViaje                   ViajeProducto[]
-  detalleCarga                     String?
-  kmRecorridos                     Int?
-  litrosConsumidos                 Float?
-  monto                            Float?
-  monedaMonto                      String          @default("ARS") // ARS | USD
-  precioTransportistaExterno       Float?
-  monedaPrecioTransportistaExterno String          @default("ARS") // ARS | USD
-  /** % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" antes de sumarlo al bruto de una Liquidación, para no duplicar el IVA. */
-  precioTransportistaIvaIncluidoPct Float          @default(0)
+  transportistaEfectivoId           String?
+  transportistaEfectivo             Transportista?  @relation("ViajeTransportistaEfectivo", fields: [transportistaEfectivoId], references: [id], onDelete: SetNull)
+  choferId                          String?
+  chofer                            Chofer?         @relation(fields: [choferId], references: [id], onDelete: SetNull)
+  vehiculosViaje                    ViajeVehiculo[]
+  origen                            String?
+  destino                           String?
+  destinosViaje                     ViajeDestino[]
+  /**
+   * Clientes adicionales del viaje (multi-cliente, opcional) — ver modelo ViajeCliente.
+   */
+  clientesViaje                     ViajeCliente[]
+  fechaCarga                        DateTime?
+  fechaDescarga                     DateTime?
+  productosViaje                    ViajeProducto[]
+  detalleCarga                      String?
+  kmRecorridos                      Int?
+  litrosConsumidos                  Float?
+  monto                             Float?
+  monedaMonto                       String          @default("ARS") // ARS | USD
+  precioTransportistaExterno        Float?
+  monedaPrecioTransportistaExterno  String          @default("ARS") // ARS | USD
+  /**
+   * % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" antes de sumarlo al bruto de una Liquidación, para no duplicar el IVA.
+   */
+  precioTransportistaIvaIncluidoPct Float           @default(0)
 
   cantidadFactura             Float?
   precioUnitarioFactura       Float?
@@ -381,7 +486,9 @@ model Factura {
   id               String         @id @default(cuid())
   tenantId         String
   tenant           Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  /** Número de comprobante. Obligatorio para tenants sin ARCA (registran un comprobante ya numerado externamente). Para tenants con integracion-arca queda null hasta que no aplica — el número real vive en cbteTipo/ptoVenta/cbteNro, asignados por AFIP al emitir. */
+  /**
+   * Número de comprobante. Obligatorio para tenants sin ARCA (registran un comprobante ya numerado externamente). Para tenants con integracion-arca queda null hasta que no aplica — el número real vive en cbteTipo/ptoVenta/cbteNro, asignados por AFIP al emitir.
+   */
   numero           String?
   tipo             String // cliente | transportista_externo
   clienteId        String?
@@ -390,13 +497,21 @@ model Factura {
   transportista    Transportista? @relation(fields: [transportistaId], references: [id], onDelete: SetNull)
   viajes           Viaje[]
   importe          Float
+  /**
+   * IVA total persistido al guardar (solo facturas por tramo de tenants sin ARCA).
+   * Null = no aplica o todavía no backfilleado; el cobro recalcula en ese caso.
+   */
+  ivaMonto         Float?
   moneda           String         @default("ARS") // ARS | USD
   fechaEmision     DateTime
   fechaVencimiento DateTime?
   estado           String         @default("pendiente") // pendiente | cobrada | vencida
   diferencia       Float?
   ivaPct           Float?         @default(21)
-  /** Si true, el importe se arma con tramos (+ monto de viajes sin tramos). */
+  /**
+   * Si true, el IVA se arma por tramo; el neto (`importe`) sigue siendo la
+   * suma completa de los viajes (la parte no cubierta por tramos usa `ivaPct`).
+   */
   facturarPorTramo Boolean        @default(false)
   comprobanteUrl   String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
   // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
@@ -423,9 +538,13 @@ model Factura {
   anuladoAt            DateTime?
   notaCreditoUrl       String? // PDF NC en Cloudinary
 
-  createdAt DateTime @default(now())
-  pagos     Pago[]
-  tramos    FacturaTramo[]
+  createdAt     DateTime       @default(now())
+  pagos         Pago[]
+  tramos        FacturaTramo[]
+  /**
+   * Clientes-tramo (ViajeCliente) facturados directamente a esta factura — ver "facturación por tramo, por cliente".
+   */
+  clientesViaje ViajeCliente[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])
@@ -436,24 +555,32 @@ model Factura {
   @@map("facturas")
 }
 
-/** Línea de tramo cuando la factura se arma “por tramo” (varios montos/IVA por viaje). */
+/**
+ * Línea de tramo cuando la factura se arma “por tramo” (varios montos/IVA por viaje).
+ */
 model FacturaTramo {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  facturaId String
-  factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
-  viajeId   String
-  viaje     Viaje    @relation(fields: [viajeId], references: [id], onDelete: Restrict)
-  detalle   String
-  monto     Float
-  ivaPct    Float
-  orden     Int      @default(0)
-  createdAt DateTime @default(now())
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  facturaId      String
+  factura        Factura       @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  viajeId        String
+  viaje          Viaje         @relation(fields: [viajeId], references: [id], onDelete: Restrict)
+  /**
+   * Si está seteado, este tramo factura específicamente a ESTE ViajeCliente (viaje multi-cliente); si es null, es el tramo "de siempre" del viaje entero.
+   */
+  viajeClienteId String?
+  viajeCliente   ViajeCliente? @relation(fields: [viajeClienteId], references: [id], onDelete: Restrict)
+  detalle        String
+  monto          Float
+  ivaPct         Float
+  orden          Int           @default(0)
+  createdAt      DateTime      @default(now())
 
   @@index([facturaId])
   @@index([tenantId])
   @@index([viajeId])
+  @@index([viajeClienteId])
   @@map("factura_tramos")
 }
 
@@ -525,6 +652,7 @@ model Producto {
 
   movimientos            MovimientoStock[]
   viajesProducto         ViajeProducto[]
+  viajesClienteProducto  ViajeClienteProducto[]
   stockItems             StockItem[]
   productoPresentaciones ProductoPresentacion[]
 
@@ -583,8 +711,6 @@ model MovimientoStock {
    * ID del movimiento par en una división (el origen apunta al destino y viceversa).
    */
   movimientoVinculadoId String?
-  remitoId              String?
-  remito                Remito?               @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   createdBy             String                @default("")
   fecha                 DateTime
   createdAt             DateTime              @default(now())
@@ -593,7 +719,6 @@ model MovimientoStock {
   @@index([tenantId, operacionId])
   @@index([tenantId, productoId])
   @@index([tenantId, presentacionId])
-  @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("movimientos_stock")
@@ -699,8 +824,6 @@ model StockOperacion {
    * Número de remito del proveedor, informado manualmente al registrar un ingreso.
    */
   numeroRemitoProveedor  String?
-  remitoId               String?
-  remito                 Remito?  @relation(fields: [remitoId], references: [id], onDelete: SetNull)
   entregadoPor           String?
   destinatario           String?
   destinoFinal           String?
@@ -819,54 +942,24 @@ model CombustibleSyncErrorLog {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Intervencion {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  vehiculoId  String
-  vehiculo    Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
-  tipo        String // service | aceite | filtro | cubiertas | otro
-  descripcion String?
-  km          Int?
-  proximoKm   Int?
-  fecha       DateTime
-  createdAt   DateTime @default(now())
-  createdBy   String
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  vehiculoId   String
+  vehiculo     Vehiculo  @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
+  tipos        String[] // catálogo por sistema del vehículo (mínimo 1) — ver src/modules/mantenimiento/tipos-intervencion.const.ts
+  descripcion  String?
+  km           Int?
+  proximoKm    Int?
+  proximaFecha DateTime?
+  fecha        DateTime
+  createdAt    DateTime  @default(now())
+  createdBy    String
 
   @@index([tenantId])
   @@index([tenantId, vehiculoId])
   @@index([tenantId, fecha])
   @@map("intervenciones")
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Módulo: remitos
-// ═══════════════════════════════════════════════════════════════════════════
-
-model Remito {
-  id               String            @id @default(cuid())
-  tenantId         String
-  tenant           Tenant            @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  numero           String
-  clienteId        String
-  cliente          Cliente           @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  choferId         String?
-  chofer           Chofer?           @relation(fields: [choferId], references: [id], onDelete: SetNull)
-  vehiculoId       String?
-  vehiculo         Vehiculo?         @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
-  descripcion      String
-  fecha            DateTime
-  firmaUrl         String?
-  estado           String            @default("emitido") // emitido | firmado | facturado
-  createdAt        DateTime          @default(now())
-  movimientosStock MovimientoStock[]
-  stockOperaciones StockOperacion[]
-
-  @@unique([tenantId, numero])
-  @@index([tenantId])
-  @@index([tenantId, clienteId])
-  @@index([tenantId, estado])
-  @@index([tenantId, fecha])
-  @@map("remitos")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1085,6 +1178,7 @@ model Liquidacion {
   ambiente    String?
 
   // Nota de crédito 065 emitida al anular (el CVLP original se conserva arriba)
+  // — solo aplica al método 'nota_credito_debito' (ver Tenant.liquidacionAnulacionMetodo)
   anulacionCbteTipo    Int?
   anulacionCbteNro     Int?
   anulacionPtoVenta    Int?
@@ -1094,17 +1188,29 @@ model Liquidacion {
 
   // Estado de la integración ARCA
   estado           String  @default("borrador")
-  // borrador | pendiente_cae | autorizado | error | anulado
+  // borrador | pendiente_cae | autorizado | error | anulado | pendiente_anulacion
+  // pendiente_anulacion: solo con Tenant.liquidacionAnulacionMetodo = 'manual' — paso intermedio
+  // entre 'autorizado' y 'anulado', sin emisión a ARCA (ver anulación manual más abajo).
   arcaError        String? // mensaje amigable del último error de ARCA
   arcaErrorDetalle String? // detalle técnico crudo de AFIP SDK (para "ver error completo")
   reintentos       Int     @default(0)
 
   comprobanteUrl String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
 
-  // Auditoría de anulación (solo cuando estado = anulado)
+  // Auditoría de anulación (solo cuando estado = anulado). anuladoPor/anuladoAt se completan
+  // en ambos métodos de anulación; motivoAnulacion también. Los campos anulacionCbte*/anulacionCae*
+  // de arriba solo se completan en el método 'nota_credito_debito'.
   motivoAnulacion String?
   anuladoPor      String? // Clerk userId
   anuladoAt       DateTime?
+
+  // Anulación manual (Tenant.liquidacionAnulacionMetodo = 'manual'): snapshot del método usado en
+  // esta anulación puntual + auditoría del paso intermedio "pendiente_anulacion" + comprobante
+  // pre-impreso adjunto por el usuario al confirmar. Nunca se emite nada a ARCA en este flujo.
+  anulacionMetodo               String? // 'nota_credito_debito' | 'manual' — snapshot al anular
+  anulacionPendienteDesde       DateTime? // cuándo se marcó pendiente_anulacion
+  anulacionPendientePor         String? // Clerk userId que marcó pendiente_anulacion
+  anulacionManualComprobanteUrl String? // URL Cloudinary del comprobante pre-impreso (PDF o foto)
 
   // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
   payloadHash String?

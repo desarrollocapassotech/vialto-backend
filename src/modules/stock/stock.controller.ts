@@ -610,4 +610,22 @@ export class StockController {
       depositoId,
     );
   }
+
+  @ApiOperation({ summary: 'Stock agrupado por producto: total en kg y composición por presentación.' })
+  @Get('disponible/agrupado')
+  @Roles('admin', 'superadmin', 'stock_viewer', 'stock_operator')
+  listStockAgrupadoPorProducto(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("clienteId") clienteId?: string,
+    @Query("productoId") productoId?: string,
+    @Query("depositoId") depositoId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.listStockAgrupadoPorProducto(
+      auth.tenantId,
+      clienteId,
+      productoId,
+      depositoId,
+    );
+  }
 }

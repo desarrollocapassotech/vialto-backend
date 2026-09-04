@@ -128,11 +128,8 @@ async function bootstrap() {
     .addTag('Módulo: Cuenta Corriente', 'Cuenta corriente por cliente · Fase 2 — activo')
     .addTag('Módulo: Stock', 'Productos y movimientos de stock · Fase 2 — activo')
     // Próximamente
-    .addTag('[Próximamente] Remitos', 'Remitos digitales con firma del cliente · Fase 3 — no activo')
     .addTag('[Próximamente] Combustible', 'Control de cargas de combustible por vehículo · Fase 4 — no activo')
     .addTag('[Próximamente] Mantenimiento', 'Intervenciones y alertas de flota · Fase 4 — no activo')
-    .addTag('[Próximamente] Turnos', 'Lista de turno para choferes (PWA) · Fase 7 — no activo')
-    .addTag('[Próximamente] Reportes', 'Reportes cross-módulo y KPIs · Fase 8 — no activo')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document, {

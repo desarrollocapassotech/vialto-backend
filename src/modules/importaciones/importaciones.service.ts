@@ -25,11 +25,23 @@ import type {
   PreviewEntidad,
   RowError,
   EntidadesFaltantesModelo,
+  ColumnaEsperada,
+  ColumnasEsperadasModulo,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
-import { TEMPLATE_CATALOGO, construirConfigPorDefecto } from "./template-catalogo";
+import { getCatalogoColumnas, getAltaFormularioDeModulo, construirConfigPorDefecto } from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
+import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
+
+/** Nombre de hoja sugerido cuando el template (propio o default) no trae uno explícito — mismo criterio que `sheetDefault` en template-catalogo.ts. */
+const SHEET_LABEL_DEFAULT: Record<string, string> = {
+  clientes: "Clientes",
+  transportistas: "Transportes",
+  choferes: "Choferes",
+  vehiculos: "Vehículos",
+  viajes: "Viajes",
+};
 
 @Injectable()
 export class ImportacionesService {
@@ -46,6 +58,7 @@ export class ImportacionesService {
     private readonly vehiculosProcessor: VehiculosProcessor,
     private readonly iaTemplateSuggestion: IaTemplateSuggestionService,
     private readonly vehiculosService: VehiculosService,
+    private readonly tenantFieldConfig: TenantFieldConfigService,
   ) {
     this.processors = {
       viajes: this.viajesProcessor,
@@ -138,12 +151,17 @@ export class ImportacionesService {
     const headersNoMapeados = headersExcel.filter(
       (h) =>
         !config.columns.some(
-          (c) => c.excelHeader.toLowerCase() === h.toLowerCase(),
+          (c) =>
+            c.excelHeader.toLowerCase() === h.toLowerCase() ||
+            c.excelHeaderAliases?.some((a) => a.toLowerCase() === h.toLowerCase()),
         ),
     );
     const columnasOpcionalesFaltantes = config.columns
       .filter(
-        (c) => !c.required && !headersExcelLower.has(c.excelHeader.toLowerCase()),
+        (c) =>
+          !c.required &&
+          !headersExcelLower.has(c.excelHeader.toLowerCase()) &&
+          !(c.excelHeaderAliases?.some((a) => headersExcelLower.has(a.toLowerCase()))),
       )
       .map((c) => c.excelHeader);
 
@@ -202,6 +220,25 @@ export class ImportacionesService {
       );
       result.advertenciasFacturasDuplicadas =
         await this.viajesProcessor.detectarFacturasDuplicadas(valid, tenantId);
+    } else if (processorModulo?.filasNuevas) {
+      const nuevas = await processorModulo.filasNuevas(valid, tenantId);
+      const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
+      result.filasDetalle = valid.map((v) => {
+        const raw = parsedByRow.get(v._rowNum);
+        const campos = config.columns
+          .filter(
+            (c) =>
+              raw &&
+              raw[c.field] != null &&
+              String(raw[c.field]).trim() !== "",
+          )
+          .map((c) => ({
+            campo: c.field,
+            label: c.excelHeader,
+            valor: String(raw![c.field]).trim(),
+          }));
+        return { fila: v._rowNum, esNuevo: nuevas.has(v._rowNum), campos };
+      });
     }
 
     return result;
@@ -278,8 +315,8 @@ export class ImportacionesService {
       if (faltan) {
         throw new BadRequestException(
           "Hay filas sin " +
-            columnasAdvertencia.map((c) => c.excelHeader).join("/") +
-            " — confirmá que querés importarlas igual.",
+          columnasAdvertencia.map((c) => c.excelHeader).join("/") +
+          " — confirmá que querés importarlas igual.",
         );
       }
     }
@@ -296,8 +333,8 @@ export class ImportacionesService {
       if (duplicadas.length > 0) {
         throw new BadRequestException(
           "Hay números de factura repetidos entre varios viajes nuevos (" +
-            duplicadas.map((d) => d.numero).join(", ") +
-            ") — confirmá que querés unificarlos en una sola factura.",
+          duplicadas.map((d) => d.numero).join(", ") +
+          ") — confirmá que querés unificarlos en una sola factura.",
         );
       }
     }
@@ -443,9 +480,72 @@ export class ImportacionesService {
     });
   }
 
-  /** Catálogo fijo de campos importables de un módulo — fuente de verdad para la UI de configuración de templates. */
-  getCatalogoCampos(modulo: string) {
-    return TEMPLATE_CATALOGO[modulo] ?? [];
+  /**
+   * Catálogo de campos importables de un módulo — se arma desde Prisma +
+   * overlays, y se filtra con los campos que el tenant tiene visibles en su
+   * formulario de alta correspondiente (`tenant-field-config`). Módulos sin
+   * contraparte ahí (ej. `choferes`) no se filtran — se muestran todos.
+   */
+  async getCatalogoCampos(modulo: string, tenantId: string) {
+    const columnas = getCatalogoColumnas(modulo);
+    const altaFormulario = getAltaFormularioDeModulo(modulo);
+    if (!altaFormulario) return columnas;
+
+    const config = await this.tenantFieldConfig.getConfigEfectiva(
+      tenantId,
+      altaFormulario.modulo,
+      altaFormulario.formulario,
+    );
+    const ocultos = new Set(config.filter((c) => !c.visible).map((c) => c.campo));
+    return columnas.filter((c) => !ocultos.has(c.field));
+  }
+
+  /**
+   * Columnas que el importador va a esperar de cada módulo si el tenant
+   * sube un Excel ahora mismo — usa el template propio si ya configuró uno
+   * (`ImportTemplate` activo), o el default si no. A diferencia de
+   * `getActiveTemplate()` (usada por `preview()`), esta consulta es de solo
+   * lectura: no crea ningún `ImportTemplate` — se llama antes de que el
+   * usuario suba nada, no tiene sentido dejar filas de más en la tabla por
+   * módulos que capaz nunca termine importando.
+   */
+  async getColumnasEsperadas(tenantId: string): Promise<ColumnasEsperadasModulo[]> {
+    const modulos = ["clientes", "transportistas", "choferes", "vehiculos", "viajes"];
+    const templates = await this.prisma.importTemplate.findMany({
+      where: { tenantId, modulo: { in: modulos }, activo: true },
+    });
+    const templatePorModulo = new Map(templates.map((t) => [t.modulo, t]));
+
+    return modulos.map((modulo) => {
+      const template = templatePorModulo.get(modulo);
+      const config = template
+        ? (template.config as unknown as TemplateConfig)
+        : construirConfigPorDefecto(modulo);
+      const catalogo = getCatalogoColumnas(modulo);
+
+      const columnas: ColumnaEsperada[] = (config?.columns ?? []).map((c) => {
+        const enCatalogo = catalogo.find((cat) => cat.field === c.field);
+        const col: ColumnaEsperada = {
+          excelHeader: c.excelHeader,
+          campoLabel: enCatalogo?.campoLabel ?? c.field,
+          tipo: c.type,
+          requerido: !!c.required,
+        };
+        if (c.warnIfEmpty) col.recomendado = true;
+        if (c.allowedValues) col.allowedValues = c.allowedValues;
+        if (c.lookupModel) col.lookupModel = c.lookupModel;
+        return col;
+      });
+
+      return {
+        modulo,
+        sheet:
+          (typeof config?.sheet === "string" ? config.sheet : undefined) ??
+          SHEET_LABEL_DEFAULT[modulo] ??
+          modulo,
+        columnas,
+      };
+    });
   }
 
   /**
@@ -456,7 +556,7 @@ export class ImportacionesService {
     modulo: string,
     buffer: Buffer,
   ): Promise<SugerenciaTemplate> {
-    const catalogo = this.getCatalogoCampos(modulo);
+    const catalogo = getCatalogoColumnas(modulo);
     if (catalogo.length === 0) {
       throw new BadRequestException(
         `No hay catálogo de campos definido para el módulo "${modulo}".`,
@@ -570,6 +670,78 @@ export class ImportacionesService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /**
+   * Nombres reales de Cliente/Transportista/Chofer para los ids ya resueltos
+   * por el lookup (`ValidatedRow.clienteId`/`transportistaId`/`choferId`) —
+   * usado por `buildViajesPreview` para mostrar el NOMBRE en el preview en
+   * vez del texto crudo de la celda (que puede ser un CUIT/DNI, ver
+   * `nombreLookupResuelto`). Ids `__pending__...` (entidad que se va a crear
+   * recién al confirmar) se resuelven aparte, no llegan a esta consulta.
+   */
+  private async resolverNombresLookup(
+    valid: ValidatedRow[],
+    tenantId: string,
+  ): Promise<{
+    clientes: Map<string, string>;
+    transportistas: Map<string, string>;
+    choferes: Map<string, string>;
+  }> {
+    const esIdReal = (v: unknown): v is string =>
+      typeof v === "string" && v !== "" && !v.startsWith("__pending__");
+
+    const idsClientes = new Set<string>();
+    const idsTransportistas = new Set<string>();
+    const idsChoferes = new Set<string>();
+    for (const row of valid) {
+      if (esIdReal(row.clienteId)) idsClientes.add(row.clienteId);
+      if (esIdReal(row.transportistaId)) idsTransportistas.add(row.transportistaId);
+      if (esIdReal(row.transportistaEfectivoId))
+        idsTransportistas.add(row.transportistaEfectivoId as string);
+      if (esIdReal(row.choferId)) idsChoferes.add(row.choferId);
+    }
+
+    const [clientesRows, transportistasRows, choferesRows] = await Promise.all([
+      idsClientes.size > 0
+        ? this.prisma.cliente.findMany({
+          where: { tenantId, id: { in: [...idsClientes] } },
+          select: { id: true, nombre: true },
+        })
+        : Promise.resolve([]),
+      idsTransportistas.size > 0
+        ? this.prisma.transportista.findMany({
+          where: { tenantId, id: { in: [...idsTransportistas] } },
+          select: { id: true, nombre: true },
+        })
+        : Promise.resolve([]),
+      idsChoferes.size > 0
+        ? this.prisma.chofer.findMany({
+          where: { tenantId, id: { in: [...idsChoferes] } },
+          select: { id: true, nombre: true },
+        })
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      clientes: new Map(clientesRows.map((c) => [c.id, c.nombre])),
+      transportistas: new Map(transportistasRows.map((t) => [t.id, t.nombre])),
+      choferes: new Map(choferesRows.map((c) => [c.id, c.nombre])),
+    };
+  }
+
+  /** Resuelve el id de un lookup (o placeholder `__pending__<modelo>__<original>` de una entidad a crear) a su nombre para mostrar. */
+  private nombreLookupResuelto(
+    valor: unknown,
+    nombresPorId: Map<string, string>,
+  ): string | null {
+    if (valor == null || typeof valor !== "string" || valor === "") return null;
+    if (valor.startsWith("__pending__")) {
+      const resto = valor.slice("__pending__".length);
+      const idx = resto.indexOf("__");
+      return (idx >= 0 ? resto.slice(idx + 2) : resto) || null;
+    }
+    return nombresPorId.get(valor) ?? null;
+  }
+
   private async buildViajesPreview(
     parsed: ParsedRow[],
     valid: ValidatedRow[],
@@ -589,6 +761,7 @@ export class ImportacionesService {
       valid,
       tenantId,
     );
+    const nombresLookup = await this.resolverNombresLookup(valid, tenantId);
     const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
     const newClienteNames = new Set(
       created.clientes.map((n) => n.toLowerCase()),
@@ -605,9 +778,6 @@ export class ImportacionesService {
     const toStr = (v: unknown): string | null =>
       v != null && String(v).trim() ? String(v).trim() : null;
 
-    const toNum = (v: unknown): number | null =>
-      v != null && !isNaN(Number(v)) ? Number(v) : null;
-
     const toDateStr = (v: unknown): string | null => {
       if (!v) return null;
       if (v instanceof Date) return v.toLocaleDateString("es-AR");
@@ -618,19 +788,42 @@ export class ImportacionesService {
       const p = parsedByRow.get(validRow._rowNum);
       if (!p) continue;
 
-      const cliente = toStr(p.clienteId) ?? "";
-      const transporte = toStr(p.transportistaId);
+      // Cliente/Transporte/Chofer se muestran por su NOMBRE resuelto (el que
+      // realmente matcheó el lookup), no el texto crudo de la celda — algunos
+      // tenants (ej. NyM) tipean el CUIT/DNI ahí en vez del nombre (ver
+      // LOOKUP_CLIENTE_VIAJE/LOOKUP_TRANSPORTISTA_VIAJE/LOOKUP_CHOFER en
+      // template-catalogo.ts), y mostrar la celda cruda comparaba "Nombre
+      // actual → CUIT" en el diff, como si el nombre hubiera cambiado a un
+      // número. Bug real reportado por el usuario, ago 2026.
+      const cliente =
+        this.nombreLookupResuelto(validRow.clienteId, nombresLookup.clientes) ??
+        "";
+      const transporte = this.nombreLookupResuelto(
+        validRow.transportistaId,
+        nombresLookup.transportistas,
+      );
       if (cliente) clienteNamesSet.add(cliente);
       if (transporte) transportistaNamesSet.add(transporte);
 
-      const monto = toNum(p.monto);
-      const precioTransp = toNum(p.precioTransportistaExterno);
+      // Igual que Cliente/Transporte/Chofer: se muestra el valor REALMENTE
+      // calculado (mismo método que usa el processor al guardar), no la
+      // celda cruda de "Monto"/"Flete" — con templates de desglose
+      // (cantidadFactura × precioUnitarioFactura, o su equivalente del
+      // transportista) esas columnas ni existen en el Excel, así que leerlas
+      // crudas mostraba "— " como si el import fuera a borrar el monto de un
+      // viaje existente. Bug real reportado por el usuario, ago 2026.
+      const monto = this.viajesProcessor.resolveMonto(validRow);
+      const precioTransp =
+        this.viajesProcessor.resolvePrecioTransportistaExterno(validRow);
       const nroFactura = toStr(p.nroFactura);
 
       const nuevoValor = {
         cliente,
         transporte,
-        chofer: toStr(p.choferId),
+        chofer: this.nombreLookupResuelto(
+          validRow.choferId,
+          nombresLookup.choferes,
+        ),
         vehiculo: toStr(p.vehiculoId),
         origen: toStr(p.origen),
         destino: toStr(p.destino),
@@ -744,32 +937,65 @@ export class ImportacionesService {
   }
 
   private async getActiveTemplate(tenantId: string, modulo: string) {
-    const template = await this.prisma.importTemplate.findFirst({
+    let template = await this.prisma.importTemplate.findFirst({
       where: { tenantId, modulo, activo: true },
     });
-    if (template) return template;
 
-    // Sin template propio todavía: se genera uno por defecto a partir del
-    // catálogo fijo (mismos encabezados sugeridos que ve el superadmin), para
-    // que ningún módulo quede bloqueado por falta de configuración. Queda
-    // guardado como un ImportTemplate real, editable después desde la pestaña
-    // Templates igual que cualquier otro.
-    const config = construirConfigPorDefecto(modulo);
-    if (!config) {
-      throw new NotFoundException(
-        `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
-      );
+    if (!template) {
+      // Sin template propio todavía: se genera uno por defecto a partir del
+      // catálogo fijo (mismos encabezados sugeridos que ve el superadmin), para
+      // que ningún módulo quede bloqueado por falta de configuración. Queda
+      // guardado como un ImportTemplate real, editable después desde la pestaña
+      // Templates igual que cualquier otro.
+      const config = construirConfigPorDefecto(modulo);
+      if (!config) {
+        throw new NotFoundException(
+          `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
+        );
+      }
+      template = await this.prisma.importTemplate.upsert({
+        where: { tenantId_modulo: { tenantId, modulo } },
+        create: {
+          tenantId,
+          modulo,
+          nombre: `Template ${modulo} (por defecto)`,
+          config: config as unknown as object,
+          activo: true,
+        },
+        update: {},
+      });
     }
-    return this.prisma.importTemplate.upsert({
-      where: { tenantId_modulo: { tenantId, modulo } },
-      create: {
-        tenantId,
-        modulo,
-        nombre: `Template ${modulo} (por defecto)`,
-        config: config as unknown as object,
-        activo: true,
-      },
-      update: {},
-    });
+
+    // Inyectar columnas faltantes y alias desde el catálogo en tiempo de ejecución
+    const configData = template.config as unknown as TemplateConfig;
+    if (configData && configData.columns) {
+      const catalogo = getCatalogoColumnas(modulo);
+
+      // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
+      for (const catCol of catalogo) {
+        if (!configData.columns.some((c) => c.field === catCol.field)) {
+          configData.columns.push({
+            field: catCol.field,
+            excelHeader: catCol.defaultExcelHeader,
+            excelHeaderAliases: catCol.excelHeaderAliases,
+            type: catCol.type,
+            required: catCol.systemRequired,
+          });
+        }
+      }
+
+      // 2. Inyectar alias a las columnas existentes (en caso de que hayan sido actualizadas en el código)
+      for (const col of configData.columns) {
+        const catCol = catalogo.find((c) => c.field === col.field);
+        if (
+          catCol?.excelHeaderAliases &&
+          (!col.excelHeaderAliases || col.excelHeaderAliases.length === 0)
+        ) {
+          col.excelHeaderAliases = catCol.excelHeaderAliases;
+        }
+      }
+    }
+
+    return template;
   }
 }

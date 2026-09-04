@@ -97,11 +97,18 @@ export class NotificacionesCronService {
         continue;
       }
 
-      await this.emailService.send({
+      const enviado = await this.emailService.send({
         to: destinatarios,
         subject: `Vialto — ${item.label}${nuevas.length > 1 ? ` (${nuevas.length})` : ''}`,
         html: this.buildHtml(item.label, nuevas),
       });
+
+      if (!enviado) {
+        this.logger.warn(
+          `[${tenantId}] ${item.tipo}: el email no se pudo enviar — no se marca como notificado, se reintenta en la próxima corrida.`,
+        );
+        continue;
+      }
 
       await this.prisma.notificacionEnvio.createMany({
         data: nuevas.map((c) => ({

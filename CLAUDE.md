@@ -113,7 +113,7 @@ Ejemplos de uso:
 2. **El `tenantId` siempre viene del token de Clerk** (`orgId`) — nunca del body del request.
 3. **Todo endpoint de módulo DEBE tener `@UseGuards(ModuleGuard)`** con el nombre del módulo.
 4. **Nuevos módulos van en `src/modules/{nombre}/`** con su propio NestJS module, controller, service y schema Prisma.
-5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí (salvo `reportes`).
+5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí.
 6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** de Neon (entorno QA); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
    - **OJO — la base develop es compartida entre ramas.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
 
@@ -280,10 +280,7 @@ src/
     stock/                  ← ✅ implementado — operaciones (ingreso/egreso/división), lotes, presentaciones por producto, remito interno
     combustible/            ← ✅ implementado — CRUD, detección de cargas sospechosas, dashboard, export Excel, fotos (Cloudinary), API paralela para choferes vía chofer-auth. El tag Swagger "[Próximamente]" quedó desactualizado: el módulo está activo.
     mantenimiento/          ← ✅ implementado (parcial) — CRUD de `Intervencion` en Postgres; el checklist diario en Firestore que describe este documento NO está implementado todavía
-    remitos/                ← ✅ implementado — CRUD de `Remito` con firma (`firmaUrl`); el flujo PWA de firma desde el celular es responsabilidad del frontend, no confirmado acá
-    liquidaciones-arca/     ← ✅ implementado — OJO: el slug de módulo real (`RequireModule`, `Tenant.modules`) es `integracion-arca`, no `liquidaciones-arca` — ver nota de VIALTO_MODULES arriba
-    turnos/                 ← 🔲 stub real — solo un endpoint estático (`GET turnos/estado`), sin modelo Prisma ni service (Fase 7 — Pereyra, módulo aislado)
-    reportes/               ← ⚠️ parcial — 2 endpoints reales (`resumen`, `tablero-general`) con agregaciones cross-módulo; falta el resto de la visión (Fase 8: builder de reportes, exports)
+    liquidaciones-arca/     ← ✅ implementado — OJO: los slugs de módulo reales (`RequireModule`, `Tenant.modules`) son `emision-facturas-arca` y `emision-liquido-producto-arca` (divididos en ago 2026, antes era un solo `integracion-arca`), no `liquidaciones-arca` — ver nota de VIALTO_MODULES arriba y la sección propia del módulo más abajo
     dashboard/              ← ✅ implementado — KPIs y alertas del tenant (`GET dashboard/resumen`); no es un módulo vendible (no gateado por `RequireModule`, disponible para todo tenant)
     importaciones/          ← ✅ implementado — motor de importación desde Excel (parser/validator/processors por módulo), preview/confirm, templates y logs; uso admin, no gateado como módulo vendible
     notificaciones/         ← ✅ implementado — alertas por email vía Resend, catálogo + config on/off por tenant; ver sección propia más abajo
@@ -298,7 +295,7 @@ src/
   main.ts
 ```
 
-> **Nota sobre `turnos`:** Módulo para sindicatos/cooperativas de choferes (Pereyra). No es para empresas de logística. Se desarrolla aislado y no se incluye en los planes standard de Vialto por ahora.
+> **Nota sobre `turnos`:** Módulo para sindicatos/cooperativas de choferes (Pereyra), no para empresas de logística — se pensaba desarrollar aislado, fuera de los planes standard de Vialto. El stub que existía (`GET turnos/estado`, sin modelo Prisma ni service) se borró por completo en ago 2026 — código y slug en `VIALTO_MODULES` — porque no tenía nada real detrás y Pereyra sigue "🔲 Pendiente" (ver "Clientes actuales y estado"). Si se retoma, es desde cero.
 >
 > Los ✅/⚠️/🔲 de arriba describen **estado del código**, no si el cliente ya lo tiene contratado/activo — eso está en la tabla de "Clientes actuales y estado" más abajo, que puede ir por detrás o por delante del código según el momento comercial.
 
@@ -332,7 +329,7 @@ model Viaje {
   // código nuevo; queda deprecado en la tabla hasta una migración de limpieza futura.
   etapa                            String    @default("pendiente") // pendiente | en_curso | finalizado | cancelado
   facturacionEstado                String    @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
-  liquidacionEstado                String?   // null si no aplica (sin transportista externo o tenant sin integracion-arca); sino: sin_liquidar | esperando_afip | liquidado | error_afip | anulado
+  liquidacionEstado                String?   // null si no aplica (sin transportista externo o tenant sin emision-liquido-producto-arca); sino: sin_liquidar | esperando_afip | liquidado | error_afip | anulado
   clienteId                        String
   transportistaId                  String?   // transportista contratante
   transportistaEfectivoId          String?   // quien realmente hace el flete, si difiere del contratante
@@ -419,13 +416,13 @@ El viejo campo único `Viaje.estado` mezclaba tres preguntas distintas (en qué 
 
 - **`etapa`**: `pendiente | en_curso | finalizado | cancelado`. Se mueve solo por fechas (`viajes-auto-estado.service.ts`) o edición manual; nunca la tocan los flujos de facturación/liquidación.
 - **`facturacionEstado`**: `sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado`.
-- **`liquidacionEstado`**: `null` (no aplica: sin transportista externo o tenant sin `integracion-arca`) | `sin_liquidar | esperando_afip | liquidado | error_afip | anulado`.
+- **`liquidacionEstado`**: `null` (no aplica: sin transportista externo o tenant sin `emision-liquido-producto-arca`) | `sin_liquidar | esperando_afip | liquidado | error_afip | anulado`.
 
 **Sync**: `modules/viajes/viaje-estado-financiero.ts` expone las funciones puras `mapFacturacionEstado`/`mapLiquidacionEstado` (calculan el indicador a partir de `Factura.arcaEstado` / `Liquidacion.estado` + si el tenant tiene ARCA) y las funciones que tocan DB `syncFacturacionEstadoViaje(s)`/`syncLiquidacionEstadoViaje(s)`. **Toda** operación que crea, vincula, desvincula, emite, anula o elimina una Factura o Liquidación debe llamar al sync correspondiente para los viajes afectados — ya está wired en `facturacion.service.ts` (create/update/removeFactura/pagos/marcarComoCobrada) y `liquidaciones.service.ts` (create/emitir/anular/deleteLiquidacion, emitir/anularFacturaArca). Un bug histórico real (re-facturar tras anular quedaba bloqueado) fue justamente un `anularFacturaArca` que no llamaba al sync — si se agrega un nuevo punto de mutación de Factura/Liquidación, hay que sumar la llamada ahí también.
 
 **También hay que llamar `syncLiquidacionEstadoViaje` al CREAR un viaje** (`viajes.service.ts#create` y `importaciones/processors/viajes.processor.ts#insert`), aunque todavía no tenga ninguna Liquidación — `liquidacionEstado` no tiene `@default` en el schema (a propósito, porque su valor correcto depende de si aplica o no), así que sin esa llamada un viaje con transportista externo en un tenant con ARCA queda en `null` en vez de `sin_liquidar` hasta el primer evento de liquidación. Bug real encontrado y corregido en ago 2026 (afectaba viajes recién creados de NyM, bloqueando el flujo de liquidación).
 
-**Tenant sin `integracion-arca`**: `liquidacionEstado` es `null` únicamente si el viaje no tiene transportista externo — **no** por falta de ARCA. `CrearLiquidacionManualModal` con `hasArca=false` sigue creando una `Liquidacion` real (registro manual, queda en `estado: 'borrador'` para siempre porque no hay paso de "emitir" sin ARCA), así que estos tenants sí tienen liquidaciones genuinas que hay que reflejar. `mapLiquidacionEstado(estado, tieneArca)` maneja esto: con `tieneArca=false`, cualquier registro no-anulado (`borrador`, y por herencia `pendiente_cae`/`autorizado`/`error` si quedaron de datos viejos) mapea directo a `liquidado` — nunca a vocabulario de AFIP (`esperando_afip`/`error_afip`). Bug real encontrado y corregido en ago 2026: la versión anterior forzaba `liquidacionEstado = null` para todo tenant sin ARCA (confundiendo "no aplica AFIP" con "no aplica liquidación"), lo que hacía que `FacturarSelectorModal` mostrara "Liquidación a transportista" como **siempre completada** ("Ya registrado") incluso en viajes sin ninguna liquidación real — bloqueando de hecho la creación de liquidaciones manuales nuevas. `facturacionEstado` sigue el mismo criterio y no tiene este problema porque nunca dependió de si existía o no un registro: nunca expone valores AFIP (`esperando_afip`/`error_afip`) para tenants sin ARCA — cae directo a `facturado`/`cobrado`/`anulado`.
+**Tenant sin `emision-liquido-producto-arca`**: `liquidacionEstado` es `null` únicamente si el viaje no tiene transportista externo — **no** por falta de ARCA. `CrearLiquidacionManualModal` con `hasArca=false` sigue creando una `Liquidacion` real (registro manual, queda en `estado: 'borrador'` para siempre porque no hay paso de "emitir" sin ARCA), así que estos tenants sí tienen liquidaciones genuinas que hay que reflejar. `mapLiquidacionEstado(estado, tieneArca)` maneja esto: con `tieneArca=false`, cualquier registro no-anulado (`borrador`, y por herencia `pendiente_cae`/`autorizado`/`error` si quedaron de datos viejos) mapea directo a `liquidado` — nunca a vocabulario de AFIP (`esperando_afip`/`error_afip`). Bug real encontrado y corregido en ago 2026: la versión anterior forzaba `liquidacionEstado = null` para todo tenant sin ARCA (confundiendo "no aplica AFIP" con "no aplica liquidación"), lo que hacía que `FacturarSelectorModal` mostrara "Liquidación a transportista" como **siempre completada** ("Ya registrado") incluso en viajes sin ninguna liquidación real — bloqueando de hecho la creación de liquidaciones manuales nuevas. `facturacionEstado` sigue el mismo criterio y no tiene este problema porque nunca dependió de si existía o no un registro: nunca expone valores AFIP (`esperando_afip`/`error_afip`) para tenants sin ARCA — cae directo a `facturado`/`cobrado`/`anulado`.
 
 **Edit-lock por campo, no todo-o-nada**: `viajes.service.ts` define `CAMPOS_FISCALES_VIAJE` (cliente, transportista, montos, gastos, pagos a transportista) — bloqueados con `ConflictException` mientras `facturacionEstado ∉ {sin_facturar, anulado}` o `liquidacionEstado ∉ {null, sin_liquidar, anulado}`. Los campos operativos (fechas, km, litros, chofer, vehículos, observaciones, **incluida `etapa`**) siempre son editables, esté o no facturado/liquidado.
 
@@ -459,9 +456,9 @@ Ejemplo: precio neto $1.100.000, 21% → $1.331.000 (cuánto se le paga en efect
 - **Fuera de alcance a propósito** (siguen mostrando el neto, sin engrosar): los agregados SQL `_sum` de `getStats()` (`viajes.service.ts`) y `sumAPagarPorMoneda`/`sumAPagarTransportistas` (`dashboard.service.ts`) — son `_sum: { precioTransportistaExterno: true }` a nivel de Prisma aggregate, no iteran fila por fila, así que aplicar el engrosado ahí requeriría restructurar la query; y los documentos MIC/CRT, que reflejan el dato operativo tal cual se cargó. Si en el futuro se decide corregir esto, hay que traer las filas y engrosar en memoria (mismo patrón que ya usa `dashboard-financiero.service.ts`).
 - **Aplica a ambos modos de carga**: precio simple (`precioTransportistaExterno`) y modo desglose (`cantidadTransportista × precioUnitarioTransportista`, usado por NyM/granel).
 
-**Lock angosto, distinto al resto de `CAMPOS_FISCALES_VIAJE`**: `precioTransportistaIvaIncluidoPct` **NO** está en `CAMPOS_FISCALES_VIAJE` — tiene su propio guard en `update()`, bloqueado **solo** por `liquidacionEstado` (no por `facturacionEstado`). Es intencional: facturación al cliente y liquidación al transportista son ejes independientes, y bloquear este campo por una factura al cliente (sin relación con el transportista) dejaría el campo atascado para siempre en viajes viejos de un tenant que recién adopta `integracion-arca`. Una vez que el viaje tiene liquidación vigente, el % queda fijo porque el "pago en efectivo" ya se le comunicó al transportista con ese valor — cambiarlo después desincronizaría el acordado ya conocido (aunque, como se explica arriba, la Liquidación en sí nunca leyó este %). Si se agrega un campo nuevo relacionado solo al transportista (no al cliente), evaluar si también necesita este lock angosto en vez de sumarlo sin más a `CAMPOS_FISCALES_VIAJE`.
+**Lock angosto, distinto al resto de `CAMPOS_FISCALES_VIAJE`**: `precioTransportistaIvaIncluidoPct` **NO** está en `CAMPOS_FISCALES_VIAJE` — tiene su propio guard en `update()`, bloqueado **solo** por `liquidacionEstado` (no por `facturacionEstado`). Es intencional: facturación al cliente y liquidación al transportista son ejes independientes, y bloquear este campo por una factura al cliente (sin relación con el transportista) dejaría el campo atascado para siempre en viajes viejos de un tenant que recién adopta `emision-liquido-producto-arca`. Una vez que el viaje tiene liquidación vigente, el % queda fijo porque el "pago en efectivo" ya se le comunicó al transportista con ese valor — cambiarlo después desincronizaría el acordado ya conocido (aunque, como se explica arriba, la Liquidación en sí nunca leyó este %). Si se agrega un campo nuevo relacionado solo al transportista (no al cliente), evaluar si también necesita este lock angosto en vez de sumarlo sin más a `CAMPOS_FISCALES_VIAJE`.
 
-**Frontend**: input numérico "% de IVA ya incluido en el precio" (`ViajeCreatePage.tsx`, `ViajeEditModal.tsx`; `0` o vacío = no suma IVA), bloqueado solo cuando `liquidacionVigente` (mismo criterio de arriba). El trío "Pago bruto / Pago neto / Monto IVA" del modo desglose (`ViajeEditModal.tsx`, `ViajeCreatePage.tsx`) muestra: bruto = `engrosarConIva(neto, pct)` (lo que se paga en efectivo, mayor), neto = cantidad × precio unitario tal cual se tipeó (el valor guardado), IVA = bruto − neto. `CrearLiquidacionManualModal.tsx` ya no ajusta su resumen por este %, porque la Liquidación tampoco lo hace — el bruto ahí es la suma simple de `precioTransportistaExterno` de los viajes seleccionados. Ningún patrón de advertencia por módulo ARCA aplica a este campo (no tiene incompatibilidad con `integracion-arca`).
+**Frontend**: input numérico "% de IVA ya incluido en el precio" (`ViajeCreatePage.tsx`, `ViajeEditModal.tsx`; `0` o vacío = no suma IVA), bloqueado solo cuando `liquidacionVigente` (mismo criterio de arriba). El trío "Pago bruto / Pago neto / Monto IVA" del modo desglose (`ViajeEditModal.tsx`, `ViajeCreatePage.tsx`) muestra: bruto = `engrosarConIva(neto, pct)` (lo que se paga en efectivo, mayor), neto = cantidad × precio unitario tal cual se tipeó (el valor guardado), IVA = bruto − neto. `CrearLiquidacionManualModal.tsx` ya no ajusta su resumen por este %, porque la Liquidación tampoco lo hace — el bruto ahí es la suma simple de `precioTransportistaExterno` de los viajes seleccionados. Ningún patrón de advertencia por módulo ARCA aplica a este campo (no tiene incompatibilidad con `emision-liquido-producto-arca`).
 
 **Migraciones**: `20260818120000_viaje_precio_transportista_incluye_iva` (v1, boolean, descartada) seguida de `20260819120000_viaje_precio_transportista_iva_incluido_pct` (dropea el boolean, agrega el float que sigue vigente) — sin dato de producción en juego, la v1 nunca llegó a producción. La v2→v3 (neteo→engrosar) fue puramente un cambio de interpretación en código, sin tocar el schema ni requerir migración nueva.
 
@@ -472,7 +469,7 @@ Ejemplo: precio neto $1.100.000, 21% → $1.331.000 (cuánto se le paga en efect
 ---
 
 ### `facturacion` — Facturación y cobranzas
-Se construye sobre `viajes` (relación N:M, una factura puede cubrir varios viajes). Incluye moneda, IVA, comprobante adjunto y los campos de emisión ARCA (nulos si el tenant no tiene `integracion-arca`).
+Se construye sobre `viajes` (relación N:M, una factura puede cubrir varios viajes). Incluye moneda, IVA, comprobante adjunto y los campos de emisión ARCA (nulos si el tenant no tiene `emision-facturas-arca`).
 
 ```prisma
 model Factura {
@@ -483,15 +480,17 @@ model Factura {
   clienteId        String?
   transportistaId  String?
   viajes           Viaje[]
-  importe          Float
+  importe          Float          // neto (suma completa de viajes)
+  ivaMonto         Float?         // IVA persistido; solo por-tramo sin ARCA — ver abajo
   moneda           String         @default("ARS") // ARS | USD
   fechaEmision     DateTime
   fechaVencimiento DateTime?
   estado           String         @default("pendiente") // valor crudo en BD, no autoritativo — ver "Estado de una Factura en lectura" abajo
   diferencia       Float?
   ivaPct           Float?         @default(21)
+  facturarPorTramo Boolean        @default(false)
   comprobanteUrl   String?        // PDF/imagen en Cloudinary
-  // Campos ARCA — nulos para tenants sin módulo integracion-arca
+  // Campos ARCA — nulos para tenants sin módulo emision-facturas-arca
   cbteTipo         Int?           // 1=Factura A, 6=Factura B
   cbteNro          Int?
   ptoVenta         Int?
@@ -526,11 +525,23 @@ model Pago {
 }
 ```
 
+#### Facturas por tramo (LSF / Uruguay) — IVA persistido (sep 2026)
+
+Pedido real de LSF: facturan a clientes separando cada viaje en tramos con distinto IVA (tramo AR exento, tramo UY 22%), como exige la normativa uruguaya. El PDF lo emiten ellos afuera y lo suben como comprobante — Vialto no arma ese PDF.
+
+- **`importe` (neto)**: siempre la suma **completa** de los viajes (`cantidadFactura × precioUnitarioFactura` si hay). Los tramos **no reemplazan** el monto del viaje. Si LSF carga solo el tramo gravado (factura A 18), el resto del viaje no se pierde: queda en el neto y se trata como tramo implícito con `ivaPct` de cabecera (en LSF es 0% = parte exenta). **No** se valida que la suma de tramos coincida con el viaje ("completar solo", no "exigir todos los tramos").
+- **`ivaMonto`**: IVA total **persistido al guardar** (create/update recalculan neto + IVA juntos). Solo se llena en facturas por tramo de tenants **sin** `emision-facturas-arca`. `null` = no aplica, tenant ARCA, o todavía no backfilleado — en ese caso el cobro recalcula en vivo.
+- **Cobro** (`importeOperativoFactura` / `importeACobrar` / `saldoPendiente` / `cobrado`): tenants sin ARCA + por tramo = `importe + ivaMonto` (o recálculo live si `ivaMonto` es null). Tenants con ARCA y facturas simples **no cambian**: el cobro sigue midiendo el neto (lo que se declara ante AFIP).
+- Lectura: todas las pantallas y el dashboard financiero leen esos dos valores guardados; no rearman la cuenta tramo a tramo cada uno por su lado.
+- Histórico: `npm run backfill:factura-iva-tramos:dry` (preview) / `npm run backfill:factura-iva-tramos` (aplica). Recalcula `importe`/`ivaMonto` y lista las facturas que quedan con diferencia a cobrar para que LSF confirme si ya se cobró afuera.
+
+---
+
 #### Estado de una Factura en lectura — dos ejes independientes, badges aditivos (ago 2026)
 
 `computeEstadoFacturaLectura` (`shared/util/factura-estado-lectura.ts`) es la única fuente de verdad del estado de una Factura al leerla (el valor crudo en la columna `estado` no se mantiene). Separa dos preguntas que antes se mezclaban en un solo campo:
 
-- **`estado`** (ciclo de vida del comprobante): `borrador | esperando_afip | facturado | error_afip | anulado`. Sigue el mismo orden de prioridad que `mapFacturacionEstado` en `viaje-estado-financiero.ts` — mantener ambos sincronizados si cambia la regla. Para tenants sin `integracion-arca` siempre es `facturado` (no hay borrador ni error AFIP fuera de ese módulo).
+- **`estado`** (ciclo de vida del comprobante): `borrador | esperando_afip | facturado | error_afip | anulado`. Sigue el mismo orden de prioridad que `mapFacturacionEstado` en `viaje-estado-financiero.ts` — mantener ambos sincronizados si cambia la regla. Para tenants sin `emision-facturas-arca` siempre es `facturado` (no hay borrador ni error AFIP fuera de ese módulo).
 - **`cobrado`** / **`vencida`** (booleanos, eje de cobro, independiente del ciclo de vida): se puede estar cobrado en cualquier `estado` (ej. cobrado antes de anular); `vencida` solo puede ser `true` si no está cobrada y ya se llegó a `facturado`.
 
 **Regla de UI obligatoria**: el badge de `cobrado`/`vencida` es **aditivo** — se muestra junto al badge de `estado`, nunca lo reemplaza (mismo criterio para `AmbienteTestBadge`, ver frontend). Implementado en `FacturacionTenantPage.tsx` (`renderEstadoBadges`), `FacturaViewModal.tsx` y `FacturaEditModal.tsx` — reusar ese patrón en pantallas nuevas en vez de volver a un único badge combinado. Los labels de estos badges van en **MAYÚSCULA** (`BORRADOR`, `ESPERANDO AFIP`, `FACTURADO`, `ERROR DE AFIP`, `ANULADO`, `COBRADO`, `VENCIDA`), y el badge `ANULADO` usa `line-through` — mismo estilo gris que usa `Liquidacion.estado === 'anulado'`.
@@ -578,7 +589,7 @@ El modelo cambió de forma respecto a versiones anteriores de este documento: ya
 - **`MovimientoStock`** es el detalle línea a línea dentro de una operación: producto + presentación + `bultos`/`unidades` + `lote` opcional (también ya implementado) + vencimiento opcional.
 - **`StockItem`** es el snapshot de disponible, ahora clave por `(productoId, presentacionId, clienteId, depositoId)`.
 
-Los egresos generan un número de remito interno automático (`remitoPrefix-YYYY-NNNNN`), vía `StockEgresoRemitoConfig` + `StockRemitoSecuencia`, y pueden vincularse a un `Remito` del módulo `remitos` (`remitoId`).
+Los egresos generan un número de remito interno automático (`remitoPrefix-YYYY-NNNNN`), vía `StockEgresoRemitoConfig` + `StockRemitoSecuencia`. (El vínculo opcional `remitoId` hacia el módulo standalone `remitos` existió hasta ago 2026 — se borró junto con ese módulo, ver sección "`remitos` — eliminado" más abajo; no confundir con este remito interno, que sigue igual.)
 
 ```prisma
 model Producto {
@@ -652,7 +663,6 @@ model StockOperacion {
   fotosUrls              String[] // fotos del producto en ingresos (hasta 2, Cloudinary)
   numeroRemito           String?  // remito interno generado (ej. R-2026-00001)
   numeroRemitoProveedor  String?  // informado manualmente en ingresos
-  remitoId               String?  // vínculo opcional a Remito (módulo remitos)
   entregadoPor           String?
   destinatario           String?
   destinoFinal           String?
@@ -680,7 +690,6 @@ model MovimientoStock {
   lote                  String?
   observaciones         String?
   movimientoVinculadoId String?   // en divisiones: apunta al movimiento par (origen ↔ destino)
-  remitoId              String?
   createdBy             String    @default("")
   fecha                 DateTime
   createdAt             DateTime  @default(now())
@@ -689,7 +698,6 @@ model MovimientoStock {
   @@index([tenantId, operacionId])
   @@index([tenantId, productoId])
   @@index([tenantId, presentacionId])
-  @@index([tenantId, remitoId])
   @@index([tenantId, fecha])
 }
 
@@ -794,35 +802,27 @@ model Intervencion {
 
 ---
 
-### `remitos` — Remitos digitales (Melisa)
-CRUD del backend implementado, incluyendo `firmaUrl` para la firma del cliente. El flujo de PWA para que el chofer complete y el cliente firme desde el celular es responsabilidad del frontend — su estado no está confirmado en este documento (verificar en `vialto-frontend` antes de asumirlo). Un `Remito` puede vincularse a movimientos/operaciones de `stock` (relación inversa).
+### `remitos` — eliminado (ago 2026)
 
-```prisma
-model Remito {
-  id          String    @id @default(cuid())
-  tenantId    String
-  numero      String
-  clienteId   String
-  choferId    String?
-  vehiculoId  String?
-  descripcion String
-  fecha       DateTime
-  firmaUrl    String?   // URL en Cloudinary (firma digital del cliente)
-  estado      String    @default("emitido") // emitido | firmado | facturado
-  createdAt   DateTime  @default(now())
+Existió un módulo standalone `remitos` (modelo `Remito` con `firmaUrl` para firma digital del cliente, CRUD completo en el backend). Se borró por completo — módulo, controller/service/DTOs, modelo Prisma y las columnas `remitoId` (FK opcional, `onDelete: SetNull`) que `MovimientoStock`/`StockOperacion` tenían hacia él — porque, pese a estar terminado del lado backend, **nunca tuvo ninguna pantalla de frontend** (cero rutas, cero componentes) y ningún tenant real lo tuvo contratado en producción (solo el tenant interno de testing `CapassoTech`). Migración: `20260828164256_drop_remito_module`, aplicada en la rama `develop` de Neon.
 
-  @@unique([tenantId, numero])
-  @@index([tenantId])
-  @@index([tenantId, clienteId])
-  @@index([tenantId, estado])
-  @@index([tenantId, fecha])
-}
-```
+**No confundir con el "remito interno" de Stock**, que sigue intacto y es una feature completamente distinta: `StockOperacion.remitoUrl`/`numeroRemito`/`numeroRemitoProveedor` + `StockEgresoRemitoConfig` + `StockRemitoSecuencia` — el PDF que se genera automáticamente al hacer un egreso de stock. Ese no se tocó.
+
+Si en el futuro Melisa (Desagotes, ver "Clientes actuales y estado" más abajo) confirma como cliente y necesita remitos con firma digital del chofer/cliente vía PWA, hay que reconstruir el módulo desde cero (no queda nada reusable salvo este historial).
 
 ---
 
-### `integracion-arca` — Liquidaciones CVLP + Facturas A/B vía AFIP SDK (carpeta `liquidaciones-arca/`)
-Implementado, no planeado. **El slug de gating real es `integracion-arca`** (ver nota sobre `VIALTO_MODULES` más arriba) aunque la carpeta del módulo, los nombres de archivo y varios comentarios del schema sigan diciendo `liquidaciones-arca` — inconsistencia de nombres conocida, no corregida a propósito por decisión del equipo (jul 2026). Para cualquier `Tenant.modules` o `@RequireModule(...)` nuevo, usar siempre `integracion-arca`.
+### Liquidaciones CVLP + Facturas A/B vía AFIP SDK (carpeta `liquidaciones-arca/`)
+Implementado, no planeado. La carpeta del módulo, los nombres de archivo y varios comentarios del schema dicen `liquidaciones-arca` — inconsistencia de nombres conocida, no corregida a propósito por decisión del equipo (jul 2026).
+
+**División del módulo en dos slugs independientes (ago 2026).** Hasta ago 2026 un único slug `integracion-arca` gateaba TODO: emisión de Facturas A/B y emisión de Liquidaciones CVLP juntas, sin poder contratar una sin la otra. Se dividió en dos módulos vendibles independientes en `VIALTO_MODULES`:
+
+- **`emision-facturas-arca`** — emisión de Facturas A/B con CAE. Gatea en `liquidaciones.controller.ts`: `facturas/:facturaId/{emitir,anular,pdf,pdf-anulacion}` (y sus espejos en `platform/arca/facturas/...` de `platform.controller.ts`, sin guard propio porque ese controller es solo-superadmin). También: `facturacion.service.ts#tieneArca()`, `mapFacturacionEstado`/`syncFacturacionEstadoViaje(s)` en `viaje-estado-financiero.ts`, `dashboard.service.ts#buildAlertas()`, `factura-por-vencer.evaluator.ts`, y la mitad "facturas" de `importaciones-post-viajes.service.ts` (`preview/confirmarFacturasClientes`).
+- **`emision-liquido-producto-arca`** — emisión de Liquidaciones CVLP tipo 60. Gatea: `liquidaciones/:id/{emitir,anular,pdf,pdf-anulacion}` (y sus espejos `platform/arca/liquidaciones/...`). También: `mapLiquidacionEstado`/`syncLiquidacionEstadoViaje(s)`, `dashboard-financiero.service.ts#hasIntegracionArca` (nombre de variable sin actualizar a propósito, es interno), y la mitad "liquidaciones" de `importaciones-post-viajes.service.ts` — que además se corrigió de paso: antes exigía el módulo ARCA estricto sin aceptar `facturacion` como alternativa, ahora acepta `facturacion OR emision-liquido-producto-arca`, igual que ya aceptaba el resto del CRUD de liquidaciones.
+- **Compartido (OR de ambos)**: `GET/POST config`, `POST/DELETE config/logo`, `GET logs` — un solo `ArcaConfig` por tenant (CUIT/certificado/ambiente son del emisor, no de un tipo de comprobante puntual) y un solo `ArcaLog`. El CRUD de Liquidaciones (`GET/POST/PATCH/DELETE liquidaciones`, conceptos) sigue con su gate `facturacion OR emision-liquido-producto-arca` de siempre (liquidaciones manuales sin ARCA), solo cambió cuál de los dos slugs ARCA acepta. `upload-comprobante` acepta los tres (`facturacion`, `emision-facturas-arca`, `emision-liquido-producto-arca`).
+- **Frontend**: `canAccessIntegracionArca()` → `canAccessEmisionFacturasArca()` / `canAccessEmisionLiquidoProductoArca()` (`lib/tenantModules.ts`). Varios componentes/páginas mezclaban ambos conceptos en una sola variable `hasArca` y hubo que separarla en dos (no fue un rename mecánico) — los más riesgosos fueron `TenantHomePage.tsx` y `ViajesTenantPage.tsx` (esta última tenía una variable llamada `hasLiquidacionesArca` que en realidad controlaba el flujo de **Facturas**, no de Liquidaciones — nombre engañoso ya corregido). `ArcaConfigTenantPage.tsx` ahora oculta la sección "Puntos de venta Factura A/B" si el tenant no tiene `emision-facturas-arca`, oculta "Comisiones e IVA" y el tab "Conceptos de liquidación" si no tiene `emision-liquido-producto-arca`, y acepta un prop `modules?` para el caso `embeddedInSuperadmin` (viene de `SuperadminArcaPage.tsx`, que resuelve `tenants.find(t => t.clerkOrgId === tenantId)?.modules`).
+- **Rutas HTTP sin cambios**: el prefijo `@Controller("integracion-arca")` (→ `/api/integracion-arca/...`) y `@Controller("platform/integracion-arca")` **no se tocaron** — son solo paths de URL, independientes del slug de `Tenant.modules`/`@RequireModule`. Ningún fetch del frontend cambió de URL por este split.
+- **Migración de datos**: no fue un `prisma migrate` (el slug vive en `Tenant.modules: String[]`, no en el schema) — fue un `UPDATE` directo vía Neon MCP en ambas ramas (`production` y `develop`), aplicado a los únicos tenants que tenían `integracion-arca` (NyM Logística + el tenant interno de testing CapassoTech): se les asignaron ambos slugs nuevos, preservando exactamente la capacidad que ya tenían.
 
 Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) + `arca-client.service.ts` (integración AFIP SDK, CAE) + `arca-config.service.ts` + `liquidacion-pdf.service.ts`, con auditoría completa de cada request/response a AFIP en `ArcaLog`.
 
@@ -839,6 +839,7 @@ Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) +
 - El PEM se normaliza antes de firmar (`normalizePem` en `arca-client.service.ts`): pegar la versión con `\n` literales (como en el `.env`) sin normalizar da `Invalid PEM formatted message`.
 - El punto de venta que usa el web service es de tipo **RECE/Web Services** y **no** aparece en "Comprobantes en Línea" (regímenes separados y permanentes). Verificar los habilitados con `FEParamGetTiposCbte` / `getSalesPoints`.
 - Al armar payloads, el CVLP va con `Concepto: 1` (Productos); con `Concepto: 2` (Servicios) AFIP exige fechas de servicio (`FchServDesde/Hasta/VtoPago`, error `10049`).
+- **AFIP 10061** (`ImpNeto` ≠ suma de `AlicIva.BaseImp`): `buildComprobanteCvlp` toma `ImpNeto` de las bases de `AlicIva`, no de la suma de todas las líneas. Los conceptos a 0% en contra (gastos/seguro) no entran a `AlicIva` (10020: `BaseImp` > 0) ni a `ImpOpEx` (tampoco negativo). Si se metían al neto del pie, AFIP rechazaba aunque el IVA de las gravadas estuviera bien.
 
 **Homologación: CUIT de prueba para todos los tenants, sin certificado propio (jul 2026).** Registrar un certificado autofirmado por tenant en el portal de homologación de AFIP (`wsaahomo.afip.gov.ar`) requiere la clave fiscal real del tenant, que en la práctica casi nunca está disponible durante el onboarding — esto bloqueaba probar la integración antes de que el cliente tuviera todo el trámite fiscal resuelto. Solución adoptada: en homologación, **todos** los tenants (sin excepción) autentican con el CUIT de prueba estándar de AFIP SDK, **sin certificado propio** — el mismo mecanismo que ya usaban los scripts de este repo (`scripts/test-tipo65.js` y similares). Esto vive en `ArcaConfigService.findWithApiKey()` (`arca-config.service.ts`): si `ambiente !== 'produccion'`, sustituye `cuitEmisor` por `CUIT_TEST_HOMOLOGACION` (constante en `arca.util.ts`, valor `'20409378472'`) y fuerza `certPem`/`keyPem` a `null`, sin tocar el resto de la config. En producción se sigue usando el CUIT real del tenant + su certificado (`certPemProduccion`/`keyPemProduccion` en `ArcaConfig` — **un solo par**, ya no hay slot de certificado de homologación; se eliminó por innecesario en la migración `20260731220000_drop_arca_config_cert_homologacion`). Como `findWithApiKey()` es el único punto de entrada usado por los tres flujos de emisión (`emitirLiquidacion`, `anularLiquidacion`, `emitirFacturaArca`), el comportamiento es automático y no requiere lógica condicional en cada uno. Al emitir con éxito se persiste el ambiente usado en `Liquidacion.ambiente` (snapshot, no se re-escribe en la anulación) — es lo que el frontend usa para marcar un comprobante como "de prueba". **Importante para cualquier flujo de emisión nuevo (ej. UI de Facturas A/B):** el punto de venta configurado por el tenant para producción muy probablemente no sea válido para el CUIT de prueba en homologación — el usuario debe poder ingresarlo manualmente al emitir (no asumir el `ptoVentaCvlp`/`ptoVentaFactura` de la config).
 
@@ -850,6 +851,15 @@ Motor: `liquidaciones.service.ts` (liquidación CVLP tipo 60 a transportistas) +
   - **Snapshot por comprobante** (informativo, nunca clickeable): `Liquidacion.ambiente` (grilla y título de `LiquidacionViewModal`) y `Factura.ambiente` (grilla, `FacturaViewModal`, `FacturaEditModal` — campo agregado en ago 2026, migración `20260808120000_add_factura_ambiente`, seteado en `emitirFacturaArca` igual que ya hacía `emitirLiquidacion`).
   - **Config actual del tenant** (accionable): `ArcaConfig.ambiente`, en los banners de página tipo "Emisión electrónica vía ARCA" (`FacturacionTenantPage.tsx`, `LiquidacionesTenantPage.tsx`) y en los modales de emisión. Estas instancias pasan `to="/configuracion/arca?tab=ambiente"` al badge — el componente acepta un `to?: string` opcional que lo vuelve un `<Link>` clickeable; sin `to` sigue siendo un `<span>` estático. Solo wirear `to` en vistas de tenant (no en las variantes `embeddedInSuperadmin`, que no tienen una ruta de config alcanzable para un tenant elegido). `ArcaConfigTenantPage.tsx` lee `?tab=` de la URL para abrir directo en la pestaña pedida (`general | ambiente | conceptos`).
 - `AmbienteHomologacionWarning` — banner ámbar de advertencia ("el comprobante no va a tener validez fiscal") que se muestra antes de confirmar la emisión cuando `config.ambiente === 'homologacion'`; ubicado al final del cuerpo del modal, justo antes de los botones de acción. Usado en `EmitirLiquidacionModal`, `EmitirCvlpModal`, `CrearLiquidacionManualModal` y `EmitirFacturaModal`.
+
+**Pantalla de configuración ARCA — un solo componente para tenant-admin y superadmin (ago 2026).** Hasta ago 2026, `SuperadminArcaPage.tsx` tenía su propio `ConfigTab` interno, copiado y pegado de `ArcaConfigTenantPage.tsx` — desactualizado respecto al de tenant (sin logo de empresa, sin pestaña de Conceptos de liquidación, un solo formulario en vez de pestañas + tarjetas por sección). Se unificó siguiendo el mismo patrón que Facturación/Viajes/Notificaciones: `ArcaConfigTenantPage` ahora acepta `tenantId?`/`embeddedInSuperadmin?` como prop (arma sus URLs de config/logo con `?tenantId=` hacia `/api/platform/arca/...` cuando viene seteado; sin prop, sigue pegando contra `/api/integracion-arca/...` como siempre) y `SuperadminArcaPage.tsx` monta `<ArcaConfigTenantPage tenantId={tenantId} embeddedInSuperadmin />` en su pestaña "Configuración" en vez del `ConfigTab` duplicado (que se eliminó, ~550 líneas). `ConceptosLiquidacionConfigSection.tsx` sigue el mismo criterio con un prop `tenantId?` propio.
+
+Para que esto funcionara hubo que sumar rutas nuevas en `PlatformController`/`PlatformService` (`core/platform/`) que antes solo existían para el tenant logueado (`LiquidacionesController` en `integracion-arca`, sin override de `tenantId` — a diferencia de `getArcaConfig`/`upsertArcaConfig`, que ya vivían en platform desde antes):
+
+- `POST/DELETE /platform/arca/config/logo?tenantId=` → delega directo a `ArcaConfigService.uploadLogo`/`removeLogo` (mismo service que ya usaba `PlatformService` para `getArcaConfig`/`upsertArcaConfig`, sin pasar por `LiquidacionesService`).
+- `GET/POST /platform/arca/conceptos-liquidacion` + `PATCH /platform/arca/conceptos-liquidacion/:id` (todos con `?tenantId=`) → delegan a `ConceptosLiquidacionService` (ya exportado por `IntegracionArcaModule`, que `PlatformModule` ya importaba — solo hizo falta inyectarlo en `PlatformService`).
+
+Ninguna de estas rutas nuevas usa `resolveTenantId` (ese helper es para controllers de usuario normal que necesitan el override *condicionado* a `auth.role === 'superadmin'`) — viven en `PlatformController`, que ya es exclusivamente de superadmin, así que el `tenantId` de query se usa directo vía `PlatformService.requiredTenantId()`, igual que el resto de los métodos de ese service.
 
 Ninguno de los dos renderiza nada si el ambiente es `'produccion'`.
 
@@ -1043,6 +1053,7 @@ model ImportLog {
   ```
 
   Los 5 processors (`clientes`, `transportistas`, `choferes`, `vehiculos`, `viajes`) implementan ambos métodos — si se agrega un módulo nuevo, replicar el patrón (`insert()` nunca devuelve solo un `string`, siempre `InsertResult`, para que el resumen final tenga el desglose exacto de creados/actualizados).
+- **Catálogo de templates dinámico** (`template-catalogo.ts` + `prisma-import-fields.ts`): la planilla de `GET /importaciones/templates/catalogo` ya no es una lista hardcodeada. La base sale del DMMF de Prisma (scalars del modelo, menos internos tipo `id`/`tenantId`/`createdAt` y un denylist chico por modelo). Encima hay overlays por módulo para lookups, labels, `warnIfEmpty` y columnas planas que no son un campo Prisma (`tipoFlota`, `productoId`/`cantidadProducto`, fechas de factura). **Si mañana se agrega un scalar a Cliente/Chofer/Vehículo/Viaje, aparece solo en la planilla.** Los processors de entidades simples copian esos scalars con `scalarDataFromRow` (no hace falta tocar el processor para un string/número/fecha nuevo); Viajes mergea extras igual, y reserva lógica propia para flota/producto/factura. Columnas que Prisma no puede inferir (lookups, enums de import) siguen yendo al overlay `extras` de ese módulo — no reinventar un catálogo paralelo.
 - **Flujo de dos fases**: `POST /importaciones/preview` (sube el Excel, valida, arma `PreviewResult`, no escribe nada de negocio — solo la `ImportSession` de staging) → `POST /importaciones/confirm` (recibe `sessionId` + confirmaciones pendientes, corre `processor.insert()` fila por fila, arma `ImportLog`). El frontend llama a estos dos endpoints **una vez por módulo**, en orden de dependencia (`clientes → transportistas → choferes → vehiculos → viajes`) — no hay una sesión "encadenada" en el backend, cada módulo es una `ImportSession` independiente.
 
 #### `warnIfEmpty` — campos recomendados pero no bloqueantes
@@ -1103,7 +1114,7 @@ model NotificacionEnvio {
 - **Destinatarios = admins de Clerk, no una lista propia**: `resolverDestinatarios()` llama `UsersService.listByTenant(tenantId)` (por eso `UsersModule` ahora exporta `UsersService` — antes solo lo usaba su propio controller) y filtra por `role === 'org:admin'` con email. Sin admins con email, el tipo se skipea con un log — no hay tabla de destinatarios propia del módulo.
 - **`ResendEmailService`** (`shared/email/`) nunca rompe el flujo que lo llama: sin `RESEND_API_KEY` configurada, loguea y no envía (útil en dev/homologación sin cuenta de Resend armada) — ver variables de entorno más abajo.
 - **Config por tenant** (`NotificacionesConfigService`, patrón calcado de `tenant-field-config`: catálogo en código + tabla de overrides, `overrides[tipo]?.activo ?? item.defaultActivo`): `GET /notificaciones/config` (catálogo efectivo filtrado por módulos del tenant) y `POST /notificaciones/config/toggle` — ambos `@Roles('admin', ...)`, sin `tenantId` en el request (viene del token, regla de siempre). `POST /notificaciones/ejecutar?tenantId=...` es `@Roles('superadmin')` — corre la evaluación de un tenant puntual fuera del horario del cron, para operar/testear sin esperar al día siguiente (único endpoint del módulo que lee `tenantId` de la query, y solo porque está gateado a superadmin).
-- **Frontend**: `pages/ConfiguracionNotificacionesTenantPage.tsx` (`/configuracion/notificaciones`, tenant-admin) — lista el catálogo agrupado por módulo con un toggle on/off por tipo, guardado inmediato al tocar el switch (mismo patrón que `CamposEmpresaPage.tsx`, sin botón "Guardar" aparte). Sin pantalla superadmin todavía — si se necesita, seguir el mismo patrón de `campos-empresa` (selector de tenant + mismo endpoint con `resolveTenantId`).
+- **Frontend**: `pages/ConfiguracionNotificacionesTenantPage.tsx` (`/configuracion/notificaciones`, tenant-admin) — lista el catálogo agrupado por módulo con un toggle on/off por tipo, guardado inmediato al tocar el switch (mismo patrón que `CamposEmpresaPage.tsx`, sin botón "Guardar" aparte). Acepta `tenantId?`/`embeddedInSuperadmin?` como prop (mismo componente reusado, no duplicado — patrón Facturación/Viajes) y arma sus 4 URLs (`config`, `config/toggle`, `config/destinatarios`, `/api/users`→`/api/platform/users`) con `?tenantId=` cuando viene seteado. **Pantalla superadmin (ago 2026)**: `pages/SuperadminNotificacionesPage.tsx` (`/superadmin/notificaciones`) — selector de tenant (`EmpresaFilterBar` + `useTenantsList`/`useTenantFiltroUrl`, mismo patrón que `campos-empresa`) que monta `ConfiguracionNotificacionesTenantPage` con el tenant elegido. El controller (`getConfig`/`toggle`/`setDestinatarios`) resuelve el tenant efectivo con `resolveTenantId(auth, tenantId)` (override solo si `auth.role === 'superadmin'`, mismo helper que `importaciones.controller.ts`) — no se creó un controller `/platform/notificaciones` nuevo, se extendió el mismo endpoint de siempre.
 
 ---
 
@@ -1162,13 +1173,13 @@ Ocultar un campo en el formulario **no alcanza** cuando ese campo alimenta un c�
 | Bressan | ✅ Activo (stack viejo) | combustible | Migrar a Vialto en el futuro |
 | Sebastián Fernández | ✅ Cerrado | viajes | 1 — construir ya |
 | Matías Riedel | ✅ Activo | stock, cuenta-corriente | 2 |
-| Melisa (Desagotes) | ⏳ Muy probable | remitos, cuenta-corriente | 3 |
-| Marcos Venturini (NyM Logística) | ⏳ Presupuesto enviado | integracion-arca, viajes | 4 |
+| Melisa (Desagotes) | ⏳ Muy probable | remitos (⚠️ a reconstruir, ver sección "`remitos` — eliminado"), cuenta-corriente | 3 |
+| Marcos Venturini (NyM Logística) | ⏳ Presupuesto enviado | emision-facturas-arca, emision-liquido-producto-arca, viajes | 4 |
 | Wichi Toledo SRL | ⏳ Muy probable | mantenimiento, combustible | 5 |
 | Gabriel González e Hijo | 🔲 Interesado | facturacion (viajes + cobranzas) | 6 |
 | Javier Altamirano | 🔲 Pendiente | viajes, facturacion, combustible | 7 |
 | Mailen Matilla | 🔲 Pendiente | viajes, facturacion | 8 |
-| Hernán Pereyra | 🔲 Pendiente | turnos (PWA) | 9 — módulo aislado |
+| Hernán Pereyra | 🔲 Pendiente | turnos (⚠️ el stub se borró, a reconstruir desde cero) (PWA) | 9 — módulo aislado |
 
 ---
 
@@ -1183,9 +1194,8 @@ Ocultar un campo en el formulario **no alcanza** cuando ese campo alimenta un c�
 | mantenimiento | — | — | — | — | ✓ | — | — | — | — |
 | combustible | — | — | — | — | ✓ | ✓ | — | — | — |
 | stock | — | ✓ | — | — | — | — | — | — | — |
-| remitos | — | — | ✓ | — | — | — | — | — | — |
-| turnos | — | — | — | — | — | — | — | ✓ | — |
-| integracion-arca | — | — | — | — | — | — | — | — | ✓ |
+| emision-facturas-arca | — | — | — | — | — | — | — | — | ✓ |
+| emision-liquido-producto-arca | — | — | — | — | — | — | — | — | ✓ |
 
 ---
 
@@ -1208,7 +1218,7 @@ FASE 2 — Riedel
   → módulo: cuenta-corriente (saldo por cliente, pagos, historial)
 
 FASE 3 — Melisa
-  → módulo: remitos (PWA para chofer, firma digital)
+  → módulo: remitos (PWA para chofer, firma digital) — ⚠️ el que existía se borró en ago 2026 (sin uso real, sin frontend nunca conectado); reconstruir desde cero llegado el momento, ver "`remitos` — eliminado"
   → cuenta-corriente ya construida en Fase 2 → reutilizar
 
 FASE 4 — Wichi Toledo
@@ -1223,11 +1233,11 @@ FASE 6 — Altamirano / Matilla
   → viajes + facturacion ya construidos → solo onboarding
 
 FASE 7 — Pereyra
-  → módulo: turnos (PWA para choferes, panel admin, listas de turno)
+  → módulo: turnos (PWA para choferes, panel admin, listas de turno) — el stub que existía se borró en ago 2026 (sin nada real detrás); reconstruir desde cero llegado el momento
   → Módulo aislado, no depende de los anteriores
 
 FASE NyM — Venturini (NyM Logística)
-  → módulo: integracion-arca (carpeta src/modules/liquidaciones-arca/) — ✅ implementado
+  → módulos: emision-facturas-arca + emision-liquido-producto-arca (carpeta src/modules/liquidaciones-arca/) — ✅ implementado, divididos en dos slugs independientes en ago 2026
   → Campos de granel en metadata del viaje: ctg, cartaDePorte, grano, tnOrigen, tnDestino, tarifaPorTn
   → Feature flag: liquidaciones.habilitarGranel = true para este tenant
   → Motor de liquidación CVLP: agrupamiento por transportista, cálculo comisión, líquido producto, IVA
@@ -1236,7 +1246,7 @@ FASE NyM — Venturini (NyM Logística)
   → PDF del comprobante con formato NyM Logística
 
 FASE 8 — Transversal
-  → módulo: reportes (dashboards cross-módulo, exportación, KPIs)
+  → módulo: reportes — el que existía (2 endpoints, sin frontend conectado) se borró en ago 2026 por no tener ningún consumidor real; si se retoma, es desde cero
   → Integración AFIP/ARCA (facturación electrónica)
   → App móvil nativa para choferes
   → Migración de Bressan al nuevo stack
@@ -1297,7 +1307,7 @@ CLOUDINARY_API_SECRET=
 PORT=8080
 NODE_ENV=production
 
-# Módulo integracion-arca / carpeta liquidaciones-arca (NyM Logística) — fail-fast si falta en runtime
+# Módulos emision-facturas-arca / emision-liquido-producto-arca — carpeta liquidaciones-arca (NyM Logística) — fail-fast si falta en runtime
 ARCA_ENCRYPTION_KEY=              # clave AES-256 (hex 64 chars) para cifrar cert/key/credenciales AFIP en DB
 AFIP_SDK_API_KEY=                 # token de AfipSDK (afipsdk.com)
 
@@ -1313,5 +1323,5 @@ STRIPE_WEBHOOK_SECRET=
 
 ---
 
-*Última actualización: agosto 2026 (módulo `notificaciones` nuevo — alertas por email vía Resend, catálogo en código + config on/off por tenant calcada de `tenant-field-config`, cron diario agrupado por tipo con dedup por entidad, destinatarios = admins de Clerk del tenant, ver sección "`notificaciones` — alertas por email vía Resend"; y, de una pasada anterior, `precioTransportistaIvaIncluidoPct` pasó a ser opt-in vía `core/tenant-field-config` — `defaultVisible: false`, oculto por defecto para todo tenant; si un tenant lo deshabilita después de haberlo usado, los valores cargados NO se borran pero se ignoran en todo cálculo hasta reactivarlo, ver sección "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant"; y, de la misma pasada, `Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
+*Última actualización: septiembre 2026 (facturas por tramo: `Factura.ivaMonto` persistido, cobro = neto + IVA para tenants sin ARCA, resto del viaje no cubierto por tramos se trata como implícito con `ivaPct` de cabecera — ver sección "Facturas por tramo (LSF / Uruguay)"; y, de una pasada anterior, el módulo `integracion-arca` se dividió en dos slugs independientes — `emision-facturas-arca` y `emision-liquido-producto-arca` — para que un tenant pueda contratar solo uno de los dos (caso real: cliente nuevo que quiere emisión de facturas ARCA sin liquidación CVLP, algo imposible con el flag único de antes); guards repartidos endpoint por endpoint en `liquidaciones.controller.ts`, variables `hasArca` mezcladas separadas en dos en el frontend (`TenantHomePage.tsx`/`ViajesTenantPage.tsx` eran las más riesgosas — esta última tenía una variable `hasLiquidacionesArca` que en realidad controlaba Facturas, no Liquidaciones), `ArcaConfigTenantPage.tsx` oculta secciones según cuál de los dos módulos tiene el tenant, y las rutas HTTP (`/api/integracion-arca/...`) no cambiaron porque son independientes del slug de acceso; ver sección propia del módulo; y, de la misma pasada, módulos `remitos`, `reportes` y `turnos` eliminados por completo — código, y en el caso de `remitos` también su modelo Prisma vía migración `20260828164256_drop_remito_module` — y sus slugs sacados de `VIALTO_MODULES`; ningún tenant real los tenía contratados y ninguno tenía frontend que los consumiera (`turnos` era un stub sin modelo ni service, para un cliente — Pereyra — que sigue "🔲 Pendiente"). Ver secciones "`remitos` — eliminado", nota de "`turnos`" arriba, y las notas de Fase 3/Fase 7/Fase 8 del roadmap; y, de la misma pasada, módulo `notificaciones` nuevo — alertas por email vía Resend, catálogo en código + config on/off por tenant calcada de `tenant-field-config`, cron diario agrupado por tipo con dedup por entidad, destinatarios = admins de Clerk del tenant, ver sección "`notificaciones` — alertas por email vía Resend"; y, de una pasada anterior, `precioTransportistaIvaIncluidoPct` pasó a ser opt-in vía `core/tenant-field-config` — `defaultVisible: false`, oculto por defecto para todo tenant; si un tenant lo deshabilita después de haberlo usado, los valores cargados NO se borran pero se ignoran en todo cálculo hasta reactivarlo, ver sección "`core/tenant-field-config` — visibilidad de campos y features opt-in por tenant"; y, de la misma pasada, `Viaje.precioTransportistaIvaIncluidoPct` — rediseño v3 "engrosar": el precio del viaje siempre fue neto/sin IVA, el % ahora se SUMA por encima al calcular cuánto se paga en efectivo (`engrosarConIva` en `viaje-ganancia-bruta.util.ts`), en vez de "netear"/descontarlo como hacía la v2 descartada; corrige un caso real de cliente (LSF) donde la ganancia bruta automática mostraba una ganancia falsa por no contemplar el IVA que se le paga al transportista; la Liquidación/CVLP vuelve a su comportamiento de siempre (sin ajuste por este %, sin exclusión ni validación de % mixto); lock angosto por `liquidacionEstado` distinto del resto de `CAMPOS_FISCALES_VIAJE`; y resumen real + badge de liquidación reusado en `ViajeEditModal.tsx` cuando el viaje tiene liquidación vigente; y, de una pasada anterior, motor de importaciones — sugerencia IA con fallback Groq, `warnIfEmpty`/CUIT-país opcional, `InsertResult` con desglose creados/actualizados, dedup de Factura por `nroFactura`, split de patente compuesta en Vehículos, diff antes/después de Viajes, endpoint `tenant-tiene-datos`; y, de una pasada anterior a esa, rediseño de estados de Viaje en 3 indicadores independientes — etapa/facturación/liquidación —, split de estado de Factura en ciclo de vida + cobrado/vencida, y `Factura.ambiente`)*
 *Desarrollado por Elias N. Capasso — CapassoTech / Vialto*

@@ -410,6 +410,19 @@ export class ValidatorService {
           const yaExiste = colFields.some((f) => caches[`${model}:${f}`]?.[lower]);
           if (yaExiste) continue;
 
+          // Un CUIT/DNI en la columna no alcanza para crear un cliente o
+          // transportista nuevo (ver `esSoloDniOCuit`) — no generamos el
+          // placeholder acá, así la fila cae en el flujo normal de "no
+          // encontrado" y el problema se ve en el preview, no recién al
+          // confirmar (antes, con el placeholder, el preview mostraba la
+          // fila como resuelta y confirmar fallaba después sin aviso claro).
+          if (
+            (model === "clientes" || model === "transportistas") &&
+            this.esSoloDniOCuit(original)
+          ) {
+            continue;
+          }
+
           if (readOnly) {
             (created[model] ??= []).push(original);
             (caches[`${model}:${primaryField}`] ??= {})[lower] =
@@ -428,6 +441,19 @@ export class ValidatorService {
     return { caches, created };
   }
 
+  /**
+   * true si `nombre` es en realidad solo un número de documento (DNI/CUIT) —
+   * pasa esto cuando la columna del Excel trae el CUIT en vez del nombre y
+   * el lookup no matcheó por ese campo (ej. template configurado con
+   * `lookupField: "nombre"` en vez de `lookupFields: ["nombre","idFiscal"]`).
+   * Crear la entidad igual guardaría el CUIT como "nombre" — un dato basura
+   * silencioso — así que se corta acá con un mensaje claro.
+   */
+  private esSoloDniOCuit(nombre: string): boolean {
+    const justDigits = nombre.replace(/[^\d]/g, "");
+    return justDigits.length >= 7 && /^[\d\-\.\s]+$/.test(nombre);
+  }
+
   async createLookup(
     model: string,
     field: string,
@@ -437,6 +463,11 @@ export class ValidatorService {
     const nombre = value.trim();
     switch (model) {
       case "clientes": {
+        if (this.esSoloDniOCuit(nombre)) {
+          throw new BadRequestException(
+            "No se puede crear automáticamente un cliente usando solo un CUIT. Por favor, importá los clientes primero o proveé el Nombre en esta columna.",
+          );
+        }
         const r = await this.prisma.cliente.create({
           data: { tenantId, nombre },
           select: { id: true },
@@ -444,8 +475,7 @@ export class ValidatorService {
         return r.id;
       }
       case "transportistas": {
-        const justDigits = nombre.replace(/[^\d]/g, "");
-        if (justDigits.length >= 7 && /^[\d\-\.\s]+$/.test(nombre)) {
+        if (this.esSoloDniOCuit(nombre)) {
           throw new BadRequestException(
             "No se puede crear automáticamente un transportista usando solo un DNI/CUIT. Por favor, importá los transportistas primero o proveé el Nombre en esta columna.",
           );

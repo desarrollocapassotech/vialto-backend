@@ -16,6 +16,7 @@ import { VehiculosProcessor } from "./processors/vehiculos.processor";
 import type { IImportProcessor } from "./processors/import-processor.interface";
 import type {
   TemplateConfig,
+  ColumnConfig,
   ValidatedRow,
   ParsedRow,
   PreviewResult,
@@ -223,6 +224,15 @@ export class ImportacionesService {
     } else if (processorModulo?.filasNuevas) {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
       const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
+      // `raw[c.field]` viene de ParserService.parse(), que para columnas de
+      // fecha ya convierte la celda a un objeto Date real (ver
+      // normalizeExcelDate en parser.service.ts) — stringificarlo con
+      // `String()` a secas usa el formato nativo de JS ("Sat May 10 2025
+      // 03:00:00 GMT+0000...") en vez de una fecha legible. Bug real
+      // encontrado en QA: todas las columnas de fecha del detalle de
+      // filas (Choferes, Vehículos, Transportistas) mostraban ese texto.
+      const valorLegible = (v: unknown): string =>
+        v instanceof Date ? v.toLocaleDateString("es-AR") : String(v).trim();
       result.filasDetalle = valid.map((v) => {
         const raw = parsedByRow.get(v._rowNum);
         const campos = config.columns
@@ -235,7 +245,7 @@ export class ImportacionesService {
           .map((c) => ({
             campo: c.field,
             label: c.excelHeader,
-            valor: String(raw![c.field]).trim(),
+            valor: valorLegible(raw![c.field]),
           }));
         return { fila: v._rowNum, esNuevo: nuevas.has(v._rowNum), campos };
       });
@@ -974,13 +984,31 @@ export class ImportacionesService {
       // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
       for (const catCol of catalogo) {
         if (!configData.columns.some((c) => c.field === catCol.field)) {
-          configData.columns.push({
+          const nueva: ColumnConfig = {
             field: catCol.field,
             excelHeader: catCol.defaultExcelHeader,
             excelHeaderAliases: catCol.excelHeaderAliases,
             type: catCol.type,
             required: catCol.systemRequired,
-          });
+          };
+          // Bug real (QA, ago 2026): esto solo copiaba los 5 campos de
+          // arriba — una columna "enum" inyectada así (ej. tipoFlota) queda
+          // sin `allowedValues`, y el validador rechaza cualquier valor con
+          // "Los valores permitidos son: undefined" para las 5 filas. Faltaba
+          // copiar el resto de las propiedades que definen cómo se valida la
+          // columna, no solo su nombre/tipo.
+          if (catCol.allowedValues) nueva.allowedValues = catCol.allowedValues;
+          if (catCol.format) nueva.format = catCol.format;
+          if (catCol.warnIfEmpty) nueva.warnIfEmpty = true;
+          if (catCol.type === "lookup") {
+            nueva.lookupModel = catCol.lookupModel;
+            if (catCol.lookupFields) nueva.lookupFields = catCol.lookupFields;
+            if (catCol.multiple) {
+              nueva.multiple = true;
+              nueva.separador = catCol.separador ?? "/";
+            }
+          }
+          configData.columns.push(nueva);
         }
       }
 

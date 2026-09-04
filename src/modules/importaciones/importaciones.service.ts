@@ -128,7 +128,10 @@ export class ImportacionesService {
     isSuperadmin: boolean,
   ): Promise<PreviewResult> {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
-    const template = await this.getActiveTemplate(tenantId, modulo);
+    const { template, columnasInyectadas } = await this.getActiveTemplate(
+      tenantId,
+      modulo,
+    );
     const config = template.config as unknown as TemplateConfig;
 
     const { rows: parsed, headers: headersExcel } = this.parser.parse(
@@ -161,6 +164,10 @@ export class ImportacionesService {
       .filter(
         (c) =>
           !c.required &&
+          // Si el tenant nunca configuró esta columna (se completó sola con
+          // un valor por defecto solo para no romper la importación), no es
+          // una decisión suya que el Excel no la traiga — avisarle es ruido.
+          !columnasInyectadas.has(c.field) &&
           !headersExcelLower.has(c.excelHeader.toLowerCase()) &&
           !(c.excelHeaderAliases?.some((a) => headersExcelLower.has(a.toLowerCase()))),
       )
@@ -999,6 +1006,17 @@ export class ImportacionesService {
     return pares.filter((p) => p.antes !== p.despues);
   }
 
+  /**
+   * `columnasInyectadas`: campos del catálogo que el tenant nunca configuró
+   * explícitamente (no están guardados en su `ImportTemplate`) y que se
+   * completan acá con un valor por defecto solo para no romper la
+   * importación. No son una decisión real del tenant — ni "sí quiero esta
+   * columna" ni "no la quiero" — así que `preview()` no debe avisar "columna
+   * del template no encontrada en el Excel" por ellas: para el tenant esa
+   * columna directamente no existe en su configuración, avisarle es ruido.
+   * Bug real (QA, ago 2026): antes se trataban igual que una columna que el
+   * tenant sí configuró a propósito y el Excel no trae.
+   */
   private async getActiveTemplate(tenantId: string, modulo: string) {
     let template = await this.prisma.importTemplate.findFirst({
       where: { tenantId, modulo, activo: true },
@@ -1030,6 +1048,7 @@ export class ImportacionesService {
     }
 
     // Inyectar columnas faltantes y alias desde el catálogo en tiempo de ejecución
+    const columnasInyectadas = new Set<string>();
     const configData = template.config as unknown as TemplateConfig;
     if (configData && configData.columns) {
       const catalogo = getCatalogoColumnas(modulo);
@@ -1037,6 +1056,7 @@ export class ImportacionesService {
       // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
       for (const catCol of catalogo) {
         if (!configData.columns.some((c) => c.field === catCol.field)) {
+          columnasInyectadas.add(catCol.field);
           const nueva: ColumnConfig = {
             field: catCol.field,
             excelHeader: catCol.defaultExcelHeader,
@@ -1077,6 +1097,6 @@ export class ImportacionesService {
       }
     }
 
-    return template;
+    return { template, columnasInyectadas };
   }
 }

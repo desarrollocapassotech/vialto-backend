@@ -1703,6 +1703,7 @@ export class StockService {
       composicion: Array<{
         presentacionId: string | null;
         presentacionNombre: string;
+        unidadesPorBulto: number | null;
         bultos: number;
         sueltas: number;
         kg: number;
@@ -1725,6 +1726,7 @@ export class StockService {
       grupo.composicion.push({
         presentacionId: item.presentacionId,
         presentacionNombre: item.presentacion?.presentacion.nombre ?? 'Sin presentación',
+        unidadesPorBulto: item.presentacion?.unidadesPorBulto ?? null,
         bultos: item.cantidad1,
         sueltas: item.cantidad2,
         kg,

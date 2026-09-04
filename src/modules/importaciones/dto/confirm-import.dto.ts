@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -20,6 +21,14 @@ export class CiudadNormalizadaImportDto {
   @IsOptional()
   @IsString()
   destino?: string | null;
+}
+
+export class IdFiscalDuplicadoDecisionDto {
+  @IsNumber()
+  fila: number;
+
+  @IsIn(['ignorar', 'actualizar'])
+  accion: 'ignorar' | 'actualizar';
 }
 
 export class ConfirmImportDto {
@@ -54,4 +63,11 @@ export class ConfirmImportDto {
   @IsOptional()
   @IsBoolean()
   confirmarFacturasDuplicadas?: boolean;
+
+  /** Solo clientes: decisión por fila ("ignorar" o "actualizar") para cada conflicto de ID Fiscal detectado en el preview (ver `PreviewResult.advertenciasIdFiscalDuplicado`). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => IdFiscalDuplicadoDecisionDto)
+  decisionesIdFiscalDuplicado?: IdFiscalDuplicadoDecisionDto[];
 }

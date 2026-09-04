@@ -1,4 +1,4 @@
-import type { ValidatedRow } from '../types/import.types';
+import type { IdFiscalConflicto, ValidatedRow } from '../types/import.types';
 
 export interface InsertResult {
   id: string;
@@ -31,4 +31,14 @@ export interface IImportProcessor {
    * (`ImportacionesService.buildViajesPreview`).
    */
   filasNuevas?(rows: ValidatedRow[], tenantId: string): Promise<Set<number>>;
+  /**
+   * Solo Clientes: detecta filas cuyo ID Fiscal ya pertenece a otro cliente
+   * existente (nombre distinto) — ver `IdFiscalConflicto`. El preview lo
+   * muestra y `confirm()` exige una decisión por fila (ignorar/actualizar)
+   * antes de importar.
+   */
+  detectarIdFiscalDuplicado?(
+    rows: ValidatedRow[],
+    tenantId: string,
+  ): Promise<IdFiscalConflicto[]>;
 }

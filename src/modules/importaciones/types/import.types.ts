@@ -97,6 +97,19 @@ export interface RowError {
   valoresNoEncontrados?: { valor: string; posicion: number }[];
 }
 
+/**
+ * Solo Clientes: una fila cuyo ID Fiscal ya pertenece a OTRO cliente del
+ * tenant (nombre distinto) — el import no puede decidir solo si hay que
+ * crear un cliente nuevo o actualizar el existente. El usuario elige por
+ * fila (ignorar / actualizar) antes de poder confirmar.
+ */
+export interface IdFiscalConflicto {
+  fila: number;
+  idFiscal: string;
+  clienteExistenteId: string;
+  clienteExistenteNombre: string;
+}
+
 export interface EntidadFaltante {
   valor: string;
   /** Sugerencia derivada de una regla simple (ej. posición en el par), no de IA. */
@@ -200,6 +213,12 @@ export interface PreviewResult {
    * confirmación explícita antes (`ConfirmImportDto.confirmarFacturasDuplicadas`).
    */
   advertenciasFacturasDuplicadas?: { numero: string; filas: number[] }[];
+  /**
+   * Solo Clientes: filas con un conflicto de ID Fiscal — ver
+   * `IdFiscalConflicto`. `confirm()` exige una decisión por cada una
+   * (`ConfirmImportDto.decisionesIdFiscalDuplicado`) antes de importar.
+   */
+  advertenciasIdFiscalDuplicado?: IdFiscalConflicto[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

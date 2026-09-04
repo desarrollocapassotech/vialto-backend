@@ -214,6 +214,11 @@ export class ImportacionesService {
       entidadesActualizadas,
     };
 
+    if (processorModulo?.detectarIdFiscalDuplicado) {
+      result.advertenciasIdFiscalDuplicado =
+        await processorModulo.detectarIdFiscalDuplicado(valid, tenantId);
+    }
+
     if (modulo === "viajes") {
       Object.assign(
         result,
@@ -269,6 +274,7 @@ export class ImportacionesService {
     filasExcluidas?: number[],
     confirmarCamposFaltantes?: boolean,
     confirmarFacturasDuplicadas?: boolean,
+    decisionesIdFiscalDuplicado?: { fila: number; accion: "ignorar" | "actualizar" }[],
   ) {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
@@ -298,6 +304,43 @@ export class ImportacionesService {
     // nunca va a resolver a una sola ciudad) — no se procesan ni se cuentan
     // como error, quedan registradas aparte en el log.
     const excluidas = new Set(filasExcluidas ?? []);
+
+    // Clientes: filas cuyo ID Fiscal ya pertenece a OTRO cliente existente —
+    // el usuario elige por fila "ignorar" (se suma a `excluidas`, mismo
+    // camino que una exclusión manual) o "actualizar" (se guarda el id del
+    // cliente existente para que el processor lo pise en vez de crear uno
+    // nuevo o chocar). Se recalcula acá en vivo, no se reusa el preview,
+    // porque la base puede haber cambiado desde entonces — mismo criterio
+    // que `detectarFacturasDuplicadas` en Viajes más abajo.
+    const actualizarClientePorFila = new Map<number, string>();
+    if (processor.detectarIdFiscalDuplicado) {
+      const candidatas = todasLasFilas.filter((f) => !excluidas.has(f._rowNum));
+      const conflictosIdFiscal = await processor.detectarIdFiscalDuplicado(
+        candidatas,
+        tenantId,
+      );
+      if (conflictosIdFiscal.length > 0) {
+        const decididas = new Map(
+          (decisionesIdFiscalDuplicado ?? []).map((d) => [d.fila, d.accion]),
+        );
+        const sinResolver = conflictosIdFiscal.filter(
+          (c) => !decididas.has(c.fila),
+        );
+        if (sinResolver.length > 0) {
+          throw new BadRequestException(
+            `Hay ${sinResolver.length} fila(s) cuyo ID Fiscal ya pertenece a otro cliente — elegí "ignorar" o "actualizar" para cada una antes de confirmar.`,
+          );
+        }
+        for (const c of conflictosIdFiscal) {
+          if (decididas.get(c.fila) === "ignorar") {
+            excluidas.add(c.fila);
+          } else {
+            actualizarClientePorFila.set(c.fila, c.clienteExistenteId);
+          }
+        }
+      }
+    }
+
     const filasValidas = todasLasFilas.filter(
       (f) => !excluidas.has(f._rowNum),
     );
@@ -306,8 +349,15 @@ export class ImportacionesService {
       .map((f) => ({
         fila: f._rowNum,
         estado: "omitida",
-        mensaje: "Fila omitida por el usuario antes de confirmar.",
+        mensaje: filasExcluidas?.includes(f._rowNum)
+          ? "Fila omitida por el usuario antes de confirmar."
+          : "Fila omitida: el ID Fiscal ya pertenece a otro cliente.",
       }));
+
+    for (const fila of filasValidas) {
+      const clienteExistenteId = actualizarClientePorFila.get(fila._rowNum);
+      if (clienteExistenteId) fila._idFiscalClienteId = clienteExistenteId;
+    }
 
     // Campos "recomendados pero no bloqueantes" (ej. CUIT/país de cliente):
     // si alguna fila a importar los tiene vacíos, el usuario tiene que

@@ -1193,6 +1193,9 @@ export class LiquidacionesService {
             condicionIva: true,
           },
         },
+        clientesViaje: {
+          select: { viajeId: true },
+        },
       },
     });
 
@@ -1377,10 +1380,15 @@ export class LiquidacionesService {
       });
       // Fix del bug histórico: sin este sync, `facturacionEstado` quedaba pisado
       // como "facturado" para siempre y el viaje nunca volvía a ser re-facturable.
+      const viajeIdsToSync = Array.from(new Set([
+        ...facturaRaw.viajes.map((v) => v.id),
+        ...(facturaRaw.clientesViaje?.map((vc) => vc.viajeId) || []),
+      ]));
       await syncFacturacionEstadoViajes(
         this.db,
         tenantId,
-        facturaRaw.viajes.map((v) => v.id),
+        viajeIdsToSync,
+        { facturaId },
       );
 
       let notaCreditoUrl: string | null = null;
@@ -1445,10 +1453,15 @@ export class LiquidacionesService {
           arcaError: errMsg,
         },
       });
+      const viajeIdsToSyncError = Array.from(new Set([
+        ...facturaRaw.viajes.map((v) => v.id),
+        ...(facturaRaw.clientesViaje?.map((vc) => vc.viajeId) || []),
+      ]));
       await syncFacturacionEstadoViajes(
         this.db,
         tenantId,
-        facturaRaw.viajes.map((v) => v.id),
+        viajeIdsToSyncError,
+        { facturaId },
       );
 
       if (isConectividad) {

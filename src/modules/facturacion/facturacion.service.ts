@@ -917,10 +917,22 @@ export class FacturacionService {
       where: { facturaId: id, tenantId },
       select: { id: true },
     });
-    const viajeIds = viajesAfectados.map((v) => v.id);
+    const viajesClientesAfectados = await this.prisma.viajeCliente.findMany({
+      where: { facturaId: id, tenantId },
+      select: { viajeId: true },
+    });
+    
+    const viajeIds = Array.from(new Set([
+      ...viajesAfectados.map((v) => v.id),
+      ...viajesClientesAfectados.map((vc) => vc.viajeId),
+    ]));
 
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.updateMany({
+        where: { facturaId: id, tenantId },
+        data: { facturaId: null },
+      });
+      await tx.viajeCliente.updateMany({
         where: { facturaId: id, tenantId },
         data: { facturaId: null },
       });

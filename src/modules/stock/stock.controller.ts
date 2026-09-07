@@ -46,7 +46,7 @@ import { TenantGuard } from "../../shared/guards/tenant.guard";
 import { ModuleGuard } from "../../shared/guards/module.guard";
 import { RequireModule } from "../../shared/decorators/require-module.decorator";
 import { assertTenantId } from "../../shared/util/assert-tenant";
-import { PaginationQueryDto } from "shared/dto/pagination-query.dto";
+import { PaginationQueryDto } from "../../shared/dto/pagination-query.dto";
 
 @ApiTags("Módulo: Stock")
 @ApiBearerAuth("clerk-jwt")

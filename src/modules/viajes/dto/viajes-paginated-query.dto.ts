@@ -134,6 +134,7 @@ export class ViajesPaginatedQueryDto {
   @Transform(({ value }) => {
     const s = firstQueryString(value);
     if (
+      s === 'fecha_creacion' ||
       s === 'fecha_carga' ||
       s === 'fecha_descarga' ||
       s === 'monto' ||
@@ -143,7 +144,7 @@ export class ViajesPaginatedQueryDto {
     }
     return undefined;
   })
-  sortBy?: 'fecha_carga' | 'fecha_descarga' | 'monto' | 'ganancia_bruta';
+  sortBy?: 'fecha_creacion' | 'fecha_carga' | 'fecha_descarga' | 'monto' | 'ganancia_bruta';
 
   @IsOptional()
   @Transform(({ value }) => {

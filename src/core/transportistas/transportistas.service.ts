@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateTransportistaDto } from './dto/create-transportista.dto';
 import { UpdateTransportistaDto } from './dto/update-transportista.dto';
@@ -80,11 +85,27 @@ export class TransportistasService {
     }
   }
 
-  create(tenantId: string, dto: CreateTransportistaDto) {
+  private async assertIdFiscalDisponible(
+    tenantId: string,
+    idFiscal: string | null,
+    excludeId?: string,
+  ) {
+    if (!idFiscal) return;
+    const existente = await this.prisma.transportista.findFirst({
+      where: { tenantId, idFiscal, ...(excludeId ? { id: { not: excludeId } } : {}) },
+      select: { id: true },
+    });
+    if (existente) {
+      throw new ConflictException('Ya existe un transportista con ese ID Fiscal');
+    }
+  }
+
+  async create(tenantId: string, dto: CreateTransportistaDto) {
     this.assertTransportistaRequiredFields(dto, dto.confirmarSinDatosFiscales);
     const pais = dto.pais?.trim() || null;
     const idFiscal = dto.idFiscal?.trim() || null;
     validarIdFiscal(pais, idFiscal);
+    await this.assertIdFiscalDisponible(tenantId, idFiscal);
     return this.prisma.transportista.create({
       data: {
         tenantId,
@@ -140,6 +161,7 @@ export class TransportistasService {
     };
     this.assertTransportistaRequiredFields(next, dto.confirmarSinDatosFiscales);
     validarIdFiscal(next.pais, next.idFiscal);
+    await this.assertIdFiscalDisponible(tenantId, next.idFiscal, id);
     return this.prisma.transportista.update({
       where: { id },
       data: next,

@@ -158,6 +158,39 @@ export class ValidatorService {
 
     const str = String(raw).trim();
 
+    // Cliente.pais / Transportista.pais son campos "string" a nivel Prisma
+    // (por eso el catálogo los infiere como type='string'), pero el resto
+    // del sistema los trata como un código de 2 letras (AR/UY/PY/CL/BR): el
+    // alta manual (PaisUbicacionSelect) solo permite elegir uno de esos
+    // códigos, y validarIdFiscal/idFiscalPorPais/condicionTributariaPorPais
+    // switchean sobre ese código exacto. Sin esto, un Excel con "Argentina"
+    // en la columna País se guardaba tal cual — un cliente con pais
+    // inconsistente entre alta manual e importado (bug real reportado: la
+    // grilla mostraba "Argentina" para unos y "AR" para otros), y de paso
+    // ninguna validación de formato de CUIT corría para esa fila (matchea
+    // por switch exacto contra "AR", no contra "Argentina"). Se normaliza
+    // acá, por nombre de campo, para que también corrija templates viejos
+    // ya guardados con type='string' en vez de requerir una migración.
+    if (col.field === "pais") {
+      const codigo = this.normalizarPais(str);
+      if (!codigo) {
+        if (col.required) {
+          return {
+            error: {
+              fila: rowNum,
+              campo: col.excelHeader,
+              error: `País no reconocido: "${str}". Usá Argentina, Uruguay, Paraguay, Chile o Brasil (o su código AR/UY/PY/CL/BR).`,
+              valor: raw,
+            },
+          };
+        }
+        // Mismo criterio que un valor numérico inválido en un campo opcional:
+        // no bloquea la fila, se deja vacío y se avisa (warnIfEmpty).
+        return { value: null, warning: true };
+      }
+      return { value: codigo };
+    }
+
     switch (col.type) {
       case "string":
         return { value: str };
@@ -309,6 +342,20 @@ export class ValidatorService {
       default:
         return { value: str };
     }
+  }
+
+  /** Códigos/alias reconocidos → código de 2 letras usado por el resto del sistema (ver `PAISES_SOPORTADOS` en el frontend, `lib/ciudades/paises.ts`). */
+  private static readonly PAIS_ALIASES: Record<string, string> = {
+    AR: "AR", ARG: "AR", ARGENTINA: "AR",
+    UY: "UY", URY: "UY", URUGUAY: "UY",
+    PY: "PY", PRY: "PY", PARAGUAY: "PY",
+    CL: "CL", CHL: "CL", CHILE: "CL",
+    BR: "BR", BRA: "BR", BRASIL: "BR", BRAZIL: "BR",
+  };
+
+  private normalizarPais(valor: string): string | null {
+    const key = valor.trim().toUpperCase();
+    return ValidatorService.PAIS_ALIASES[key] ?? null;
   }
 
   private parseDate(raw: unknown, format?: string): Date | null {

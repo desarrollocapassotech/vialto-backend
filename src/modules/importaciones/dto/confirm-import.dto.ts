@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -20,6 +21,14 @@ export class CiudadNormalizadaImportDto {
   @IsOptional()
   @IsString()
   destino?: string | null;
+}
+
+export class CampoUnicoDuplicadoDecisionDto {
+  @IsNumber()
+  fila: number;
+
+  @IsIn(['ignorar', 'actualizar'])
+  accion: 'ignorar' | 'actualizar';
 }
 
 export class ConfirmImportDto {
@@ -54,4 +63,11 @@ export class ConfirmImportDto {
   @IsOptional()
   @IsBoolean()
   confirmarFacturasDuplicadas?: boolean;
+
+  /** Clientes/Transportistas/Choferes: decisión por fila ("ignorar" o "actualizar") para cada conflicto de campo único (ID Fiscal/DNI) detectado en el preview (ver `PreviewResult.advertenciasCampoUnicoDuplicado`). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CampoUnicoDuplicadoDecisionDto)
+  decisionesCampoUnicoDuplicado?: CampoUnicoDuplicadoDecisionDto[];
 }

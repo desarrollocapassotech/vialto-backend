@@ -1,4 +1,4 @@
-import type { ValidatedRow } from '../types/import.types';
+import type { CampoUnicoConflicto, ValidatedRow } from '../types/import.types';
 
 export interface InsertResult {
   id: string;
@@ -31,4 +31,14 @@ export interface IImportProcessor {
    * (`ImportacionesService.buildViajesPreview`).
    */
   filasNuevas?(rows: ValidatedRow[], tenantId: string): Promise<Set<number>>;
+  /**
+   * Clientes/Transportistas (ID Fiscal), Choferes (DNI): detecta filas cuyo
+   * campo único ya pertenece a otra entidad existente (nombre distinto) —
+   * ver `CampoUnicoConflicto`. El preview lo muestra y `confirm()` exige una
+   * decisión por fila (ignorar/actualizar) antes de importar.
+   */
+  detectarCampoUnicoDuplicado?(
+    rows: ValidatedRow[],
+    tenantId: string,
+  ): Promise<CampoUnicoConflicto[]>;
 }

@@ -97,6 +97,22 @@ export interface RowError {
   valoresNoEncontrados?: { valor: string; posicion: number }[];
 }
 
+/**
+ * Clientes/Transportistas/Choferes: una fila cuyo campo único (ID Fiscal en
+ * Clientes/Transportistas, DNI en Choferes) ya pertenece a OTRA entidad
+ * existente del tenant (nombre distinto) — el import no puede decidir solo
+ * si hay que crear una entidad nueva o actualizar la existente. El usuario
+ * elige por fila (ignorar / actualizar) antes de poder confirmar.
+ */
+export interface CampoUnicoConflicto {
+  fila: number;
+  /** Nombre del campo en conflicto, para mostrar (ej. "ID Fiscal", "DNI"). */
+  campoLabel: string;
+  valor: string;
+  entidadExistenteId: string;
+  entidadExistenteNombre: string;
+}
+
 export interface EntidadFaltante {
   valor: string;
   /** Sugerencia derivada de una regla simple (ej. posición en el par), no de IA. */
@@ -200,6 +216,13 @@ export interface PreviewResult {
    * confirmación explícita antes (`ConfirmImportDto.confirmarFacturasDuplicadas`).
    */
   advertenciasFacturasDuplicadas?: { numero: string; filas: number[] }[];
+  /**
+   * Clientes/Transportistas/Choferes: filas con un conflicto de campo único
+   * (ID Fiscal o DNI) — ver `CampoUnicoConflicto`. `confirm()` exige una
+   * decisión por cada una (`ConfirmImportDto.decisionesCampoUnicoDuplicado`)
+   * antes de importar.
+   */
+  advertenciasCampoUnicoDuplicado?: CampoUnicoConflicto[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

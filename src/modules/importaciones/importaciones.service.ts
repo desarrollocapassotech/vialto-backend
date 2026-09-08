@@ -128,7 +128,10 @@ export class ImportacionesService {
     isSuperadmin: boolean,
   ): Promise<PreviewResult> {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
-    const template = await this.getActiveTemplate(tenantId, modulo);
+    const { template, columnasInyectadas } = await this.getActiveTemplate(
+      tenantId,
+      modulo,
+    );
     const config = template.config as unknown as TemplateConfig;
 
     const { rows: parsed, headers: headersExcel } = this.parser.parse(
@@ -161,6 +164,10 @@ export class ImportacionesService {
       .filter(
         (c) =>
           !c.required &&
+          // Si el tenant nunca configuró esta columna (se completó sola con
+          // un valor por defecto solo para no romper la importación), no es
+          // una decisión suya que el Excel no la traiga — avisarle es ruido.
+          !columnasInyectadas.has(c.field) &&
           !headersExcelLower.has(c.excelHeader.toLowerCase()) &&
           !(c.excelHeaderAliases?.some((a) => headersExcelLower.has(a.toLowerCase()))),
       )
@@ -213,6 +220,11 @@ export class ImportacionesService {
       entidadesNuevas,
       entidadesActualizadas,
     };
+
+    if (processorModulo?.detectarCampoUnicoDuplicado) {
+      result.advertenciasCampoUnicoDuplicado =
+        await processorModulo.detectarCampoUnicoDuplicado(valid, tenantId);
+    }
 
     if (modulo === "viajes") {
       Object.assign(
@@ -269,6 +281,7 @@ export class ImportacionesService {
     filasExcluidas?: number[],
     confirmarCamposFaltantes?: boolean,
     confirmarFacturasDuplicadas?: boolean,
+    decisionesCampoUnicoDuplicado?: { fila: number; accion: "ignorar" | "actualizar" }[],
   ) {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const session = await this.prisma.importSession.findFirst({
@@ -298,6 +311,46 @@ export class ImportacionesService {
     // nunca va a resolver a una sola ciudad) — no se procesan ni se cuentan
     // como error, quedan registradas aparte en el log.
     const excluidas = new Set(filasExcluidas ?? []);
+
+    // Clientes/Transportistas (ID Fiscal), Choferes (DNI): filas cuyo campo
+    // único ya pertenece a OTRA entidad existente — el usuario elige por
+    // fila "ignorar" (se suma a `excluidas`, mismo camino que una exclusión
+    // manual) o "actualizar" (se guarda el id de la entidad existente para
+    // que el processor la pise en vez de crear una nueva o chocar). Se
+    // recalcula acá en vivo, no se reusa el preview, porque la base puede
+    // haber cambiado desde entonces — mismo criterio que
+    // `detectarFacturasDuplicadas` en Viajes más abajo.
+    const actualizarEntidadPorFila = new Map<number, string>();
+    let campoLabelConflicto = "campo único";
+    if (processor.detectarCampoUnicoDuplicado) {
+      const candidatas = todasLasFilas.filter((f) => !excluidas.has(f._rowNum));
+      const conflictos = await processor.detectarCampoUnicoDuplicado(
+        candidatas,
+        tenantId,
+      );
+      if (conflictos.length > 0) {
+        campoLabelConflicto = [
+          ...new Set(conflictos.map((c) => c.campoLabel)),
+        ].join("/");
+        const decididas = new Map(
+          (decisionesCampoUnicoDuplicado ?? []).map((d) => [d.fila, d.accion]),
+        );
+        const sinResolver = conflictos.filter((c) => !decididas.has(c.fila));
+        if (sinResolver.length > 0) {
+          throw new BadRequestException(
+            `Hay ${sinResolver.length} fila(s) cuyo ${campoLabelConflicto} ya pertenece a otro registro — elegí "ignorar" o "actualizar" para cada una antes de confirmar.`,
+          );
+        }
+        for (const c of conflictos) {
+          if (decididas.get(c.fila) === "ignorar") {
+            excluidas.add(c.fila);
+          } else {
+            actualizarEntidadPorFila.set(c.fila, c.entidadExistenteId);
+          }
+        }
+      }
+    }
+
     const filasValidas = todasLasFilas.filter(
       (f) => !excluidas.has(f._rowNum),
     );
@@ -306,8 +359,15 @@ export class ImportacionesService {
       .map((f) => ({
         fila: f._rowNum,
         estado: "omitida",
-        mensaje: "Fila omitida por el usuario antes de confirmar.",
+        mensaje: filasExcluidas?.includes(f._rowNum)
+          ? "Fila omitida por el usuario antes de confirmar."
+          : `Fila omitida: el ${campoLabelConflicto} ya pertenece a otro registro.`,
       }));
+
+    for (const fila of filasValidas) {
+      const entidadExistenteId = actualizarEntidadPorFila.get(fila._rowNum);
+      if (entidadExistenteId) fila._duplicadoEntidadId = entidadExistenteId;
+    }
 
     // Campos "recomendados pero no bloqueantes" (ej. CUIT/país de cliente):
     // si alguna fila a importar los tiene vacíos, el usuario tiene que
@@ -946,6 +1006,17 @@ export class ImportacionesService {
     return pares.filter((p) => p.antes !== p.despues);
   }
 
+  /**
+   * `columnasInyectadas`: campos del catálogo que el tenant nunca configuró
+   * explícitamente (no están guardados en su `ImportTemplate`) y que se
+   * completan acá con un valor por defecto solo para no romper la
+   * importación. No son una decisión real del tenant — ni "sí quiero esta
+   * columna" ni "no la quiero" — así que `preview()` no debe avisar "columna
+   * del template no encontrada en el Excel" por ellas: para el tenant esa
+   * columna directamente no existe en su configuración, avisarle es ruido.
+   * Bug real (QA, ago 2026): antes se trataban igual que una columna que el
+   * tenant sí configuró a propósito y el Excel no trae.
+   */
   private async getActiveTemplate(tenantId: string, modulo: string) {
     let template = await this.prisma.importTemplate.findFirst({
       where: { tenantId, modulo, activo: true },
@@ -977,6 +1048,7 @@ export class ImportacionesService {
     }
 
     // Inyectar columnas faltantes y alias desde el catálogo en tiempo de ejecución
+    const columnasInyectadas = new Set<string>();
     const configData = template.config as unknown as TemplateConfig;
     if (configData && configData.columns) {
       const catalogo = getCatalogoColumnas(modulo);
@@ -984,6 +1056,7 @@ export class ImportacionesService {
       // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
       for (const catCol of catalogo) {
         if (!configData.columns.some((c) => c.field === catCol.field)) {
+          columnasInyectadas.add(catCol.field);
           const nueva: ColumnConfig = {
             field: catCol.field,
             excelHeader: catCol.defaultExcelHeader,
@@ -1024,6 +1097,6 @@ export class ImportacionesService {
       }
     }
 
-    return template;
+    return { template, columnasInyectadas };
   }
 }

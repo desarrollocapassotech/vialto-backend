@@ -105,9 +105,8 @@ export class NotificacionesCronService {
 
       if (!enviado) {
         this.logger.warn(
-          `[${tenantId}] ${item.tipo}: el email no se pudo enviar — no se marca como notificado, se reintenta en la próxima corrida.`,
+          `[${tenantId}] ${item.tipo}: el email no se pudo enviar, pero la notificación se registrará internamente en la campana.`,
         );
-        continue;
       }
 
       await this.prisma.notificacionEnvio.createMany({

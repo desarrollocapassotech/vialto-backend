@@ -76,6 +76,7 @@ export function compareViajesFechaAr(
 }
 
 export const VIAJES_SORT_FIELDS = [
+  "fecha_creacion",
   "fecha_carga",
   "fecha_descarga",
   "monto",
@@ -104,6 +105,7 @@ export function parseViajesSortParams(
   sortDir?: string,
 ): { sortBy: ViajesSortField; sortDir: ViajesSortDir } {
   const by =
+    sortBy?.trim() === "fecha_creacion" ||
     sortBy?.trim() === "fecha_carga" ||
     sortBy?.trim() === "fecha_descarga" ||
     sortBy?.trim() === "monto" ||
@@ -123,9 +125,9 @@ export function resolveViajesSort(query: ViajesPaginatedQueryDto): {
   const rawBy = query.sortBy?.trim();
   const sortBy = VIAJES_SORT_FIELDS.includes(rawBy as ViajesSortField)
     ? (rawBy as ViajesSortField)
-    : "fecha_carga";
+    : "fecha_creacion";
   const rawDir = query.sortDir?.trim();
-  const sortDir = rawDir === "asc" || rawDir === "desc" ? rawDir : "asc";
+  const sortDir = rawDir === "asc" || rawDir === "desc" ? rawDir : "desc";
   return { sortBy, sortDir };
 }
 
@@ -241,6 +243,8 @@ export function buildViajesPrismaOrderBy(
   | Prisma.ViajeOrderByWithRelationInput[] {
   const nulls = "last" as const;
   switch (sortBy) {
+    case "fecha_creacion":
+      return { createdAt: sortDir };
     case "fecha_carga":
       return [{ fechaCarga: { sort: sortDir, nulls } }, { id: sortDir }];
     case "fecha_descarga":
@@ -248,6 +252,6 @@ export function buildViajesPrismaOrderBy(
     case "monto":
       return [{ monto: { sort: sortDir, nulls } }, { id: sortDir }];
     default:
-      return [{ fechaCarga: { sort: "asc", nulls } }, { id: "asc" }];
+      return { createdAt: "desc" };
   }
 }

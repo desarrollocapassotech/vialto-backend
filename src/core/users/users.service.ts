@@ -22,12 +22,23 @@ export class UsersService {
    * Clerk es la fuente de verdad para usuarios — no se duplican en Postgres.
    */
   async listByTenant(tenantId: string) {
-    const memberships = await clerk.organizations.getOrganizationMembershipList({
-      organizationId: tenantId,
-    });
+    let allMembers = [];
+    let offset = 0;
+    const limit = 50;
+
+    while (true) {
+      const memberships = await clerk.organizations.getOrganizationMembershipList({
+        organizationId: tenantId,
+        limit,
+        offset,
+      });
+      allMembers.push(...memberships.data);
+      if (memberships.data.length < limit) break;
+      offset += limit;
+    }
 
     const results = await Promise.all(
-      memberships.data.map(async (m) => {
+      allMembers.map(async (m) => {
         const userId = m.publicUserData?.userId ?? null;
         const platformRole = await getPlatformRole(userId);
         const effectiveRole =

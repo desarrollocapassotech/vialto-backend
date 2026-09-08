@@ -2,6 +2,7 @@
 export const VIALTO_MODULES = [
   'viajes',
   'facturacion',
+  'liquidaciones',
   'cuenta-corriente',
   'stock',
   'combustible',

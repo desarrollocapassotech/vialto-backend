@@ -96,14 +96,14 @@ export class ImportacionesPostViajesService {
     tenantId: string,
     viajeIds: string[],
   ): Promise<LiquidacionPreviewGrupo[]> {
-    const tieneFacturacion = await this.tieneModulo(tenantId, "facturacion");
+    const tieneLiquidaciones = await this.tieneModulo(tenantId, "liquidaciones");
     const tieneLiquidoProductoArca = await this.tieneModulo(
       tenantId,
       "emision-liquido-producto-arca",
     );
-    if (!tieneFacturacion && !tieneLiquidoProductoArca) {
+    if (!tieneLiquidaciones && !tieneLiquidoProductoArca) {
       throw new BadRequestException(
-        "Este tenant no tiene facturación ni emisión de líquido producto ARCA — no aplica generar liquidaciones.",
+        "Este tenant no tiene registro de liquidaciones ni emisión de líquido producto ARCA — no aplica generar liquidaciones.",
       );
     }
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);
@@ -146,14 +146,14 @@ export class ImportacionesPostViajesService {
     userId: string,
     viajeIds: string[],
   ) {
-    const tieneFacturacion = await this.tieneModulo(tenantId, "facturacion");
+    const tieneLiquidaciones = await this.tieneModulo(tenantId, "liquidaciones");
     const tieneLiquidoProductoArca = await this.tieneModulo(
       tenantId,
       "emision-liquido-producto-arca",
     );
-    if (!tieneFacturacion && !tieneLiquidoProductoArca) {
+    if (!tieneLiquidaciones && !tieneLiquidoProductoArca) {
       throw new BadRequestException(
-        "Este tenant no tiene facturación ni emisión de líquido producto ARCA — no aplica generar liquidaciones.",
+        "Este tenant no tiene registro de liquidaciones ni emisión de líquido producto ARCA — no aplica generar liquidaciones.",
       );
     }
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);

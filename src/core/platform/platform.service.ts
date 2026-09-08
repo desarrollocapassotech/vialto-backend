@@ -1471,7 +1471,11 @@ export class PlatformService {
     formulario: string,
   ) {
     const id = this.requiredTenantId(tenantId);
-    return this.fieldConfigService.getConfigEfectiva(id, modulo, formulario);
+    return this.fieldConfigService.getConfigEfectivaParaSuperadmin(
+      id,
+      modulo,
+      formulario,
+    );
   }
 
   toggleFieldConfig(

@@ -114,11 +114,11 @@ export class LiquidacionesController {
     return this.service.removeLogo(auth.tenantId);
   }
 
-  // ── Liquidaciones CRUD (facturacion OR emision-liquido-producto-arca) ────
+  // ── Liquidaciones CRUD (liquidaciones OR emision-liquido-producto-arca) ──
 
   @ApiOperation({ summary: "Listar liquidaciones del tenant" })
   @Get("liquidaciones")
-  @RequireModule("facturacion", "emision-liquido-producto-arca")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   findAll(@CurrentAuth() auth: AuthPayload, @Query("estado") estado?: string) {
     assertTenantId(auth.tenantId);
@@ -129,7 +129,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Listar conceptos de liquidación del tenant" })
   @Get("conceptos-liquidacion")
-  @RequireModule("emision-liquido-producto-arca", "facturacion")
+  @RequireModule("emision-liquido-producto-arca", "liquidaciones")
   @Roles("admin", "member", "superadmin")
   listConceptos(
     @CurrentAuth() auth: AuthPayload,
@@ -145,7 +145,7 @@ export class LiquidacionesController {
     summary: "Crear concepto de liquidación (catálogo o alta rápida)",
   })
   @Post("conceptos-liquidacion")
-  @RequireModule("emision-liquido-producto-arca", "facturacion")
+  @RequireModule("emision-liquido-producto-arca", "liquidaciones")
   @Roles("admin", "superadmin")
   createConcepto(
     @CurrentAuth() auth: AuthPayload,
@@ -157,7 +157,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Editar / desactivar concepto de liquidación" })
   @Patch("conceptos-liquidacion/:id")
-  @RequireModule("emision-liquido-producto-arca", "facturacion")
+  @RequireModule("emision-liquido-producto-arca", "liquidaciones")
   @Roles("admin", "superadmin")
   updateConcepto(
     @CurrentAuth() auth: AuthPayload,
@@ -170,7 +170,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Obtener liquidación por ID" })
   @Get("liquidaciones/:id")
-  @RequireModule("facturacion", "emision-liquido-producto-arca")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
   @Roles("admin", "member", "superadmin")
   findOne(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
     assertTenantId(auth.tenantId);
@@ -182,7 +182,7 @@ export class LiquidacionesController {
       "Crear liquidación (CVLP Tipo 60) — calcula montos automáticamente",
   })
   @Post("liquidaciones")
-  @RequireModule("facturacion", "emision-liquido-producto-arca")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   createLiquidacion(
     @CurrentAuth() auth: AuthPayload,
@@ -200,7 +200,7 @@ export class LiquidacionesController {
       "viajeIds (agregar/quitar viajes) solo en borrador.",
   })
   @Patch("liquidaciones/:id")
-  @RequireModule("facturacion", "emision-liquido-producto-arca")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   updateLiquidacion(
     @CurrentAuth() auth: AuthPayload,
@@ -214,7 +214,7 @@ export class LiquidacionesController {
   @ApiOperation({ summary: "Eliminar liquidación en borrador o con error" })
   @Delete("liquidaciones/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequireModule("facturacion", "emision-liquido-producto-arca")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
   @Roles("admin", "superadmin")
   deleteLiquidacion(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
     assertTenantId(auth.tenantId);
@@ -488,7 +488,12 @@ export class LiquidacionesController {
     summary: "Subir comprobante adjunto (PDF o imagen) a Cloudinary",
   })
   @Post("upload-comprobante")
-  @RequireModule("facturacion", "emision-facturas-arca", "emision-liquido-producto-arca")
+  @RequireModule(
+    "facturacion",
+    "liquidaciones",
+    "emision-facturas-arca",
+    "emision-liquido-producto-arca",
+  )
   @Roles("admin", "member", "superadmin")
   @UseInterceptors(
     FileInterceptor("file", {

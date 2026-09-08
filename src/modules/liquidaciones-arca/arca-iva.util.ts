@@ -150,8 +150,9 @@ export function formatAlicuotaIva(ivaPct: number): string {
 
 /**
  * Pie financiero del PDF CVLP.
- * Preferir montos del comprobante armado (`cvlp`) cuando existen: incluyen conceptos
- * configurables. El fallback usa montos persistidos (autorizados por ARCA).
+ * Usa los montos persistidos en la liquidación (computeLiquidacionTotales / modal).
+ * El comprobante AFIP (`cvlp`) puede diferir en el neto fiscal cuando hay conceptos
+ * a 0% en contra (AFIP 10061); el PDF debe coincidir con lo acordado al liquidar.
  * Garantiza Neto Gravado + Otros Tributos + IVA = Importe Total.
  * `gastosAdmin` está deprecado (siempre 0): no forma parte del CVLP.
  */
@@ -163,7 +164,7 @@ export function cvlpPdfPieFinanciero(
     gastosAdminIva: number;
     liquido: number;
   },
-  cvlp?: { impNeto: number; impIva: number; impTotal: number } | null,
+  _cvlp?: { impNeto: number; impIva: number; impTotal: number } | null,
 ): {
   netoGravado: number;
   otrosTributos: number;
@@ -171,25 +172,17 @@ export function cvlpPdfPieFinanciero(
   total: number;
   balances: boolean;
 } {
-  if (cvlp) {
-    const netoGravado = round2(cvlp.impNeto);
-    const otrosTributos = 0;
-    const iva = round2(cvlp.impIva);
-    const total = round2(cvlp.impTotal);
-    return {
-      netoGravado,
-      otrosTributos,
-      iva,
-      total,
-      balances: round2(netoGravado + otrosTributos + iva) === total,
-    };
-  }
-  const netoGravado = round2(liq.bruto - liq.comision);
   const otrosTributos = 0;
   const iva = round2(liq.gastosAdminIva);
   const total = round2(liq.liquido);
-  const balances = round2(netoGravado + otrosTributos + iva) === total;
-  return { netoGravado, otrosTributos, iva, total, balances };
+  const netoGravado = round2(total - iva);
+  return {
+    netoGravado,
+    otrosTributos,
+    iva,
+    total,
+    balances: round2(netoGravado + otrosTributos + iva) === total,
+  };
 }
 
 /**

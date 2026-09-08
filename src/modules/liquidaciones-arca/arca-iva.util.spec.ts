@@ -91,19 +91,19 @@ test('caso 21% sigue funcionando', () => {
   assert.equal(formatAlicuotaIva(21), '21,00');
 });
 
-test('PDF pie usa montos del cvlp (incluye conceptos)', () => {
+test('PDF pie usa montos persistidos de la liquidación (no el cvlp fiscal AFIP)', () => {
   const liq = {
     bruto: 1000,
     comision: 100,
     gastosAdmin: 0,
-    gastosAdminIva: 189, // desfasado a propósito (sin conceptos)
-    liquido: 1089,
+    gastosAdminIva: 212_945.04,
+    liquido: 1_221_969.04,
   };
-  const cvlp = { impNeto: 950, impIva: 199.5, impTotal: 1149.5 };
+  const cvlp = { impNeto: 1_014_024, impIva: 212_945.04, impTotal: 1_226_969.04 };
   const pie = cvlpPdfPieFinanciero(liq, cvlp);
-  assert.equal(pie.netoGravado, 950);
-  assert.equal(pie.iva, 199.5);
-  assert.equal(pie.total, 1149.5);
+  assert.equal(pie.iva, 212_945.04);
+  assert.equal(pie.total, 1_221_969.04);
+  assert.equal(pie.netoGravado, 1_009_024);
   assert.equal(pie.balances, true);
 });
 

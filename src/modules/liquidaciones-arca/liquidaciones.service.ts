@@ -793,8 +793,10 @@ export class LiquidacionesService {
           ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           gastosAdmin: 0,
-          gastosAdminIva: cvlp.impIva,
-          liquido: cvlp.impTotal,
+          // Totales de negocio (computeLiquidacionTotales): coinciden con el modal.
+          // buildComprobanteCvlp puede diferir en el pie fiscal AFIP (10061 / 0% en contra).
+          gastosAdminIva: montos.impIva,
+          liquido: montos.liquido,
           updatedAt: new Date(),
         },
       });

@@ -60,11 +60,23 @@ export function buildCvlpConceptosList(args: {
   return conceptos;
 }
 
+/** IVA de una línea de concepto configurable (no flete/comisión). */
+function ivaDeConceptoLinea(
+  signo: ConceptoSigno,
+  monto: number,
+  ivaPct: number,
+): number {
+  const abs = Math.abs(monto);
+  if (abs === 0 || !Number.isFinite(ivaPct) || ivaPct === 0) return 0;
+  const iva = round2((abs * ivaPct) / 100);
+  return signo === 'contra' ? -iva : iva;
+}
+
 /**
  * Totales a persistir en Liquidacion.
- * El IVA se calcula por línea (alícuota de flete/comisión vs. la de cada concepto)
- * y se agrupa por tasa: 0% no reduce el IVA de las gravadas. El neto del pie es
- * la suma de todas las bases (incluye gastos/seguro a 0%).
+ * Misma lógica que el modal de creación (`ivaGeneralSobreBase` + conceptos c/IVA propio):
+ * el IVA general va solo sobre (bruto − comisión); los conceptos configurables suman
+ * su base y su IVA aparte. Gastos/seguro a 0% bajan el neto, no el IVA del flete.
  */
 export function computeLiquidacionTotales(args: {
   bruto: number;
@@ -74,21 +86,37 @@ export function computeLiquidacionTotales(args: {
   viajes?: { id: string; numero: string | number }[];
 }): { impNeto: number; impIva: number; liquido: number } {
   const defaultPct = Number(args.ivaPctDefault);
-  const fallbackPct = Number.isFinite(defaultPct) ? defaultPct : 0;
-  const conceptos = buildCvlpConceptosList(args).filter((c) => c.importe !== 0);
-  const byPct = new Map<number, number>();
-  for (const c of conceptos) {
-    const base = round2(c.importe);
-    const raw = c.ivaPct;
-    const pct = typeof raw === 'number' && Number.isFinite(raw) ? raw : fallbackPct;
-    byPct.set(pct, round2((byPct.get(pct) ?? 0) + base));
+  const ivaPct = Number.isFinite(defaultPct) ? defaultPct : 0;
+  const bruto = round2(args.bruto);
+  const comision = round2(args.comision);
+  const baseFleteComision = round2(bruto - comision);
+  const ivaGeneral =
+    ivaPct > 0 ? round2((baseFleteComision * ivaPct) / 100) : 0;
+
+  let conceptosBase = 0;
+  let conceptosIva = 0;
+  for (const l of args.lineas ?? []) {
+    if (!l.monto || l.monto === 0) continue;
+    const pct =
+      typeof l.ivaPct === 'number' && Number.isFinite(l.ivaPct)
+        ? l.ivaPct
+        : ivaPct;
+    const veces =
+      l.modoAplicacion === 'TODOS_LOS_VIAJES' &&
+      args.viajes &&
+      args.viajes.length > 0
+        ? args.viajes.length
+        : 1;
+    for (let i = 0; i < veces; i++) {
+      conceptosBase = round2(conceptosBase + signedImporte(l.signo, l.monto));
+      conceptosIva = round2(
+        conceptosIva + ivaDeConceptoLinea(l.signo, l.monto, pct),
+      );
+    }
   }
-  let impNeto = 0;
-  let impIva = 0;
-  for (const [pct, base] of byPct) {
-    impNeto = round2(impNeto + base);
-    impIva = round2(impIva + round2((base * pct) / 100));
-  }
+
+  const impNeto = round2(baseFleteComision + conceptosBase);
+  const impIva = round2(ivaGeneral + conceptosIva);
   return {
     impNeto,
     impIva,

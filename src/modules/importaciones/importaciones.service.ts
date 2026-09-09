@@ -118,6 +118,76 @@ export class ImportacionesService {
     };
   }
 
+  /**
+   * Pre-flight check: valida rápidamente que todas las hojas requeridas en el arreglo `modulos`
+   * existan en el Excel y tengan las columnas obligatorias. Retorna las que faltan.
+   */
+  async preFlight(
+    tenantId: string,
+    modulos: string[],
+    buffer: Buffer,
+  ): Promise<{ valid: boolean; errores: { modulo: string; faltantes: string[] }[] }> {
+    const errores: { modulo: string; faltantes: string[] }[] = [];
+
+    // Obtenemos los templates de los módulos elegidos
+    const templates = await this.prisma.importTemplate.findMany({
+      where: { tenantId, modulo: { in: modulos } },
+    });
+    const templateMap = new Map(templates.map((t) => [t.modulo, t]));
+
+    for (const modulo of modulos) {
+      const template = templateMap.get(modulo);
+      if (!template) continue;
+
+      const config = template.config as any as TemplateConfig;
+      if (!config.columns || config.columns.length === 0) continue;
+
+      const obligatorias = config.columns.filter((c) => c.required);
+      if (obligatorias.length === 0) continue;
+
+      let sheetHeaders: string[] = [];
+      try {
+        // Usa public parseHeaders (modificaremos parser.service para exponer un parseHeaders o sampleWorkbook)
+        const muestras = this.parser.sampleWorkbook(buffer, 1);
+        
+        let targetName = "";
+        if (config.sheet) {
+          const target = typeof config.sheet === 'string' ? config.sheet.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() : "";
+          const found = muestras.find(m => m.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() === target);
+          if (found) targetName = found.nombre;
+        } else {
+          targetName = muestras.length === 1 ? muestras[0].nombre : "";
+        }
+        
+        const sheet = muestras.find(m => m.nombre === targetName);
+        if (sheet && sheet.filas.length > 0) {
+          const headerRowIndex = (config.headerRow ?? 1) - 1;
+          if (sheet.filas.length > headerRowIndex) {
+            sheetHeaders = (sheet.filas[headerRowIndex] as unknown[]).map(h => h != null ? String(h).trim() : "");
+          }
+        }
+      } catch (e) {
+        // Ignorar si la hoja no se encuentra, saltará error en `preview()` de cada módulo.
+        continue;
+      }
+
+      const sheetHeadersLower = sheetHeaders.map(h => h.toLowerCase());
+      const faltantes: string[] = [];
+
+      for (const col of obligatorias) {
+        const validHeaders = [col.excelHeader, ...(col.excelHeaderAliases || [])].map(h => h.toLowerCase());
+        const exists = validHeaders.some(h => sheetHeadersLower.includes(h));
+        if (!exists) faltantes.push(col.excelHeader);
+      }
+
+      if (faltantes.length > 0) {
+        errores.push({ modulo, faltantes });
+      }
+    }
+
+    return { valid: errores.length === 0, errores };
+  }
+
   // ── Preview ──────────────────────────────────────────────────────────────
 
   async preview(
@@ -146,6 +216,7 @@ export class ImportacionesService {
       parsed,
       config.columns,
       tenantId,
+      modulo,
       true,
     );
 

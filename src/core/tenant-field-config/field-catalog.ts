@@ -237,6 +237,27 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
       }
     }
   },
+  choferes: {
+    label: "Choferes",
+    formularios: {
+      alta_chofer: {
+        label: "Alta de chofer",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "flotaPropia", label: "Opción \"Flota propia\"", obligatorioSistema: false },
+          { campo: "transportistaExterno", label: "Opción \"Transportista externo\"", obligatorioSistema: false },
+        ],
+      },
+      edicion_chofer: {
+        label: "Edición de chofer",
+        campos: [
+          { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "flotaPropia", label: "Opción \"Flota propia\"", obligatorioSistema: false },
+          { campo: "transportistaExterno", label: "Opción \"Transportista externo\"", obligatorioSistema: false },
+        ],
+      },
+    },
+  },
   vehiculos: {
     label: "Vehículos",
     formularios: {

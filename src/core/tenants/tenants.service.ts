@@ -96,7 +96,30 @@ export class TenantsService {
   async findOne(clerkOrgId: string) {
     const tenant = await this.prisma.tenant.findUnique({ where: { clerkOrgId } });
     if (!tenant) throw new NotFoundException('Tenant no encontrado');
-    return tenant;
+    return this.withPaisOrigenDestinoFijo(tenant);
+  }
+
+  /**
+   * Resuelve `paisOrigenDestinoFijoId` (id de Pais, catálogo del tenant) contra el
+   * código de 2 letras real — computado, no vive en la tabla `tenants`. Mismo flag
+   * (`paisOrigenDestinoOculto`/`paisOrigenDestinoFijoId`) se reusa para Viajes,
+   * Clientes y Transportistas: el código resuelto acá alcanza para los tres, sin
+   * que cada pantalla tenga que resolver el id contra el catálogo de países.
+   */
+  private async withPaisOrigenDestinoFijo<T extends { paisOrigenDestinoFijoId: string | null }>(
+    tenant: T,
+  ) {
+    if (!tenant.paisOrigenDestinoFijoId) {
+      return { ...tenant, paisOrigenDestinoFijoCodigo: null, paisOrigenDestinoFijoNombre: null };
+    }
+    const pais = await this.prisma.pais.findUnique({
+      where: { id: tenant.paisOrigenDestinoFijoId },
+    });
+    return {
+      ...tenant,
+      paisOrigenDestinoFijoCodigo: pais?.codigo ?? null,
+      paisOrigenDestinoFijoNombre: pais?.nombre ?? null,
+    };
   }
 
   /** Registra la org de Clerk en Vialto si aún no existe (onboarding automático). */

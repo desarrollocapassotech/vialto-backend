@@ -592,10 +592,9 @@ export class FacturacionService {
 
     const tieneArca = await this.tieneArca(tenantId);
 
-    // El número de comprobante solo es obligatorio para tenants sin ARCA: ahí
-    // representa un comprobante ya numerado externamente. Para tenants con
-    // integracion-arca el número real lo asigna AFIP al emitir (cbteTipo/
-    // ptoVenta/cbteNro) — la factura borrador se crea sin numero.
+    // El número de comprobante es opcional: para tenants con integracion-arca
+    // lo asigna AFIP al emitir (cbteTipo/ptoVenta/cbteNro); para tenants sin
+    // ARCA es un comprobante externo que puede cargarse después.
     // Normalizamos acá (no solo confiar en el frontend) para que un string
     // vacío/solo-espacios nunca llegue a guardarse como numero="" — eso
     // rompería la unicidad real (NULL sí admite múltiples filas, "" no).
@@ -603,10 +602,6 @@ export class FacturacionService {
     if (numero) {
       // Validación previa para atrapar el 99% de los casos antes de abrir transacción
       await this.assertNumeroFacturaUnico(tenantId, numero);
-    } else if (!tieneArca) {
-      throw new BadRequestException(
-        "El número de comprobante es obligatorio.",
-      );
     }
 
     const viajeIds = dto.viajeIds ?? [];
@@ -674,9 +669,17 @@ export class FacturacionService {
           });
 
           for (const v of viajesInvolucrados) {
-            // Actualizar la cabecera del viaje si el cliente facturado es el principal
-            // o si el viaje no tenía ninguna factura asignada aún (retrocompatibilidad).
-            if (v.clienteId === dto.clienteId || !v.facturaId) {
+            // Viaje.facturaId (→ Viaje.facturacionEstado) representa específicamente
+            // al cliente principal (Viaje.clienteId), independiente de cada
+            // ViajeCliente.facturaId. Solo se actualiza si esta factura es del
+            // cliente principal, o si no se especificó cliente (retrocompatibilidad
+            // con flujos sin desglose multi-cliente). Ojo: NO cae acá solo porque
+            // `!v.facturaId` — eso pisaba la cabecera con la factura de un cliente
+            // ADICIONAL en un viaje multi-cliente que todavía no tenía ninguna
+            // factura vinculada, marcando al principal como facturado sin serlo
+            // (bug real: viaje con 3 clientes, se factura solo al 2do, y el
+            // principal aparecía como "facturado" en vez de "sin facturar").
+            if (v.clienteId === dto.clienteId || !dto.clienteId) {
               await tx.viaje.update({
                 where: { id: v.id },
                 data: { facturaId: factura.id },
@@ -831,7 +834,16 @@ export class FacturacionService {
           });
 
           for (const v of viajesInvolucrados) {
-            if (v.clienteId === targetClienteId || !v.facturaId || v.facturaId === id) {
+            // Mismo criterio que createFactura: Viaje.facturaId representa al
+            // cliente principal. `v.facturaId === id` es legítimo (el viaje ya
+            // estaba vinculado a esta misma factura); `!targetClienteId` es la
+            // retrocompatibilidad sin desglose. NO cae por `!v.facturaId` solo
+            // (ver bug real documentado en createFactura más arriba).
+            if (
+              v.clienteId === targetClienteId ||
+              !targetClienteId ||
+              v.facturaId === id
+            ) {
               await tx.viaje.update({
                 where: { id: v.id },
                 data: { facturaId: id },

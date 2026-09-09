@@ -33,6 +33,7 @@ const MODULOS_CAMPOS_COMPARTIDOS = new Set([
   "clientes",
   "transportistas",
   "vehiculos",
+  "choferes",
 ]);
 
 @Injectable()

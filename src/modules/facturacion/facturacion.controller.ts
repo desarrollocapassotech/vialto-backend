@@ -24,7 +24,7 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 @ApiBearerAuth('clerk-jwt')
 @Controller('facturacion')
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
-@RequireModule('facturacion')
+@RequireModule('facturacion', 'emision-facturas-arca')
 export class FacturacionController {
   constructor(private readonly service: FacturacionService) {}
 

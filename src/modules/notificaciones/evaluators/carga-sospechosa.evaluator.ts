@@ -2,17 +2,30 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import type { NotificacionEvaluator, NotificacionItem } from './notificacion-evaluator.interface';
 
-/** Ventana de búsqueda hacia atrás — acotada para que la query sea liviana; el dedup por `entidadId` en `NotificacionEnvio` evita reenviar. */
-const DIAS_VENTANA = 2;
+/**
+ * Tope de filas por corrida — protege la query/el email de un backlog inusualmente
+ * grande (ej. una primera corrida contra datos migrados), no un filtro de "recientes".
+ */
+const LIMITE_CARGAS = 300;
 
 const MOTIVO_LABEL: Record<string, string> = {
   litros_extremo: 'litros fuera de rango',
   importe_invalido: 'importe inválido',
   precio_litro_fuera_de_rango: 'precio por litro fuera de rango',
   km_delta_invalido: 'salto de kilometraje inválido',
+  costo_km_invalido: 'costo por kilómetro fuera de rango',
 };
 
-/** Cargas de combustible marcadas `sospechoso` en los últimos días — el dedup de `NotificacionEnvio` asegura que cada carga se avise una sola vez. */
+/**
+ * Todas las cargas de combustible marcadas `sospechoso` del tenant — sin ventana de
+ * fecha. `CargaCombustible.fecha` es la fecha operativa de la carga (cuándo se cargó
+ * combustible), no cuándo se la marcó sospechosa, y fase 2/3 puede marcar como
+ * sospechosa una carga de fecha vieja recién ahora (al aparecer una carga vecina
+ * nueva que revela una cadena de km inconsistente) — filtrar por fecha reciente
+ * dejaría esos casos afuera para siempre. El dedup por `entidadId` en
+ * `NotificacionEnvio` es lo que garantiza que cada carga se avise una sola vez, no
+ * la ventana de fecha.
+ */
 @Injectable()
 export class CargaSospechosaEvaluator implements NotificacionEvaluator {
   readonly tipo = 'combustible.cargaSospechosa';
@@ -20,12 +33,8 @@ export class CargaSospechosaEvaluator implements NotificacionEvaluator {
   constructor(private readonly prisma: PrismaService) {}
 
   async evaluar(tenantId: string): Promise<NotificacionItem[]> {
-    const desde = new Date();
-    desde.setDate(desde.getDate() - DIAS_VENTANA);
-    desde.setHours(0, 0, 0, 0);
-
     const cargas = await this.prisma.cargaCombustible.findMany({
-      where: { tenantId, sospechoso: true, fecha: { gte: desde } },
+      where: { tenantId, sospechoso: true },
       select: {
         id: true,
         estacion: true,
@@ -36,6 +45,7 @@ export class CargaSospechosaEvaluator implements NotificacionEvaluator {
         vehiculoId: true,
       },
       orderBy: { fecha: 'desc' },
+      take: LIMITE_CARGAS,
     });
     if (cargas.length === 0) return [];
 

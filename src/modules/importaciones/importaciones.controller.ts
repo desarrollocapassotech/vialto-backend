@@ -83,6 +83,27 @@ export class ImportacionesController {
   }
 
   /**
+   * Valida rápidamente que las hojas necesarias tengan todas las columnas obligatorias.
+   */
+  @ApiOperation({ summary: 'Validar encabezados de Excel antes de importar' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('pre-flight')
+  @Roles('admin', 'superadmin')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async preFlight(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('tenantId') queryTenantId: string | undefined,
+    @Query('modulos') modulos: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere un archivo Excel');
+    const tenantId = this.resolveTenantId(auth, queryTenantId);
+    const modulosArray = modulos ? modulos.split(',') : [];
+    return this.service.preFlight(tenantId, modulosArray, file.buffer);
+  }
+
+  /**
    * Sube un archivo Excel, lo valida y devuelve una previsualización.
    * No guarda nada en las tablas de negocio.
    */

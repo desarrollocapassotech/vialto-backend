@@ -8,6 +8,7 @@ import {
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { CloudinaryService } from "../../shared/storage/cloudinary.service";
 import { KM_DELTA_PLAUSIBLE_MAX } from "../../shared/util/combustible-km.constants";
+import { evaluarLitrosImporteFase1 } from "../../shared/util/combustible-fase1.util";
 
 import { CreateCargaDto } from "./dto/create-carga.dto";
 import { UpdateCargaDto } from "./dto/update-carga.dto";
@@ -416,13 +417,17 @@ export class CombustibleService {
       undefined,
       createdAtValue
     );
+    const fase1 = evaluarLitrosImporteFase1(dto.litros, dto.importe);
     const carga = await this.prisma.cargaCombustible.create({
       data: {
         tenantId: auth.tenantId,
         vehiculoId: dto.vehiculoId,
         choferId: dto.choferId ?? null,
         estacion: dto.estacion,
-        litros: dto.litros,
+        litros: fase1.litros,
+        litrosOriginal: fase1.litrosOriginal,
+        sospechoso: fase1.sospechoso,
+        motivoSospecha: fase1.motivoSospecha,
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,
@@ -610,13 +615,17 @@ export class CombustibleService {
 
     await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km, undefined, createdAtValue);
     this.assertCoherenciaImporte(dto.litros, dto.precioPorLitro, dto.importe);
+    const fase1 = evaluarLitrosImporteFase1(dto.litros, dto.importe);
     const carga = await this.prisma.cargaCombustible.create({
       data: {
         tenantId,
         vehiculoId: vehiculo.id,
         choferId,
         estacion: dto.estacion,
-        litros: dto.litros,
+        litros: fase1.litros,
+        litrosOriginal: fase1.litrosOriginal,
+        sospechoso: fase1.sospechoso,
+        motivoSospecha: fase1.motivoSospecha,
         precioPorLitro: dto.precioPorLitro,
         importe: dto.importe,
         km: dto.km,

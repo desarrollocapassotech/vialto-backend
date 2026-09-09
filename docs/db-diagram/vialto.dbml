@@ -1,5 +1,5 @@
 // =============================================================================
-// Vialto — Diagrama ER (DBML) — FUENTE EDITABLE
+// Vialto - Diagrama ER (DBML) — FUENTE EDITABLE
 // Vista principal: abrir index.html en el navegador (sin cuenta ni tarjeta).
 //
 // [IMP-*]  = implementado (existe en schema.prisma)

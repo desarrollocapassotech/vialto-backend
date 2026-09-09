@@ -149,8 +149,23 @@ export function buildViajesPaginatedWhere(
   const cid = query.clienteId?.trim();
   if (cid) where.clienteId = cid;
 
+  // El filtro de "Transporte" matchea tanto al contratante (transportistaId) como a
+  // quien ejecuta el flete si difiere del contratante (transportistaEfectivoId) — la
+  // columna de la grilla ya muestra ambos, así que filtrar por uno solo dejaba afuera
+  // viajes donde el transportista buscado aparece como ejecutor de otro contratante.
   const tid = query.transportistaId?.trim();
-  if (tid) where.transportistaId = tid;
+  if (tid) {
+    const prevAnd = where.AND;
+    const andArr: Prisma.ViajeWhereInput[] = Array.isArray(prevAnd)
+      ? [...prevAnd]
+      : prevAnd != null
+        ? [prevAnd]
+        : [];
+    where.AND = [
+      ...andArr,
+      { OR: [{ transportistaId: tid }, { transportistaEfectivoId: tid }] },
+    ];
+  }
 
   const chid = query.choferId?.trim();
   if (chid) where.choferId = chid;

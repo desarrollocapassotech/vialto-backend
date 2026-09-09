@@ -13,7 +13,7 @@ import { Type } from 'class-transformer';
 import { FacturaTramoDto } from './factura-tramo.dto';
 
 export class CreateFacturaDto {
-  /** Obligatorio salvo para tenants con integracion-arca (ahí el número lo asigna AFIP al emitir) — validado en el service, no acá, porque depende del tenant. */
+  /** Opcional: con integracion-arca lo asigna AFIP al emitir; sin ARCA puede cargarse después, cuando se tenga el comprobante externo. */
   @IsOptional() @IsString() numero?: string;
   /** Siempre "cliente" — el pago a transportistas externos se gestiona en Liquidaciones, no como Factura. */
   @IsIn(['cliente']) tipo: string;

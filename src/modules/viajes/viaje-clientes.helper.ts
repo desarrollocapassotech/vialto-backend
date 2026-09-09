@@ -237,5 +237,6 @@ export const viajeClientesViajeInclude = {
       orderBy: { orden: "asc" as const },
       include: { producto: { select: { id: true, nombre: true, activo: true } } },
     },
+    factura: { select: { ivaPct: true } },
   },
 };

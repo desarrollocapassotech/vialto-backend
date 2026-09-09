@@ -95,6 +95,7 @@ const VIAJE_INCLUDE_FULL = {
       cbteNro: true,
       ptoVenta: true,
       fechaEmision: true,
+      ivaPct: true,
       viajes: { select: { id: true, monto: true } },
     },
   },

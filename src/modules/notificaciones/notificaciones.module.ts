@@ -18,6 +18,6 @@ import { UsersModule } from '../../core/users/users.module';
     FacturaPorVencerEvaluator,
     CargaSospechosaEvaluator,
   ],
-  exports: [NotificacionesConfigService],
+  exports: [NotificacionesConfigService, NotificacionesCronService],
 })
 export class NotificacionesModule {}

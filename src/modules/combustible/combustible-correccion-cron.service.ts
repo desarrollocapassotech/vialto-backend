@@ -3,6 +3,7 @@ import { Cron } from "@nestjs/schedule";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { evaluarLitrosImporteFase1 } from "../../shared/util/combustible-fase1.util";
 import { corregirKmYCostoPorKm } from "../../shared/util/combustible-fase2-km.util";
+import { NotificacionesCronService } from "../notificaciones/notificaciones-cron.service";
 
 /**
  * Corrida diaria de detección/corrección de cargas de combustible sospechosas — ver
@@ -22,12 +23,22 @@ import { corregirKmYCostoPorKm } from "../../shared/util/combustible-fase2-km.ut
  * producción por depender de que alguien se acuerde). El script sigue existiendo
  * para pases puntuales (ej. `--tenant-id` acotado, verificación manual con
  * `--dry-run`), ambos apuntan a las mismas funciones compartidas.
+ *
+ * Al final de cada corrida dispara además el email de "cargas sospechosas"
+ * (`combustible.cargaSospechosa`, `frecuencia: 'semanal'` en el catálogo de
+ * notificaciones) para cada tenant con el módulo activo — a propósito, no en cada
+ * alta individual: un email por carga sospechosa resultó excesivo dado el volumen
+ * real (hasta ~70% de las cargas de un tenant en meses con mucho error de tipeo), así
+ * que el aviso se agrupa en un solo resumen semanal, sincronizado con esta corrida.
  */
 @Injectable()
 export class CombustibleCorreccionCronService {
   private readonly logger = new Logger(CombustibleCorreccionCronService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificacionesCron: NotificacionesCronService,
+  ) {}
 
   /**
    * Domingo 4:00 AM hora Argentina — fuera del horario de uso de la app del chofer.
@@ -55,6 +66,26 @@ export class CombustibleCorreccionCronService {
         "Error en la corrección semanal de cargas de combustible",
         error instanceof Error ? error.stack : String(error),
       );
+    }
+
+    await this.notificarTenants();
+  }
+
+  /** Dispara el resumen semanal de cargas sospechosas para cada tenant con `combustible` activo. */
+  private async notificarTenants(): Promise<void> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { modules: { has: "combustible" } },
+      select: { clerkOrgId: true, modules: true },
+    });
+    for (const t of tenants) {
+      try {
+        await this.notificacionesCron.procesarTenant(t.clerkOrgId, t.modules, "semanal");
+      } catch (error) {
+        this.logger.error(
+          `Error notificando cargas sospechosas del tenant ${t.clerkOrgId}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
     }
   }
 

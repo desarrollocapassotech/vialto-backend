@@ -43,6 +43,18 @@ model Tenant {
    * anulado) con comprobante pre-impreso adjunto por el usuario. Ver Liquidacion.estado y CLAUDE.md.
    */
   liquidacionAnulacionMetodo             String    @default("nota_credito_debito")
+  /**
+   * true = oculta el selector de país en origen/destino de Viajes (queda solo
+   * el buscador de ciudad); usa paisOrigenDestinoFijoId como país fijo.
+   */
+  paisOrigenDestinoOculto                Boolean   @default(false)
+  /**
+   * Id de Pais (catálogo propio del tenant, ver modelo Pais) a usar cuando
+   * paisOrigenDestinoOculto=true. Sin relación Prisma a propósito (mismo
+   * criterio que Cliente.idFiscal): si se borra el Pais referenciado, el
+   * frontend lo trata como "no configurado" y vuelve a mostrar el selector.
+   */
+  paisOrigenDestinoFijoId                String?
   createdAt                              DateTime  @default(now())
 
   clientes                   Cliente[]

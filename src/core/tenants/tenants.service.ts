@@ -141,6 +141,7 @@ export class TenantsService {
         },
       });
       await this.tenantBootstrap.seedDefaultPresentaciones(tenant.clerkOrgId);
+      await this.tenantBootstrap.seedDefaultPaises(tenant.clerkOrgId);
       return tenant;
     } catch (error) {
       if (createdOrgId) {

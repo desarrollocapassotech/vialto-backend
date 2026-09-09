@@ -244,6 +244,11 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
         label: "Alta de chofer",
         campos: [
           { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "dni", label: "DNI", obligatorioSistema: false },
+          { campo: "cuit", label: "CUIT", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "licencia", label: "N.° licencia", obligatorioSistema: false },
+          { campo: "licenciaVence", label: "Vencimiento de licencia", obligatorioSistema: false },
           { campo: "flotaPropia", label: "Opción \"Flota propia\"", obligatorioSistema: false },
           { campo: "transportistaExterno", label: "Opción \"Transportista externo\"", obligatorioSistema: false },
         ],
@@ -252,6 +257,11 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
         label: "Edición de chofer",
         campos: [
           { campo: "nombre", label: "Nombre", obligatorioSistema: true },
+          { campo: "dni", label: "DNI", obligatorioSistema: false },
+          { campo: "cuit", label: "CUIT", obligatorioSistema: false },
+          { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
+          { campo: "licencia", label: "N.° licencia", obligatorioSistema: false },
+          { campo: "licenciaVence", label: "Vencimiento de licencia", obligatorioSistema: false },
           { campo: "flotaPropia", label: "Opción \"Flota propia\"", obligatorioSistema: false },
           { campo: "transportistaExterno", label: "Opción \"Transportista externo\"", obligatorioSistema: false },
         ],

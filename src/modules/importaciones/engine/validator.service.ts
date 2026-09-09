@@ -31,6 +31,7 @@ export class ValidatorService {
     rows: ParsedRow[],
     columns: ColumnConfig[],
     tenantId: string,
+    modulo: string,
     readOnly = false,
   ): Promise<ValidationResult> {
     if (rows.length > 0) {
@@ -87,8 +88,105 @@ export class ValidatorService {
       }
     }
 
+    // Validaciones de negocio cruzadas (post-parseo)
+    const validFinal: ValidatedRow[] = [];
+    for (const row of valid) {
+      const rowErrors: RowError[] = [];
+
+      if (modulo === "vehiculos") {
+        const partes = (row.patente as string | null)?.toString().trim().split("/").filter((p) => p !== "") || [];
+        const tipoFila = String(row.tipo ?? "").trim();
+        if (partes.length < 2 && !tipoFila) {
+          rowErrors.push({
+            fila: row._rowNum,
+            campo: "Tipo",
+            error: "El tipo de vehículo es obligatorio.",
+            valor: row.tipo,
+          });
+        }
+      } else if (modulo === "viajes") {
+        const fechaCarga = row.fechaCarga ? new Date(row.fechaCarga as any) : null;
+        const fechaDescarga = row.fechaDescarga ? new Date(row.fechaDescarga as any) : null;
+        
+        if (!fechaCarga) {
+          rowErrors.push({
+            fila: row._rowNum,
+            campo: "Fecha de carga",
+            error: "La fecha de carga es requerida.",
+            valor: null,
+          });
+        }
+
+        if (fechaCarga && !isNaN(fechaCarga.getTime()) && fechaDescarga && !isNaN(fechaDescarga.getTime())) {
+          if (fechaDescarga < fechaCarga) {
+            rowErrors.push({
+              fila: row._rowNum,
+              campo: "Fecha de descarga",
+              error: "La fecha de descarga no puede ser anterior a la de carga.",
+              valor: row.fechaDescarga,
+            });
+          }
+        }
+
+        const transportistaId = row.transportistaId as string | null;
+        const transportistaEfectivoId = row.transportistaEfectivoId as string | null;
+        
+        if (transportistaId && transportistaEfectivoId && transportistaId === transportistaEfectivoId) {
+          rowErrors.push({
+            fila: row._rowNum,
+            campo: "Transportista efectivo (subcontratación)",
+            error: "El transportista efectivo no puede ser el mismo que el transportista principal.",
+            valor: transportistaEfectivoId,
+          });
+        }
+
+        const tipoFlota = (row.tipoFlota as string | null)?.toString().toUpperCase().trim();
+        let precioFlete: number | null = null;
+        const cantTransp = row.cantidadTransportista != null ? Number(row.cantidadTransportista) : null;
+        const precioUnitTransp = row.precioUnitarioTransportista != null ? Number(row.precioUnitarioTransportista) : null;
+        if (cantTransp != null && precioUnitTransp != null) {
+          precioFlete = Math.round(cantTransp * precioUnitTransp * 100) / 100;
+        } else if (row.precioTransportistaExterno != null) {
+          precioFlete = Number(row.precioTransportistaExterno);
+        }
+
+        if (tipoFlota === "TERCERO") {
+          if (!transportistaId) {
+            rowErrors.push({
+              fila: row._rowNum,
+              campo: "Transporte",
+              error: "Flota TERCERO sin transportista: completá la columna TRANSPORTE.",
+              valor: null,
+            });
+          }
+          if (precioFlete == null) {
+            rowErrors.push({
+              fila: row._rowNum,
+              campo: "Valor fletero",
+              error: "Flota TERCERO sin VALOR FLETERO: se perdería el costo del flete.",
+              valor: null,
+            });
+          }
+        }
+        if (tipoFlota === "PROPIA" && transportistaId) {
+          rowErrors.push({
+            fila: row._rowNum,
+            campo: "Transporte",
+            error: "Flota PROPIA con transportista externo asignado: datos incoherentes.",
+            valor: transportistaId,
+          });
+        }
+      }
+
+      if (rowErrors.length > 0) {
+        errors.push(...rowErrors);
+      } else {
+        validFinal.push(row);
+      }
+    }
+
     return {
-      valid,
+      valid: validFinal,
       errors,
       advertencias,
       created: {

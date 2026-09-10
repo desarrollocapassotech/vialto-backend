@@ -123,19 +123,69 @@ export class ViajesProcessor implements IImportProcessor {
       if (existing) return existing.id;
     }
 
-    const existing = await this.prisma.viaje.findFirst({
+    const choferId = (row.choferId as string | null) ?? null;
+    const vehiculoIds = Array.isArray(row.vehiculoId)
+      ? (row.vehiculoId as string[])
+      : row.vehiculoId
+        ? [row.vehiculoId as string]
+        : [];
+    const vehiculosStr = vehiculoIds.join(",");
+
+    const origenTrim = (row.origen as string).trim();
+    const destinoTrim = (row.destino as string).trim();
+    const ciudadBase = (s: string) => s.split(",")[0].trim();
+
+    // La comparación usa startsWith para cubrir el caso donde el viaje fue
+    // guardado con el formato "Ciudad, Provincia" pero la fila trae solo "Ciudad".
+    // El filtro es permisivo a propósito — la verificación de ciudad base y
+    // vehículos al final actúa como desempate exacto entre candidatos.
+    const candidates = await this.prisma.viaje.findMany({
       where: {
         tenantId,
         clienteId: row.clienteId as string,
-        transportistaId: row.transportistaId as string,
-        origen: { equals: (row.origen as string).trim(), mode: "insensitive" },
-        destino: { equals: (row.destino as string).trim(), mode: "insensitive" },
-        fechaCarga: row.fechaCarga as Date,
-        fechaDescarga: row.fechaDescarga as Date | null,
+        transportistaId: (row.transportistaId as string | null) ?? null,
+        OR: [
+          { origen: { equals: origenTrim, mode: "insensitive" } },
+          { origen: { startsWith: origenTrim + ",", mode: "insensitive" } },
+          { origen: { startsWith: ciudadBase(origenTrim), mode: "insensitive" } },
+        ],
+        AND: [
+          {
+            OR: [
+              { destino: { equals: destinoTrim, mode: "insensitive" } },
+              { destino: { startsWith: destinoTrim + ",", mode: "insensitive" } },
+              { destino: { startsWith: ciudadBase(destinoTrim), mode: "insensitive" } },
+            ],
+          },
+        ],
+        fechaCarga: this.toDate(row.fechaCarga)!,
+        fechaDescarga: this.toDate(row.fechaDescarga),
+        choferId,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        origen: true,
+        destino: true,
+        vehiculosViaje: {
+          select: { vehiculoId: true },
+          orderBy: { orden: "asc" },
+        },
+      },
     });
-    return existing?.id ?? null;
+
+    // Desempate: de los candidatos que pasaron el OR de ciudades, nos quedamos
+    // solo con los que coinciden en la ciudad base (normalizada) y en vehículos.
+    const exactMatch = candidates.find((c) => {
+      const mismoOrigen =
+        ciudadBase(c.origen ?? "").toLowerCase() === ciudadBase(origenTrim).toLowerCase();
+      const mismoDestino =
+        ciudadBase(c.destino ?? "").toLowerCase() === ciudadBase(destinoTrim).toLowerCase();
+      const mismosVehiculos =
+        c.vehiculosViaje.map((v) => v.vehiculoId).join(",") === vehiculosStr;
+      return mismoOrigen && mismoDestino && mismosVehiculos;
+    });
+
+    return exactMatch?.id ?? null;
   }
 
   async insert(
@@ -279,10 +329,8 @@ export class ViajesProcessor implements IImportProcessor {
     tenantId: string,
     createdBy: string,
   ): Promise<{ id: string; facturado: boolean }> {
-    // Envolvemos todas las operaciones de la fila en una transacción interactiva
     return await this.prisma.$transaction(async (tx) => {
-      // Pasamos 'tx' (el cliente transaccional) a tu generador para mantener la consistencia
-      // (Forzamos el tipo con 'as any' en caso de que generateNumeroViaje espere estrictamente PrismaService en tu tipado)
+      // generateNumeroViaje espera PrismaService pero es compatible con TransactionClient — el cast es seguro.
       const numero = await generateNumeroViaje(tx as any, tenantId);
 
       const observaciones = (row.observaciones as string | undefined) ?? null;
@@ -390,28 +438,28 @@ export class ViajesProcessor implements IImportProcessor {
           .trim() || null;
 
       const especialesCreate = {
-          tenantId,
-          numero,
-          numeroIdentificacionPersonalizado,
-          etapa,
-          facturacionEstado,
-          clienteId,
-          transportistaId,
-          transportistaEfectivoId,
-          choferId: (row.choferId as string | null) ?? null,
-          origen: (row.origen as string | null) ?? null,
-          destino: (row.destino as string | null) ?? null,
-          fechaCarga,
-          fechaDescarga,
-          monto: this.resolveMonto(row),
-          monedaMonto: (row.monedaMonto as string | null) ?? "ARS",
-          precioTransportistaExterno: precioFlete,
-          monedaPrecioTransportistaExterno:
-            (row.monedaPrecioTransportistaExterno as string | null) ?? "ARS",
-          facturaId: facturaClienteId,
-          observaciones,
-          otrosGastos: this.extractOtrosGastos(row),
-          createdBy,
+        tenantId,
+        numero,
+        numeroIdentificacionPersonalizado,
+        etapa,
+        facturacionEstado,
+        clienteId,
+        transportistaId,
+        transportistaEfectivoId,
+        choferId: (row.choferId as string | null) ?? null,
+        origen: (row.origen as string | null) ?? null,
+        destino: (row.destino as string | null) ?? null,
+        fechaCarga,
+        fechaDescarga,
+        monto: this.resolveMonto(row),
+        monedaMonto: (row.monedaMonto as string | null) ?? "ARS",
+        precioTransportistaExterno: precioFlete,
+        monedaPrecioTransportistaExterno:
+          (row.monedaPrecioTransportistaExterno as string | null) ?? "ARS",
+        facturaId: facturaClienteId,
+        observaciones,
+        otrosGastos: this.extractOtrosGastos(row),
+        createdBy,
       };
       const extrasCreate = scalarDataFromRow(row, "Viaje", {
         skip: Object.keys(especialesCreate),
@@ -487,19 +535,36 @@ export class ViajesProcessor implements IImportProcessor {
   /** Clave normalizada para el fallback compuesto de `findExisting` — misma combinación de campos, para poder comparar en memoria sin una query por fila. `fechaDescarga` es opcional: las filas/viajes sin ella comparten la misma clave vacía, igual que el `IS NULL` que arma la query. */
   private claveCompuesta(
     clienteId: string,
-    transportistaId: string,
+    transportistaId: string | null,
     origen: string,
     destino: string,
     fechaCarga: Date,
     fechaDescarga: Date | null,
+    choferId: string | null,
+    vehiculos: string[],
   ): string {
+    // Normalizamos las fechas a solo la parte de fecha (YYYY-MM-DD) para evitar
+    // diferencias de timezone entre lo que parsea el Excel (T00:00:00Z) y lo
+    // que devuelve Prisma desde Postgres (puede venir con T03:00:00Z si el
+    // servidor está en Argentina UTC-3). Las fechas de viaje son fechas de
+    // calendario — la hora no tiene semántica relevante para el matching.
+    const toDateStr = (d: Date) => d.toISOString().slice(0, 10);
+    // Normalizamos origen/destino a la ciudad base (antes de la coma) para que
+    // "Córdoba" matchee con "Córdoba, Córdoba" — el campo origen/destino puede
+    // estar guardado en la BD con el formato "Ciudad, Provincia" (cuando se
+    // importó con el nombre completo) o solo con "Ciudad" (cuando el Excel
+    // solo traía la ciudad). Tomamos la parte antes de la primera coma, en
+    // minúsculas, para que ambos formatos generen la misma clave.
+    const normCiudad = (s: string) => s.split(",")[0].trim().toLowerCase();
     return [
       clienteId,
-      transportistaId,
-      origen.trim().toLowerCase(),
-      destino.trim().toLowerCase(),
-      fechaCarga.toISOString(),
-      fechaDescarga ? fechaDescarga.toISOString() : "",
+      transportistaId || "",
+      normCiudad(origen),
+      normCiudad(destino),
+      toDateStr(fechaCarga),
+      fechaDescarga ? toDateStr(fechaDescarga) : "",
+      choferId || "",
+      vehiculos.join(","),
     ].join("|");
   }
 
@@ -563,6 +628,8 @@ export class ViajesProcessor implements IImportProcessor {
       destino: string;
       fechaCarga: Date;
       fechaDescarga: Date | null;
+      choferId: string | null;
+      vehiculoIds: string[];
     };
     const conDatosCompuestos: FilaCompuesta[] = [];
     for (const r of pendientes) {
@@ -572,6 +639,13 @@ export class ViajesProcessor implements IImportProcessor {
       const destino = r.destino as string | undefined;
       const fechaCarga = this.toDate(r.fechaCarga);
       const fechaDescarga = this.toDate(r.fechaDescarga);
+      const choferId = (r.choferId as string | null) ?? null;
+      const vehiculoIds = Array.isArray(r.vehiculoId) 
+        ? (r.vehiculoId as string[]) 
+        : r.vehiculoId 
+          ? [r.vehiculoId as string] 
+          : [];
+
       if (clienteId && transportistaId && origen && destino && fechaCarga) {
         conDatosCompuestos.push({
           row: r,
@@ -581,42 +655,69 @@ export class ViajesProcessor implements IImportProcessor {
           destino,
           fechaCarga,
           fechaDescarga,
+          choferId,
+          vehiculoIds,
         });
       }
     }
     if (conDatosCompuestos.length === 0) return filasExistentes;
 
+    // La query usa startsWith para origen/destino porque el campo puede estar
+    // guardado en BD como "Ciudad, Provincia" (formato enriquecido) mientras
+    // que el Excel importa solo "Ciudad". El match en memoria se hace después
+    // con claveCompuesta que normaliza ambos a la ciudad base.
     const existentesCompuesto = await this.prisma.viaje.findMany({
       where: {
         OR: conDatosCompuestos.map((f) => ({
           tenantId,
           clienteId: f.clienteId,
           transportistaId: f.transportistaId,
-          origen: { equals: f.origen.trim(), mode: "insensitive" as const },
-          destino: { equals: f.destino.trim(), mode: "insensitive" as const },
+          OR: [
+            { origen: { equals: f.origen.trim(), mode: "insensitive" as const } },
+            { origen: { startsWith: f.origen.trim() + ",", mode: "insensitive" as const } },
+            { origen: { startsWith: f.origen.trim().split(",")[0].trim(), mode: "insensitive" as const } },
+          ],
+          AND: [
+            {
+              OR: [
+                { destino: { equals: f.destino.trim(), mode: "insensitive" as const } },
+                { destino: { startsWith: f.destino.trim() + ",", mode: "insensitive" as const } },
+                { destino: { startsWith: f.destino.trim().split(",")[0].trim(), mode: "insensitive" as const } },
+              ],
+            },
+          ],
           fechaCarga: f.fechaCarga,
           fechaDescarga: f.fechaDescarga,
+          choferId: f.choferId,
         })),
       },
       select: {
         id: true,
         clienteId: true,
         transportistaId: true,
+        choferId: true,
+        vehiculosViaje: {
+          select: { vehiculoId: true },
+          orderBy: { orden: "asc" },
+        },
         origen: true,
         destino: true,
         fechaCarga: true,
         fechaDescarga: true,
       },
     });
+
     const idPorClave = new Map(
       existentesCompuesto.map((v) => [
         this.claveCompuesta(
           v.clienteId,
           v.transportistaId,
-          v.origen,
-          v.destino,
+          v.origen ?? "",
+          v.destino ?? "",
           v.fechaCarga,
           v.fechaDescarga,
+          v.choferId,
+          v.vehiculosViaje.map((vv) => vv.vehiculoId)
         ),
         v.id,
       ]),
@@ -630,6 +731,8 @@ export class ViajesProcessor implements IImportProcessor {
         f.destino,
         f.fechaCarga,
         f.fechaDescarga,
+        f.choferId,
+        f.vehiculoIds
       );
       const id = idPorClave.get(clave);
       if (id) filasExistentes.set(f.row._rowNum, id);
@@ -644,14 +747,137 @@ export class ViajesProcessor implements IImportProcessor {
   }
 
   /**
-   * Detecta números de factura que van a terminar compartidos por más de
-   * un viaje NUEVO de este archivo (o que ya existen como Factura de otro
-   * import) — en esos casos `insert()` reutiliza la factura existente y le
-   * suma el importe en vez de crear un duplicado, así que el usuario tiene
-   * que confirmarlo antes de poder importar (ver `ConfirmImportDto.
-   * confirmarFacturasDuplicadas`). Solo mira filas que van a ser altas
-   * nuevas — una fila que actualiza un viaje existente no toca su factura.
+   * Detecta filas que comparten el mismo ID Personalizado o las mismas claves
+   * heurísticas dentro del mismo archivo. Estas filas se fusionarán en un único
+   * viaje usando los datos de la primera fila del grupo.
+   * Usa Union-Find para agrupar por doble criterio: ID o datos crudos — si una
+   * fila coincide con otra en al menos uno, se unen en el mismo grupo.
    */
+  async detectarViajesFusionados(
+    rows: ValidatedRow[],
+  ): Promise<{ identificador: string; filas: number[]; motivo: "id" | "datos" }[]> {
+    class UnionFind {
+      parent = new Map<number, number>();
+      find(i: number): number {
+        if (!this.parent.has(i)) this.parent.set(i, i);
+        let root = i;
+        while (root !== this.parent.get(root)) {
+          root = this.parent.get(root)!;
+        }
+        let curr = i;
+        while (curr !== root) {
+          const nxt = this.parent.get(curr)!;
+          this.parent.set(curr, root);
+          curr = nxt;
+        }
+        return root;
+      }
+      union(i: number, j: number) {
+        const rootI = this.find(i);
+        const rootJ = this.find(j);
+        if (rootI !== rootJ) {
+          if (rootI < rootJ) {
+            this.parent.set(rootJ, rootI);
+          } else {
+            this.parent.set(rootI, rootJ);
+          }
+        }
+      }
+    }
+
+    const uf = new UnionFind();
+    const rowsByKey = new Map<string, number[]>();
+
+    for (const r of rows) {
+      const rowNum = r._rowNum;
+      const clienteId = r.clienteId as string | undefined;
+      const transportistaId = r.transportistaId as string | undefined;
+      const origen = r.origen as string | undefined;
+      const destino = r.destino as string | undefined;
+      const fechaCarga = this.toDate(r.fechaCarga);
+
+      if (clienteId && transportistaId && origen && destino && fechaCarga) {
+        const numero = (r.numeroIdentificacionPersonalizado as string | null)
+          ?.toString()
+          .trim();
+        const idKey = numero ? `id:${numero.toLowerCase()}` : null;
+        
+        const choferId = (r.choferId as string | null) ?? null;
+        const vehiculoIds = Array.isArray(r.vehiculoId)
+          ? (r.vehiculoId as string[])
+          : r.vehiculoId
+            ? [r.vehiculoId as string]
+            : [];
+
+        const clave = this.claveCompuesta(
+          clienteId,
+          transportistaId,
+          origen.trim(),
+          destino.trim(),
+          fechaCarga,
+          this.toDate(r.fechaDescarga),
+          choferId,
+          vehiculoIds,
+        );
+
+        // Clave por ID Personalizado (si está presente)
+        if (idKey) {
+          if (!rowsByKey.has(idKey)) rowsByKey.set(idKey, []);
+          rowsByKey.get(idKey)!.push(rowNum);
+        }
+        // Clave por Datos Crudos (Ruta, Fechas, Cliente, Transporte, Chofer, Vehículo)
+        if (!rowsByKey.has(clave)) rowsByKey.set(clave, []);
+        rowsByKey.get(clave)!.push(rowNum);
+      }
+    }
+
+    // Paso 2: Unir filas que comparten alguna clave (ID o Datos)
+    for (const group of rowsByKey.values()) {
+      for (let i = 1; i < group.length; i++) {
+        uf.union(group[0], group[i]);
+      }
+    }
+
+    // Paso 3: Agrupar por la raíz del conjunto
+    const fusionGroups = new Map<number, number[]>();
+    for (const r of rows) {
+      const rowNum = r._rowNum;
+      const root = uf.find(rowNum);
+      if (!fusionGroups.has(root)) fusionGroups.set(root, []);
+      fusionGroups.get(root)!.push(rowNum);
+    }
+
+    const fusionados: { identificador: string; filas: number[]; motivo: "id" | "datos" }[] = [];
+    const rowByNum = new Map(rows.map(r => [r._rowNum, r]));
+
+    for (const [root, filas] of fusionGroups.entries()) {
+      filas.sort((a, b) => a - b);
+      if (filas.length > 1) {
+        const idsInGroup = new Set<string>();
+        for (const num of filas) {
+          const row = rowByNum.get(num);
+          if (row?.numeroIdentificacionPersonalizado) {
+            idsInGroup.add(row.numeroIdentificacionPersonalizado.toString().trim().toLowerCase());
+          }
+        }
+        
+        const motivo = idsInGroup.size === 1 ? "id" : "datos";
+        
+        const perdedoras = filas.slice(1).join(", ");
+        const prefix = filas.length > 2 ? 'Filas' : 'Fila';
+        const suffix = filas.length > 2 ? 's' : '';
+        
+        fusionados.push({
+          identificador: `${prefix} ${perdedoras} unificada${suffix} con la fila ${filas[0]}`,
+          filas,
+          motivo,
+        });
+      }
+    }
+    return fusionados;
+  }
+
+
   async detectarFacturasDuplicadas(
     rows: ValidatedRow[],
     tenantId: string,
@@ -715,6 +941,7 @@ export class ViajesProcessor implements IImportProcessor {
       where: { id: { in: ids } },
       select: {
         id: true,
+        numeroIdentificacionPersonalizado: true,
         cliente: { select: { nombre: true } },
         transportista: { select: { nombre: true } },
         chofer: { select: { nombre: true } },
@@ -743,6 +970,7 @@ export class ViajesProcessor implements IImportProcessor {
         return [
           v.id,
           {
+            numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado,
             cliente: v.cliente?.nombre ?? null,
             transporte: v.transportista?.nombre ?? null,
             chofer: v.chofer?.nombre ?? null,
@@ -772,6 +1000,7 @@ export class ViajesProcessor implements IImportProcessor {
 }
 
 export interface ViajeActual {
+  numeroIdentificacionPersonalizado: string | null;
   cliente: string | null;
   transporte: string | null;
   chofer: string | null;

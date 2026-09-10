@@ -20,4 +20,9 @@ export class UpdateTenantDto {
    * Solo editable desde superadmin (panel Empresas). Ver Liquidacion.estado en schema.prisma.
    */
   @IsOptional() @IsIn(['nota_credito_debito', 'manual']) liquidacionAnulacionMetodo?: string;
+
+  /** true = oculta el selector de país en origen/destino de Viajes (ver Tenant en schema.prisma). */
+  @IsOptional() @IsBoolean() paisOrigenDestinoOculto?: boolean;
+  /** Id de Pais (catálogo del tenant) a usar cuando paisOrigenDestinoOculto=true. null = desfijar. */
+  @IsOptional() @IsString() paisOrigenDestinoFijoId?: string | null;
 }

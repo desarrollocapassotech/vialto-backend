@@ -62,27 +62,15 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { KM_DELTA_PLAUSIBLE_MAX } from '../src/shared/util/combustible-km.constants';
+import { evaluarLitrosImporteFase1 } from '../src/shared/util/combustible-fase1.util';
+import { corregirKmYCostoPorKm } from '../src/shared/util/combustible-fase2-km.util';
 
 const prisma = new PrismaClient();
-
-const LITROS_EXTREMO_UMBRAL = 100_000;
-const FACTOR_CORRECCION = 1000;
-const LITROS_PLAUSIBLE_MIN = 5;
-const LITROS_PLAUSIBLE_MAX = 1000;
-const PRECIO_LITRO_MIN = 900;
-const PRECIO_LITRO_MAX = 3500;
-
-const KM_DELTA_UMBRAL = KM_DELTA_PLAUSIBLE_MAX;
-const KM_FACTORES = [10, 100, 1000];
-const COSTO_KM_PLAUSIBLE_MAX = 3000;
 
 type Motivo =
   | 'litros_extremo'
   | 'importe_invalido'
-  | 'precio_litro_fuera_de_rango'
-  | 'km_delta_invalido'
-  | 'costo_km_invalido';
+  | 'precio_litro_fuera_de_rango';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -90,30 +78,6 @@ function parseArgs() {
   const tidIdx = args.indexOf('--tenant-id');
   const tenantIdArg = tidIdx !== -1 ? args[tidIdx + 1] : undefined;
   return { isDryRun, tenantIdArg };
-}
-
-function enRango(valor: number, min: number, max: number): boolean {
-  return valor >= min && valor <= max;
-}
-
-/**
- * Prueba ×10/×100/×1000 (para km demasiado bajo) y ÷10/÷100/÷1000 (para km demasiado
- * alto) sobre `actual`, y devuelve el primer resultado cuyo delta contra `anterior`
- * (y contra `siguiente`, si existe) caiga en [0, KM_DELTA_UMBRAL] en ambos lados.
- * null si ningún factor da una cadena consistente con los vecinos.
- */
-function probarCorreccionKm(actual: number, anterior: number, siguiente: number | null): number | null {
-  const candidatos = KM_FACTORES.flatMap((f) => [Math.round(actual / f), Math.round(actual * f)]);
-  for (const corregido of candidatos) {
-    const deltaIn = corregido - anterior;
-    if (deltaIn < 0 || deltaIn > KM_DELTA_UMBRAL) continue;
-    if (siguiente !== null) {
-      const deltaOut = siguiente - corregido;
-      if (deltaOut < 0 || deltaOut > KM_DELTA_UMBRAL) continue;
-    }
-    return corregido;
-  }
-  return null;
 }
 
 async function main() {
@@ -145,8 +109,6 @@ async function main() {
     litros_extremo: 0,
     importe_invalido: 0,
     precio_litro_fuera_de_rango: 0,
-    km_delta_invalido: 0,
-    costo_km_invalido: 0,
   };
   // IDs marcados sospechosos en esta misma corrida — en --dry-run nada se persiste,
   // así que la fase 2 no podría verlos si solo mirara la BD real.
@@ -154,193 +116,69 @@ async function main() {
 
   for (const carga of cargas) {
     const fechaStr = carga.fecha.toISOString().slice(0, 10);
+    const fase1 = evaluarLitrosImporteFase1(carga.litros, carga.importe);
 
-    // ── 1. litros extremo → intentar corrección ÷1000 ──────────────────────
-    if (carga.litros >= LITROS_EXTREMO_UMBRAL) {
-      const litrosCorregidos = carga.litros / FACTOR_CORRECCION;
-      const precioCorregido = carga.importe > 0 ? carga.importe / litrosCorregidos : 0;
-
-      if (
-        enRango(litrosCorregidos, LITROS_PLAUSIBLE_MIN, LITROS_PLAUSIBLE_MAX) &&
-        enRango(precioCorregido, PRECIO_LITRO_MIN, PRECIO_LITRO_MAX)
-      ) {
-        console.log(
-          `✅ ${fechaStr} | CORRIGE litros ${carga.litros} → ${litrosCorregidos} (÷1000) | ${carga.id}`,
-        );
-        corregidas++;
-        if (!isDryRun) {
-          await prisma.cargaCombustible.update({
-            where: { id: carga.id },
-            data: { litrosOriginal: carga.litros, litros: litrosCorregidos },
-          });
-        }
-        continue;
-      }
-
-      console.log(`⚠️  ${fechaStr} | SOSPECHOSA (litros_extremo, sin factor limpio: ${carga.litros}L) | ${carga.id}`);
-      sospechosas++;
-      porMotivo.litros_extremo++;
-      flaggedFase1.add(carga.id);
-      if (!isDryRun) {
-        await prisma.cargaCombustible.update({
-          where: { id: carga.id },
-          data: { sospechoso: true, motivoSospecha: 'litros_extremo' },
-        });
-      }
-      continue;
-    }
-
-    // ── 2. importe inválido ─────────────────────────────────────────────────
-    if (carga.importe <= 0) {
-      console.log(`⚠️  ${fechaStr} | SOSPECHOSA (importe_invalido: $${carga.importe}) | ${carga.id}`);
-      sospechosas++;
-      porMotivo.importe_invalido++;
-      flaggedFase1.add(carga.id);
-      if (!isDryRun) {
-        await prisma.cargaCombustible.update({
-          where: { id: carga.id },
-          data: { sospechoso: true, motivoSospecha: 'importe_invalido' },
-        });
-      }
-      continue;
-    }
-
-    // ── 3. precio/litro fuera de rango ──────────────────────────────────────
-    const precioLitro = carga.importe / carga.litros;
-    if (!enRango(precioLitro, PRECIO_LITRO_MIN, PRECIO_LITRO_MAX)) {
+    if (fase1.litrosOriginal !== null) {
       console.log(
-        `⚠️  ${fechaStr} | SOSPECHOSA (precio_litro_fuera_de_rango: $${precioLitro.toFixed(2)}/L) | ${carga.id}`,
+        `✅ ${fechaStr} | CORRIGE litros ${fase1.litrosOriginal} → ${fase1.litros} (÷1000) | ${carga.id}`,
       );
-      sospechosas++;
-      porMotivo.precio_litro_fuera_de_rango++;
-      flaggedFase1.add(carga.id);
+      corregidas++;
       if (!isDryRun) {
         await prisma.cargaCombustible.update({
           where: { id: carga.id },
-          data: { sospechoso: true, motivoSospecha: 'precio_litro_fuera_de_rango' },
+          data: { litrosOriginal: fase1.litrosOriginal, litros: fase1.litros },
         });
       }
       continue;
     }
 
-    // ── 4. sin problemas ─────────────────────────────────────────────────────
+    if (fase1.sospechoso) {
+      const detalle =
+        fase1.motivoSospecha === 'litros_extremo'
+          ? `sin factor limpio: ${carga.litros}L`
+          : fase1.motivoSospecha === 'importe_invalido'
+            ? `$${carga.importe}`
+            : `$${(carga.importe / carga.litros).toFixed(2)}/L`;
+      console.log(`⚠️  ${fechaStr} | SOSPECHOSA (${fase1.motivoSospecha}: ${detalle}) | ${carga.id}`);
+      sospechosas++;
+      porMotivo[fase1.motivoSospecha as Motivo]++;
+      flaggedFase1.add(carga.id);
+      if (!isDryRun) {
+        await prisma.cargaCombustible.update({
+          where: { id: carga.id },
+          data: { sospechoso: true, motivoSospecha: fase1.motivoSospecha },
+        });
+      }
+      continue;
+    }
+
+    // ── sin problemas ─────────────────────────────────────────────────────
     sinCambios++;
   }
 
   console.log('\n─────────────────────────────────────────────────────────');
   console.log('Fase 2: km (por vehículo, en cadena cronológica)\n');
 
-  // Sin filtrar por sospechoso acá: el km de una carga litros/importe-sospechosa
-  // sigue siendo un dato real del odómetro y sirve como vecino físico confiable
-  // para juzgar si LA CARGA SIGUIENTE tiene un km plausible. Filtrar por sospechoso
-  // (como hace el dashboard) generaría un efecto cascada: al saltear cada carga ya
-  // excluida, el delta se mide contra un ancla cada vez más vieja y termina
-  // "detectando" como anómalos huecos que en realidad son kilometraje real
-  // acumulado durante varias cargas seguidas con importe/litros mal tipeados.
-  const cargasConVehiculo = await prisma.cargaCombustible.findMany({
-    where: {
-      vehiculoId: { not: null },
-      ...(tenantIdArg ? { tenantId: tenantIdArg } : {}),
-    },
-    select: {
-      id: true,
-      vehiculoId: true,
-      km: true,
-      importe: true,
-      fecha: true,
-      sospechoso: true,
-      kmOriginal: true,
-    },
-    orderBy: [{ vehiculoId: 'asc' }, { fecha: 'asc' }],
+  const fase2 = await corregirKmYCostoPorKm(prisma, {
+    tenantId: tenantIdArg,
+    isDryRun,
+    flaggedFase1,
+    onEvento: (msg) => console.log(msg),
   });
 
-  const porVehiculo = new Map<string, typeof cargasConVehiculo>();
-  for (const c of cargasConVehiculo) {
-    const arr = porVehiculo.get(c.vehiculoId!) ?? [];
-    arr.push(c);
-    porVehiculo.set(c.vehiculoId!, arr);
-  }
-
-  let kmCorregidas = 0;
-  let kmSospechosas = 0;
-  let costoKmSospechosas = 0;
-
-  for (const [, lista] of porVehiculo) {
-    for (let i = 1; i < lista.length; i++) {
-      const actual = lista[i];
-      const anterior = lista[i - 1];
-      const siguiente = lista[i + 1] ?? null;
-
-      // Ya resuelta antes (por esta fase o por la 1) — no se reevalúa, pero su km
-      // (real u original) sigue sirviendo de vecino físico para las demás filas.
-      if (actual.sospechoso || flaggedFase1.has(actual.id) || actual.kmOriginal !== null) continue;
-
-      const fechaStr = actual.fecha.toISOString().slice(0, 10);
-      let delta = actual.km - anterior.km;
-
-      if (Math.abs(delta) > KM_DELTA_UMBRAL) {
-        const corregido = probarCorreccionKm(actual.km, anterior.km, siguiente?.km ?? null);
-
-        if (corregido !== null) {
-          console.log(`✅ ${fechaStr} | CORRIGE km ${actual.km} → ${corregido} | ${actual.id}`);
-          kmCorregidas++;
-          if (!isDryRun) {
-            await prisma.cargaCombustible.update({
-              where: { id: actual.id },
-              data: { kmOriginal: actual.km, km: corregido },
-            });
-          }
-          actual.km = corregido; // mantiene la cadena consistente para las próximas iteraciones
-          delta = corregido - anterior.km;
-        } else {
-          console.log(
-            `⚠️  ${fechaStr} | SOSPECHOSA (km_delta_invalido: ${delta > 0 ? '+' : ''}${delta}km respecto a la carga físicamente anterior) | ${actual.id}`,
-          );
-          kmSospechosas++;
-          porMotivo.km_delta_invalido++;
-          if (!isDryRun) {
-            await prisma.cargaCombustible.update({
-              where: { id: actual.id },
-              data: { sospechoso: true, motivoSospecha: 'km_delta_invalido' },
-            });
-          }
-          continue; // km no confiable — no tiene sentido evaluar costo/km sobre este delta
-        }
-      }
-
-      // ── Fase 3: costo por km de esta carga puntual (delta ya plausible o recién corregido) ──
-      if (delta > 0) {
-        const costoKm = actual.importe / delta;
-        if (costoKm > COSTO_KM_PLAUSIBLE_MAX) {
-          console.log(
-            `⚠️  ${fechaStr} | SOSPECHOSA (costo_km_invalido: $${Math.round(costoKm).toLocaleString('es-AR')}/km) | ${actual.id}`,
-          );
-          costoKmSospechosas++;
-          porMotivo.costo_km_invalido++;
-          if (!isDryRun) {
-            await prisma.cargaCombustible.update({
-              where: { id: actual.id },
-              data: { sospechoso: true, motivoSospecha: 'costo_km_invalido' },
-            });
-          }
-        }
-      }
-    }
-  }
-
-  console.log(`\nCargas con vehículo evaluadas: ${cargasConVehiculo.length}`);
+  console.log(`\nCargas con vehículo evaluadas: ${fase2.cargasEvaluadas}`);
 
   console.log('\n══════════════════════════════════════════════════════════');
   console.log('📊 Resultado:');
   console.log(`   Total procesadas (fase 1):     ${cargas.length}`);
   console.log(`   Corregidas (litros ÷1000):     ${corregidas}`);
-  console.log(`   Corregidas (km ÷10/100/1000):  ${kmCorregidas}`);
-  console.log(`   Marcadas sospechosas:          ${sospechosas + kmSospechosas + costoKmSospechosas}`);
+  console.log(`   Corregidas (km ÷10/100/1000):  ${fase2.kmCorregidas}`);
+  console.log(`   Marcadas sospechosas:          ${sospechosas + fase2.kmSospechosas + fase2.costoKmSospechosas}`);
   console.log(`     - litros_extremo:             ${porMotivo.litros_extremo}`);
   console.log(`     - importe_invalido:           ${porMotivo.importe_invalido}`);
   console.log(`     - precio_litro_fuera_de_rango: ${porMotivo.precio_litro_fuera_de_rango}`);
-  console.log(`     - km_delta_invalido:           ${porMotivo.km_delta_invalido}`);
-  console.log(`     - costo_km_invalido:           ${porMotivo.costo_km_invalido}`);
+  console.log(`     - km_delta_invalido:           ${fase2.kmSospechosas}`);
+  console.log(`     - costo_km_invalido:           ${fase2.costoKmSospechosas}`);
   console.log(`   Sin cambios (fase 1, ya coherentes): ${sinCambios}`);
 
   if (isDryRun) {

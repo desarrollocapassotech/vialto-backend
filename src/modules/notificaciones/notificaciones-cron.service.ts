@@ -4,7 +4,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { UsersService } from '../../core/users/users.service';
 import { ResendEmailService } from '../../shared/email/resend-email.service';
 import { NotificacionesConfigService } from './notificaciones-config.service';
-import { getNotificacionesCatalogoPorModulos } from './notificaciones-catalog';
+import { getNotificacionesCatalogoPorModulos, type NotificacionFrecuencia } from './notificaciones-catalog';
 import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
 import type { NotificacionEvaluator, NotificacionItem } from './evaluators/notificacion-evaluator.interface';
@@ -49,7 +49,12 @@ export class NotificacionesCronService {
     this.evaluators = [facturaPorVencer, cargaSospechosa];
   }
 
-  /** 8:00 hora Argentina — para que el admin lo tenga en la bandeja de entrada al arrancar el día. */
+  /**
+   * 8:00 hora Argentina — para que el admin lo tenga en la bandeja de entrada al arrancar
+   * el día. Solo procesa tipos `frecuencia: 'diaria'` — los `'semanal'` (ej.
+   * `combustible.cargaSospechosa`) los dispara el cron específico de ese dominio (ver
+   * `CombustibleCorreccionCronService.cronSemanal`), no este.
+   */
   @Cron('0 8 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
   async cronDiario(): Promise<void> {
     this.logger.log('Ejecutando cron de notificaciones...');
@@ -58,16 +63,24 @@ export class NotificacionesCronService {
     });
     for (const t of tenants) {
       try {
-        await this.procesarTenant(t.clerkOrgId, t.modules);
+        await this.procesarTenant(t.clerkOrgId, t.modules, 'diaria');
       } catch (err) {
         this.logger.error(`Error procesando notificaciones del tenant ${t.clerkOrgId}: ${err}`);
       }
     }
   }
 
-  /** Evalúa y envía las notificaciones de un tenant puntual — usado por el cron y por el trigger manual de superadmin. */
-  async procesarTenant(tenantId: string, modules: string[]): Promise<void> {
-    const catalogo = getNotificacionesCatalogoPorModulos(modules);
+  /**
+   * Evalúa y envía las notificaciones de un tenant puntual — usado por el cron diario, por
+   * el cron semanal de un módulo puntual (con `frecuencia` filtrando a ese tipo) y por el
+   * trigger manual de superadmin (sin `frecuencia`, procesa todo el catálogo aplicable).
+   */
+  async procesarTenant(
+    tenantId: string,
+    modules: string[],
+    frecuencia?: NotificacionFrecuencia,
+  ): Promise<void> {
+    const catalogo = getNotificacionesCatalogoPorModulos(modules, frecuencia);
 
     for (const item of catalogo) {
       const evaluator = this.evaluators.find((e) => e.tipo === item.tipo);
@@ -99,8 +112,8 @@ export class NotificacionesCronService {
 
       const enviado = await this.emailService.send({
         to: destinatarios,
-        subject: `Vialto — ${item.label}${nuevas.length > 1 ? ` (${nuevas.length})` : ''}`,
-        html: this.buildHtml(item.label, nuevas),
+        subject: `Vialto - ${item.label}${nuevas.length > 1 ? ` (${nuevas.length})` : ''}`,
+        html: this.buildHtml(item.label, nuevas, `${APP_URL}${item.urlDestino ?? ''}`),
       });
 
       if (!enviado) {
@@ -150,7 +163,7 @@ export class NotificacionesCronService {
       .map((m) => m.email as string);
   }
 
-  private buildHtml(label: string, items: NotificacionItem[]): string {
+  private buildHtml(label: string, items: NotificacionItem[], urlBoton: string): string {
     const tarjetas = items
       .map(
         (i) => `
@@ -193,7 +206,7 @@ export class NotificacionesCronService {
                   <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:8px;">
                     <tr>
                       <td style="border-radius:6px; background-color:${COLOR_CHARCOAL};">
-                        <a href="${APP_URL}" style="display:inline-block; padding:11px 22px; font-family:Arial, sans-serif; font-size:13px; font-weight:700; letter-spacing:0.04em; color:#ffffff; text-decoration:none;">
+                        <a href="${urlBoton}" style="display:inline-block; padding:11px 22px; font-family:Arial, sans-serif; font-size:13px; font-weight:700; letter-spacing:0.04em; color:#ffffff; text-decoration:none;">
                           Ver en Vialto
                         </a>
                       </td>

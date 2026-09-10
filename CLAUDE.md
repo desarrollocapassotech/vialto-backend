@@ -12,7 +12,7 @@ multi-tenant. **No las dupliques acá**: la fuente de verdad es un solo archivo.
 A continuación se incluye el contenido completo del documento de arquitectura
 que debés respetar en todo momento:
 
-# Vialto — Arquitectura del Sistema
+# Vialto - Arquitectura del Sistema
 
 > Sistema SaaS modular para empresas de transporte y logística.
 > Este archivo es la fuente de verdad arquitectónica del proyecto.

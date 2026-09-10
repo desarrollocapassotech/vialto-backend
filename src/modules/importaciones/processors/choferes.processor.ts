@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { CampoUnicoConflicto, ValidatedRow } from "../types/import.types";
@@ -69,11 +70,18 @@ export class ChoferesProcessor implements IImportProcessor {
       return { id: existing.id, creado: false };
     }
 
-    const created = await this.prisma.chofer.create({
-      data: { tenantId, nombre, ...data },
-      select: { id: true },
-    });
-    return { id: created.id, creado: true };
+    try {
+      const created = await this.prisma.chofer.create({
+        data: { tenantId, nombre, ...data },
+        select: { id: true },
+      });
+      return { id: created.id, creado: true };
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        throw new BadRequestException(`Ya existe otro chofer con el DNI "${dni}"`);
+      }
+      throw e;
+    }
   }
 
   /**

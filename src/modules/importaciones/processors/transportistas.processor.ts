@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { validarIdFiscal } from "../../../shared/util/validar-id-fiscal";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
@@ -80,11 +81,20 @@ export class TransportistasProcessor implements IImportProcessor {
       return { id: existing.id, creado: false };
     }
 
-    const created = await this.prisma.transportista.create({
-      data: { tenantId, nombre, ...data },
-      select: { id: true },
-    });
-    return { id: created.id, creado: true };
+    try {
+      const created = await this.prisma.transportista.create({
+        data: { tenantId, nombre, ...data },
+        select: { id: true },
+      });
+      return { id: created.id, creado: true };
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        throw new BadRequestException(
+          `Ya existe otro transportista con el ID Fiscal "${idFiscal}"`,
+        );
+      }
+      throw e;
+    }
   }
 
   /**

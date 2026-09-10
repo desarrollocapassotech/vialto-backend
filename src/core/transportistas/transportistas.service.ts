@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateTransportistaDto } from './dto/create-transportista.dto';
 import { UpdateTransportistaDto } from './dto/update-transportista.dto';
@@ -106,24 +107,31 @@ export class TransportistasService {
     const idFiscal = dto.idFiscal?.trim() || null;
     validarIdFiscal(pais, idFiscal);
     await this.assertIdFiscalDisponible(tenantId, idFiscal);
-    return this.prisma.transportista.create({
-      data: {
-        tenantId,
-        nombre: dto.nombre.trim(),
-        pais,
-        idFiscal,
-        email: dto.email?.trim() || null,
-        telefono: dto.telefono?.trim() || null,
-        domicilio: dto.domicilio?.trim() || null,
-        condicionIva: dto.condicionIva ?? null,
-        condicionTributaria: dto.condicionTributaria?.trim() || null,
-        paut: dto.paut?.trim() || null,
-        permisoInternacional: dto.permisoInternacional?.trim() || null,
-        fechaVencimientoPermiso: dto.fechaVencimientoPermiso
-          ? new Date(dto.fechaVencimientoPermiso)
-          : null,
-      },
-    });
+    try {
+      return await this.prisma.transportista.create({
+        data: {
+          tenantId,
+          nombre: dto.nombre.trim(),
+          pais,
+          idFiscal,
+          email: dto.email?.trim() || null,
+          telefono: dto.telefono?.trim() || null,
+          domicilio: dto.domicilio?.trim() || null,
+          condicionIva: dto.condicionIva ?? null,
+          condicionTributaria: dto.condicionTributaria?.trim() || null,
+          paut: dto.paut?.trim() || null,
+          permisoInternacional: dto.permisoInternacional?.trim() || null,
+          fechaVencimientoPermiso: dto.fechaVencimientoPermiso
+            ? new Date(dto.fechaVencimientoPermiso)
+            : null,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un transportista con ese ID Fiscal');
+      }
+      throw e;
+    }
   }
 
   async update(id: string, tenantId: string, dto: UpdateTransportistaDto) {
@@ -162,10 +170,17 @@ export class TransportistasService {
     this.assertTransportistaRequiredFields(next, dto.confirmarSinDatosFiscales);
     validarIdFiscal(next.pais, next.idFiscal);
     await this.assertIdFiscalDisponible(tenantId, next.idFiscal, id);
-    return this.prisma.transportista.update({
-      where: { id },
-      data: next,
-    });
+    try {
+      return await this.prisma.transportista.update({
+        where: { id },
+        data: next,
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un transportista con ese ID Fiscal');
+      }
+      throw e;
+    }
   }
 
   async remove(id: string, tenantId: string) {

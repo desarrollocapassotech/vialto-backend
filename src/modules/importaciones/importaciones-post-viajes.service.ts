@@ -58,8 +58,9 @@ export class ImportacionesPostViajesService {
     tenantId: string,
     viajeIds: string[],
   ): Promise<ViajeParaAgrupar[]> {
+    const uniqueIds = [...new Set(viajeIds)];
     const viajes = await this.prisma.viaje.findMany({
-      where: { id: { in: viajeIds }, tenantId },
+      where: { id: { in: uniqueIds }, tenantId },
       select: {
         id: true,
         transportistaId: true,
@@ -71,7 +72,7 @@ export class ImportacionesPostViajesService {
         monedaMonto: true,
       },
     });
-    if (viajes.length !== viajeIds.length) {
+    if (viajes.length !== uniqueIds.length) {
       throw new BadRequestException(
         "Alguno de los viajes indicados no existe o no pertenece al tenant.",
       );

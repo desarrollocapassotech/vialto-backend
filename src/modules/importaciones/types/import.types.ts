@@ -167,7 +167,13 @@ export interface PreviewViaje {
   monedaPrecioTransportistaExterno: string | null;
   /** true = este viaje no existe todavía (alta nueva). false = actualiza uno existente. */
   nuevo: boolean;
-  /** Solo si `nuevo` es false: campos que cambian respecto al valor actual, con su antes/después. */
+  /** Si esta fila representa un grupo de filas fusionadas, contiene los números de fila del grupo. */
+  filasAgrupadas?: number[];
+  /** true = los datos del grupo eran distintos y se sobrescribieron con los de la última fila. */
+  advertenciaSobrescritura?: boolean;
+  /** Solo si hay sobrescritura: campos que se pierden de la primera fila. */
+  cambiosSobrescritura?: PreviewCambioCampo[];
+  /** Solo si `nuevo` es false: campos que cambian respecto al valor actual. */
   cambios?: PreviewCambioCampo[];
 }
 
@@ -223,6 +229,12 @@ export interface PreviewResult {
    * antes de importar.
    */
   advertenciasCampoUnicoDuplicado?: CampoUnicoConflicto[];
+  /**
+   * Solo viajes: filas que comparten el mismo ID Personalizado o los mismos
+   * datos compuestos (cliente, transporte, origen, destino, fechas, chofer, vehículo)
+   * dentro del mismo archivo, lo que provocará que se fusionen en un solo viaje.
+   */
+  advertenciasViajesFusionados?: { filas: number[]; identificador: string; motivo: "id" | "datos" }[];
   viajes?: PreviewViaje[];
   facturas?: PreviewFactura[];
   clientes?: PreviewEntidad[];

@@ -16,6 +16,15 @@ import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 
 const EPS = 1e-6;
 
+/**
+ * Imputar/deshacer una imputación puede encadenar la sincronización completa con
+ * Facturación (`registrarPagoDesdeCuentaCorriente` → `syncViajesEstadoTrasPago` →
+ * `syncFacturacionEstadoViajes`, que recorre todos los viajes de la factura) y con
+ * `Viaje.pagosTransportista` — el default de Prisma (5s) no alcanza. Mismo valor que
+ * `FACTURA_INTERACTIVE_TX`/`VIAJE_INTERACTIVE_TX` en sus respectivos services.
+ */
+const CC_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
+
 type ContraparteInput = { clienteId?: string | null; proveedorId?: string | null };
 
 @Injectable()
@@ -85,7 +94,7 @@ export class CuentaCorrienteService {
     }
   }
 
-  findAll(
+  async findAll(
     tenantId: string,
     filtros: {
       clienteId?: string;
@@ -95,7 +104,7 @@ export class CuentaCorrienteService {
       hasta?: string;
     },
   ) {
-    return this.prisma.movimientoCuentaCorriente.findMany({
+    const rows = await this.prisma.movimientoCuentaCorriente.findMany({
       where: {
         tenantId,
         ...(filtros.clienteId ? { clienteId: filtros.clienteId } : {}),
@@ -115,8 +124,23 @@ export class CuentaCorrienteService {
             }
           : {}),
       },
+      include: {
+        imputacionesComoCargo: { select: { importe: true } },
+        imputacionesComoPago: { select: { importe: true } },
+      },
       orderBy: { fecha: 'desc' },
       take: 500,
+    });
+
+    // "Saldo" de la línea: lo que todavía no se resolvió de ESE movimiento puntual
+    // (un cargo, cuánto le falta cobrar/pagar; un pago, cuánto le falta imputar) —
+    // no confundir con el saldo acumulado de la cuenta completa.
+    return rows.map(({ imputacionesComoCargo, imputacionesComoPago, ...m }) => {
+      const imputado =
+        m.tipo === 'cargo'
+          ? imputacionesComoCargo.reduce((s, i) => s + i.importe, 0)
+          : imputacionesComoPago.reduce((s, i) => s + i.importe, 0);
+      return { ...m, pendiente: Math.max(m.importe - imputado, 0) };
     });
   }
 
@@ -594,7 +618,7 @@ export class CuentaCorrienteService {
       }
 
       return creada;
-    });
+    }, CC_INTERACTIVE_TX);
   }
 
   async eliminarImputacion(id: string, tenantId: string) {
@@ -628,7 +652,7 @@ export class CuentaCorrienteService {
           tx,
         );
       }
-    });
+    }, CC_INTERACTIVE_TX);
     return { id };
   }
 }

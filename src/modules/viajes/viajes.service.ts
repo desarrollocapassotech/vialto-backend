@@ -584,11 +584,19 @@ export class ViajesService {
     const numeroVisible = numeroVisibleViaje(viaje);
     const concepto = `Cargo automático por viaje ${numeroVisible}`;
 
+    // NOTA: si el cliente del viaje cambia luego de ya tener un cargo generado,
+    // este upsert crea un cargo nuevo bajo el cliente nuevo y deja el anterior
+    // huérfano (no se borra, para no perder imputaciones ya aplicadas). Este
+    // caso puntual (reasignación de cliente en un viaje ya finalizado) sigue
+    // sin resolverse — no confundir con la reversión por cambio de etapa
+    // (viaje que deja de estar finalizado o se cancela), que sí maneja
+    // `revertirCargoFinalizacionSiCorresponde` más abajo.
     await tx.movimientoCuentaCorriente.upsert({
       where: {
-        tenantId_viajeId: {
+        tenantId_viajeId_contraparteId: {
           tenantId: viaje.tenantId,
           viajeId: viaje.id,
+          contraparteId: viaje.clienteId,
         },
       },
       update: {
@@ -599,10 +607,12 @@ export class ViajesService {
         importe: monto,
         fecha,
         referencia: numeroVisible,
+        estadoDisponibilidad: "pendiente",
       },
       create: {
         tenantId: viaje.tenantId,
         clienteId: viaje.clienteId,
+        contraparteId: viaje.clienteId,
         viajeId: viaje.id,
         tipo: "cargo",
         origen: "viaje",
@@ -612,6 +622,355 @@ export class ViajesService {
         referencia: numeroVisible,
       },
     });
+  }
+
+  /**
+   * Cuando un viaje ya finalizado deja de estarlo (se reabre o se cancela), el cargo
+   * automático que había generado queda desactualizado. No se borra (rompería la
+   * trazabilidad si ya recibió pagos) — se marca `estadoDisponibilidad: 'anulado'`
+   * para que deje de contar en el saldo/tablero, y sigue visible en el historial.
+   * Si el cargo ya tiene imputaciones (pagos aplicados), se deja tal cual: requiere
+   * intervención manual, ver sección 6 del doc funcional de Cuenta Corriente.
+   */
+  private async revertirCargoFinalizacionSiCorresponde(
+    tx: Prisma.TransactionClient,
+    viaje: { id: string; tenantId: string },
+  ) {
+    const cargos = await tx.movimientoCuentaCorriente.findMany({
+      where: {
+        tenantId: viaje.tenantId,
+        viajeId: viaje.id,
+        tipo: "cargo",
+        origen: "viaje",
+        estadoDisponibilidad: { not: "anulado" },
+      },
+    });
+    for (const cargo of cargos) {
+      const imputado = await tx.imputacionCuentaCorriente.aggregate({
+        where: { cargoId: cargo.id },
+        _sum: { importe: true },
+      });
+      if ((imputado._sum.importe ?? 0) > 0) continue;
+      await tx.movimientoCuentaCorriente.update({
+        where: { id: cargo.id },
+        data: { estadoDisponibilidad: "anulado" },
+      });
+    }
+  }
+
+  /**
+   * Si el tenant tiene Facturación (manual o ARCA), el cargo de cuenta corriente
+   * nace de la factura emitida, no del viaje finalizado — evita duplicar/desalinear
+   * con el ciclo propio de `Factura.estado`. Mismo patrón OR que el resto del
+   * proyecto para "¿tiene Facturas?" (facturacion | emision-facturas-arca).
+   */
+  private async tieneFacturacion(tenantId: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    const modules = (tenant?.modules ?? []).map((m) => m.toLowerCase());
+    return modules.includes("facturacion") || modules.includes("emision-facturas-arca");
+  }
+
+  private estadoDisponibilidadCcDesde(pagado: number, importe: number): string {
+    const EPS = 1e-6;
+    if (pagado <= EPS) return "pendiente";
+    if (pagado + EPS >= importe) return "cancelado";
+    return "parcial";
+  }
+
+  /**
+   * Cuenta corriente (cuentas por pagar): espejo de `upsertCargoFinalizacion` pero
+   * del lado proveedor/fletero. No reemplaza `Viaje.pagosTransportista` (sigue siendo
+   * la carga operativa de siempre, ver `addPagoTransportista`) — lo refleja. El
+   * importe es el mismo "acordado" que ya usa `assertPagosTransportistaNoSuperanSaldo`
+   * (neto de IVA, contempla Liquidación si existe), y el estado de pago se recalcula
+   * en vivo desde la suma de `pagosTransportista` en la misma moneda — igual patrón
+   * "sin migración" que `FacturacionService.syncViajesEstadoTrasPago` del lado cliente.
+   */
+  private async upsertCargoTransportista(
+    tx: Prisma.TransactionClient,
+    viaje: {
+      id: string;
+      tenantId: string;
+      transportistaId: string | null;
+      numero: string;
+      numeroIdentificacionPersonalizado?: string | null;
+      precioTransportistaExterno?: number | null;
+      monedaPrecioTransportistaExterno?: string | null;
+      precioTransportistaIvaIncluidoPct?: number | null;
+      liquidacionesViaje?: unknown;
+      pagosTransportista?: unknown;
+      fechaFinalizado: Date | null;
+    },
+    ivaTransportistaHabilitado: boolean,
+  ) {
+    if (!viaje.transportistaId || !viaje.precioTransportistaExterno) return;
+    const acordado = this.calcularAcordado(
+      viaje as Parameters<typeof this.calcularAcordado>[0],
+      ivaTransportistaHabilitado,
+    );
+    if (acordado <= 0) return;
+
+    const moneda = viaje.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
+    const fecha = viaje.fechaFinalizado ?? new Date();
+    const numeroVisible = numeroVisibleViaje(viaje);
+    const concepto = `Cargo automático por viaje ${numeroVisible} (transportista)`;
+    const pagosJson = Array.isArray(viaje.pagosTransportista)
+      ? (viaje.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
+      : [];
+    const pagado = pagosJson
+      .filter((p) => (p.moneda === "USD" ? "USD" : "ARS") === moneda)
+      .reduce((acc, p) => acc + (Number(p.monto) || 0), 0);
+    const estadoDisponibilidad = this.estadoDisponibilidadCcDesde(pagado, acordado);
+
+    await tx.movimientoCuentaCorriente.upsert({
+      where: {
+        tenantId_viajeId_contraparteId: {
+          tenantId: viaje.tenantId,
+          viajeId: viaje.id,
+          contraparteId: viaje.transportistaId,
+        },
+      },
+      update: {
+        proveedorId: viaje.transportistaId,
+        tipo: "cargo",
+        origen: "viaje",
+        concepto,
+        importe: acordado,
+        moneda,
+        fecha,
+        referencia: numeroVisible,
+        estadoDisponibilidad,
+      },
+      create: {
+        tenantId: viaje.tenantId,
+        proveedorId: viaje.transportistaId,
+        contraparteId: viaje.transportistaId,
+        viajeId: viaje.id,
+        tipo: "cargo",
+        origen: "viaje",
+        concepto,
+        importe: acordado,
+        moneda,
+        fecha,
+        referencia: numeroVisible,
+        estadoDisponibilidad,
+      },
+    });
+  }
+
+  /**
+   * Recalcula (sin recrear) el cargo de cuenta corriente del proveedor a partir de la
+   * suma actual de `pagosTransportista` — usado por `addPagoTransportista` y
+   * `deletePagoTransportista`. Si el cargo todavía no existe (viaje no finalizado, o
+   * tenant sin haber llegado a generarlo) no hace nada: no hay nada que sincronizar.
+   */
+  private async sincronizarCargoCcTransportista(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    viajeId: string,
+    transportistaId: string,
+    moneda: string,
+    pagado: number,
+  ) {
+    const cargo = await tx.movimientoCuentaCorriente.findFirst({
+      where: { tenantId, viajeId, proveedorId: transportistaId, tipo: "cargo", moneda },
+    });
+    if (!cargo) return;
+    await tx.movimientoCuentaCorriente.update({
+      where: { id: cargo.id },
+      data: { estadoDisponibilidad: this.estadoDisponibilidadCcDesde(pagado, cargo.importe) },
+    });
+  }
+
+  /**
+   * Espejo de `FacturacionService.registrarPagoDesdeCuentaCorriente` pero del lado
+   * proveedor: cuando se imputa un pago de Cuenta Corriente a un cargo de
+   * transportista vinculado a un viaje (`viajeId`), agrega la entrada equivalente a
+   * `Viaje.pagosTransportista` para que quede unificado con la carga operativa de
+   * siempre (misma lista que ve/usa la pantalla de Viajes). Acepta `tx` opcional
+   * para participar de la transacción de `CuentaCorrienteService.crearImputacion`.
+   */
+  async registrarPagoTransportistaDesdeCuentaCorriente(
+    tenantId: string,
+    viajeId: string,
+    ccImputacionId: string,
+    importe: number,
+    moneda: string,
+    fecha: Date,
+    formaPago?: string | null,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
+    const viaje = await client.viaje.findFirst({ where: { id: viajeId, tenantId } });
+    if (!viaje) return null;
+    const pagosActuales = Array.isArray(viaje.pagosTransportista)
+      ? (viaje.pagosTransportista as Array<Record<string, unknown>>)
+      : [];
+    const nuevoPago: Record<string, unknown> = {
+      monto: importe,
+      moneda,
+      fecha: fecha.toISOString(),
+      createdBy: "cuenta-corriente",
+      createdAt: new Date().toISOString(),
+      ccImputacionId,
+    };
+    if (formaPago?.trim()) nuevoPago.observaciones = `Medio de pago: ${formaPago.trim()}`;
+    const pagosActualizados = [...pagosActuales, nuevoPago];
+    await client.viaje.update({
+      where: { id: viajeId },
+      data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
+    });
+    if (viaje.transportistaId) {
+      await this.resincronizarCargoCcTransportistaDesdeJson(
+        client,
+        tenantId,
+        viajeId,
+        viaje.transportistaId,
+        pagosActualizados,
+      );
+    }
+    return nuevoPago;
+  }
+
+  /** Contraparte de `registrarPagoTransportistaDesdeCuentaCorriente`, al deshacer una imputación en Cuenta Corriente. */
+  async eliminarPagoTransportistaDesdeCuentaCorriente(
+    tenantId: string,
+    viajeId: string,
+    ccImputacionId: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
+    const viaje = await client.viaje.findFirst({ where: { id: viajeId, tenantId } });
+    if (!viaje) return;
+    const pagosActuales = Array.isArray(viaje.pagosTransportista)
+      ? (viaje.pagosTransportista as Array<Record<string, unknown>>)
+      : [];
+    const pagosActualizados = pagosActuales.filter(
+      (p) => p.ccImputacionId !== ccImputacionId,
+    );
+    if (pagosActualizados.length === pagosActuales.length) return;
+    await client.viaje.update({
+      where: { id: viajeId },
+      data: { pagosTransportista: pagosActualizados as unknown as Prisma.InputJsonValue },
+    });
+    if (viaje.transportistaId) {
+      await this.resincronizarCargoCcTransportistaDesdeJson(
+        client,
+        tenantId,
+        viajeId,
+        viaje.transportistaId,
+        pagosActualizados,
+      );
+    }
+  }
+
+  /** Recalcula la moneda/suma desde `pagosTransportista` y delega en `sincronizarCargoCcTransportista`. */
+  private async resincronizarCargoCcTransportistaDesdeJson(
+    client: PrismaService | Prisma.TransactionClient,
+    tenantId: string,
+    viajeId: string,
+    transportistaId: string,
+    pagos: Array<Record<string, unknown>>,
+    monedaAcordada?: string,
+  ) {
+    const viaje = monedaAcordada
+      ? null
+      : await client.viaje.findFirst({
+          where: { id: viajeId, tenantId },
+          select: { monedaPrecioTransportistaExterno: true },
+        });
+    const moneda =
+      monedaAcordada ??
+      (viaje?.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS");
+    const pagado = pagos
+      .filter((p) => ((p as { moneda?: string }).moneda === "USD" ? "USD" : "ARS") === moneda)
+      .reduce((acc, p) => acc + (Number((p as { monto?: number }).monto) || 0), 0);
+    await this.sincronizarCargoCcTransportista(
+      client as Prisma.TransactionClient,
+      tenantId,
+      viajeId,
+      transportistaId,
+      moneda,
+      pagado,
+    );
+  }
+
+  /**
+   * Backfill histórico: recorre los viajes ya finalizados (creados antes de que
+   * existiera esta integración) y les genera/actualiza el cargo de cuenta corriente
+   * correspondiente — el mismo que ya se genera solo para actividad nueva vía
+   * `update()`/`addGasto()`. Sin esto, un viaje finalizado hace tiempo y nunca más
+   * tocado no aparece en Cuenta Corriente aunque el tenant prenda el módulo.
+   * Idempotente (usa los mismos `upsert` de siempre) — correr de nuevo no duplica.
+   * Usado por `scripts/backfill-cuenta-corriente.ts`, no se expone por HTTP.
+   */
+  async backfillCuentaCorriente(opts: { tenantId?: string; dryRun: boolean }) {
+    const resultados: string[] = [];
+    const viajes = await this.prisma.viaje.findMany({
+      where: {
+        etapa: "finalizado",
+        ...(opts.tenantId ? { tenantId: opts.tenantId } : {}),
+      },
+      include: VIAJE_INCLUDE_FULL,
+    });
+
+    const ivaCache = new Map<string, boolean>();
+    const facturacionCache = new Map<string, boolean>();
+
+    for (const viaje of viajes) {
+      const v = viaje as unknown as ViajeConVehiculosViaje;
+      if (!ivaCache.has(v.tenantId)) {
+        ivaCache.set(v.tenantId, await this.ivaTransportistaHabilitado(v.tenantId));
+      }
+      const ivaTransportistaHabilitado = ivaCache.get(v.tenantId)!;
+      if (!facturacionCache.has(v.tenantId)) {
+        facturacionCache.set(v.tenantId, await this.tieneFacturacion(v.tenantId));
+      }
+      const conFacturacion = facturacionCache.get(v.tenantId)!;
+
+      if (!conFacturacion) {
+        try {
+          const existe = await this.prisma.movimientoCuentaCorriente.findFirst({
+            where: { tenantId: v.tenantId, viajeId: v.id, clienteId: v.clienteId },
+          });
+          const monto = this.getMontoFinal(v);
+          resultados.push(
+            `[cliente] ${v.tenantId} viaje ${numeroVisibleViaje(v)} → ${existe ? "update" : "CREATE"} $${monto}`,
+          );
+          if (!opts.dryRun) {
+            await this.prisma.$transaction((tx) => this.upsertCargoFinalizacion(tx, v));
+          }
+        } catch (e) {
+          resultados.push(
+            `[cliente] ${v.tenantId} viaje ${numeroVisibleViaje(v)} → ⚠️ SKIP (${e instanceof Error ? e.message : String(e)})`,
+          );
+        }
+      }
+
+      if (v.transportistaId && v.precioTransportistaExterno) {
+        try {
+          const existe = await this.prisma.movimientoCuentaCorriente.findFirst({
+            where: { tenantId: v.tenantId, viajeId: v.id, proveedorId: v.transportistaId },
+          });
+          const acordado = this.calcularAcordado(v, ivaTransportistaHabilitado);
+          resultados.push(
+            `[proveedor] ${v.tenantId} viaje ${numeroVisibleViaje(v)} → ${existe ? "update" : "CREATE"} $${acordado}`,
+          );
+          if (!opts.dryRun && acordado > 0) {
+            await this.prisma.$transaction((tx) =>
+              this.upsertCargoTransportista(tx, v, ivaTransportistaHabilitado),
+            );
+          }
+        } catch (e) {
+          resultados.push(
+            `[proveedor] ${v.tenantId} viaje ${numeroVisibleViaje(v)} → ⚠️ SKIP (${e instanceof Error ? e.message : String(e)})`,
+          );
+        }
+      }
+    }
+
+    return resultados;
   }
 
   private async assertRefs(
@@ -1699,7 +2058,12 @@ export class ViajesService {
           include: VIAJE_INCLUDE_FULL,
         })) as unknown as ViajeConVehiculosViaje;
         if (esEtapaFinal(full.etapa)) {
-          await this.upsertCargoFinalizacion(tx, full);
+          if (!(await this.tieneFacturacion(full.tenantId))) {
+            await this.upsertCargoFinalizacion(tx, full);
+          }
+          await this.upsertCargoTransportista(tx, full, ivaTransportistaHabilitado);
+        } else {
+          await this.revertirCargoFinalizacionSiCorresponde(tx, full);
         }
         const fullSinIva = this.zerarIvaTransportistaSiDeshabilitado(
           full,
@@ -1758,7 +2122,7 @@ export class ViajesService {
         include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
 
-      if (esEtapaFinal(full.etapa)) {
+      if (esEtapaFinal(full.etapa) && !(await this.tieneFacturacion(tenantId))) {
         await this.upsertCargoFinalizacion(tx, full);
       }
 
@@ -1818,6 +2182,12 @@ export class ViajesService {
       ivaTransportistaHabilitado,
     );
 
+    const monedaAcordada =
+      viaje.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
+    const totalPagado = pagosActualizados
+      .filter((p) => ((p as { moneda?: string }).moneda === "USD" ? "USD" : "ARS") === monedaAcordada)
+      .reduce((acc, p) => acc + (Number((p as { monto?: number }).monto) || 0), 0);
+
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id },
@@ -1826,6 +2196,14 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
+      await this.sincronizarCargoCcTransportista(
+        tx,
+        tenantId,
+        id,
+        viaje.transportistaId!,
+        monedaAcordada,
+        totalPagado,
+      );
       const out = await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
         include: VIAJE_INCLUDE_FULL,
@@ -1867,6 +2245,12 @@ export class ViajesService {
 
     const pagosActualizados = pagosActuales.filter((_, idx) => idx !== index);
 
+    const monedaAcordada =
+      viaje.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
+    const totalPagado = pagosActualizados
+      .filter((p) => ((p as { moneda?: string }).moneda === "USD" ? "USD" : "ARS") === monedaAcordada)
+      .reduce((acc, p) => acc + (Number((p as { monto?: number }).monto) || 0), 0);
+
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id },
@@ -1875,6 +2259,14 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
+      await this.sincronizarCargoCcTransportista(
+        tx,
+        tenantId,
+        id,
+        viaje.transportistaId!,
+        monedaAcordada,
+        totalPagado,
+      );
       const out = await tx.viaje.findFirstOrThrow({
         where: { id, tenantId },
         include: VIAJE_INCLUDE_FULL,

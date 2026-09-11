@@ -586,6 +586,87 @@ export class FacturacionService {
     return this.shapeConNombre(row, tieneArca);
   }
 
+  /**
+   * Cuenta corriente (cuentas por cobrar): si el tenant tiene Facturación, el cargo
+   * nace de la factura emitida, no del viaje (ver `tieneFacturacion` en
+   * viajes.service.ts, que por eso se abstiene de generarlo). Solo aplica a facturas
+   * de cliente (`clienteId` seteado) — las de transportista quedan fuera de esta fase.
+   * Idempotente por `(tenantId, facturaId)`, igual que el cargo de viaje lo es por
+   * `(tenantId, viajeId, contraparteId)`.
+   */
+  private async upsertCargoFactura(
+    tx: Prisma.TransactionClient,
+    factura: {
+      id: string;
+      tenantId: string;
+      clienteId: string | null;
+      numero: string | null;
+      importe: number;
+      moneda: string;
+      fechaEmision: Date;
+      fechaVencimiento: Date | null;
+    },
+  ) {
+    if (!factura.clienteId) return;
+    const concepto = `Cargo automático por factura ${factura.numero ?? factura.id}`;
+    await tx.movimientoCuentaCorriente.upsert({
+      where: { tenantId_facturaId: { tenantId: factura.tenantId, facturaId: factura.id } },
+      update: {
+        clienteId: factura.clienteId,
+        contraparteId: factura.clienteId,
+        tipo: "cargo",
+        origen: "factura",
+        concepto,
+        importe: factura.importe,
+        moneda: factura.moneda,
+        fecha: factura.fechaEmision,
+        fechaVencimiento: factura.fechaVencimiento,
+        numeroComprobante: factura.numero,
+        estadoDisponibilidad: "pendiente",
+      },
+      create: {
+        tenantId: factura.tenantId,
+        clienteId: factura.clienteId,
+        contraparteId: factura.clienteId,
+        facturaId: factura.id,
+        tipo: "cargo",
+        origen: "factura",
+        concepto,
+        importe: factura.importe,
+        moneda: factura.moneda,
+        fecha: factura.fechaEmision,
+        fechaVencimiento: factura.fechaVencimiento,
+        numeroComprobante: factura.numero,
+      },
+    });
+  }
+
+  /**
+   * Reversión análoga a `revertirCargoFinalizacionSiCorresponde` (viajes): al anular o
+   * eliminar una factura, el cargo que había generado se marca `anulado` en vez de
+   * borrarse, salvo que ya tenga imputaciones (pagos aplicados) — ese caso requiere
+   * intervención manual, no se toca solo.
+   */
+  private async revertirCargoFacturaSiCorresponde(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    facturaId: string,
+  ) {
+    const cargo = await tx.movimientoCuentaCorriente.findFirst({
+      where: { tenantId, facturaId, tipo: "cargo", estadoDisponibilidad: { not: "anulado" } },
+    });
+    if (!cargo) return;
+    const imputado = await tx.imputacionCuentaCorriente.aggregate({
+      where: { cargoId: cargo.id },
+      _sum: { importe: true },
+    });
+    if ((imputado._sum.importe ?? 0) > 0) return;
+    await tx.movimientoCuentaCorriente.update({
+      where: { id: cargo.id },
+      data: { estadoDisponibilidad: "anulado" },
+    });
+  }
+
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
@@ -647,6 +728,8 @@ export class FacturacionService {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as any,
         });
+
+        await this.upsertCargoFactura(tx, factura);
 
         if (viajeIds.length > 0) {
           if (dto.clienteId) {
@@ -920,6 +1003,11 @@ export class FacturacionService {
         },
         include: this.FACTURA_INCLUDE,
       });
+      if (updated.clienteId) {
+        await this.upsertCargoFactura(tx, updated);
+      } else {
+        await this.revertirCargoFacturaSiCorresponde(tx, tenantId, id);
+      }
       return this.toShape(updated, tieneArca);
     }, FACTURA_INTERACTIVE_TX);
   }
@@ -949,6 +1037,7 @@ export class FacturacionService {
         data: { facturaId: null },
       });
       await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
+      await this.revertirCargoFacturaSiCorresponde(tx, tenantId, id);
       return tx.factura.delete({ where: { id } });
     }, FACTURA_INTERACTIVE_TX);
   }
@@ -1028,12 +1117,92 @@ export class FacturacionService {
     return row;
   }
 
+  /**
+   * Espejo del cobro en Facturación cuando se imputa un pago a un cargo de Cuenta
+   * Corriente vinculado a una factura real (`facturaId`). Mantiene unificados ambos
+   * módulos: reutiliza exactamente la misma lógica de `marcarComoCobrada` (crea un
+   * `Pago` y resincroniza `Factura`/`Viaje.facturacionEstado`), así que la factura
+   * queda igual de "cobrada" que si el pago se hubiera cargado desde Facturas.
+   * Acepta un `tx` opcional para participar de la transacción de Cuenta Corriente
+   * que la llama (ver `CuentaCorrienteService.crearImputacion`).
+   */
+  async registrarPagoDesdeCuentaCorriente(
+    tenantId: string,
+    facturaId: string,
+    importe: number,
+    fecha: Date,
+    formaPago?: string | null,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
+    const factura = await client.factura.findFirst({ where: { id: facturaId, tenantId } });
+    if (!factura) return null;
+    const pago = await client.pago.create({
+      data: { tenantId, facturaId, importe, fecha, formaPago: formaPago ?? null },
+    });
+    await this.syncViajesEstadoTrasPago(facturaId, tenantId, client);
+    return pago;
+  }
+
+  /** Contraparte de `registrarPagoDesdeCuentaCorriente`, para cuando se deshace una imputación en Cuenta Corriente. */
+  async eliminarPagoDesdeCuentaCorriente(
+    tenantId: string,
+    pagoId: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
+    const row = await client.pago.findFirst({ where: { id: pagoId, tenantId } });
+    if (!row) return;
+    await client.pago.delete({ where: { id: pagoId } });
+    await this.syncViajesEstadoTrasPago(row.facturaId, tenantId, client);
+  }
+
+  /**
+   * Backfill histórico: recorre las facturas de cliente ya emitidas (antes de que
+   * existiera esta integración) y les genera/actualiza el cargo de cuenta corriente
+   * correspondiente, con su `estadoDisponibilidad` ya calculado desde los `Pago`
+   * reales que tenga cada una. Idempotente (mismo `upsert` de siempre). Usado por
+   * `scripts/backfill-cuenta-corriente.ts`, no se expone por HTTP.
+   */
+  async backfillCuentaCorriente(opts: { tenantId?: string; dryRun: boolean }) {
+    const resultados: string[] = [];
+    const facturas = await this.prisma.factura.findMany({
+      where: {
+        clienteId: { not: null },
+        ...(opts.tenantId ? { tenantId: opts.tenantId } : {}),
+      },
+      include: this.FACTURA_INCLUDE,
+    });
+
+    for (const factura of facturas) {
+      try {
+        const existe = await this.prisma.movimientoCuentaCorriente.findFirst({
+          where: { tenantId: factura.tenantId, facturaId: factura.id },
+        });
+        const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
+        resultados.push(
+          `[factura] ${factura.tenantId} ${factura.numero ?? factura.id} → ${existe ? "update" : "CREATE"} ` +
+            `$${factura.importe} (pagado: $${totalPagado})`,
+        );
+        if (!opts.dryRun) {
+          await this.prisma.$transaction((tx) => this.upsertCargoFactura(tx, factura));
+          await this.syncViajesEstadoTrasPago(factura.id, factura.tenantId);
+        }
+      } catch (e) {
+        resultados.push(
+          `[factura] ${factura.tenantId} ${factura.numero ?? factura.id} → ⚠️ SKIP (${e instanceof Error ? e.message : String(e)})`,
+        );
+      }
+    }
+
+    return resultados;
+  }
+
   /** Alinea estado de viajes vinculados con cobro total o parcial de la factura. */
   private async syncViajesEstadoTrasPago(
     facturaId: string,
     tenantId: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
   ): Promise<void> {
-    const factura = await this.prisma.factura.findFirst({
+    const factura = await client.factura.findFirst({
       where: { id: facturaId, tenantId },
       include: this.FACTURA_INCLUDE,
     });
@@ -1059,10 +1228,33 @@ export class FacturacionService {
     ]));
 
     await syncFacturacionEstadoViajes(
-      this.prisma,
+      client,
       tenantId,
       viajeIds,
       { cobrado, facturaId },
     );
+
+    // Mantiene el cargo de Cuenta Corriente (si existe) alineado con TODOS los pagos
+    // de la factura, no solo los que llegaron vía CC — cubre tanto el pago hecho
+    // directamente en Facturas (createPago/marcarComoCobrada, sin pasar por CC) como
+    // el caso de un tenant que todavía no tiene el módulo Cuenta Corriente
+    // contratado: el cargo se sigue generando y actualizando en segundo plano
+    // (RequireModule lo oculta de la API), así que el día que contrate el módulo ve
+    // el estado real sin ninguna migración — el saldo pagado siempre se recalculó
+    // en vivo desde acá, nunca dependió de que existiera Cuenta Corriente.
+    const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
+    await client.movimientoCuentaCorriente.updateMany({
+      where: { tenantId, facturaId, tipo: 'cargo' },
+      data: {
+        estadoDisponibilidad: this.estadoDisponibilidadCcDesde(totalPagado, factura.importe),
+      },
+    });
+  }
+
+  private estadoDisponibilidadCcDesde(pagado: number, importe: number): string {
+    const EPS = 1e-6;
+    if (pagado <= EPS) return 'pendiente';
+    if (pagado + EPS >= importe) return 'cancelado';
+    return 'parcial';
   }
 }

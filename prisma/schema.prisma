@@ -35,27 +35,27 @@ model Tenant {
    * Habilita la opción de exportar el reporte PAUT / MIC CRT en el módulo de Viajes.
    * Por defecto desactivado para nuevas empresas.
    */
-  habilitarExportacionPautMicCrt         Boolean   @default(false)
+  habilitarExportacionPautMicCrt Boolean  @default(false)
   /**
    * Método de anulación del comprobante CVLP (060) — configurable solo desde superadmin (panel Empresas).
    * 'nota_credito_debito' (default, todo tenant nuevo): anulación emitiendo NC/ND asociada vía AFIP SDK,
    * comportamiento histórico. 'manual': sin emisión a ARCA — anulación en 2 pasos (pendiente_anulacion →
    * anulado) con comprobante pre-impreso adjunto por el usuario. Ver Liquidacion.estado y CLAUDE.md.
    */
-  liquidacionAnulacionMetodo             String    @default("nota_credito_debito")
+  liquidacionAnulacionMetodo     String   @default("nota_credito_debito")
   /**
    * true = oculta el selector de país en origen/destino de Viajes (queda solo
    * el buscador de ciudad); usa paisOrigenDestinoFijoId como país fijo.
    */
-  paisOrigenDestinoOculto                Boolean   @default(false)
+  paisOrigenDestinoOculto        Boolean  @default(false)
   /**
    * Id de Pais (catálogo propio del tenant, ver modelo Pais) a usar cuando
    * paisOrigenDestinoOculto=true. Sin relación Prisma a propósito (mismo
    * criterio que Cliente.idFiscal): si se borra el Pais referenciado, el
    * frontend lo trata como "no configurado" y vuelve a mostrar el selector.
    */
-  paisOrigenDestinoFijoId                String?
-  createdAt                              DateTime  @default(now())
+  paisOrigenDestinoFijoId        String?
+  createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]
   transportistas             Transportista[]
@@ -69,6 +69,7 @@ model Tenant {
   facturaTramos              FacturaTramo[]
   pagos                      Pago[]
   movimientosCc              MovimientoCuentaCorriente[]
+  imputacionesCc             ImputacionCuentaCorriente[]
   productos                  Producto[]
   movimientosStock           MovimientoStock[]
   stockOperaciones           StockOperacion[]
@@ -112,6 +113,10 @@ model Cliente {
   pais                String?
   condicionIva        Int? // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
   condicionTributaria String? // condición tributaria genérica (para países no AR)
+  /**
+   * Días de plazo para calcular el vencimiento de los cargos de cuenta corriente. Si es null, se usa el default del tenant.
+   */
+  condicionPagoDias   Int?
   createdAt           DateTime @default(now())
 
   viajes           Viaje[]
@@ -142,14 +147,19 @@ model Transportista {
   condicionIva            Int? // AFIP: 1=IVA RI, 4=IVA Exento, 5=Consumidor Final, 6=Monotributo
   condicionTributaria     String? // condición tributaria genérica (para países no AR)
   comisionPct             Float? // % comisión NyM (si null usa el default de ArcaConfig)
+  /**
+   * Días de plazo para calcular el vencimiento de los cargos de cuenta corriente (cuentas por pagar). Si es null, se usa el default del tenant.
+   */
+  condicionPagoDias       Int?
   createdAt               DateTime  @default(now())
 
   choferes       Chofer[]
   vehiculos      Vehiculo[]
-  viajes         Viaje[]       @relation("ViajeTransportistaPrincipal")
-  viajesEfectivo Viaje[]       @relation("ViajeTransportistaEfectivo")
+  viajes         Viaje[]                     @relation("ViajeTransportistaPrincipal")
+  viajesEfectivo Viaje[]                     @relation("ViajeTransportistaEfectivo")
   facturas       Factura[]
   liquidaciones  Liquidacion[]
+  movimientosCc  MovimientoCuentaCorriente[]
 
   @@index([tenantId])
   @@map("transportistas")
@@ -550,13 +560,14 @@ model Factura {
   anuladoAt            DateTime?
   notaCreditoUrl       String? // PDF NC en Cloudinary
 
-  createdAt     DateTime       @default(now())
+  createdAt     DateTime                    @default(now())
   pagos         Pago[]
   tramos        FacturaTramo[]
   /**
    * Clientes-tramo (ViajeCliente) facturados directamente a esta factura — ver "facturación por tramo, por cliente".
    */
   clientesViaje ViajeCliente[]
+  movimientosCc MovimientoCuentaCorriente[]
 
   @@unique([tenantId, numero])
   @@index([tenantId])
@@ -617,29 +628,86 @@ model Pago {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model MovimientoCuentaCorriente {
-  id         String   @id @default(cuid())
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  clienteId  String
-  cliente    Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  viajeId    String?
-  viaje      Viaje?   @relation(fields: [viajeId], references: [id], onDelete: SetNull)
-  tipo       String // cargo | pago
-  origen     String   @default("manual") // manual | viaje
-  concepto   String
-  importe    Float
-  fecha      DateTime
-  referencia String?
-  createdAt  DateTime @default(now())
+  id                   String         @id @default(cuid())
+  tenantId             String
+  tenant               Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  clienteId            String?
+  cliente              Cliente?       @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  proveedorId          String?
+  proveedor            Transportista? @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  /**
+   * = clienteId ?? proveedorId. Columna auxiliar no nula que existe solo para que el índice único por viaje funcione: en Postgres un unique constraint con columnas nullable no bloquea duplicados cuando la columna que falta es NULL (dos filas con clienteId=NULL nunca chocan entre sí).
+   */
+  contraparteId        String
+  viajeId              String?
+  viaje                Viaje?         @relation(fields: [viajeId], references: [id], onDelete: SetNull)
+  facturaId            String?
+  factura              Factura?       @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  tipo                 String // cargo | pago
+  origen               String         @default("manual") // manual | viaje | factura
+  concepto             String
+  importe              Float
+  moneda               String         @default("ARS")
+  fecha                DateTime
+  fechaVencimiento     DateTime?
+  /**
+   * Referencia libre a un número de comprobante externo (tenants sin módulo de Facturación, o proveedores sin factura formal en el sistema). No confundir con `facturaId`, que vincula a una Factura real emitida por Vialto.
+   */
+  numeroComprobante    String?
+  referencia           String?
+  /**
+   * Solo aplica a cargos: pendiente | parcial | cancelado, según cuánto de su importe cubren las imputaciones recibidas. Se recalcula, nunca se edita a mano.
+   */
+  estadoDisponibilidad String         @default("pendiente")
+  /**
+   * Solo aplica a pagos: no_imputado | imputado_parcial | imputado, según cuánto de su importe fue aplicado a cargos puntuales. Se recalcula, nunca se edita a mano.
+   */
+  estadoImputacion     String         @default("no_imputado")
+  createdAt            DateTime       @default(now())
+  createdBy            String?
 
-  @@unique([tenantId, viajeId])
+  imputacionesComoCargo ImputacionCuentaCorriente[] @relation("ImputacionCargo")
+  imputacionesComoPago  ImputacionCuentaCorriente[] @relation("ImputacionPago")
+
+  @@unique([tenantId, viajeId, contraparteId])
+  @@unique([tenantId, facturaId])
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@index([tenantId, clienteId, tipo])
+  @@index([tenantId, proveedorId])
+  @@index([tenantId, proveedorId, tipo])
   @@index([tenantId, fecha])
   @@index([tenantId, origen])
   @@index([tenantId, viajeId])
+  @@index([tenantId, facturaId])
   @@map("movimientos_cuenta_corriente")
+}
+
+model ImputacionCuentaCorriente {
+  id                String                    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant                    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  pagoId            String
+  pago              MovimientoCuentaCorriente @relation("ImputacionPago", fields: [pagoId], references: [id], onDelete: Cascade)
+  cargoId           String
+  cargo             MovimientoCuentaCorriente @relation("ImputacionCargo", fields: [cargoId], references: [id], onDelete: Cascade)
+  importe           Float
+  createdAt         DateTime                  @default(now())
+  createdBy         String?
+  /**
+   * Id de Pago (módulo Facturación) creado en espejo cuando el cargo imputado tiene
+   * facturaId (tenant con Facturación) — mantiene unificado el cobro entre ambos
+   * módulos. Sin relación Prisma a propósito (mismo criterio que
+   * Tenant.paisOrigenDestinoFijoId): si ese Pago se borra por otro lado, esto queda
+   * huérfano y se ignora sin romper nada.
+   */
+  pagoFacturacionId String?
+
+  @@unique([pagoId, cargoId])
+  @@index([tenantId])
+  @@index([tenantId, pagoId])
+  @@index([tenantId, cargoId])
+  @@map("imputaciones_cuenta_corriente")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,9 +1,13 @@
-import { IsDateString, IsNotEmpty, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString } from 'class-validator';
 
 export class ExportarMovimientosQueryDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  clienteId: string;
+  clienteId?: string;
+
+  @IsOptional()
+  @IsString()
+  proveedorId?: string;
 
   @IsDateString()
   desde: string;

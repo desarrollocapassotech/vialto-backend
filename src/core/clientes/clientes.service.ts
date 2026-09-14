@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
@@ -97,19 +98,26 @@ export class ClientesService {
     const idFiscal = dto.idFiscal?.trim() || null;
     validarIdFiscal(pais, idFiscal);
     await this.assertIdFiscalDisponible(tenantId, idFiscal);
-    return this.prisma.cliente.create({
-      data: {
-        tenantId,
-        nombre: dto.nombre.trim(),
-        idFiscal,
-        pais,
-        email: dto.email?.trim() || null,
-        telefono: dto.telefono?.trim() || null,
-        direccion: dto.direccion?.trim() || null,
-        condicionIva: pais === 'AR' ? (dto.condicionIva ?? null) : null,
-        condicionTributaria: pais !== 'AR' ? (dto.condicionTributaria ?? null) : null,
-      },
-    });
+    try {
+      return await this.prisma.cliente.create({
+        data: {
+          tenantId,
+          nombre: dto.nombre.trim(),
+          idFiscal,
+          pais,
+          email: dto.email?.trim() || null,
+          telefono: dto.telefono?.trim() || null,
+          direccion: dto.direccion?.trim() || null,
+          condicionIva: pais === 'AR' ? (dto.condicionIva ?? null) : null,
+          condicionTributaria: pais !== 'AR' ? (dto.condicionTributaria ?? null) : null,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un cliente con ese ID Fiscal');
+      }
+      throw e;
+    }
   }
 
   async update(id: string, tenantId: string, dto: UpdateClienteDto) {
@@ -130,19 +138,26 @@ export class ClientesService {
     this.assertClienteRequiredFields(next, dto.confirmarSinDatosFiscales);
     validarIdFiscal(next.pais, next.idFiscal);
     await this.assertIdFiscalDisponible(tenantId, next.idFiscal, id);
-    return this.prisma.cliente.update({
-      where: { id },
-      data: {
-        nombre: next.nombre,
-        idFiscal: next.idFiscal,
-        pais: next.pais,
-        email: next.email,
-        telefono: next.telefono,
-        direccion: next.direccion,
-        condicionIva: next.pais === 'AR' ? dto.condicionIva : null,
-        condicionTributaria: next.pais !== 'AR' ? dto.condicionTributaria : null,
-      },
-    });
+    try {
+      return await this.prisma.cliente.update({
+        where: { id },
+        data: {
+          nombre: next.nombre,
+          idFiscal: next.idFiscal,
+          pais: next.pais,
+          email: next.email,
+          telefono: next.telefono,
+          direccion: next.direccion,
+          condicionIva: next.pais === 'AR' ? dto.condicionIva : null,
+          condicionTributaria: next.pais !== 'AR' ? dto.condicionTributaria : null,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un cliente con ese ID Fiscal');
+      }
+      throw e;
+    }
   }
 
   async remove(id: string, tenantId: string) {

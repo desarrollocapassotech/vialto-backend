@@ -106,20 +106,27 @@ export class ChoferesService {
     await this.assertTransportista(tenantId, dto.transportistaId);
     const dni = dto.dni ?? null;
     await this.assertDniDisponible(tenantId, dni);
-    const row = await this.prisma.chofer.create({
-      data: {
-        tenantId,
-        nombre: dto.nombre,
-        dni,
-        cuit: dto.cuit?.trim() || null,
-        licencia: dto.licencia ?? null,
-        licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
-        telefono: dto.telefono ?? null,
-        transportistaId: dto.transportistaId ?? null,
-        pin: dto.pin ? hashPin(dto.pin) : null,
-      },
-    });
-    return sanitize(row);
+    try {
+      const row = await this.prisma.chofer.create({
+        data: {
+          tenantId,
+          nombre: dto.nombre,
+          dni,
+          cuit: dto.cuit?.trim() || null,
+          licencia: dto.licencia ?? null,
+          licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
+          telefono: dto.telefono ?? null,
+          transportistaId: dto.transportistaId ?? null,
+          pin: dto.pin ? hashPin(dto.pin) : null,
+        },
+      });
+      return sanitize(row);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un chofer con ese DNI');
+      }
+      throw e;
+    }
   }
 
   async update(id: string, tenantId: string, dto: UpdateChoferDto) {
@@ -130,27 +137,34 @@ export class ChoferesService {
     if (dto.dni !== undefined) {
       await this.assertDniDisponible(tenantId, dto.dni ?? null, id);
     }
-    const row = await this.prisma.chofer.update({
-      where: { id },
-      data: {
-        nombre: dto.nombre,
-        dni: dto.dni,
-        cuit: dto.cuit === undefined ? undefined : dto.cuit?.trim() || null,
-        licencia: dto.licencia,
-        telefono: dto.telefono,
-        transportistaId:
-          dto.transportistaId === undefined ? undefined : dto.transportistaId,
-        licenciaVence:
-          dto.licenciaVence === undefined
-            ? undefined
-            : dto.licenciaVence
-              ? new Date(dto.licenciaVence)
-              : null,
-        pin: dto.pin === undefined ? undefined : hashPin(dto.pin),
-        activo: dto.activo,
-      },
-    });
-    return sanitize(row);
+    try {
+      const row = await this.prisma.chofer.update({
+        where: { id },
+        data: {
+          nombre: dto.nombre,
+          dni: dto.dni,
+          cuit: dto.cuit === undefined ? undefined : dto.cuit?.trim() || null,
+          licencia: dto.licencia,
+          telefono: dto.telefono,
+          transportistaId:
+            dto.transportistaId === undefined ? undefined : dto.transportistaId,
+          licenciaVence:
+            dto.licenciaVence === undefined
+              ? undefined
+              : dto.licenciaVence
+                ? new Date(dto.licenciaVence)
+                : null,
+          pin: dto.pin === undefined ? undefined : hashPin(dto.pin),
+          activo: dto.activo,
+        },
+      });
+      return sanitize(row);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Ya existe un chofer con ese DNI');
+      }
+      throw e;
+    }
   }
 
   async remove(id: string, tenantId: string) {

@@ -1,14 +1,22 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class RegistrarPagoDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  clienteId: string;
+  clienteId?: string;
+
+  @IsOptional()
+  @IsString()
+  proveedorId?: string;
 
   @IsNumber()
   @Type(() => Number)
   importe: number;
+
+  @IsOptional()
+  @IsIn(['ARS', 'USD'])
+  moneda?: string;
 
   @IsDateString()
   fecha: string;

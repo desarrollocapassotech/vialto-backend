@@ -7,6 +7,7 @@ import { CreateMovimientoCcDto } from './dto/create-movimiento-cc.dto';
 import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
+import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -25,15 +26,38 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 export class CuentaCorrienteController {
   constructor(private readonly service: CuentaCorrienteService) {}
 
-  @ApiOperation({ summary: 'Listar movimientos de cuenta corriente (opcionalmente por cliente)' })
+  @ApiOperation({ summary: 'Listar movimientos de cuenta corriente (filtros opcionales: cliente, proveedor, estado, rango de fechas)' })
   @Get('movimientos')
   @Roles('admin', 'member', 'superadmin')
   list(
     @CurrentAuth() auth: AuthPayload,
     @Query('clienteId') clienteId?: string,
+    @Query('proveedorId') proveedorId?: string,
+    @Query('estado') estado?: string,
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.findAll(auth.tenantId, clienteId);
+    return this.service.findAll(auth.tenantId, { clienteId, proveedorId, estado, desde, hasta });
+  }
+
+  @ApiOperation({ summary: 'Tablero de cobranzas y pagos: vencidos, próximos a vencer y sin vencimiento' })
+  @Get('tablero')
+  @Roles('admin', 'member', 'superadmin')
+  tablero(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('diasProximos') diasProximos?: string,
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    const dias = diasProximos ? Number(diasProximos) : undefined;
+    return this.service.tablero(
+      auth.tenantId,
+      Number.isFinite(dias) ? dias : undefined,
+      desde,
+      hasta,
+    );
   }
 
   @ApiOperation({ summary: 'Exportar movimientos a Excel' })
@@ -55,7 +79,7 @@ export class CuentaCorrienteController {
     return this.service.findOne(id, auth.tenantId);
   }
 
-  @ApiOperation({ summary: 'Registrar movimiento de cuenta corriente' })
+  @ApiOperation({ summary: 'Registrar movimiento de cuenta corriente (cliente o proveedor)' })
   @Post('movimientos')
   @Roles('admin', 'superadmin')
   create(@Body() dto: CreateMovimientoCcDto, @CurrentAuth() auth: AuthPayload) {
@@ -63,7 +87,7 @@ export class CuentaCorrienteController {
     return this.service.create(auth.tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Registrar pago de cliente (genera movimiento automáticamente)' })
+  @ApiOperation({ summary: 'Registrar pago/cobranza (genera movimiento automáticamente)' })
   @Post('pagos')
   @Roles('admin', 'superadmin')
   registrarPago(@Body() dto: RegistrarPagoDto, @CurrentAuth() auth: AuthPayload) {
@@ -72,7 +96,7 @@ export class CuentaCorrienteController {
   }
 
   @ApiOperation({ summary: 'Saldo actual de un cliente en cuenta corriente' })
-  @Get('saldo/:clienteId')
+  @Get('saldo/cliente/:clienteId')
   @Roles('admin', 'member', 'superadmin')
   saldoCliente(
     @Param('clienteId') clienteId: string,
@@ -80,6 +104,17 @@ export class CuentaCorrienteController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.saldoCliente(auth.tenantId, clienteId);
+  }
+
+  @ApiOperation({ summary: 'Saldo actual de un proveedor/fletero en cuenta corriente' })
+  @Get('saldo/proveedor/:proveedorId')
+  @Roles('admin', 'member', 'superadmin')
+  saldoProveedor(
+    @Param('proveedorId') proveedorId: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.saldoProveedor(auth.tenantId, proveedorId);
   }
 
   @ApiOperation({ summary: 'Actualizar movimiento de cuenta corriente' })
@@ -100,5 +135,24 @@ export class CuentaCorrienteController {
   remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.remove(id, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: 'Imputar un pago a un cargo puntual (factura/comprobante)' })
+  @Post('imputaciones')
+  @Roles('admin', 'superadmin')
+  crearImputacion(
+    @Body() dto: CreateImputacionCcDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.crearImputacion(auth.tenantId, dto);
+  }
+
+  @ApiOperation({ summary: 'Deshacer una imputación de pago a cargo' })
+  @Delete('imputaciones/:id')
+  @Roles('admin', 'superadmin')
+  eliminarImputacion(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.eliminarImputacion(id, auth.tenantId);
   }
 }

@@ -129,14 +129,8 @@ export class ImportacionesService {
   ): Promise<{ valid: boolean; errores: { modulo: string; faltantes: string[] }[] }> {
     const errores: { modulo: string; faltantes: string[] }[] = [];
 
-    // Obtenemos los templates de los módulos elegidos
-    const templates = await this.prisma.importTemplate.findMany({
-      where: { tenantId, modulo: { in: modulos } },
-    });
-    const templateMap = new Map(templates.map((t) => [t.modulo, t]));
-
     for (const modulo of modulos) {
-      const template = templateMap.get(modulo);
+      const { template } = await this.getActiveTemplate(tenantId, modulo);
       if (!template) continue;
 
       const config = template.config as any as TemplateConfig;
@@ -145,11 +139,13 @@ export class ImportacionesService {
       const obligatorias = config.columns.filter((c) => c.required);
       if (obligatorias.length === 0) continue;
 
+      const catColumns = getCatalogoColumnas(modulo);
+
       let sheetHeaders: string[] = [];
       try {
         // Usa public parseHeaders (modificaremos parser.service para exponer un parseHeaders o sampleWorkbook)
         const muestras = this.parser.sampleWorkbook(buffer, 1);
-        
+
         let targetName = "";
         if (config.sheet) {
           const target = typeof config.sheet === 'string' ? config.sheet.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() : "";
@@ -158,7 +154,7 @@ export class ImportacionesService {
         } else {
           targetName = muestras.length === 1 ? muestras[0].nombre : "";
         }
-        
+
         const sheet = muestras.find(m => m.nombre === targetName);
         if (sheet && sheet.filas.length > 0) {
           const headerRowIndex = (config.headerRow ?? 1) - 1;
@@ -171,11 +167,17 @@ export class ImportacionesService {
         continue;
       }
 
-      const sheetHeadersLower = sheetHeaders.map(h => h.toLowerCase());
+      const sheetHeadersLower = sheetHeaders.map(h => h.toLowerCase().trim());
       const faltantes: string[] = [];
 
       for (const col of obligatorias) {
-        const validHeaders = [col.excelHeader, ...(col.excelHeaderAliases || [])].map(h => h.toLowerCase());
+        const catCol = catColumns.find(c => c.field === col.field);
+        const validHeaders = [
+          col.excelHeader,
+          ...(col.excelHeaderAliases || []),
+          ...(catCol?.excelHeaderAliases || [])
+        ].map(h => h.toLowerCase().trim());
+
         const exists = validHeaders.some(h => sheetHeadersLower.includes(h));
         if (!exists) faltantes.push(col.excelHeader);
       }
@@ -298,12 +300,14 @@ export class ImportacionesService {
     }
 
     if (modulo === "viajes") {
+      const fusionados = await this.viajesProcessor.detectarViajesFusionados(valid);
       Object.assign(
         result,
-        await this.buildViajesPreview(parsed, valid, created, tenantId),
+        await this.buildViajesPreview(parsed, valid, created, tenantId, fusionados),
       );
       result.advertenciasFacturasDuplicadas =
         await this.viajesProcessor.detectarFacturasDuplicadas(valid, tenantId);
+      result.advertenciasViajesFusionados = fusionados;
     } else if (processorModulo?.filasNuevas) {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
       const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
@@ -517,7 +521,40 @@ export class ImportacionesService {
     let exitosas = 0;
     let errores = 0;
 
-    for (const fila of filasValidas) {
+    let filasAInsertar = filasValidas;
+    if (session.template.modulo === "viajes") {
+      // PRE-AGRUPACIÓN: Para evitar que viajes duplicados dentro del mismo Excel
+      // colisionen en la BD y generen números inconsistentes, los fusionamos ANTES
+      // de intentar insertarlos.
+      const fusionados = await this.viajesProcessor.detectarViajesFusionados(filasValidas);
+      const filasGanadoras = new Set<number>();
+      const fusionadasSet = new Set<number>();
+      
+      for (const grupo of fusionados) {
+        // La primera fila del grupo se considera la ganadora y es la única que se inserta.
+        filasGanadoras.add(grupo.filas[0]);
+        for (const f of grupo.filas) fusionadasSet.add(f);
+        
+        // Las filas perdedoras no van a la BD, pero se registran como omitidas
+        // en el log para que no figuren como creadas/actualizadas ni como error.
+        for (let i = 1; i < grupo.filas.length; i++) {
+          detalles.push({
+            fila: grupo.filas[i],
+            estado: "omitida",
+            id: null,
+            creado: false,
+            facturado: false,
+            mensaje: `Unificada con la fila ${grupo.filas[0]}`,
+          });
+        }
+      }
+      
+      filasAInsertar = filasValidas.filter(
+        (f) => !fusionadasSet.has(f._rowNum) || filasGanadoras.has(f._rowNum),
+      );
+    }
+
+    for (const fila of filasAInsertar) {
       try {
         const { id, creado, facturado } = await processor.insert(
           fila,
@@ -892,11 +929,15 @@ export class ImportacionesService {
       choferes: string[];
     },
     tenantId: string,
+    fusionados: { identificador: string; filas: number[]; motivo: "id" | "datos" }[],
   ): Promise<{
     viajes: PreviewViaje[];
     facturas: PreviewFactura[];
     clientes: PreviewEntidad[];
     transportistas: PreviewEntidad[];
+    entidadesNuevas: number;
+    entidadesActualizadas: number;
+    filasFusionadas: number;
   }> {
     const estadoActual = await this.viajesProcessor.obtenerEstadoActual(
       valid,
@@ -925,17 +966,23 @@ export class ImportacionesService {
       return toStr(v);
     };
 
+    const filaAFusion = new Map<number, { identificador: string; filas: number[] }>();
+    for (const grupo of fusionados) {
+      for (const num of grupo.filas) {
+        filaAFusion.set(num, grupo);
+      }
+    }
+
+    let entidadesNuevas = 0;
+    let entidadesActualizadas = 0;
+    let filasFusionadas = 0;
+
+    const valoresCalculados = new Map<number, any>();
+
     for (const validRow of valid) {
       const p = parsedByRow.get(validRow._rowNum);
       if (!p) continue;
 
-      // Cliente/Transporte/Chofer se muestran por su NOMBRE resuelto (el que
-      // realmente matcheó el lookup), no el texto crudo de la celda — algunos
-      // tenants (ej. NyM) tipean el CUIT/DNI ahí en vez del nombre (ver
-      // LOOKUP_CLIENTE_VIAJE/LOOKUP_TRANSPORTISTA_VIAJE/LOOKUP_CHOFER en
-      // template-catalogo.ts), y mostrar la celda cruda comparaba "Nombre
-      // actual → CUIT" en el diff, como si el nombre hubiera cambiado a un
-      // número. Bug real reportado por el usuario, ago 2026.
       const cliente =
         this.nombreLookupResuelto(validRow.clienteId, nombresLookup.clientes) ??
         "";
@@ -946,19 +993,13 @@ export class ImportacionesService {
       if (cliente) clienteNamesSet.add(cliente);
       if (transporte) transportistaNamesSet.add(transporte);
 
-      // Igual que Cliente/Transporte/Chofer: se muestra el valor REALMENTE
-      // calculado (mismo método que usa el processor al guardar), no la
-      // celda cruda de "Monto"/"Flete" — con templates de desglose
-      // (cantidadFactura × precioUnitarioFactura, o su equivalente del
-      // transportista) esas columnas ni existen en el Excel, así que leerlas
-      // crudas mostraba "— " como si el import fuera a borrar el monto de un
-      // viaje existente. Bug real reportado por el usuario, ago 2026.
       const monto = this.viajesProcessor.resolveMonto(validRow);
       const precioTransp =
         this.viajesProcessor.resolvePrecioTransportistaExterno(validRow);
       const nroFactura = toStr(p.nroFactura);
 
       const nuevoValor = {
+        idPersonalizado: toStr(validRow.numeroIdentificacionPersonalizado),
         cliente,
         transporte,
         chofer: this.nombreLookupResuelto(
@@ -980,30 +1021,126 @@ export class ImportacionesService {
         ),
       };
 
-      const actual = estadoActual.get(validRow._rowNum);
-      const cambios = actual
-        ? this.compararCamposViaje(actual, nuevoValor, toDateStr)
-        : undefined;
-
-      viajes.push({
-        fila: validRow._rowNum,
-        ...nuevoValor,
-        nuevo: !actual,
-        cambios,
+      valoresCalculados.set(validRow._rowNum, {
+        nuevoValor,
+        nroFactura,
+        cliente,
+        monto,
+        p,
       });
+    }
 
-      // Las facturas de este preview son siempre a cliente — el pago al
-      // transportista (precioTransportistaExterno) se liquida por afuera,
-      // vía Liquidaciones (post-viajes), no como una Factura propia.
-      if (nroFactura) {
-        facturas.push({
-          tipo: "cliente",
-          numero: nroFactura,
-          nombre: cliente || null,
-          importe: monto ?? 0,
-          fechaEmision: toDateStr(p.fechaEmisionFactura),
-          fechaVencimiento: toDateStr(p.fechaVencimientoFactura),
+    const processedFilas = new Set<number>();
+
+    for (const validRow of valid) {
+      if (processedFilas.has(validRow._rowNum)) continue;
+
+      const fusionGroup = filaAFusion.get(validRow._rowNum);
+      
+      if (fusionGroup) {
+        for (const num of fusionGroup.filas) {
+          processedFilas.add(num);
+        }
+
+        const primerFila = fusionGroup.filas[0];
+        const ultimaFila = fusionGroup.filas[fusionGroup.filas.length - 1];
+
+        const dataPrimer = valoresCalculados.get(primerFila);
+        const dataUltimo = valoresCalculados.get(ultimaFila);
+
+        if (!dataPrimer || !dataUltimo) continue;
+
+        const actual = estadoActual.get(primerFila);
+        const nuevo = !actual;
+
+        filasFusionadas += fusionGroup.filas.length - 1;
+        if (actual) entidadesActualizadas++;
+        else entidadesNuevas++;
+
+        const cambiosDB = actual
+          ? this.compararCamposViaje(actual, dataPrimer.nuevoValor, toDateStr)
+          : undefined;
+        
+        const cambiosIntraLote: PreviewCambioCampo[] = [];
+        
+        // Comparamos cada fila perdedora contra la primera (ganadora)
+        // para advertirle al usuario qué datos se van a perder de cada una.
+        for (let i = 1; i < fusionGroup.filas.length; i++) {
+          const numFilaPerdedora = fusionGroup.filas[i];
+          const dataPerdedora = valoresCalculados.get(numFilaPerdedora);
+          if (!dataPerdedora) continue;
+
+          const diffs = this.compararCamposViaje(
+            { ...dataPerdedora.nuevoValor, numeroIdentificacionPersonalizado: dataPerdedora.nuevoValor.idPersonalizado } as unknown as ViajeActual,
+            dataPrimer.nuevoValor,
+            toDateStr,
+          );
+          
+          for (const diff of diffs) {
+            cambiosIntraLote.push({
+              ...diff,
+              campo: `(Fila ${numFilaPerdedora}) ${diff.campo}`
+            });
+          }
+        }
+
+        const advertenciaSobrescritura = cambiosIntraLote.length > 0;
+        const cambiosSobrescritura = advertenciaSobrescritura
+          ? cambiosIntraLote
+          : undefined;
+        const cambios = actual ? cambiosDB : undefined;
+
+        viajes.push({
+          fila: primerFila,
+          filasAgrupadas: fusionGroup.filas,
+          advertenciaSobrescritura,
+          ...dataPrimer.nuevoValor,
+          nuevo,
+          cambiosSobrescritura,
+          cambios,
         });
+
+        if (dataUltimo.nroFactura) {
+          facturas.push({
+            tipo: "cliente",
+            numero: dataUltimo.nroFactura,
+            nombre: dataUltimo.cliente || null,
+            importe: dataUltimo.monto ?? 0,
+            fechaEmision: toDateStr(dataUltimo.p.fechaEmisionFactura),
+            fechaVencimiento: toDateStr(dataUltimo.p.fechaVencimientoFactura),
+          });
+        }
+      } else {
+        processedFilas.add(validRow._rowNum);
+
+        const data = valoresCalculados.get(validRow._rowNum);
+        if (!data) continue;
+
+        const actual = estadoActual.get(validRow._rowNum);
+        if (actual) entidadesActualizadas++;
+        else entidadesNuevas++;
+
+        const cambios = actual
+          ? this.compararCamposViaje(actual, data.nuevoValor, toDateStr)
+          : undefined;
+
+        viajes.push({
+          fila: validRow._rowNum,
+          ...data.nuevoValor,
+          nuevo: !actual,
+          cambios,
+        });
+
+        if (data.nroFactura) {
+          facturas.push({
+            tipo: "cliente",
+            numero: data.nroFactura,
+            nombre: data.cliente || null,
+            importe: data.monto ?? 0,
+            fechaEmision: toDateStr(data.p.fechaEmisionFactura),
+            fechaVencimiento: toDateStr(data.p.fechaVencimientoFactura),
+          });
+        }
       }
     }
 
@@ -1018,6 +1155,9 @@ export class ImportacionesService {
         nombre,
         esNuevo: newTransportistaNames.has(nombre.toLowerCase()),
       })),
+      entidadesNuevas,
+      entidadesActualizadas,
+      filasFusionadas,
     };
   }
 
@@ -1025,6 +1165,7 @@ export class ImportacionesService {
   private compararCamposViaje(
     actual: ViajeActual,
     nuevo: {
+      idPersonalizado: string | null;
       cliente: string;
       transporte: string | null;
       chofer: string | null;
@@ -1043,6 +1184,11 @@ export class ImportacionesService {
     toDateStr: (v: unknown) => string | null,
   ): PreviewCambioCampo[] {
     const pares: PreviewCambioCampo[] = [
+      {
+        campo: "ID Personalizado",
+        antes: actual.numeroIdentificacionPersonalizado,
+        despues: nuevo.idPersonalizado,
+      },
       { campo: "Cliente", antes: actual.cliente, despues: nuevo.cliente || null },
       { campo: "Transporte", antes: actual.transporte, despues: nuevo.transporte },
       { campo: "Chofer", antes: actual.chofer, despues: nuevo.chofer },

@@ -144,22 +144,41 @@ export class ImportacionesService {
       let sheetHeaders: string[] = [];
       try {
         // Usa public parseHeaders (modificaremos parser.service para exponer un parseHeaders o sampleWorkbook)
-        const muestras = this.parser.sampleWorkbook(buffer, 1);
+        const muestras = this.parser.sampleWorkbook(buffer, 10);
 
+        const sheetSugerida = config.sheet || SHEET_LABEL_DEFAULT[modulo];
         let targetName = "";
-        if (config.sheet) {
-          const target = typeof config.sheet === 'string' ? config.sheet.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() : "";
-          const found = muestras.find(m => m.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() === target);
+
+        if (sheetSugerida) {
+          const target = typeof sheetSugerida === 'string'
+            ? sheetSugerida.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase()
+            : "";
+          const found = muestras.find(m =>
+            m.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() === target
+          );
           if (found) targetName = found.nombre;
-        } else {
-          targetName = muestras.length === 1 ? muestras[0].nombre : "";
+        }
+
+        if (!targetName) {
+          if (muestras.length === 1) {
+            targetName = muestras[0].nombre;
+          } else {
+            const matchModulo = muestras.find(m =>
+              m.nombre.toLowerCase().includes(modulo.toLowerCase())
+            );
+            if (matchModulo) targetName = matchModulo.nombre;
+          }
         }
 
         const sheet = muestras.find(m => m.nombre === targetName);
         if (sheet && sheet.filas.length > 0) {
-          const headerRowIndex = (config.headerRow ?? 1) - 1;
-          if (sheet.filas.length > headerRowIndex) {
-            sheetHeaders = (sheet.filas[headerRowIndex] as unknown[]).map(h => h != null ? String(h).trim() : "");
+          let headerRowIndex = (config.headerRow ?? 1) - 1;
+          if (headerRowIndex < 0 || sheet.filas.length <= headerRowIndex) {
+            headerRowIndex = 0;
+          }
+          sheetHeaders = (sheet.filas[headerRowIndex] as unknown[]).map(h => h != null ? String(h).trim() : "");
+          if (sheetHeaders.filter(Boolean).length === 0 && sheet.filas.length > 0) {
+            sheetHeaders = (sheet.filas[0] as unknown[]).map(h => h != null ? String(h).trim() : "");
           }
         }
       } catch (e) {

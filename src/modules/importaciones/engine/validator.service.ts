@@ -217,12 +217,24 @@ export class ValidatorService {
     fields: string[],
     caches: LookupCaches,
   ): string | null {
+    const lower = valor.toLowerCase();
+    const digitsOnly = valor.replace(/[^\d]/g, "");
     for (const field of fields) {
       const cache = caches[`${model}:${field}`] ?? {};
-      const id = cache[valor.toLowerCase()];
+      const id = cache[lower] ?? (digitsOnly ? cache[digitsOnly] : undefined);
       if (id) return id;
     }
     return null;
+  }
+
+  private resolveLookupModel(col: ColumnConfig): string {
+    if (col.lookupModel) return col.lookupModel;
+    const fieldLower = col.field.toLowerCase();
+    if (fieldLower.includes("chofer")) return "choferes";
+    if (fieldLower.includes("transportista") || fieldLower.includes("transporte")) return "transportistas";
+    if (fieldLower.includes("vehiculo")) return "vehiculos";
+    if (fieldLower.includes("producto")) return "productos";
+    return "clientes";
   }
 
   private coerce(
@@ -345,7 +357,7 @@ export class ValidatorService {
       }
 
       case "lookup": {
-        const model = col.lookupModel ?? "clientes";
+        const model = this.resolveLookupModel(col);
 
         // ──────────────────────────────────────────────────────────
         // EXCEPCIÓN PARA CIUDADES: Dejamos pasar el texto crudo
@@ -415,7 +427,7 @@ export class ValidatorService {
             valoresNoEncontrados: [{ valor: str, posicion: 0 }],
             error:
               fields.length > 1
-                ? `No se encontró "${str}" en ${model} (buscado por ${fields.join(" o ")})`
+                ? `No se encontró "${str}" en ${model} (buscado por ${fields.map((f) => (f === "idFiscal" ? "CUIT" : f)).join(", ").replace(/, ([^,]*)$/, " o $1")})`
                 : `No se encontró "${str}" en ${model}`,
             valor: raw,
           },
@@ -532,6 +544,11 @@ export class ValidatorService {
           const key = String(v).trim().toLowerCase();
           if (!key) continue;
           map[key] = (r as { id: string }).id;
+
+          const digits = key.replace(/[^\d]/g, "");
+          if (digits && digits !== key) {
+            map[digits] = (r as { id: string }).id;
+          }
         }
         caches[`${model}:${field}`] = map;
       }
@@ -552,17 +569,21 @@ export class ValidatorService {
         }
 
         for (const [lower, original] of valuesMap) {
-          const yaExiste = colFields.some((f) => caches[`${model}:${f}`]?.[lower]);
+          const yaExiste = colFields.some((f) => {
+            const cache = caches[`${model}:${f}`];
+            if (!cache) return false;
+            const digits = original.replace(/[^\d]/g, "");
+            return !!(cache[lower] || (digits && cache[digits]));
+          });
           if (yaExiste) continue;
 
-          // Un CUIT/DNI en la columna no alcanza para crear un cliente o
-          // transportista nuevo (ver `esSoloDniOCuit`) — no generamos el
+          // Un CUIT/DNI en la columna no alcanza para crear un cliente,
+          // transportista o chofer nuevo (ver `esSoloDniOCuit`) — no generamos el
           // placeholder acá, así la fila cae en el flujo normal de "no
           // encontrado" y el problema se ve en el preview, no recién al
-          // confirmar (antes, con el placeholder, el preview mostraba la
-          // fila como resuelta y confirmar fallaba después sin aviso claro).
+          // confirmar.
           if (
-            (model === "clientes" || model === "transportistas") &&
+            (model === "clientes" || model === "transportistas" || model === "choferes") &&
             this.esSoloDniOCuit(original)
           ) {
             continue;
@@ -632,6 +653,11 @@ export class ValidatorService {
         return r.id;
       }
       case "choferes": {
+        if (this.esSoloDniOCuit(nombre)) {
+          throw new BadRequestException(
+            "No se puede crear automáticamente un chofer usando solo un DNI/CUIT. Por favor, importá los choferes primero o proveé el Nombre en esta columna.",
+          );
+        }
         const r = await this.prisma.chofer.create({
           data: { tenantId, nombre },
           select: { id: true },

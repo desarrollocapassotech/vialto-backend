@@ -1335,9 +1335,15 @@ export class ImportacionesService {
         }
       }
 
-      // 2. Inyectar alias a las columnas existentes (en caso de que hayan sido actualizadas en el código)
+      // 2. Inyectar alias, lookupModel y lookupFields a las columnas existentes (en caso de que hayan sido actualizadas en el código)
       for (const col of configData.columns) {
         const catCol = catalogo.find((c) => c.field === col.field);
+        if (catCol?.lookupModel) {
+          col.lookupModel = catCol.lookupModel;
+        }
+        if (catCol?.lookupFields) {
+          col.lookupFields = catCol.lookupFields;
+        }
         if (
           catCol?.excelHeaderAliases &&
           (!col.excelHeaderAliases || col.excelHeaderAliases.length === 0)

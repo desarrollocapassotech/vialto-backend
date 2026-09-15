@@ -3,19 +3,21 @@ import { PrismaModule } from '../../shared/prisma/prisma.module';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { LiquidacionesService } from './liquidaciones.service';
-import { LiquidacionesController } from './liquidaciones.controller';
+import { LiquidacionesController, LiquidacionesPlatformController } from './liquidaciones.controller';
 import { LiquidacionPdfService } from './liquidacion-pdf.service';
+import { LiquidacionContratoPdfService } from './liquidacion-contrato-pdf.service';
 import { FacturaPdfService } from './factura-pdf.service';
 import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
 
 @Module({
   imports: [PrismaModule],
-  controllers: [LiquidacionesController],
+  controllers: [LiquidacionesController, LiquidacionesPlatformController],
   providers: [
     ArcaClientService,
     ArcaConfigService,
     LiquidacionesService,
     LiquidacionPdfService,
+    LiquidacionContratoPdfService,
     FacturaPdfService,
     ConceptosLiquidacionService,
   ],
@@ -23,6 +25,7 @@ import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
     ArcaConfigService,
     LiquidacionesService,
     LiquidacionPdfService,
+    LiquidacionContratoPdfService,
     FacturaPdfService,
     ConceptosLiquidacionService,
   ],

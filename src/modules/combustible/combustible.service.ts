@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -15,6 +16,7 @@ import { UpdateCargaDto } from "./dto/update-carga.dto";
 import { CreateCargaChoferDto } from "./dto/create-carga-chofer.dto";
 import { UpdateCargaChoferDto } from "./dto/update-carga-chofer.dto";
 import { LogSyncErrorDto } from "./dto/log-sync-error.dto";
+import { AsignarVehiculoDto } from "./dto/asignar-vehiculo.dto";
 
 /** Datos mínimos de contexto de autenticación que el servicio necesita. */
 interface CombustibleAuth {
@@ -215,7 +217,31 @@ export class CombustibleService {
       targetCreatedAt,
     );
 
-    if (prev && km < prev.km) {
+    /**
+     * Caso normal (alta nueva, sin ninguna carga posterior ya registrada para este
+     * vehículo): el límite inferior es `Vehiculo.kmActual` en vez de la carga anterior
+     * en `CargaCombustible`. En los hechos son el mismo valor —`kmActual` se sincroniza
+     * con la última carga real (`syncVehiculoKmActual`)— pero usar el campo del vehículo
+     * respeta una corrección manual hecha desde el panel (botón "Editar km"), algo que
+     * comparar directo contra la carga anterior no podía reflejar nunca.
+     *
+     * Se excluye a propósito el caso `excludeId` (edición de una carga existente): si la
+     * carga que se está editando es la más reciente del vehículo, `kmActual` hoy refleja
+     * su propio valor viejo (ella fue la última en sincronizarlo) — compararla contra sí
+     * misma no tiene sentido, así que las ediciones siguen usando la carga cronológicamente
+     * anterior de siempre.
+     */
+    if (!next && !excludeId) {
+      const vehiculo = await this.prisma.vehiculo.findUnique({
+        where: { id: vehiculoId },
+        select: { kmActual: true },
+      });
+      if (vehiculo && km < vehiculo.kmActual) {
+        throw new BadRequestException(
+          `El kilometraje ingresado (${km} km) es inconsistente: no puede ser inferior al kilometraje actual del vehículo (${vehiculo.kmActual} km).`,
+        );
+      }
+    } else if (prev && km < prev.km) {
       const fechaFmt = new Intl.DateTimeFormat("es-AR", {
         day: "2-digit",
         month: "2-digit",
@@ -718,7 +744,14 @@ export class CombustibleService {
     });
   }
 
+  /** Prioriza la asignación activa del chofer (ver AsignacionVehiculo); si no tiene, cae a la patente de su última carga real. */
   async getUltimaCargaChofer(choferId: string, tenantId: string) {
+    const asignacion = await this.prisma.asignacionVehiculo.findFirst({
+      where: { tenantId, choferId, fechaHasta: null },
+      include: { vehiculo: { select: { patente: true } } },
+    });
+    if (asignacion) return { patente: asignacion.vehiculo.patente };
+
     const ultima = await this.prisma.cargaCombustible.findFirst({
       where: { tenantId, choferId },
       orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
@@ -726,6 +759,110 @@ export class CombustibleService {
     });
     if (!ultima) return null;
     return { patente: ultima.vehiculo?.patente ?? null };
+  }
+
+  /** Asignación activa del chofer (o null), con datos del vehículo. */
+  async getAsignacionActual(choferId: string, tenantId: string) {
+    return this.prisma.asignacionVehiculo.findFirst({
+      where: { tenantId, choferId, fechaHasta: null },
+      include: { vehiculo: { select: { id: true, patente: true, tipo: true, kmActual: true } } },
+    });
+  }
+
+  /** Asignación activa de cada chofer del tenant — para la grilla del panel admin. */
+  async getAsignacionesActuales(tenantId: string) {
+    return this.prisma.asignacionVehiculo.findMany({
+      where: { tenantId, fechaHasta: null },
+      include: {
+        chofer: { select: { id: true, nombre: true, dni: true } },
+        vehiculo: { select: { id: true, patente: true, tipo: true, kmActual: true } },
+      },
+      orderBy: { chofer: { nombre: "asc" } },
+    });
+  }
+
+  /** Historial completo de asignaciones de un chofer o un vehículo, más reciente primero. */
+  async getHistorialAsignaciones(
+    tenantId: string,
+    filtro: { choferId?: string; vehiculoId?: string },
+  ) {
+    if (!filtro.choferId && !filtro.vehiculoId) {
+      throw new BadRequestException("Debe indicarse choferId o vehiculoId.");
+    }
+    return this.prisma.asignacionVehiculo.findMany({
+      where: { tenantId, ...filtro },
+      include: {
+        chofer: { select: { id: true, nombre: true, dni: true } },
+        vehiculo: { select: { id: true, patente: true, tipo: true, kmActual: true } },
+      },
+      orderBy: { fechaDesde: "desc" },
+    });
+  }
+
+  /**
+   * Asigna un vehículo a un chofer, cerrando la asignación activa anterior del
+   * chofer (si tenía una) en la misma transacción. Un chofer solo puede tener una
+   * asignación activa a la vez; el historial queda como filas con `fechaHasta` seteado.
+   */
+  async asignarVehiculo(dto: AsignarVehiculoDto, auth: CombustibleAuth) {
+    const tenantId = auth.tenantId as string;
+
+    const [chofer, vehiculo] = await Promise.all([
+      this.prisma.chofer.findFirst({ where: { id: dto.choferId, tenantId } }),
+      this.prisma.vehiculo.findFirst({ where: { id: dto.vehiculoId, tenantId } }),
+    ]);
+    if (!chofer) throw new NotFoundException("Chofer no encontrado.");
+    if (!vehiculo) throw new NotFoundException("Vehículo no encontrado.");
+
+    /**
+     * Un vehículo no puede tener dos choferes activos a la vez (no hay soporte para
+     * turnos rotativos simultáneos — ver CLAUDE.md, "Asignación de vehículo a chofer").
+     * Si ya está asignado a OTRO chofer, se rechaza: el admin tiene que sacárselo a
+     * mano primero (finalizarAsignacion) y recién ahí reasignarlo — nunca se transfiere
+     * automáticamente para no perder de vista quién lo tenía sin que nadie lo decida.
+     */
+    const asignacionVehiculoActiva = await this.prisma.asignacionVehiculo.findFirst({
+      where: { tenantId, vehiculoId: dto.vehiculoId, fechaHasta: null, choferId: { not: dto.choferId } },
+      include: { chofer: { select: { nombre: true } } },
+    });
+    if (asignacionVehiculoActiva) {
+      throw new ConflictException(
+        `El vehículo ${vehiculo.patente} ya está asignado a ${asignacionVehiculoActiva.chofer.nombre}. Quitáselo primero antes de reasignarlo.`,
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.asignacionVehiculo.updateMany({
+        where: { tenantId, choferId: dto.choferId, fechaHasta: null },
+        data: { fechaHasta: new Date() },
+      });
+
+      return tx.asignacionVehiculo.create({
+        data: {
+          tenantId,
+          choferId: dto.choferId,
+          vehiculoId: dto.vehiculoId,
+          createdBy: auth.userId,
+        },
+        include: {
+          chofer: { select: { id: true, nombre: true, dni: true } },
+          vehiculo: { select: { id: true, patente: true, tipo: true, kmActual: true } },
+        },
+      });
+    });
+  }
+
+  /** Termina la asignación activa del chofer sin reemplazarla (queda sin vehículo asignado). */
+  async finalizarAsignacion(choferId: string, tenantId: string) {
+    const activa = await this.prisma.asignacionVehiculo.findFirst({
+      where: { tenantId, choferId, fechaHasta: null },
+    });
+    if (!activa) throw new NotFoundException("El chofer no tiene una asignación activa.");
+
+    return this.prisma.asignacionVehiculo.update({
+      where: { id: activa.id },
+      data: { fechaHasta: new Date() },
+    });
   }
 
   async getUltimoKmPorPatente(

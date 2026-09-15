@@ -773,6 +773,35 @@ model CargaCombustible {
 }
 ```
 
+#### Asignación de vehículo a chofer, con historial (sep 2026)
+
+Pedido real de un tenant (Bressan/NyM): la app vieja permitía fijar qué vehículo maneja cada chofer; en el rediseño de `vialto-combustible` esto se había perdido — el "default" de patente al cargar combustible dependía únicamente de la última carga real del chofer (`CombustibleService.getUltimaCargaChofer`), sin ningún lugar del panel admin para verlo o cambiarlo, y sin historial de qué vehículo usó cada chofer y cuándo.
+
+```prisma
+/** Un chofer tiene a lo sumo una asignación activa (fechaHasta: null) a la vez.
+ *  Asignar un vehículo nuevo cierra la anterior en la misma transacción — el
+ *  historial es simplemente el conjunto de filas con fechaHasta seteado. */
+model AsignacionVehiculo {
+  id         String    @id @default(cuid())
+  tenantId   String
+  choferId   String
+  vehiculoId String
+  fechaDesde DateTime  @default(now())
+  fechaHasta DateTime? // null = asignación activa
+  createdAt  DateTime  @default(now())
+  createdBy  String
+
+  @@index([tenantId, choferId, fechaHasta])
+  @@index([tenantId, vehiculoId])
+}
+```
+
+- **Regla de negocio** (decidida a propósito, sep 2026): un vehículo puede pasar por muchos choferes en el tiempo, pero un chofer solo puede tener **un** vehículo activo a la vez — no hay soporte para turnos rotativos donde 2+ choferes comparten el mismo camión en simultáneo sin cerrar la asignación anterior. Si eso se necesita a futuro, hay que sacar el `updateMany` de cierre automático de `CombustibleService.asignarVehiculo` y dejarlo opt-in.
+- **`CombustibleService.getUltimaCargaChofer`** ahora prioriza la asignación activa del chofer sobre su última carga real — solo cae al comportamiento viejo (última carga) si el chofer no tiene ninguna asignación cargada. Mismo endpoint de siempre (`GET combustible/chofer/ultima-carga`), sin cambios de contrato para la app `vialto-combustible`.
+- **Km por vehículo**: no fue necesario ningún modelo nuevo — `Vehiculo.kmActual` ya se sincronizaba con cada carga real (`syncVehiculoKmActual`), y el historial de km por vehículo ya se puede leer filtrando `CargaCombustible` por `vehiculoId`.
+- **Endpoints admin**, duplicados en `combustible-tenant.controller.ts` (`/api/combustible/asignaciones...`, org:admin de su propio tenant) y `combustible.controller.ts` (`/api/platform/combustible/asignaciones...`, superadmin cross-tenant — el mismo patrón `requiredTenantId`/`scopedAuth` que el resto de ese controller): `GET asignaciones` (vigente por chofer), `GET asignaciones/historial?choferId=|vehiculoId=`, `POST asignaciones` (asignar/reasignar), `DELETE asignaciones/:choferId` (dejar sin vehículo asignado). **OJO de orden de rutas**: en `combustible.controller.ts`, las rutas estáticas `asignaciones`/`asignaciones/historial` están declaradas *antes* de `@Get(":id")` (`findOne`) — si no, Nest las matchea como si "asignaciones" fuera un `:id` (mismo problema documentado en `combustible.module.ts` sobre el orden de controllers).
+- **Frontend**: `CombustibleTenantPage.tsx` (la página real detrás de la ruta `/combustible`, tanto para tenant-admin como embebida en superadmin) ahora tiene dos pestañas — "Cargas" (comportamiento de siempre) y "Asignación de vehículos" (`AsignacionVehiculoSection.tsx`, nueva) — siguiendo el mismo patrón visual de sub-pestañas que ya usa el dashboard de Combustible. Reusa las listas de `choferes`/`vehiculos` que la página ya traía para los filtros, sin fetch duplicado. Igual que el resto de esta página, pega siempre contra `/api/platform/combustible/...` con `?tenantId=` (nunca contra `/api/combustible/...` directo), así que el endpoint tenant-facing existe por paridad de API pero hoy no lo consume ningún frontend.
+
 ---
 
 ### `mantenimiento` — Flota y mantenimiento (Wichi Toledo)

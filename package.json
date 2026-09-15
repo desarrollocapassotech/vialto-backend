@@ -27,6 +27,8 @@
     "backfill:notif-carga-sospechosa:dry": "ts-node scripts/backfill-notificacion-carga-sospechosa.ts --dry-run",
     "backfill:cuenta-corriente": "ts-node scripts/backfill-cuenta-corriente.ts",
     "backfill:cuenta-corriente:dry": "ts-node scripts/backfill-cuenta-corriente.ts --dry-run",
+    "backfill:asignacion-vehiculo": "ts-node scripts/backfill-asignacion-vehiculo.ts",
+    "backfill:asignacion-vehiculo:dry": "ts-node scripts/backfill-asignacion-vehiculo.ts --dry-run",
     "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts",
     "test:viaje-estado-financiero": "ts-node src/modules/viajes/viaje-estado-financiero.spec.ts",
     "test:importaciones": "ts-node src/modules/importaciones/engine/importaciones.spec.ts"

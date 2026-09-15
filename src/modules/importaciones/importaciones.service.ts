@@ -1038,6 +1038,8 @@ export class ImportacionesService {
         monedaPrecioTransportistaExterno: toStr(
           validRow.monedaPrecioTransportistaExterno,
         ),
+        precioTransportistaIvaIncluidoPct:
+          this.viajesProcessor.parseIvaPct(validRow.precioTransportistaIvaIncluidoPct),
       };
 
       valoresCalculados.set(validRow._rowNum, {
@@ -1199,6 +1201,7 @@ export class ImportacionesService {
       nroFactura: string | null;
       precioTransportistaExterno: number | null;
       monedaPrecioTransportistaExterno: string | null;
+      precioTransportistaIvaIncluidoPct: number | null;
     },
     toDateStr: (v: unknown) => string | null,
   ): PreviewCambioCampo[] {
@@ -1237,6 +1240,17 @@ export class ImportacionesService {
         campo: "Moneda Flete",
         antes: actual.monedaPrecioTransportistaExterno,
         despues: nuevo.monedaPrecioTransportistaExterno,
+      },
+      {
+        campo: "% IVA transportista",
+        antes:
+          actual.precioTransportistaIvaIncluidoPct != null
+            ? `${actual.precioTransportistaIvaIncluidoPct}%`
+            : null,
+        despues:
+          nuevo.precioTransportistaIvaIncluidoPct != null
+            ? `${nuevo.precioTransportistaIvaIncluidoPct}%`
+            : null,
       },
     ];
     return pares.filter((p) => p.antes !== p.despues);

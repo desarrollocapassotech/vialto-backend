@@ -73,6 +73,25 @@ export class ViajesProcessor implements IImportProcessor {
   }
 
   /**
+   * Normaliza el porcentaje de IVA del transportista (`precioTransportistaIvaIncluidoPct`).
+   * Soporta valores numéricos (21), strings ("21%", "10.5%", "10,5%") y ratios decimales (0.21 -> 21%).
+   */
+  parseIvaPct(raw: unknown): number | null {
+    if (raw == null || raw === "") return null;
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw) || raw < 0) return null;
+      if (raw > 0 && raw < 1) return Math.round(raw * 100 * 100) / 100;
+      return raw;
+    }
+    const cleanStr = String(raw).replace("%", "").trim().replace(",", ".");
+    if (!cleanStr) return null;
+    const n = Number(cleanStr);
+    if (!Number.isFinite(n) || n < 0) return null;
+    if (n > 0 && n < 1) return Math.round(n * 100 * 100) / 100;
+    return n;
+  }
+
+  /**
    * Vincula (o actualiza la cantidad de) un único producto por viaje —
    * alcance reducido a propósito: el modelo soporta varios productos por
    * viaje, pero el import solo cubre uno. Si la fila no trae Producto, no
@@ -306,6 +325,8 @@ export class ViajesProcessor implements IImportProcessor {
       monto: this.resolveMonto(row) ?? undefined,
       precioTransportistaExterno:
         this.resolvePrecioTransportistaExterno(row) ?? undefined,
+      precioTransportistaIvaIncluidoPct:
+        this.parseIvaPct(row.precioTransportistaIvaIncluidoPct) ?? undefined,
       observaciones,
     };
     const extras = scalarDataFromRow(row, "Viaje", {
@@ -456,6 +477,8 @@ export class ViajesProcessor implements IImportProcessor {
         precioTransportistaExterno: precioFlete,
         monedaPrecioTransportistaExterno:
           (row.monedaPrecioTransportistaExterno as string | null) ?? "ARS",
+        precioTransportistaIvaIncluidoPct:
+          this.parseIvaPct(row.precioTransportistaIvaIncluidoPct) ?? 0,
         facturaId: facturaClienteId,
         observaciones,
         otrosGastos: this.extractOtrosGastos(row),
@@ -959,6 +982,7 @@ export class ViajesProcessor implements IImportProcessor {
         nroFactura: true,
         precioTransportistaExterno: true,
         monedaPrecioTransportistaExterno: true,
+        precioTransportistaIvaIncluidoPct: true,
       },
     });
 
@@ -985,6 +1009,7 @@ export class ViajesProcessor implements IImportProcessor {
             nroFactura: v.nroFactura,
             precioTransportistaExterno: v.precioTransportistaExterno,
             monedaPrecioTransportistaExterno: v.monedaPrecioTransportistaExterno,
+            precioTransportistaIvaIncluidoPct: v.precioTransportistaIvaIncluidoPct,
           },
         ];
       }),
@@ -1016,4 +1041,5 @@ export interface ViajeActual {
   nroFactura: string | null;
   precioTransportistaExterno: number | null;
   monedaPrecioTransportistaExterno: string | null;
+  precioTransportistaIvaIncluidoPct: number | null;
 }

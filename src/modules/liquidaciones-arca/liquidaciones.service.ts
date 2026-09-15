@@ -84,6 +84,25 @@ export class LiquidacionesService {
     return this.prisma as PrismaAny;
   }
 
+  private async tieneModulo(tenantId: string, modulo: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    return tenant?.modules.includes(modulo) ?? false;
+  }
+
+  private assertMonedaUnica(viajes: { monedaPrecioTransportistaExterno?: string | null }[]): string {
+    if (viajes.length === 0) return 'ARS';
+    const monedas = new Set(viajes.map((v) => v.monedaPrecioTransportistaExterno ?? 'ARS'));
+    if (monedas.size > 1) {
+      throw new BadRequestException(
+        'Una liquidación no puede contener viajes en distintas monedas. Generá una liquidación por moneda.',
+      );
+    }
+    return [...monedas][0];
+  }
+
   /** Resuelve DTOs de líneas → snapshots listos para persistir / totales. */
   private async resolveConceptoLineas(
     tenantId: string,
@@ -220,6 +239,23 @@ export class LiquidacionesService {
       );
     }
 
+    const moneda = this.assertMonedaUnica(viajes);
+    if (dto.moneda && dto.moneda !== moneda) {
+      throw new BadRequestException(
+        'La moneda especificada no coincide con la moneda de los viajes seleccionados.',
+      );
+    }
+
+    const tieneLiquidoProductoArca = await this.tieneModulo(
+      tenantId,
+      'emision-liquido-producto-arca',
+    );
+    if (tieneLiquidoProductoArca && moneda === 'USD') {
+      throw new BadRequestException(
+        'Las liquidaciones emitidas con ARCA (Líquido Producto) deben ser en ARS.',
+      );
+    }
+
     // Verificar que ningún viaje ya tenga liquidación activa para este transportista
     await this.assertViajesSinLiquidacionActiva(tenantId, dto.transportistaId, viajes);
 
@@ -290,6 +326,7 @@ export class LiquidacionesService {
         data: {
           tenantId,
           transportistaId: dto.transportistaId,
+          moneda,
           periodoDesde: new Date(dto.periodoDesde),
           periodoHasta: new Date(dto.periodoHasta),
           cantViajes: dto.viajeIds.length,
@@ -629,6 +666,11 @@ export class LiquidacionesService {
     }
     if (liquidacion.estado === 'pendiente_anulacion') {
       throw new BadRequestException('La liquidación está pendiente de anulación');
+    }
+    if (liquidacion.moneda === 'USD') {
+      throw new BadRequestException(
+        'No se pueden emitir liquidaciones en USD por ARCA.',
+      );
     }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);

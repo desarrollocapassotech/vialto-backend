@@ -1233,6 +1233,7 @@ model Liquidacion {
   tenant          Tenant        @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   transportistaId String
   transportista   Transportista @relation(fields: [transportistaId], references: [id], onDelete: Restrict)
+  moneda          String        @default("ARS")
 
   // Período de la liquidación
   periodoDesde DateTime

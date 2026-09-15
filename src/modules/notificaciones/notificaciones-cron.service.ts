@@ -155,11 +155,11 @@ export class NotificacionesCronService {
       const emailPorUserId = new Map(miembros.map((m) => [m.userId, m.email]));
       return destinatariosElegidos
         .map((userId) => emailPorUserId.get(userId))
-        .filter((email): email is string => !!email);
+        .filter((email): email is string => !!email && !email.endsWith('@example.com'));
     }
 
     return miembros
-      .filter((m) => m.role === 'org:admin' && !!m.email)
+      .filter((m) => m.role === 'org:admin' && !!m.email && !m.email.endsWith('@example.com'))
       .map((m) => m.email as string);
   }
 

@@ -144,22 +144,41 @@ export class ImportacionesService {
       let sheetHeaders: string[] = [];
       try {
         // Usa public parseHeaders (modificaremos parser.service para exponer un parseHeaders o sampleWorkbook)
-        const muestras = this.parser.sampleWorkbook(buffer, 1);
+        const muestras = this.parser.sampleWorkbook(buffer, 10);
 
+        const sheetSugerida = config.sheet || SHEET_LABEL_DEFAULT[modulo];
         let targetName = "";
-        if (config.sheet) {
-          const target = typeof config.sheet === 'string' ? config.sheet.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() : "";
-          const found = muestras.find(m => m.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() === target);
+
+        if (sheetSugerida) {
+          const target = typeof sheetSugerida === 'string'
+            ? sheetSugerida.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase()
+            : "";
+          const found = muestras.find(m =>
+            m.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() === target
+          );
           if (found) targetName = found.nombre;
-        } else {
-          targetName = muestras.length === 1 ? muestras[0].nombre : "";
+        }
+
+        if (!targetName) {
+          if (muestras.length === 1) {
+            targetName = muestras[0].nombre;
+          } else {
+            const matchModulo = muestras.find(m =>
+              m.nombre.toLowerCase().includes(modulo.toLowerCase())
+            );
+            if (matchModulo) targetName = matchModulo.nombre;
+          }
         }
 
         const sheet = muestras.find(m => m.nombre === targetName);
         if (sheet && sheet.filas.length > 0) {
-          const headerRowIndex = (config.headerRow ?? 1) - 1;
-          if (sheet.filas.length > headerRowIndex) {
-            sheetHeaders = (sheet.filas[headerRowIndex] as unknown[]).map(h => h != null ? String(h).trim() : "");
+          let headerRowIndex = (config.headerRow ?? 1) - 1;
+          if (headerRowIndex < 0 || sheet.filas.length <= headerRowIndex) {
+            headerRowIndex = 0;
+          }
+          sheetHeaders = (sheet.filas[headerRowIndex] as unknown[]).map(h => h != null ? String(h).trim() : "");
+          if (sheetHeaders.filter(Boolean).length === 0 && sheet.filas.length > 0) {
+            sheetHeaders = (sheet.filas[0] as unknown[]).map(h => h != null ? String(h).trim() : "");
           }
         }
       } catch (e) {
@@ -468,7 +487,7 @@ export class ImportacionesService {
 
     // Viajes: si varios viajes nuevos van a compartir número de factura (o
     // ese número ya existe de otro import), confirm() los reutiliza y suma
-    // el importe en vez de duplicarlos — pero necesita confirmación
+    // el importe en vez de duplicarlos - pero necesita confirmación
     // explícita antes, mismo criterio que los campos recomendados.
     if (session.template.modulo === "viajes" && !confirmarFacturasDuplicadas) {
       const duplicadas = await this.viajesProcessor.detectarFacturasDuplicadas(
@@ -1019,6 +1038,8 @@ export class ImportacionesService {
         monedaPrecioTransportistaExterno: toStr(
           validRow.monedaPrecioTransportistaExterno,
         ),
+        precioTransportistaIvaIncluidoPct:
+          this.viajesProcessor.parseIvaPct(validRow.precioTransportistaIvaIncluidoPct),
       };
 
       valoresCalculados.set(validRow._rowNum, {
@@ -1180,6 +1201,7 @@ export class ImportacionesService {
       nroFactura: string | null;
       precioTransportistaExterno: number | null;
       monedaPrecioTransportistaExterno: string | null;
+      precioTransportistaIvaIncluidoPct: number | null;
     },
     toDateStr: (v: unknown) => string | null,
   ): PreviewCambioCampo[] {
@@ -1218,6 +1240,17 @@ export class ImportacionesService {
         campo: "Moneda Flete",
         antes: actual.monedaPrecioTransportistaExterno,
         despues: nuevo.monedaPrecioTransportistaExterno,
+      },
+      {
+        campo: "% IVA transportista",
+        antes:
+          actual.precioTransportistaIvaIncluidoPct != null
+            ? `${actual.precioTransportistaIvaIncluidoPct}%`
+            : null,
+        despues:
+          nuevo.precioTransportistaIvaIncluidoPct != null
+            ? `${nuevo.precioTransportistaIvaIncluidoPct}%`
+            : null,
       },
     ];
     return pares.filter((p) => p.antes !== p.despues);

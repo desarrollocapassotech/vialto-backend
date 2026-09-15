@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "liquidaciones" ADD COLUMN IF NOT EXISTS "moneda" TEXT NOT NULL DEFAULT 'ARS';
+
+-- AlterTable
+ALTER TABLE "facturas" ADD COLUMN IF NOT EXISTS "moneda" TEXT NOT NULL DEFAULT 'ARS';

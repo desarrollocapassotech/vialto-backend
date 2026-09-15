@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { ClerkAuthGuard } from "../../core/auth/clerk-auth.guard";
 import { RolesGuard } from "../../core/auth/roles.guard";
@@ -10,6 +10,7 @@ import { ModuleGuard } from "../../shared/guards/module.guard";
 import { RequireModule } from "../../shared/decorators/require-module.decorator";
 import { assertTenantId } from "../../shared/util/assert-tenant";
 import { CombustibleService } from "./combustible.service";
+import { AsignarVehiculoDto } from "./dto/asignar-vehiculo.dto";
 
 @ApiTags("Módulo: Combustible")
 @ApiBearerAuth("clerk-jwt")
@@ -63,5 +64,45 @@ export class CombustibleTenantController {
       fecha,
       excludeId,
     );
+  }
+
+  @ApiOperation({ summary: "Asignación de vehículo vigente de cada chofer del tenant" })
+  @Get("asignaciones")
+  @Roles("admin", "member", "superadmin")
+  getAsignacionesActuales(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.getAsignacionesActuales(auth.tenantId);
+  }
+
+  @ApiOperation({ summary: "Historial de asignaciones de un chofer o un vehículo" })
+  @Get("asignaciones/historial")
+  @Roles("admin", "member", "superadmin")
+  getHistorialAsignaciones(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("choferId") choferId?: string,
+    @Query("vehiculoId") vehiculoId?: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.getHistorialAsignaciones(auth.tenantId, { choferId, vehiculoId });
+  }
+
+  @ApiOperation({ summary: "Asignar (o reasignar) un vehículo a un chofer" })
+  @Post("asignaciones")
+  @Roles("admin", "superadmin")
+  asignarVehiculo(@CurrentAuth() auth: AuthPayload, @Body() dto: AsignarVehiculoDto) {
+    assertTenantId(auth.tenantId);
+    return this.service.asignarVehiculo(dto, {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      role: auth.role,
+    });
+  }
+
+  @ApiOperation({ summary: "Terminar la asignación activa de un chofer (queda sin vehículo asignado)" })
+  @Delete("asignaciones/:choferId")
+  @Roles("admin", "superadmin")
+  finalizarAsignacion(@CurrentAuth() auth: AuthPayload, @Param("choferId") choferId: string) {
+    assertTenantId(auth.tenantId);
+    return this.service.finalizarAsignacion(choferId, auth.tenantId);
   }
 }

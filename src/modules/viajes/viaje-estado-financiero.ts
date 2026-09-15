@@ -133,7 +133,7 @@ export async function syncFacturacionEstadoViajes(
  * transportista externo — eso sí es "no aplica" independientemente de ARCA.
  * Tenants sin `emision-liquido-producto-arca` SÍ pueden tener liquidaciones reales (registro
  * manual vía `CrearLiquidacionManualModal` con `hasArca=false`), así que no hay
- * que nulear el indicador para ellos — `mapLiquidacionEstado` ya se encarga de
+ * que nulear el indicador para ellos - `mapLiquidacionEstado` ya se encarga de
  * no exponer sub-estados de AFIP cuando `tieneArca` es falso.
  */
 export async function syncLiquidacionEstadoViaje(

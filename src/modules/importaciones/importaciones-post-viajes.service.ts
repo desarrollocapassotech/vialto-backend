@@ -10,8 +10,10 @@ interface ViajeParaAgrupar {
   fechaCarga: Date | null;
   cantidadTransportista: number | null;
   precioUnitarioTransportista: number | null;
+  precioTransportistaExterno: number | null;
   monto: number | null;
   monedaMonto: string;
+  monedaPrecioTransportistaExterno: string;
 }
 
 export interface LiquidacionPreviewGrupo {
@@ -21,6 +23,12 @@ export interface LiquidacionPreviewGrupo {
   periodoDesde: string;
   periodoHasta: string;
   bruto: number;
+  moneda: string;
+}
+
+export interface LiquidacionesPreviewRespuesta {
+  grupos: LiquidacionPreviewGrupo[];
+  viajesOmitidosUsdCount: number;
 }
 
 export interface FacturaClientePreviewGrupo {
@@ -31,12 +39,17 @@ export interface FacturaClientePreviewGrupo {
   moneda: string;
 }
 
+export interface FacturasClientesPreviewRespuesta {
+  grupos: FacturaClientePreviewGrupo[];
+  viajesOmitidosUsdCount: number;
+}
+
 /**
  * Etapas opcionales del import que corren DESPUÉS de que los viajes ya están
  * creados y guardados: generar liquidaciones borrador (agrupado por
- * transportista) y facturar a clientes (agrupado por cliente). Ninguna se
- * ejecuta automáticamente — cada una tiene su propio preview antes de crear
- * nada, y ninguna emite comprobantes a AFIP.
+ * transportista y moneda) y facturar a clientes (agrupado por cliente y moneda).
+ * Ninguna se ejecuta automáticamente — cada una tiene su propio preview antes
+ * de crear nada, y ninguna emite comprobantes a AFIP.
  */
 @Injectable()
 export class ImportacionesPostViajesService {
@@ -68,8 +81,10 @@ export class ImportacionesPostViajesService {
         fechaCarga: true,
         cantidadTransportista: true,
         precioUnitarioTransportista: true,
+        precioTransportistaExterno: true,
         monto: true,
         monedaMonto: true,
+        monedaPrecioTransportistaExterno: true,
       },
     });
     if (viajes.length !== uniqueIds.length) {
@@ -91,12 +106,12 @@ export class ImportacionesPostViajesService {
     };
   }
 
-  // ── Liquidaciones borrador (agrupadas por transportista) ──────────────
+  // ── Liquidaciones borrador (agrupadas por transportista y moneda) ──────
 
   async previewLiquidaciones(
     tenantId: string,
     viajeIds: string[],
-  ): Promise<LiquidacionPreviewGrupo[]> {
+  ): Promise<LiquidacionesPreviewRespuesta> {
     const tieneLiquidaciones = await this.tieneModulo(tenantId, "liquidaciones");
     const tieneLiquidoProductoArca = await this.tieneModulo(
       tenantId,
@@ -110,26 +125,47 @@ export class ImportacionesPostViajesService {
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);
     const conTransportista = viajes.filter((v) => v.transportistaId);
 
-    const porTransportista = new Map<string, ViajeParaAgrupar[]>();
+    const porGrupo = new Map<
+      string,
+      { transportistaId: string; moneda: string; viajes: ViajeParaAgrupar[] }
+    >();
     for (const v of conTransportista) {
-      const key = v.transportistaId!;
-      (porTransportista.get(key) ?? porTransportista.set(key, []).get(key)!).push(v);
+      const transportistaId = v.transportistaId!;
+      const moneda = v.monedaPrecioTransportistaExterno || "ARS";
+      const key = `${transportistaId}|${moneda}`;
+      if (!porGrupo.has(key)) {
+        porGrupo.set(key, { transportistaId, moneda, viajes: [] });
+      }
+      porGrupo.get(key)!.viajes.push(v);
     }
-    if (porTransportista.size === 0) return [];
+    if (porGrupo.size === 0) return { grupos: [], viajesOmitidosUsdCount: 0 };
 
+    let viajesOmitidosUsdCount = 0;
+    if (tieneLiquidoProductoArca) {
+      for (const [key, item] of Array.from(porGrupo.entries())) {
+        if (item.moneda === "USD") {
+          viajesOmitidosUsdCount += item.viajes.length;
+          porGrupo.delete(key);
+        }
+      }
+    }
+
+    if (porGrupo.size === 0) return { grupos: [], viajesOmitidosUsdCount };
+
+    const transportistaIds = [...new Set([...porGrupo.values()].map((g) => g.transportistaId))];
     const transportistas = await this.prisma.transportista.findMany({
-      where: { id: { in: [...porTransportista.keys()] }, tenantId },
+      where: { id: { in: transportistaIds }, tenantId },
       select: { id: true, nombre: true },
     });
     const nombreById = new Map(transportistas.map((t) => [t.id, t.nombre]));
 
-    return [...porTransportista.entries()].map(([transportistaId, grupo]) => {
+    const grupos = [...porGrupo.values()].map(({ transportistaId, moneda, viajes: grupo }) => {
       const { desde, hasta } = this.periodoDesdeHasta(grupo.map((v) => v.fechaCarga));
       const bruto = grupo.reduce((sum, v) => {
         if (v.cantidadTransportista != null && v.precioUnitarioTransportista != null) {
           return sum + v.cantidadTransportista * v.precioUnitarioTransportista;
         }
-        return sum;
+        return sum + (v.precioTransportistaExterno ?? 0);
       }, 0);
       return {
         transportistaId,
@@ -138,8 +174,11 @@ export class ImportacionesPostViajesService {
         periodoDesde: desde,
         periodoHasta: hasta,
         bruto: Math.round(bruto * 100) / 100,
+        moneda,
       };
     });
+
+    return { grupos, viajesOmitidosUsdCount };
   }
 
   async confirmarLiquidaciones(
@@ -158,35 +197,50 @@ export class ImportacionesPostViajesService {
       );
     }
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);
-    const porTransportista = new Map<string, ViajeParaAgrupar[]>();
+    const porGrupo = new Map<
+      string,
+      { transportistaId: string; moneda: string; viajes: ViajeParaAgrupar[] }
+    >();
     for (const v of viajes) {
       if (!v.transportistaId) continue;
-      const key = v.transportistaId;
-      (porTransportista.get(key) ?? porTransportista.set(key, []).get(key)!).push(v);
+      const transportistaId = v.transportistaId;
+      const moneda = v.monedaPrecioTransportistaExterno || "ARS";
+      const key = `${transportistaId}|${moneda}`;
+      if (!porGrupo.has(key)) {
+        porGrupo.set(key, { transportistaId, moneda, viajes: [] });
+      }
+      porGrupo.get(key)!.viajes.push(v);
+    }
+
+    if (tieneLiquidoProductoArca) {
+      for (const [key, item] of Array.from(porGrupo.entries())) {
+        if (item.moneda === "USD") {
+          porGrupo.delete(key);
+        }
+      }
     }
 
     const creadas = [];
-    for (const [transportistaId, grupo] of porTransportista) {
+    for (const { transportistaId, moneda, viajes: grupo } of porGrupo.values()) {
       const { desde, hasta } = this.periodoDesdeHasta(grupo.map((v) => v.fechaCarga));
-      // Reutiliza el cálculo (bruto, comisión, IVA) de createLiquidacion en
-      // vez de reimplementarlo — mismo criterio que la liquidación manual.
       const liquidacion = await this.liquidaciones.createLiquidacion(tenantId, userId, {
         transportistaId,
         periodoDesde: desde,
         periodoHasta: hasta,
         viajeIds: grupo.map((v) => v.id),
+        moneda,
       });
       creadas.push(liquidacion);
     }
     return creadas;
   }
 
-  // ── Facturar a clientes (agrupado por cliente) ─────────────────────────
+  // ── Facturar a clientes (agrupado por cliente y moneda) ────────────────
 
   async previewFacturasClientes(
     tenantId: string,
     viajeIds: string[],
-  ): Promise<FacturaClientePreviewGrupo[]> {
+  ): Promise<FacturasClientesPreviewRespuesta> {
     const tieneArca = await this.tieneModulo(tenantId, "emision-facturas-arca");
     const tieneFacturacion = await this.tieneModulo(tenantId, "facturacion");
     if (!tieneArca && !tieneFacturacion) {
@@ -196,26 +250,49 @@ export class ImportacionesPostViajesService {
     }
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);
 
-    const porCliente = new Map<string, ViajeParaAgrupar[]>();
+    const porGrupo = new Map<
+      string,
+      { clienteId: string; moneda: string; viajes: ViajeParaAgrupar[] }
+    >();
     for (const v of viajes) {
-      const key = v.clienteId;
-      (porCliente.get(key) ?? porCliente.set(key, []).get(key)!).push(v);
+      const clienteId = v.clienteId;
+      const moneda = v.monedaMonto || "ARS";
+      const key = `${clienteId}|${moneda}`;
+      if (!porGrupo.has(key)) {
+        porGrupo.set(key, { clienteId, moneda, viajes: [] });
+      }
+      porGrupo.get(key)!.viajes.push(v);
     }
-    if (porCliente.size === 0) return [];
+    if (porGrupo.size === 0) return { grupos: [], viajesOmitidosUsdCount: 0 };
 
+    let viajesOmitidosUsdCount = 0;
+    if (tieneArca) {
+      for (const [key, item] of Array.from(porGrupo.entries())) {
+        if (item.moneda === "USD") {
+          viajesOmitidosUsdCount += item.viajes.length;
+          porGrupo.delete(key);
+        }
+      }
+    }
+
+    if (porGrupo.size === 0) return { grupos: [], viajesOmitidosUsdCount };
+
+    const clienteIds = [...new Set([...porGrupo.values()].map((g) => g.clienteId))];
     const clientes = await this.prisma.cliente.findMany({
-      where: { id: { in: [...porCliente.keys()] }, tenantId },
+      where: { id: { in: clienteIds }, tenantId },
       select: { id: true, nombre: true },
     });
     const nombreById = new Map(clientes.map((c) => [c.id, c.nombre]));
 
-    return [...porCliente.entries()].map(([clienteId, grupo]) => ({
+    const grupos = [...porGrupo.values()].map(({ clienteId, moneda, viajes: grupo }) => ({
       clienteId,
       clienteNombre: nombreById.get(clienteId) ?? clienteId,
       cantidadViajes: grupo.length,
       importe: Math.round(grupo.reduce((s, v) => s + (v.monto ?? 0), 0) * 100) / 100,
-      moneda: grupo[0]?.monedaMonto ?? "ARS",
+      moneda,
     }));
+
+    return { grupos, viajesOmitidosUsdCount };
   }
 
   async confirmarFacturasClientes(
@@ -231,22 +308,37 @@ export class ImportacionesPostViajesService {
       );
     }
     const viajes = await this.viajesParaAgrupar(tenantId, viajeIds);
-    const porCliente = new Map<string, ViajeParaAgrupar[]>();
+
+    const porGrupo = new Map<
+      string,
+      { clienteId: string; moneda: string; viajes: ViajeParaAgrupar[] }
+    >();
     for (const v of viajes) {
-      const key = v.clienteId;
-      (porCliente.get(key) ?? porCliente.set(key, []).get(key)!).push(v);
+      const clienteId = v.clienteId;
+      const moneda = v.monedaMonto || "ARS";
+      const key = `${clienteId}|${moneda}`;
+      if (!porGrupo.has(key)) {
+        porGrupo.set(key, { clienteId, moneda, viajes: [] });
+      }
+      porGrupo.get(key)!.viajes.push(v);
+    }
+
+    if (tieneArca) {
+      for (const [key, item] of Array.from(porGrupo.entries())) {
+        if (item.moneda === "USD") {
+          porGrupo.delete(key);
+        }
+      }
     }
 
     const hoy = new Date().toISOString().slice(0, 10);
     const creadas = [];
-    for (const [clienteId, grupo] of porCliente) {
-      // Sin ARCA, el número representa un comprobante ya numerado
-      // externamente — obligatorio. Con ARCA, se crea en borrador sin
-      // número: AFIP lo asigna recién al emitir (ver fix de Factura.numero).
-      const numero = numerosPorCliente?.[clienteId];
+    for (const { clienteId, moneda, viajes: grupo } of porGrupo.values()) {
+      const key = `${clienteId}|${moneda}`;
+      const numero = numerosPorCliente?.[key] ?? numerosPorCliente?.[clienteId];
       if (!tieneArca && !numero) {
         throw new BadRequestException(
-          `Falta el número de factura para el cliente ${clienteId} (obligatorio para tenants sin ARCA).`,
+          `Falta el número de factura para el cliente ${clienteId} (${moneda}) (obligatorio para tenants sin ARCA).`,
         );
       }
       const factura = await this.facturacion.createFactura(tenantId, {

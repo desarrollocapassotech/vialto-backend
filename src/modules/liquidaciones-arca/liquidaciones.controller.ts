@@ -30,6 +30,7 @@ import { AuthPayload } from "../../core/auth/clerk-auth.guard";
 import { assertTenantId } from "../../shared/util/assert-tenant";
 import { LiquidacionesService } from "./liquidaciones.service";
 import { LiquidacionPdfService } from "./liquidacion-pdf.service";
+import { LiquidacionContratoPdfService } from "./liquidacion-contrato-pdf.service";
 import { FacturaPdfService } from "./factura-pdf.service";
 import { CreateLiquidacionDto } from "./dto/create-liquidacion.dto";
 import { UpdateLiquidacionDto } from "./dto/update-liquidacion.dto";
@@ -55,6 +56,7 @@ export class LiquidacionesController {
   constructor(
     private readonly service: LiquidacionesService,
     private readonly pdfService: LiquidacionPdfService,
+    private readonly contratoPdfService: LiquidacionContratoPdfService,
     private readonly facturaPdfService: FacturaPdfService,
     private readonly conceptosService: ConceptosLiquidacionService,
   ) {}
@@ -235,6 +237,46 @@ export class LiquidacionesController {
     assertTenantId(auth.tenantId);
     try {
       const { buffer, filename } = await this.pdfService.generate(
+        auth.tenantId,
+        id,
+      );
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404) {
+        res.status(404).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
+  @ApiOperation({
+    summary:
+      "Descargar PDF comercial de liquidación (contrato / liquidación a proveedor)",
+  })
+  @Get("liquidaciones/:id/pdf-contrato")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
+  @Roles("admin", "member", "superadmin")
+  async getPdfContrato(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    try {
+      const { buffer, filename } = await this.contratoPdfService.generate(
         auth.tenantId,
         id,
       );
@@ -535,6 +577,7 @@ export class LiquidacionesPlatformController {
   constructor(
     private readonly service: LiquidacionesService,
     private readonly pdfService: LiquidacionPdfService,
+    private readonly contratoPdfService: LiquidacionContratoPdfService,
     private readonly facturaPdfService: FacturaPdfService,
   ) {}
 
@@ -610,6 +653,40 @@ export class LiquidacionesPlatformController {
     const tid = this.requiredTenantId(tenantId);
     try {
       const { buffer, filename } = await this.pdfService.generate(tid, id);
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(buffer.length),
+      });
+      res.end(buffer);
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        message?: string;
+        response?: unknown;
+      };
+      if (e?.status === 404) {
+        res.status(404).json(e.response ?? { message: e.message });
+      } else {
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Error interno al generar el PDF" });
+      }
+    }
+  }
+
+  @Get("liquidaciones/:id/pdf-contrato")
+  async getPdfContrato(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    try {
+      const { buffer, filename } = await this.contratoPdfService.generate(
+        tid,
+        id,
+      );
       res.set({
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,

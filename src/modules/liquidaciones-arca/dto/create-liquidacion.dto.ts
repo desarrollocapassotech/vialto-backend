@@ -85,4 +85,8 @@ export class CreateLiquidacionDto {
   @IsString()
   @MaxLength(2048)
   comprobanteUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  moneda?: string;
 }

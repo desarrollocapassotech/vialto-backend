@@ -5,10 +5,12 @@ import type { TemplateConfig, ParsedRow } from "../types/import.types";
 @Injectable()
 export class ParserService {
   /** Lee la hoja completa como array de arrays + la fila de encabezados ya resuelta. */
+  /** Lee la hoja completa como array de arrays + la fila de encabezados ya resuelta. */
   private readSheetRows(
     buffer: Buffer,
     sheet?: string | number,
     headerRow?: number,
+    modulo?: string,
   ): { headers: string[]; allRows: unknown[][]; headerRowIndex: number } {
     let workbook: XLSX.WorkBook;
     try {
@@ -19,7 +21,7 @@ export class ParserService {
       );
     }
 
-    const sheetName = this.resolveSheetName(workbook, sheet);
+    const sheetName = this.resolveSheetName(workbook, sheet, modulo);
     const sheetObj = workbook.Sheets[sheetName];
     if (!sheetObj) {
       throw new BadRequestException(
@@ -47,9 +49,7 @@ export class ParserService {
 
   /**
    * Primeras filas crudas de CADA hoja del archivo, sin asumir todavía cuál
-   * es la hoja correcta ni dónde está la fila de encabezados — lo usa la
-   * sugerencia de mapeo con IA (ver ia-template-suggestion) para elegir
-   * también la hoja y la fila de encabezados, no solo el mapeo de columnas.
+   * es la hoja correcta ni dónde está la fila de encabezados.
    */
   sampleWorkbook(
     buffer: Buffer,
@@ -77,11 +77,13 @@ export class ParserService {
   parse(
     buffer: Buffer,
     config: TemplateConfig,
+    modulo?: string,
   ): { rows: ParsedRow[]; headers: string[] } {
     const { headers, allRows, headerRowIndex } = this.readSheetRows(
       buffer,
       config.sheet,
       config.headerRow,
+      modulo,
     );
 
     const dataRows = allRows.slice(headerRowIndex + 1);
@@ -132,18 +134,18 @@ export class ParserService {
   private resolveSheetName(
     workbook: XLSX.WorkBook,
     sheet?: string | number,
+    modulo?: string,
   ): string {
     if (sheet == null) {
-      // Sin hoja configurada en el template: si el archivo tiene una sola
-      // hoja no hay ambigüedad posible. Si tiene varias (ej. el Excel único
-      // multi-hoja del wizard de carga masiva: Clientes/Transportes/
-      // Choferes/Vehículos/Viajes, subido una vez y reusado para el
-      // preview/confirm de cada módulo) asumir la primera sería leer la hoja
-      // de otro módulo — causa real detectada: clientes duplicados como
-      // transportistas/choferes porque todos terminaban leyendo la hoja
-      // Clientes. Mejor fallar claro que importar datos de la hoja
-      // equivocada en silencio.
       if (workbook.SheetNames.length > 1) {
+        // Si no hay hoja especificada pero el archivo tiene varias pestañas, intentar buscar por nombre de módulo
+        if (modulo) {
+          const modTarget = normalizeSheetName(modulo);
+          const foundByMod = workbook.SheetNames.find((n) =>
+            normalizeSheetName(n).includes(modTarget),
+          );
+          if (foundByMod) return foundByMod;
+        }
         throw new BadRequestException(
           "El archivo tiene varias hojas y la plantilla de importación de este módulo no especifica cuál usar. " +
             'Configurá el campo "Hoja del Excel" en la plantilla (pestaña Templates).',
@@ -158,11 +160,15 @@ export class ParserService {
       }
       return name;
     }
-    // Comparación insensible a mayúsculas/acentos: el nombre de hoja real del
-    // tenant puede no coincidir carácter a carácter con el configurado
-    // ("Transportes" vs "TRANSPORTES" vs "Tránsportes").
+    // Comparación insensible a mayúsculas/acentos
     const target = normalizeSheetName(sheet);
-    const name = workbook.SheetNames.find((n) => normalizeSheetName(n) === target);
+    let name = workbook.SheetNames.find((n) => normalizeSheetName(n) === target);
+    if (!name && modulo) {
+      const modTarget = normalizeSheetName(modulo);
+      name = workbook.SheetNames.find((n) =>
+        normalizeSheetName(n).includes(modTarget),
+      );
+    }
     if (!name) {
       throw new BadRequestException(
         `Hoja "${sheet}" no encontrada en el archivo`,

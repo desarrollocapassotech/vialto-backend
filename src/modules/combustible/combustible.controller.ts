@@ -18,6 +18,7 @@ import { Roles } from "../../core/auth/roles.decorator";
 import { CurrentAuth } from "../../core/auth/current-auth.decorator";
 import { CombustibleService } from "../../modules/combustible/combustible.service";
 import { CreateCargaDto } from "../../modules/combustible/dto/create-carga.dto";
+import { AsignarVehiculoDto } from "../../modules/combustible/dto/asignar-vehiculo.dto";
 
 @ApiTags("Admin — Platform")
 @ApiBearerAuth("clerk-jwt")
@@ -101,6 +102,32 @@ export class CombustibleController {
   }
 
   @ApiOperation({
+    summary: "Asignación de vehículo vigente de cada chofer (superadmin/admin/member)",
+  })
+  @Get("asignaciones")
+  getAsignacionesActuales(
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId, current);
+    return this.service.getAsignacionesActuales(id);
+  }
+
+  @ApiOperation({
+    summary: "Historial de asignaciones de un chofer o un vehículo (superadmin/admin/member)",
+  })
+  @Get("asignaciones/historial")
+  getHistorialAsignaciones(
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
+    @Query("choferId") choferId?: string,
+    @Query("vehiculoId") vehiculoId?: string,
+  ) {
+    const id = this.requiredTenantId(tenantId, current);
+    return this.service.getHistorialAsignaciones(id, { choferId, vehiculoId });
+  }
+
+  @ApiOperation({
     summary:
       "Obtener una carga por ID dentro del tenant (superadmin/admin/member)",
   })
@@ -157,5 +184,34 @@ export class CombustibleController {
   ) {
     const tid = this.requiredTenantId(tenantId, current);
     return this.service.remove(id, this.scopedAuth(tid, current));
+  }
+
+  @ApiOperation({
+    summary: "Asignar (o reasignar) un vehículo a un chofer (superadmin/admin)",
+  })
+  @Post("asignaciones")
+  @Roles("superadmin", "org:admin", "admin")
+  asignarVehiculo(
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: AsignarVehiculoDto,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId, current);
+    return this.service.asignarVehiculo(dto, this.scopedAuth(id, current));
+  }
+
+  @ApiOperation({
+    summary:
+      "Terminar la asignación activa de un chofer (superadmin/admin)",
+  })
+  @Delete("asignaciones/:choferId")
+  @Roles("superadmin", "org:admin", "admin")
+  finalizarAsignacion(
+    @Param("choferId") choferId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId, current);
+    return this.service.finalizarAsignacion(choferId, id);
   }
 }

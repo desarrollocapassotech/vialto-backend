@@ -287,6 +287,7 @@ const MODULOS: Record<string, ModuloDef> = {
       "precioUnitarioTransportista",
       "precioTransportistaExterno",
       "monedaPrecioTransportistaExterno",
+      "precioTransportistaIvaIncluidoPct",
       "observaciones",
       "monedaMonto",
     ],
@@ -343,6 +344,14 @@ const MODULOS: Record<string, ModuloDef> = {
       precioTransportistaIvaIncluidoPct: {
         campoLabel: "% IVA transportista (pago en efectivo)",
         defaultExcelHeader: "% IVA transportista",
+        excelHeaderAliases: [
+          "% IVA transportista",
+          "% IVA flete",
+          "IVA transportista",
+          "IVA %",
+          "% IVA transportista (pago en efectivo)",
+          "IVA transportista %",
+        ],
       },
     },
     extras: [

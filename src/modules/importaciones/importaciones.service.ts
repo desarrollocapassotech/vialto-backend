@@ -487,7 +487,7 @@ export class ImportacionesService {
 
     // Viajes: si varios viajes nuevos van a compartir número de factura (o
     // ese número ya existe de otro import), confirm() los reutiliza y suma
-    // el importe en vez de duplicarlos — pero necesita confirmación
+    // el importe en vez de duplicarlos - pero necesita confirmación
     // explícita antes, mismo criterio que los campos recomendados.
     if (session.template.modulo === "viajes" && !confirmarFacturasDuplicadas) {
       const duplicadas = await this.viajesProcessor.detectarFacturasDuplicadas(

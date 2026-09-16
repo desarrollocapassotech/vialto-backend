@@ -19,6 +19,7 @@ import { CurrentAuth } from "../../core/auth/current-auth.decorator";
 import { CombustibleService } from "../../modules/combustible/combustible.service";
 import { CreateCargaDto } from "../../modules/combustible/dto/create-carga.dto";
 import { AsignarVehiculoDto } from "../../modules/combustible/dto/asignar-vehiculo.dto";
+import { EditarKmVehiculoDto } from "../../modules/combustible/dto/editar-km-vehiculo.dto";
 
 @ApiTags("Admin — Platform")
 @ApiBearerAuth("clerk-jwt")
@@ -213,5 +214,33 @@ export class CombustibleController {
   ) {
     const id = this.requiredTenantId(tenantId, current);
     return this.service.finalizarAsignacion(choferId, id);
+  }
+
+  @ApiOperation({
+    summary: "Corregir el kilometraje de un vehículo, con auditoría (superadmin/admin)",
+  })
+  @Post("vehiculos/:id/km")
+  @Roles("superadmin", "org:admin", "admin")
+  editarKmVehiculo(
+    @Param("id") vehiculoId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @Body() dto: EditarKmVehiculoDto,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId, current);
+    return this.service.editarKmVehiculo(id, vehiculoId, dto.kmNuevo, current.userId);
+  }
+
+  @ApiOperation({
+    summary: "Historial de correcciones manuales de km de un vehículo (superadmin/admin/member)",
+  })
+  @Get("vehiculos/:id/km-historial")
+  editarKmVehiculoHistorial(
+    @Param("id") vehiculoId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() current: AuthPayload,
+  ) {
+    const id = this.requiredTenantId(tenantId, current);
+    return this.service.getHistorialKmVehiculo(id, vehiculoId);
   }
 }

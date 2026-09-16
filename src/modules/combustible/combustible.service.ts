@@ -69,6 +69,9 @@ function endOfDayLocal(ymd: string): Date {
   return new Date(y, m - 1, d, 23, 59, 59, 999);
 }
 
+/** Punto de referencia de km en la línea de tiempo de un vehículo: una carga real o una corrección manual de admin (ver `VehiculoKmEdicion`). */
+type LimiteKm = { km: number; fecha: Date; createdAt: Date; origen: "carga" | "edicion" } | null;
+
 type CargaHistorica = {
   id: string;
   vehiculoId: string | null;
@@ -160,6 +163,27 @@ export class CombustibleService {
     }
   }
 
+  private static elegirMasReciente(a: LimiteKm, b: LimiteKm): LimiteKm {
+    if (!a) return b;
+    if (!b) return a;
+    if (a.fecha.getTime() !== b.fecha.getTime()) return a.fecha > b.fecha ? a : b;
+    return a.createdAt > b.createdAt ? a : b;
+  }
+
+  private static elegirMasAntiguo(a: LimiteKm, b: LimiteKm): LimiteKm {
+    if (!a) return b;
+    if (!b) return a;
+    if (a.fecha.getTime() !== b.fecha.getTime()) return (a.fecha < b.fecha ? a : b);
+    return a.createdAt < b.createdAt ? a : b;
+  }
+
+  /**
+   * Límites cronológicos de km para un vehículo alrededor de `fechaIn`, mezclando dos
+   * fuentes: cargas de combustible reales y correcciones manuales de admin
+   * (`VehiculoKmEdicion`). Sin esto, una carga atrasada/offline fechada después de una
+   * corrección de admin pero antes de la próxima carga real no tenía forma de "ver" esa
+   * corrección y validaba contra un dato viejo — ver CLAUDE.md, sección de este bug.
+   */
   private async getLimitesCronologicos(
     tenantId: string,
     vehiculoId: string,
@@ -170,35 +194,68 @@ export class CombustibleService {
     const fecha = new Date(fechaIn.getTime());
     fecha.setUTCHours(0, 0, 0, 0);
 
-    const prev = await this.prisma.cargaCombustible.findFirst({
-      where: {
-        tenantId,
-        vehiculoId,
-        OR: [
-          { fecha: { lt: fecha } },
-          ...(targetCreatedAt !== undefined ? [{ fecha, createdAt: { lte: targetCreatedAt } }] : [{ fecha }]),
-        ],
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
-      select: { km: true, fecha: true, createdAt: true },
-    });
+    const [prevCarga, nextCarga, prevEdicion, nextEdicion] = await Promise.all([
+      this.prisma.cargaCombustible.findFirst({
+        where: {
+          tenantId,
+          vehiculoId,
+          OR: [
+            { fecha: { lt: fecha } },
+            ...(targetCreatedAt !== undefined ? [{ fecha, createdAt: { lte: targetCreatedAt } }] : [{ fecha }]),
+          ],
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+        },
+        orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+        select: { km: true, fecha: true, createdAt: true },
+      }),
+      this.prisma.cargaCombustible.findFirst({
+        where: {
+          tenantId,
+          vehiculoId,
+          OR: [
+            { fecha: { gt: fecha } },
+            ...(targetCreatedAt !== undefined ? [{ fecha, createdAt: { gte: targetCreatedAt } }] : []),
+          ],
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+        },
+        orderBy: [{ fecha: "asc" }, { createdAt: "asc" }],
+        select: { km: true, fecha: true, createdAt: true },
+      }),
+      this.prisma.vehiculoKmEdicion.findFirst({
+        where: {
+          tenantId,
+          vehiculoId,
+          OR: [
+            { fecha: { lt: fecha } },
+            ...(targetCreatedAt !== undefined ? [{ fecha, createdAt: { lte: targetCreatedAt } }] : [{ fecha }]),
+          ],
+        },
+        orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+        select: { kmNuevo: true, fecha: true, createdAt: true },
+      }),
+      this.prisma.vehiculoKmEdicion.findFirst({
+        where: {
+          tenantId,
+          vehiculoId,
+          OR: [
+            { fecha: { gt: fecha } },
+            ...(targetCreatedAt !== undefined ? [{ fecha, createdAt: { gte: targetCreatedAt } }] : []),
+          ],
+        },
+        orderBy: [{ fecha: "asc" }, { createdAt: "asc" }],
+        select: { kmNuevo: true, fecha: true, createdAt: true },
+      }),
+    ]);
 
-    const next = await this.prisma.cargaCombustible.findFirst({
-      where: {
-        tenantId,
-        vehiculoId,
-        OR: [
-          { fecha: { gt: fecha } },
-          ...(targetCreatedAt !== undefined ? [{ fecha, createdAt: { gte: targetCreatedAt } }] : []),
-        ],
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-      orderBy: [{ fecha: "asc" }, { createdAt: "asc" }],
-      select: { km: true, fecha: true, createdAt: true },
-    });
+    const prevCargaN: LimiteKm = prevCarga ? { km: prevCarga.km, fecha: prevCarga.fecha, createdAt: prevCarga.createdAt, origen: "carga" } : null;
+    const prevEdicionN: LimiteKm = prevEdicion ? { km: prevEdicion.kmNuevo, fecha: prevEdicion.fecha, createdAt: prevEdicion.createdAt, origen: "edicion" } : null;
+    const nextCargaN: LimiteKm = nextCarga ? { km: nextCarga.km, fecha: nextCarga.fecha, createdAt: nextCarga.createdAt, origen: "carga" } : null;
+    const nextEdicionN: LimiteKm = nextEdicion ? { km: nextEdicion.kmNuevo, fecha: nextEdicion.fecha, createdAt: nextEdicion.createdAt, origen: "edicion" } : null;
 
-    return { prev, next };
+    return {
+      prev: CombustibleService.elegirMasReciente(prevCargaN, prevEdicionN),
+      next: CombustibleService.elegirMasAntiguo(nextCargaN, nextEdicionN),
+    };
   }
 
   private async assertKmNoRetroceso(
@@ -217,39 +274,19 @@ export class CombustibleService {
       targetCreatedAt,
     );
 
-    /**
-     * Caso normal (alta nueva, sin ninguna carga posterior ya registrada para este
-     * vehículo): el límite inferior es `Vehiculo.kmActual` en vez de la carga anterior
-     * en `CargaCombustible`. En los hechos son el mismo valor —`kmActual` se sincroniza
-     * con la última carga real (`syncVehiculoKmActual`)— pero usar el campo del vehículo
-     * respeta una corrección manual hecha desde el panel (botón "Editar km"), algo que
-     * comparar directo contra la carga anterior no podía reflejar nunca.
-     *
-     * Se excluye a propósito el caso `excludeId` (edición de una carga existente): si la
-     * carga que se está editando es la más reciente del vehículo, `kmActual` hoy refleja
-     * su propio valor viejo (ella fue la última en sincronizarlo) — compararla contra sí
-     * misma no tiene sentido, así que las ediciones siguen usando la carga cronológicamente
-     * anterior de siempre.
-     */
-    if (!next && !excludeId) {
-      const vehiculo = await this.prisma.vehiculo.findUnique({
-        where: { id: vehiculoId },
-        select: { kmActual: true },
-      });
-      if (vehiculo && km < vehiculo.kmActual) {
-        throw new BadRequestException(
-          `El kilometraje ingresado (${km} km) es inconsistente: no puede ser inferior al kilometraje actual del vehículo (${vehiculo.kmActual} km).`,
-        );
-      }
-    } else if (prev && km < prev.km) {
+    if (prev && km < prev.km) {
       const fechaFmt = new Intl.DateTimeFormat("es-AR", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
         timeZone: "UTC",
       }).format(prev.fecha);
+      const origenLabel =
+        prev.origen === "edicion"
+          ? `a la corrección de kilometraje hecha el ${fechaFmt}`
+          : `al de la carga anterior registrada el ${fechaFmt}`;
       throw new BadRequestException(
-        `El kilometraje ingresado (${km} km) es inconsistente: no puede ser inferior al de la carga anterior registrada el ${fechaFmt} (${prev.km} km).`,
+        `El kilometraje ingresado (${km} km) es inconsistente: no puede ser inferior ${origenLabel} (${prev.km} km).`,
       );
     }
 
@@ -260,8 +297,12 @@ export class CombustibleService {
         year: "numeric",
         timeZone: "UTC",
       }).format(next.fecha);
+      const origenLabel =
+        next.origen === "edicion"
+          ? `a la corrección de kilometraje hecha el ${fechaFmt}`
+          : `al de una carga posterior ya registrada el ${fechaFmt}`;
       throw new BadRequestException(
-        `El kilometraje ingresado (${km} km) es inconsistente: no puede ser superior al de una carga posterior ya registrada el ${fechaFmt} (${next.km} km).`,
+        `El kilometraje ingresado (${km} km) es inconsistente: no puede ser superior ${origenLabel} (${next.km} km).`,
       );
     }
   }
@@ -862,6 +903,36 @@ export class CombustibleService {
     return this.prisma.asignacionVehiculo.update({
       where: { id: activa.id },
       data: { fechaHasta: new Date() },
+    });
+  }
+
+  /**
+   * Corrige el kilometraje de un vehículo desde el panel, dejando auditoría
+   * (`VehiculoKmEdicion`: quién, cuándo, km anterior → nuevo). La fecha de la
+   * corrección es siempre "hoy" (no se permite backdatear) — es lo que le da a esta
+   * corrección su lugar en la línea de tiempo que usa `getLimitesCronologicos`.
+   */
+  async editarKmVehiculo(tenantId: string, vehiculoId: string, kmNuevo: number, userId: string) {
+    const vehiculo = await this.prisma.vehiculo.findFirst({ where: { id: vehiculoId, tenantId } });
+    if (!vehiculo) throw new NotFoundException("Vehículo no encontrado.");
+
+    const fecha = new Date();
+    fecha.setUTCHours(0, 0, 0, 0);
+
+    return this.prisma.$transaction(async (tx) => {
+      const edicion = await tx.vehiculoKmEdicion.create({
+        data: { tenantId, vehiculoId, kmAnterior: vehiculo.kmActual, kmNuevo, fecha, createdBy: userId },
+      });
+      await tx.vehiculo.update({ where: { id: vehiculoId }, data: { kmActual: kmNuevo } });
+      return edicion;
+    });
+  }
+
+  /** Historial de correcciones manuales de km de un vehículo, más reciente primero. */
+  async getHistorialKmVehiculo(tenantId: string, vehiculoId: string) {
+    return this.prisma.vehiculoKmEdicion.findMany({
+      where: { tenantId, vehiculoId },
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
     });
   }
 

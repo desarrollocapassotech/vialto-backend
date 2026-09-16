@@ -11,6 +11,7 @@ import { RequireModule } from "../../shared/decorators/require-module.decorator"
 import { assertTenantId } from "../../shared/util/assert-tenant";
 import { CombustibleService } from "./combustible.service";
 import { AsignarVehiculoDto } from "./dto/asignar-vehiculo.dto";
+import { EditarKmVehiculoDto } from "./dto/editar-km-vehiculo.dto";
 
 @ApiTags("Módulo: Combustible")
 @ApiBearerAuth("clerk-jwt")
@@ -104,5 +105,25 @@ export class CombustibleTenantController {
   finalizarAsignacion(@CurrentAuth() auth: AuthPayload, @Param("choferId") choferId: string) {
     assertTenantId(auth.tenantId);
     return this.service.finalizarAsignacion(choferId, auth.tenantId);
+  }
+
+  @ApiOperation({ summary: "Corregir el kilometraje de un vehículo (queda auditado)" })
+  @Post("vehiculos/:id/km")
+  @Roles("admin", "superadmin")
+  editarKmVehiculo(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("id") id: string,
+    @Body() dto: EditarKmVehiculoDto,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.editarKmVehiculo(auth.tenantId, id, dto.kmNuevo, auth.userId);
+  }
+
+  @ApiOperation({ summary: "Historial de correcciones manuales de km de un vehículo" })
+  @Get("vehiculos/:id/km-historial")
+  @Roles("admin", "member", "superadmin")
+  getHistorialKmVehiculo(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
+    assertTenantId(auth.tenantId);
+    return this.service.getHistorialKmVehiculo(auth.tenantId, id);
   }
 }

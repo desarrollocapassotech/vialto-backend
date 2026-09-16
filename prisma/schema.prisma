@@ -80,6 +80,7 @@ model Tenant {
   cargasCombustible          CargaCombustible[]
   combustibleSyncErrorLogs   CombustibleSyncErrorLog[]
   asignacionesVehiculo       AsignacionVehiculo[]
+  vehiculoKmEdiciones        VehiculoKmEdicion[]
   intervenciones             Intervencion[]
   importTemplates            ImportTemplate[]
   importLogs                 ImportLog[]
@@ -264,11 +265,38 @@ model Vehiculo {
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
   intervenciones           Intervencion[]
   asignacionesVehiculo     AsignacionVehiculo[]
+  kmEdiciones              VehiculoKmEdicion[]
 
   @@unique([tenantId, patente])
   @@index([tenantId])
   @@index([tenantId, activo])
   @@map("vehiculos")
+}
+
+/**
+ * Auditoría de correcciones manuales de `Vehiculo.kmActual` desde el panel (botón
+ * "Editar km" en Combustible → Asignación de vehículos). `fecha` es siempre el día en
+ * que se hizo la edición (no se permite backdatear) y es lo que permite tratar cada
+ * edición como un punto más en la misma línea de tiempo que las cargas de combustible
+ * al validar kilometraje — ver `CombustibleService.getLimitesCronologicos`. Sin esto,
+ * una carga atrasada/offline fechada después de una edición pero antes de la próxima
+ * carga real no tenía forma de "verla" y se validaba contra un dato viejo.
+ */
+model VehiculoKmEdicion {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  vehiculoId String
+  vehiculo   Vehiculo @relation(fields: [vehiculoId], references: [id], onDelete: Cascade)
+  kmAnterior Int
+  kmNuevo    Int
+  fecha      DateTime
+  createdBy  String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, vehiculoId, fecha])
+  @@map("vehiculo_km_ediciones")
 }
 
 /**

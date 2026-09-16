@@ -97,7 +97,7 @@ const LOOKUP_TRANSPORTISTA: LookupOverlay = {
 // ahí el DNI del chofer, no el nombre — matchear por DNI primero.
 const LOOKUP_CHOFER: LookupOverlay = {
   lookupModel: "choferes",
-  lookupFields: ["dni", "nombre"],
+  lookupFields: ["dni", "cuit", "nombre"],
   createIfNotFoundSoportado: true,
 };
 

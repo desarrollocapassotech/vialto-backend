@@ -83,6 +83,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
         campos: [
           { campo: "clienteId", label: "Cliente", obligatorioSistema: true },
           { campo: "transportistaId", label: "Transportista", obligatorioSistema: false },
+          { campo: "choferId", label: "Chofer", obligatorioSistema: false },
           { campo: "origen", label: "Ruta (origen/destinos)", obligatorioSistema: true },
           { campo: "fechaCarga", label: "Fecha de carga", obligatorioSistema: false },
           { campo: "fechaDescarga", label: "Fecha de descarga", obligatorioSistema: false },

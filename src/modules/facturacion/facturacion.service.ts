@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -328,6 +329,106 @@ export class FacturacionService {
       throw new BadRequestException(
         "No se pudo guardar la factura. El número de comprobante ingresado ya se encuentra registrado.",
       );
+    }
+  }
+
+  /**
+   * Condición Prisma de "tramo disponible para vincular una factura nueva", evaluada contra el
+   * FK crudo (`facturaId`) en vez de `facturacionEstado`. `facturacionEstado` (`mapFacturacionEstado`
+   * en `viaje-estado-financiero.ts`) muestra "sin_facturar" a propósito mientras una factura ARCA
+   * sigue en borrador (`arcaEstado == null`, todavía no se intentó emitir) — eso es correcto para
+   * mostrar el badge y para no bloquear la edición de campos fiscales del viaje (ver
+   * `CAMPOS_FISCALES_VIAJE`), pero usarlo acá para decidir si se puede vincular OTRA factura
+   * dejaría un agujero real: dos facturas borrador (o una sin ARCA y otra con) podrían apuntar al
+   * mismo viaje mientras ninguna llegó a emitirse. Un viaje/tramo está genuinamente disponible
+   * solo si no tiene ninguna factura vigente enlazada (`facturaId` null) o si la que tiene fue
+   * anulada en ARCA (`factura.arcaEstado === "anulado"` — no hay equivalente para tenants sin ARCA,
+   * ahí "liberar" un viaje es `removeFactura`, que ya deja `facturaId` en null).
+   */
+  private facturaDisponibleWhere() {
+    return {
+      OR: [{ facturaId: null }, { factura: { arcaEstado: "anulado" } }],
+    };
+  }
+
+  /**
+   * Vincula atómicamente los viajes (y, si aplica, su `ViajeCliente` del cliente indicado) a
+   * `facturaId`, usando `updateMany` condicionado por disponibilidad real (`facturaDisponibleWhere()`)
+   * en vez de `update` por id: la condición se evalúa y aplica en un solo UPDATE de Postgres, así
+   * que dos facturaciones del mismo viaje —secuenciales sin recargar, o disparadas casi al mismo
+   * tiempo— no pueden pisarse: la segunda transacción queda bloqueada por el lock de fila hasta
+   * que la primera commitea, y al reevaluar el WHERE ya no matchea (el viaje dejó de estar
+   * disponible). Si algún viaje no está disponible, tira `ConflictException` y se aborta toda la
+   * transacción (no queda la factura a medio vincular).
+   */
+  private async vincularViajesAFactura(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    facturaId: string,
+    viajeIds: string[],
+    clienteId: string | null | undefined,
+  ): Promise<void> {
+    if (viajeIds.length === 0) return;
+
+    if (clienteId) {
+      const clientesDelViaje = await tx.viajeCliente.findMany({
+        where: { tenantId, viajeId: { in: viajeIds }, clienteId },
+        select: { id: true, facturaId: true },
+      });
+      // Los que ya pertenecen a esta misma factura (resave de una factura existente) no
+      // necesitan re-validarse ni re-escribirse.
+      const pendientes = clientesDelViaje
+        .filter((c) => c.facturaId !== facturaId)
+        .map((c) => c.id);
+      if (pendientes.length > 0) {
+        const { count } = await tx.viajeCliente.updateMany({
+          where: {
+            id: { in: pendientes },
+            ...this.facturaDisponibleWhere(),
+          },
+          data: { facturaId, facturacionEstado: "facturado" },
+        });
+        if (count !== pendientes.length) {
+          throw new ConflictException(
+            "Uno o más viajes ya fueron facturados para este cliente. Recargá la página e intentá nuevamente.",
+          );
+        }
+      }
+    }
+
+    const viajesInvolucrados = await tx.viaje.findMany({
+      where: { id: { in: viajeIds }, tenantId },
+      select: { id: true, clienteId: true, facturaId: true },
+    });
+
+    // Viaje.facturaId (→ Viaje.facturacionEstado) representa específicamente al cliente
+    // principal (Viaje.clienteId), independiente de cada ViajeCliente.facturaId. Solo se
+    // actualiza si esta factura es del cliente principal, si no se especificó cliente
+    // (retrocompatibilidad sin desglose), o si el viaje ya pertenecía a esta misma factura
+    // (resave). Ojo: NO cae acá solo por `v.facturaId` vacío — ver bug real de un viaje
+    // multi-cliente facturado al 2do cliente que pisaba al principal como "facturado".
+    const idsAFacturar = viajesInvolucrados
+      .filter(
+        (v) =>
+          v.facturaId !== facturaId &&
+          (v.clienteId === clienteId || !clienteId),
+      )
+      .map((v) => v.id);
+
+    if (idsAFacturar.length > 0) {
+      const { count } = await tx.viaje.updateMany({
+        where: {
+          id: { in: idsAFacturar },
+          tenantId,
+          ...this.facturaDisponibleWhere(),
+        },
+        data: { facturaId },
+      });
+      if (count !== idsAFacturar.length) {
+        throw new ConflictException(
+          "Uno o más viajes ya fueron facturados. Recargá la página e intentá nuevamente.",
+        );
+      }
     }
   }
 
@@ -732,44 +833,13 @@ export class FacturacionService {
         await this.upsertCargoFactura(tx, factura);
 
         if (viajeIds.length > 0) {
-          if (dto.clienteId) {
-            await tx.viajeCliente.updateMany({
-              where: {
-                tenantId,
-                viajeId: { in: viajeIds },
-                clienteId: dto.clienteId,
-              },
-              data: {
-                facturaId: factura.id,
-                facturacionEstado: "facturado",
-              },
-            });
-          }
-
-          const viajesInvolucrados = await tx.viaje.findMany({
-            where: { id: { in: viajeIds }, tenantId },
-            select: { id: true, clienteId: true, facturaId: true },
-          });
-
-          for (const v of viajesInvolucrados) {
-            // Viaje.facturaId (→ Viaje.facturacionEstado) representa específicamente
-            // al cliente principal (Viaje.clienteId), independiente de cada
-            // ViajeCliente.facturaId. Solo se actualiza si esta factura es del
-            // cliente principal, o si no se especificó cliente (retrocompatibilidad
-            // con flujos sin desglose multi-cliente). Ojo: NO cae acá solo porque
-            // `!v.facturaId` — eso pisaba la cabecera con la factura de un cliente
-            // ADICIONAL en un viaje multi-cliente que todavía no tenía ninguna
-            // factura vinculada, marcando al principal como facturado sin serlo
-            // (bug real: viaje con 3 clientes, se factura solo al 2do, y el
-            // principal aparecía como "facturado" en vez de "sin facturar").
-            if (v.clienteId === dto.clienteId || !dto.clienteId) {
-              await tx.viaje.update({
-                where: { id: v.id },
-                data: { facturaId: factura.id },
-              });
-            }
-          }
-
+          await this.vincularViajesAFactura(
+            tx,
+            tenantId,
+            factura.id,
+            viajeIds,
+            dto.clienteId,
+          );
           await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
         }
 
@@ -897,43 +967,13 @@ export class FacturacionService {
 
         if (newIds.length > 0) {
           const targetClienteId = dto.clienteId ?? existing.clienteId ?? undefined;
-          if (targetClienteId) {
-            await tx.viajeCliente.updateMany({
-              where: {
-                tenantId,
-                viajeId: { in: newIds },
-                clienteId: targetClienteId,
-              },
-              data: {
-                facturaId: id,
-                facturacionEstado: "facturado",
-              },
-            });
-          }
-
-          const viajesInvolucrados = await tx.viaje.findMany({
-            where: { id: { in: newIds }, tenantId },
-            select: { id: true, clienteId: true, facturaId: true },
-          });
-
-          for (const v of viajesInvolucrados) {
-            // Mismo criterio que createFactura: Viaje.facturaId representa al
-            // cliente principal. `v.facturaId === id` es legítimo (el viaje ya
-            // estaba vinculado a esta misma factura); `!targetClienteId` es la
-            // retrocompatibilidad sin desglose. NO cae por `!v.facturaId` solo
-            // (ver bug real documentado en createFactura más arriba).
-            if (
-              v.clienteId === targetClienteId ||
-              !targetClienteId ||
-              v.facturaId === id
-            ) {
-              await tx.viaje.update({
-                where: { id: v.id },
-                data: { facturaId: id },
-              });
-            }
-          }
-
+          await this.vincularViajesAFactura(
+            tx,
+            tenantId,
+            id,
+            newIds,
+            targetClienteId,
+          );
           await syncFacturacionEstadoViajes(tx, tenantId, newIds);
         }
       }

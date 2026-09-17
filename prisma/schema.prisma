@@ -27,6 +27,14 @@ model Tenant {
    */
   labelIdentificacionPersonalizadaViajes String?   @default("ID propio")
   /**
+   * true = habilita el campo "ID Propio 2" (texto libre, no único) en Viajes. Deshabilitado por defecto en todas las empresas.
+   */
+  idPropio2Habilitado                    Boolean   @default(false)
+  /**
+   * Label configurable del campo "ID Propio 2" (ej. "CPE", "Referencia Cliente"). Solo se usa si idPropio2Habilitado=true.
+   */
+  idPropio2Label                         String?   @default("ID Propio 2")
+  /**
    * true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla).
    */
   importacionesOcultas                   Boolean   @default(false)
@@ -464,6 +472,10 @@ model Viaje {
    * ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna.
    */
   numeroIdentificacionPersonalizado String?
+  /**
+   * Segundo ID propio del cliente, opcional y NO único (a diferencia de numeroIdentificacionPersonalizado). Ej. CPE, Referencia Cliente. Visible solo si Tenant.idPropio2Habilitado=true.
+   */
+  idPropio2                         String?
   /**
    * @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura.
    */

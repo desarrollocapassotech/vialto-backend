@@ -4,6 +4,9 @@ import { readStoredMicCrtExport } from '../viajes/mic-crt-export.util';
 export type LiquidacionContratoViajeInput = {
   numero: string;
   numeroIdentificacionPersonalizado?: string | null;
+  /** Label configurable del tenant para "ID Propio 2" y su valor en este viaje; ambos null si el tenant no lo habilitó o el viaje no tiene valor cargado. */
+  idPropio2Label?: string | null;
+  idPropio2Valor?: string | null;
   origen: string | null;
   destino: string | null;
   fechaCarga: Date | string | null;

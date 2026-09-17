@@ -9,6 +9,10 @@ export class UpdateTenantDto {
   @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;
   @IsOptional() @IsDateString() billingRenewsAt?: string;
   @IsOptional() @IsString() labelIdentificacionPersonalizadaViajes?: string;
+  /** true = habilita el campo "ID Propio 2" (texto libre, no único) en Viajes. */
+  @IsOptional() @IsBoolean() idPropio2Habilitado?: boolean;
+  /** Label configurable del campo "ID Propio 2". */
+  @IsOptional() @IsString() idPropio2Label?: string | null;
   /** true = el admin del tenant no ve la pantalla de import masivo (superadmin sigue pudiendo usarla). */
   @IsOptional() @IsBoolean() importacionesOcultas?: boolean;
 

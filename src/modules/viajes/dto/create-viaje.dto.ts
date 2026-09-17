@@ -59,6 +59,8 @@ export class CreateViajeDto {
   @IsOptional() @IsString() numero?: string;
   /** ID propio del cliente para identificar el viaje (ej. CTG). Reemplaza a `numero` en toda vista/documento humano cuando está cargado. */
   @IsOptional() @IsString() numeroIdentificacionPersonalizado?: string;
+  /** Segundo ID propio, opcional y no único (ej. CPE, Referencia Cliente). Solo tiene efecto si el tenant tiene idPropio2Habilitado. */
+  @IsOptional() @IsString() idPropio2?: string;
 
   @Transform(({ value }) =>
     typeof value === "string" ? normalizarEtapaViaje(value) : value,

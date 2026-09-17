@@ -262,6 +262,7 @@ const MODULOS: Record<string, ModuloDef> = {
     sheetDefault: "Viajes",
     ordenPreferido: [
       "numeroIdentificacionPersonalizado",
+      "idPropio2",
       "clienteId",
       "transportistaId",
       "transportistaEfectivoId",
@@ -301,6 +302,10 @@ const MODULOS: Record<string, ModuloDef> = {
       numeroIdentificacionPersonalizado: {
         campoLabel: "ID Personalizado",
         defaultExcelHeader: "ID Personalizado",
+      },
+      idPropio2: {
+        campoLabel: "ID Propio 2",
+        defaultExcelHeader: "ID Propio 2",
       },
       clienteId: { systemRequired: true, campoLabel: "Cliente" },
       transportistaId: {

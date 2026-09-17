@@ -457,11 +457,14 @@ export class ViajesProcessor implements IImportProcessor {
         (row.numeroIdentificacionPersonalizado as string | null)
           ?.toString()
           .trim() || null;
+      const idPropio2 =
+        (row.idPropio2 as string | null)?.toString().trim() || null;
 
       const especialesCreate = {
         tenantId,
         numero,
         numeroIdentificacionPersonalizado,
+        idPropio2,
         etapa,
         facturacionEstado,
         clienteId,

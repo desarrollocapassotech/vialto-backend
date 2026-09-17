@@ -257,6 +257,7 @@ export class LiquidacionPdfService {
                 },
                 chofer: { select: { nombre: true } },
                 numeroIdentificacionPersonalizado: true,
+                idPropio2: true,
                 productosViaje: {
                   select: { producto: { select: { nombre: true } } },
                 },
@@ -270,6 +271,11 @@ export class LiquidacionPdfService {
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException("Liquidación no encontrada");
     }
+
+    const tenantIdPropio2 = await this.db.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { idPropio2Habilitado: true, idPropio2Label: true },
+    });
 
     if (kind === "nc") {
       if (
@@ -465,6 +471,7 @@ export class LiquidacionPdfService {
       logoBuffer,
       cvlp,
       drawOpts,
+      tenantIdPropio2,
     );
 
     const cbteNroStr = drawOpts.cbteNro
@@ -500,6 +507,7 @@ export class LiquidacionPdfService {
     logoBuffer: Buffer | null,
     cvlp: ArcaComprobanteCvlp,
     drawOpts: PdfDrawOpts,
+    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (no acción manual del usuario).
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
@@ -524,6 +532,7 @@ export class LiquidacionPdfService {
           cvlp,
           drawOpts,
           showTestWatermark,
+          tenantIdPropio2,
         );
         doc.addPage();
         this.draw(
@@ -536,6 +545,7 @@ export class LiquidacionPdfService {
           cvlp,
           drawOpts,
           showTestWatermark,
+          tenantIdPropio2,
         );
         doc.end();
       } catch (e) {
@@ -554,6 +564,7 @@ export class LiquidacionPdfService {
     cvlp: ArcaComprobanteCvlp,
     opts: PdfDrawOpts,
     showTestWatermark = false,
+    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -924,6 +935,10 @@ export class LiquidacionPdfService {
 
           const descParts = [];
           if (isSingleTrip) descParts.push(`ID: ${idViajeText}`);
+          if (tenantIdPropio2?.idPropio2Habilitado && v.idPropio2?.trim()) {
+            const label = tenantIdPropio2.idPropio2Label?.trim() || "ID Propio 2";
+            descParts.push(`${label}: ${v.idPropio2.trim()}`);
+          }
           const ruta = [v.origen, v.destino].filter(Boolean).join(" - ");
           if (ruta) descParts.push(`${ruta}`);
 
@@ -1080,6 +1095,11 @@ export class LiquidacionPdfService {
             )
               .toString()
               .toUpperCase();
+            const idPropio2Valor = tripMatch?.viaje.idPropio2?.trim();
+            if (tenantIdPropio2?.idPropio2Habilitado && idPropio2Valor) {
+              const label = tenantIdPropio2.idPropio2Label?.trim() || "ID Propio 2";
+              tripIdText = `${tripIdText}\n${label}: ${idPropio2Valor}`.toUpperCase();
+            }
           }
           // Aquí la descripción final (con viaje) se mapea a 'desc', pero mantenemos el 'prodText' limpio
           const descText = match ? item.descripcion.toUpperCase() : baseName;

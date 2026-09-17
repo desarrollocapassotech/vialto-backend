@@ -1639,6 +1639,7 @@ export class ViajesService {
           numero,
           numeroIdentificacionPersonalizado:
             dto.numeroIdentificacionPersonalizado?.trim() || null,
+          idPropio2: dto.idPropio2?.trim() || null,
           etapa,
           clienteId: dto.clienteId,
           transportistaId: refs.transportistaId,
@@ -1930,6 +1931,9 @@ export class ViajesService {
     if (dto.numeroIdentificacionPersonalizado !== undefined) {
       (data as any).numeroIdentificacionPersonalizado =
         dto.numeroIdentificacionPersonalizado?.trim() || null;
+    }
+    if (dto.idPropio2 !== undefined) {
+      (data as any).idPropio2 = dto.idPropio2?.trim() || null;
     }
     if (dto.otrosGastos !== undefined) {
       (data as any).otrosGastos =

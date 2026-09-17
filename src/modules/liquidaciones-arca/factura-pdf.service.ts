@@ -57,6 +57,28 @@ function fmtDate(d: Date | string | null | undefined): string {
   return `${dd}/${mm}/${yy}`;
 }
 
+/**
+ * Matchea un ítem del comprobante (solo tiene `producto`/`descripcion`, sin viajeId)
+ * contra `factura.viajes` reconstruyendo el mismo texto que arma `item.producto`
+ * (numeroIdentificacionPersonalizado o `#numero`), para poder anexar el "ID Propio 2"
+ * del viaje puramente a nivel de dibujo del PDF (no se persiste, no es texto fiscal:
+ * ArcaComprobanteItem es solo presentación/auditoría, WSFEv1 no recibe detalle de líneas).
+ */
+function idPropio2SufijoParaItem(
+  item: { producto?: string },
+  viajes: Array<{ numero: string; numeroIdentificacionPersonalizado: string | null; idPropio2: string | null }>,
+  tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null,
+): string | null {
+  if (!tenantIdPropio2?.idPropio2Habilitado || !item.producto) return null;
+  const viaje = viajes.find(
+    (v) => (v.numeroIdentificacionPersonalizado?.trim() || `#${v.numero}`) === item.producto,
+  );
+  const valor = viaje?.idPropio2?.trim();
+  if (!valor) return null;
+  const label = tenantIdPropio2.idPropio2Label?.trim() || 'ID Propio 2';
+  return `${label}: ${valor}`;
+}
+
 const UNIDADES = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE',
   'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
 const VEINTES = ['VEINTE', 'VEINTIUNO', 'VEINTIDÓS', 'VEINTITRÉS', 'VEINTICUATRO', 'VEINTICINCO',
@@ -165,6 +187,7 @@ export class FacturaPdfService {
           select: {
             numero: true,
             numeroIdentificacionPersonalizado: true,
+            idPropio2: true,
             monto: true,
             cantidadFactura: true,
             precioUnitarioFactura: true,
@@ -179,6 +202,11 @@ export class FacturaPdfService {
     if (!factura || factura.tenantId !== tenantId) {
       throw new NotFoundException('Factura no encontrada');
     }
+
+    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { idPropio2Habilitado: true, idPropio2Label: true },
+    });
 
     const facturaExt = factura as typeof factura & {
       cbteTipo?: number | null;
@@ -306,6 +334,7 @@ export class FacturaPdfService {
       comprobante,
       asociados,
       kind,
+      tenantIdPropio2,
     );
 
     const cbteNroStr =
@@ -472,6 +501,7 @@ export class FacturaPdfService {
     comprobante: ArcaComprobanteCvlp,
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
     kind: 'factura' | 'nc' = 'factura',
+    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (misma condición que PDF CVLP).
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
@@ -494,6 +524,7 @@ export class FacturaPdfService {
           asociados,
           showTestWatermark,
           kind,
+          tenantIdPropio2,
         );
         doc.addPage();
         this.draw(
@@ -508,6 +539,7 @@ export class FacturaPdfService {
           asociados,
           showTestWatermark,
           kind,
+          tenantIdPropio2,
         );
         doc.end();
       } catch (e) {
@@ -528,6 +560,7 @@ export class FacturaPdfService {
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }>,
     showTestWatermark: boolean,
     kind: 'factura' | 'nc',
+    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -697,9 +730,13 @@ export class FacturaPdfService {
     y += headerRowH;
 
     for (const item of comprobante.items) {
+      const idPropio2Sufijo = idPropio2SufijoParaItem(item, factura.viajes, tenantIdPropio2);
+      const descripcionDraw = idPropio2Sufijo
+        ? `${item.descripcion}\n${idPropio2Sufijo}`
+        : item.descripcion;
       const cells = [
         { v: (item.producto ?? '').toUpperCase(), align: 'left' as const },
-        { v: item.descripcion.toUpperCase(), align: 'left' as const },
+        { v: descripcionDraw.toUpperCase(), align: 'left' as const },
         { v: item.cantidad != null ? fmtNum(item.cantidad) : '1,00', align: 'right' as const },
         { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },
         { v: fmtNum(item.importeBase), align: 'right' as const },

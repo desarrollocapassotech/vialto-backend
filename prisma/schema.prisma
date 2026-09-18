@@ -74,6 +74,12 @@ model Tenant {
    * frontend lo trata como "no configurado" y vuelve a mostrar el selector.
    */
   paisOrigenDestinoFijoId        String?
+  /**
+   * Unidad mostrada junto a la cantidad en la columna "Cantidad" del PDF de factura A/B
+   * (ARCA) — 'TN' (default, toneladas) | 'UD' (unidades). Configurable solo desde
+   * superadmin (panel "Configuración por empresa"). Ver FacturaPdfService.
+   */
+  facturaCantidadUnidad          String   @default("TN")
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]

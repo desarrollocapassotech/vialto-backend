@@ -67,6 +67,19 @@ type ViajeParaDetalle = {
   productosViaje?: Array<{ producto: { nombre: string } }>;
 };
 
+type TenantPdfConfig = {
+  idPropio2Habilitado: boolean;
+  idPropio2Label: string | null;
+  facturaCantidadUnidad: string;
+} | null;
+
+/** Header de la columna "Cantidad" del PDF de factura: "Toneladas" si el tenant factura por TN, "Cantidad" si factura por unidades. */
+const HEADER_CANTIDAD_POR_UNIDAD: Record<string, string> = { TN: 'Toneladas', UD: 'Cantidad' };
+
+function headerCantidad(tenantPdfConfig: TenantPdfConfig): string {
+  return HEADER_CANTIDAD_POR_UNIDAD[tenantPdfConfig?.facturaCantidadUnidad ?? 'TN'] ?? 'Toneladas';
+}
+
 /**
  * Matchea un ítem del comprobante (solo tiene `producto`/`descripcion`, sin viajeId)
  * contra `factura.viajes` reconstruyendo el mismo texto que arma `item.producto`
@@ -94,15 +107,15 @@ function matchViajeItem(
 function buildDetalleFlete(
   item: { descripcion: string; producto?: string },
   viajes: ViajeParaDetalle[],
-  tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null,
+  tenantPdfConfig: TenantPdfConfig,
 ): string {
   const viaje = matchViajeItem(item, viajes);
   if (!viaje) return item.descripcion;
 
   const ctg = numeroVisibleViaje(viaje);
   const idPropio2Valor = viaje.idPropio2?.trim();
-  const usaIdPropio2 = Boolean(tenantIdPropio2?.idPropio2Habilitado && idPropio2Valor);
-  const label = tenantIdPropio2?.idPropio2Label?.trim() || 'ID Propio 2';
+  const usaIdPropio2 = Boolean(tenantPdfConfig?.idPropio2Habilitado && idPropio2Valor);
+  const label = tenantPdfConfig?.idPropio2Label?.trim() || 'ID Propio 2';
 
   const producto = (viaje.productosViaje ?? [])
     .map((p) => p.producto?.nombre)
@@ -250,9 +263,13 @@ export class FacturaPdfService {
       throw new NotFoundException('Factura no encontrada');
     }
 
-    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
+    const tenantPdfConfig = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: tenantId },
-      select: { idPropio2Habilitado: true, idPropio2Label: true },
+      select: {
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        facturaCantidadUnidad: true,
+      },
     });
 
     const facturaExt = factura as typeof factura & {
@@ -381,7 +398,7 @@ export class FacturaPdfService {
       comprobante,
       asociados,
       kind,
-      tenantIdPropio2,
+      tenantPdfConfig,
     );
 
     const cbteNroStr =
@@ -548,7 +565,7 @@ export class FacturaPdfService {
     comprobante: ArcaComprobanteCvlp,
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
     kind: 'factura' | 'nc' = 'factura',
-    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
+    tenantPdfConfig: TenantPdfConfig = null,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (misma condición que PDF CVLP).
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
@@ -571,7 +588,7 @@ export class FacturaPdfService {
           asociados,
           showTestWatermark,
           kind,
-          tenantIdPropio2,
+          tenantPdfConfig,
         );
         doc.addPage();
         this.draw(
@@ -586,7 +603,7 @@ export class FacturaPdfService {
           asociados,
           showTestWatermark,
           kind,
-          tenantIdPropio2,
+          tenantPdfConfig,
         );
         doc.end();
       } catch (e) {
@@ -607,7 +624,7 @@ export class FacturaPdfService {
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }>,
     showTestWatermark: boolean,
     kind: 'factura' | 'nc',
-    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
+    tenantPdfConfig: TenantPdfConfig = null,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -765,7 +782,7 @@ export class FacturaPdfService {
     const cellPadY = 4;
     const cellPadX = 2;
 
-    const tHeaders = ['Detalle', 'Cantidad', 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+    const tHeaders = ['Detalle', headerCantidad(tenantPdfConfig), 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
     doc.rect(M, y, tableW, headerRowH).fill('#e8e8e8').stroke('#aaa');
     tHeaders.forEach((h, i) => {
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
@@ -777,11 +794,11 @@ export class FacturaPdfService {
     y += headerRowH;
 
     for (const item of comprobante.items) {
-      const detalleDraw = buildDetalleFlete(item, factura.viajes, tenantIdPropio2);
+      const detalleDraw = buildDetalleFlete(item, factura.viajes, tenantPdfConfig);
       const cells = [
         { v: detalleDraw.toUpperCase(), align: 'left' as const },
         {
-          v: item.cantidad != null ? `${fmtNum(item.cantidad)}` : '1,00',
+          v: item.cantidad != null ? fmtNum(item.cantidad) : '1,00',
           align: 'right' as const,
         },
         { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },

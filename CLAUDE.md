@@ -167,7 +167,7 @@ model Cliente {
   @@index([tenantId])
 }
 
-// Transportista externo (a quien se paga el flete; siempre tipo "externo")
+// Transporte externo (a quien se paga el flete; siempre tipo "externo")
 model Transportista {
   id                      String    @id @default(cuid())
   tenantId                String

@@ -91,8 +91,26 @@ export class ValidatorService {
     // Validaciones de negocio cruzadas (post-parseo)
     const ctgRowsMap = new Map<string, { ctgRaw: string; rows: number[] }>();
     const dbCtgMap = new Map<string, string>(); // ctgKey -> numeroViaje
+    // Si el tenant tiene "ID Sistema" deshabilitado, "ID Propio 1" pasa a ser
+    // el único identificador visible del viaje y se vuelve obligatorio en
+    // todos lados donde se carga (alta, edición e import) — ver
+    // `assertIdPropio1SiSistemaDeshabilitado` en `viajes.service.ts`.
+    let idSistemaHabilitado = true;
+    let labelIdPropio1 = "ID propio";
 
     if (modulo === "viajes") {
+      const tenantIdentificadores = await this.prisma.tenant.findUnique({
+        where: { clerkOrgId: tenantId },
+        select: {
+          idSistemaHabilitado: true,
+          labelIdentificacionPersonalizadaViajes: true,
+        },
+      });
+      idSistemaHabilitado = tenantIdentificadores?.idSistemaHabilitado ?? true;
+      labelIdPropio1 =
+        tenantIdentificadores?.labelIdentificacionPersonalizadaViajes?.trim() ||
+        "ID propio";
+
       // 1. Agrupar CTGs para detección intra-archivo
       for (const row of valid) {
         const ctgRaw = (row.numeroIdentificacionPersonalizado as string | null)
@@ -171,6 +189,13 @@ export class ValidatorService {
               valor: ctgRaw,
             });
           }
+        } else if (!idSistemaHabilitado) {
+          rowErrors.push({
+            fila: row._rowNum,
+            campo: "ID Personalizado (CTG)",
+            error: `${labelIdPropio1} es obligatorio: tu empresa tiene deshabilitado el ID Sistema, así que todo viaje necesita este identificador cargado.`,
+            valor: null,
+          });
         }
 
         const fechaCarga = row.fechaCarga ? new Date(row.fechaCarga as any) : null;

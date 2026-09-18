@@ -320,6 +320,36 @@ export class ViajesService {
     return { ...item, precioTransportistaIvaIncluidoPct: 0 };
   }
 
+  /**
+   * Si el tenant tiene `Tenant.idSistemaHabilitado = false`, el "ID Sistema"
+   * autogenerado (`numero`) deja de mostrarse en toda la interfaz — así que
+   * "ID Propio 1" (`numeroIdentificacionPersonalizado`) pasa a ser el único
+   * identificador visible del viaje y ya no puede quedar vacío. Se valida acá
+   * (no con una constraint de Prisma, no puede ser condicional por tenant) y
+   * se replica en `viajes.processor.ts` (import) y en el frontend
+   * (`ViajeCreatePage.tsx`/`ViajeEditModal.tsx`) para dar feedback inline.
+   */
+  private async assertIdPropio1SiSistemaDeshabilitado(
+    tenantId: string,
+    valor: string | null | undefined,
+  ): Promise<void> {
+    if (valor?.trim()) return;
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idSistemaHabilitado: true,
+        labelIdentificacionPersonalizadaViajes: true,
+      },
+    });
+    if (tenant?.idSistemaHabilitado === false) {
+      const label =
+        tenant.labelIdentificacionPersonalizadaViajes?.trim() || "ID propio";
+      throw new BadRequestException(
+        `${label} es obligatorio: tu empresa tiene deshabilitado el ID Sistema, así que todo viaje necesita este identificador cargado.`,
+      );
+    }
+  }
+
   /** Acepta legado del `estado` combinado y valida contra {@link VIAJE_ETAPAS}. */
   private parseEtapaViaje(etapa: string): ViajeEtapa {
     const n = normalizarEtapaViaje(etapa);
@@ -1511,6 +1541,10 @@ export class ViajesService {
   }
 
   async create(tenantId: string, userId: string, dto: CreateViajeDto) {
+    await this.assertIdPropio1SiSistemaDeshabilitado(
+      tenantId,
+      dto.numeroIdentificacionPersonalizado,
+    );
     const ivaTransportistaHabilitado =
       await this.ivaTransportistaHabilitado(tenantId);
     const op = mergeViajeOperacionIds(
@@ -1733,6 +1767,15 @@ export class ViajesService {
 
   async update(id: string, tenantId: string, dto: UpdateViajeDto) {
     const current = await this.findOne(id, tenantId);
+    // Solo se valida si el campo viene explícito en el request (no bloquea
+    // ediciones de otros campos en viajes viejos que quedaron sin ID Propio 1
+    // antes de que el tenant deshabilitara el ID Sistema).
+    if (dto.numeroIdentificacionPersonalizado !== undefined) {
+      await this.assertIdPropio1SiSistemaDeshabilitado(
+        tenantId,
+        dto.numeroIdentificacionPersonalizado,
+      );
+    }
     const ivaTransportistaHabilitado =
       await this.ivaTransportistaHabilitado(tenantId);
 

@@ -9,6 +9,10 @@ export class UpdateTenantDto {
   @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;
   @IsOptional() @IsDateString() billingRenewsAt?: string;
   @IsOptional() @IsString() labelIdentificacionPersonalizadaViajes?: string;
+  /** true = muestra la columna/campo dedicado "ID Sistema" en Viajes. */
+  @IsOptional() @IsBoolean() idSistemaHabilitado?: boolean;
+  /** true = muestra el campo/columna dedicado "ID Propio 1" en Viajes. */
+  @IsOptional() @IsBoolean() idPropio1Habilitado?: boolean;
   /** true = habilita el campo "ID Propio 2" (texto libre, no único) en Viajes. */
   @IsOptional() @IsBoolean() idPropio2Habilitado?: boolean;
   /** Label configurable del campo "ID Propio 2". */

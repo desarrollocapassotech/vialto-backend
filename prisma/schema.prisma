@@ -27,7 +27,18 @@ model Tenant {
    */
   labelIdentificacionPersonalizadaViajes String?   @default("ID propio")
   /**
+   * true = muestra la columna/campo dedicado "ID Sistema" (numero) en Viajes. Default true (comportamiento actual).
+   * Regla de dependencia (ver TenantsService#update): no puede quedar en false al mismo tiempo que idPropio1Habilitado.
+   */
+  idSistemaHabilitado                    Boolean   @default(true)
+  /**
+   * true = muestra el campo/columna dedicado "ID Propio 1" (numeroIdentificacionPersonalizado) en Viajes. Default true (comportamiento actual).
+   * Regla de dependencia: no puede quedar en false al mismo tiempo que idSistemaHabilitado; al pasar a false, idPropio2Habilitado se apaga en cascada.
+   */
+  idPropio1Habilitado                    Boolean   @default(true)
+  /**
    * true = habilita el campo "ID Propio 2" (texto libre, no único) en Viajes. Deshabilitado por defecto en todas las empresas.
+   * Regla de dependencia: solo puede ser true si idPropio1Habilitado es true.
    */
   idPropio2Habilitado                    Boolean   @default(false)
   /**

@@ -89,6 +89,48 @@ export class ValidatorService {
     }
 
     // Validaciones de negocio cruzadas (post-parseo)
+    const ctgRowsMap = new Map<string, { ctgRaw: string; rows: number[] }>();
+    const dbCtgMap = new Map<string, string>(); // ctgKey -> numeroViaje
+
+    if (modulo === "viajes") {
+      // 1. Agrupar CTGs para detección intra-archivo
+      for (const row of valid) {
+        const ctgRaw = (row.numeroIdentificacionPersonalizado as string | null)
+          ?.toString()
+          .trim();
+        if (ctgRaw) {
+          const key = ctgRaw.toLowerCase();
+          if (!ctgRowsMap.has(key)) {
+            ctgRowsMap.set(key, { ctgRaw, rows: [] });
+          }
+          ctgRowsMap.get(key)!.rows.push(row._rowNum);
+        }
+      }
+
+      // 2. Consultar CTGs existentes en la BD para este tenant
+      const rawCtgs = Array.from(ctgRowsMap.values()).map((v) => v.ctgRaw);
+      if (rawCtgs.length > 0) {
+        const viajesExistentes = await this.prisma.viaje.findMany({
+          where: {
+            tenantId,
+            numeroIdentificacionPersonalizado: { in: rawCtgs, mode: "insensitive" },
+          },
+          select: {
+            numeroIdentificacionPersonalizado: true,
+            numero: true,
+          },
+        });
+        for (const v of viajesExistentes) {
+          if (v.numeroIdentificacionPersonalizado) {
+            dbCtgMap.set(
+              v.numeroIdentificacionPersonalizado.toLowerCase(),
+              v.numero,
+            );
+          }
+        }
+      }
+    }
+
     const validFinal: ValidatedRow[] = [];
     for (const row of valid) {
       const rowErrors: RowError[] = [];
@@ -105,6 +147,32 @@ export class ValidatorService {
           });
         }
       } else if (modulo === "viajes") {
+        // Validar unicidad de CTG (ID Personalizado)
+        const ctgRaw = (row.numeroIdentificacionPersonalizado as string | null)
+          ?.toString()
+          .trim();
+        if (ctgRaw) {
+          const key = ctgRaw.toLowerCase();
+          const intraInfo = ctgRowsMap.get(key);
+          if (intraInfo && intraInfo.rows.length > 1) {
+            const filasDuplicadas = intraInfo.rows.join(", ");
+            rowErrors.push({
+              fila: row._rowNum,
+              campo: "ID Personalizado (CTG)",
+              error: `El CTG '${ctgRaw}' está duplicado en el archivo de importación (filas ${filasDuplicadas}).`,
+              valor: ctgRaw,
+            });
+          } else if (dbCtgMap.has(key)) {
+            const numeroExistente = dbCtgMap.get(key);
+            rowErrors.push({
+              fila: row._rowNum,
+              campo: "ID Personalizado (CTG)",
+              error: `El CTG '${ctgRaw}' ya existe en el sistema (Viaje N° ${numeroExistente}).`,
+              valor: ctgRaw,
+            });
+          }
+        }
+
         const fechaCarga = row.fechaCarga ? new Date(row.fechaCarga as any) : null;
         const fechaDescarga = row.fechaDescarga ? new Date(row.fechaDescarga as any) : null;
         

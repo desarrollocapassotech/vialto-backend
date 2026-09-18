@@ -16,9 +16,16 @@ import {
   shouldShowHomologacionWatermark,
 } from "./pdf-homologacion-watermark";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
+import { headerCantidad } from "./cantidad-unidad.util";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
+
+type TenantPdfConfig = {
+  idPropio2Habilitado: boolean;
+  idPropio2Label: string | null;
+  unidadCantidadViajes: string;
+} | null;
 
 type PdfCbteAsoc = { tipo: number; ptoVenta: number; nro: number };
 
@@ -274,7 +281,11 @@ export class LiquidacionPdfService {
 
     const tenantIdPropio2 = await this.db.tenant.findUnique({
       where: { clerkOrgId: tenantId },
-      select: { idPropio2Habilitado: true, idPropio2Label: true },
+      select: {
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        unidadCantidadViajes: true,
+      },
     });
 
     if (kind === "nc") {
@@ -507,7 +518,7 @@ export class LiquidacionPdfService {
     logoBuffer: Buffer | null,
     cvlp: ArcaComprobanteCvlp,
     drawOpts: PdfDrawOpts,
-    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
+    tenantIdPropio2: TenantPdfConfig = null,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (no acción manual del usuario).
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
@@ -564,7 +575,7 @@ export class LiquidacionPdfService {
     cvlp: ArcaComprobanteCvlp,
     opts: PdfDrawOpts,
     showTestWatermark = false,
-    tenantIdPropio2: { idPropio2Habilitado: boolean; idPropio2Label: string | null } | null = null,
+    tenantIdPropio2: TenantPdfConfig = null,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -799,12 +810,13 @@ export class LiquidacionPdfService {
     let tHeaders: string[];
     let aligns: string[];
 
+    const cantidadHeader = headerCantidad(tenantIdPropio2?.unidadCantidadViajes);
     if (isSingleTrip) {
       colWidths = [100, 157.28, 40, 65, 65, 42, 70];
       tHeaders = [
         "Producto",
         "Descripción",
-        "Cantidad",
+        cantidadHeader,
         "Precio",
         "SubTotal",
         "IVA %",
@@ -817,7 +829,7 @@ export class LiquidacionPdfService {
         "ID de Viaje",
         "Producto",
         "Descripción",
-        "Cantidad",
+        cantidadHeader,
         "Precio",
         "SubTotal",
         "IVA %",

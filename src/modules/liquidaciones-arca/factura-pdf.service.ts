@@ -15,6 +15,7 @@ import {
 } from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+import { headerCantidad } from './cantidad-unidad.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -70,15 +71,8 @@ type ViajeParaDetalle = {
 type TenantPdfConfig = {
   idPropio2Habilitado: boolean;
   idPropio2Label: string | null;
-  facturaCantidadUnidad: string;
+  unidadCantidadViajes: string;
 } | null;
-
-/** Header de la columna "Cantidad" del PDF de factura: "Toneladas" si el tenant factura por TN, "Cantidad" si factura por unidades. */
-const HEADER_CANTIDAD_POR_UNIDAD: Record<string, string> = { TN: 'Toneladas', UD: 'Cantidad' };
-
-function headerCantidad(tenantPdfConfig: TenantPdfConfig): string {
-  return HEADER_CANTIDAD_POR_UNIDAD[tenantPdfConfig?.facturaCantidadUnidad ?? 'TN'] ?? 'Toneladas';
-}
 
 /**
  * Matchea un ítem del comprobante (solo tiene `producto`/`descripcion`, sin viajeId)
@@ -268,7 +262,7 @@ export class FacturaPdfService {
       select: {
         idPropio2Habilitado: true,
         idPropio2Label: true,
-        facturaCantidadUnidad: true,
+        unidadCantidadViajes: true,
       },
     });
 
@@ -782,7 +776,7 @@ export class FacturaPdfService {
     const cellPadY = 4;
     const cellPadX = 2;
 
-    const tHeaders = ['Detalle', headerCantidad(tenantPdfConfig), 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+    const tHeaders = ['Detalle', headerCantidad(tenantPdfConfig?.unidadCantidadViajes), 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
     doc.rect(M, y, tableW, headerRowH).fill('#e8e8e8').stroke('#aaa');
     tHeaders.forEach((h, i) => {
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')

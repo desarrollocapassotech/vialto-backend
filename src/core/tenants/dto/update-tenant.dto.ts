@@ -34,6 +34,6 @@ export class UpdateTenantDto {
   /** Id de Pais (catálogo del tenant) a usar cuando paisOrigenDestinoOculto=true. null = desfijar. */
   @IsOptional() @IsString() paisOrigenDestinoFijoId?: string | null;
 
-  /** Unidad de la columna "Cantidad" en el PDF de factura A/B (ARCA) — 'TN' | 'UD'. */
-  @IsOptional() @IsIn(['TN', 'UD']) facturaCantidadUnidad?: string;
+  /** Unidad de cantidad de flete del tenant — 'TN' | 'UD'. Afecta PDFs (Factura/Liquidación/Contrato) y formularios de Viajes. */
+  @IsOptional() @IsIn(['TN', 'UD']) unidadCantidadViajes?: string;
 }

@@ -75,11 +75,13 @@ model Tenant {
    */
   paisOrigenDestinoFijoId        String?
   /**
-   * Unidad mostrada junto a la cantidad en la columna "Cantidad" del PDF de factura A/B
-   * (ARCA) — 'TN' (default, toneladas) | 'UD' (unidades). Configurable solo desde
-   * superadmin (panel "Configuración por empresa"). Ver FacturaPdfService.
+   * Unidad de cantidad de flete del tenant — 'TN' (default, toneladas) | 'UD' (unidades).
+   * Determina cómo se etiqueta la columna/campo "Cantidad" en los PDF de Factura A/B,
+   * Liquidación (CVLP) y Contrato de liquidación, y en los formularios de alta/edición
+   * de Viajes. Configurable solo desde superadmin (panel "Configuración por empresa").
+   * Ver `cantidad-unidad.util.ts`.
    */
-  facturaCantidadUnidad          String   @default("TN")
+  unidadCantidadViajes           String   @default("TN")
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]

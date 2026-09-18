@@ -50,6 +50,39 @@ export class TenantBootstrapService {
     });
   }
 
+  /**
+   * Valores por defecto para nuevos tenants (VTO-371):
+   * Los campos de fecha en liquidación ("fechaDesde", "fechaHasta") nacen deshabilitados (visible: false)
+   * para nuevos tenants.
+   */
+  async seedDefaultFieldConfigs(tenantId: string) {
+    const ocultosJson = {
+      fechaDesde: { visible: false },
+      fechaHasta: { visible: false },
+    };
+    await this.prisma.tenantFieldConfig.createMany({
+      data: [
+        {
+          tenantId,
+          modulo: 'liquidaciones',
+          formulario: 'alta_liquidacion',
+          campos: ocultosJson,
+          updatedAt: new Date(),
+          updatedBy: 'system',
+        },
+        {
+          tenantId,
+          modulo: 'liquidaciones',
+          formulario: 'edicion_liquidacion',
+          campos: ocultosJson,
+          updatedAt: new Date(),
+          updatedBy: 'system',
+        },
+      ],
+      skipDuplicates: true,
+    });
+  }
+
   async ensureRegistered(clerkOrgId: string) {
     const existing = await this.prisma.tenant.findUnique({ where: { clerkOrgId } });
     if (existing) return existing;
@@ -76,6 +109,7 @@ export class TenantBootstrapService {
       });
       await this.seedDefaultPresentaciones(tenant.clerkOrgId);
       await this.seedDefaultPaises(tenant.clerkOrgId);
+      await this.seedDefaultFieldConfigs(tenant.clerkOrgId);
       return tenant;
     } catch {
       const again = await this.prisma.tenant.findUnique({ where: { clerkOrgId } });

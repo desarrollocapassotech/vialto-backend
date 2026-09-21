@@ -68,6 +68,16 @@ export class CuentaCorrienteService {
     return importe;
   }
 
+  /**
+   * Texto por defecto cuando no se tipea un concepto — en lenguaje comercial
+   * (venta/cobro del lado cliente, compra/pago del lado proveedor) en vez de la
+   * jerga contable "cargo"/"cobranza" que no resultaba clara para el usuario.
+   */
+  private defaultConcepto(tipo: string, esCliente: boolean): string {
+    if (esCliente) return tipo === 'pago' ? 'Cobro manual' : 'Venta manual';
+    return tipo === 'pago' ? 'Pago manual' : 'Compra manual';
+  }
+
   private resolveFechaVencimiento(
     fecha: Date,
     condicionPagoDias: number | null,
@@ -246,9 +256,7 @@ export class CuentaCorrienteService {
       dto,
     );
     const importe = this.normalizeImporte(dto.importe);
-    const concepto =
-      dto.concepto?.trim() ||
-      (dto.tipo === 'pago' ? 'Pago manual' : 'Cargo manual');
+    const concepto = dto.concepto?.trim() || this.defaultConcepto(dto.tipo, !!dto.clienteId);
     const fecha = new Date(dto.fecha);
     return this.prisma.movimientoCuentaCorriente.create({
       data: {
@@ -355,7 +363,7 @@ export class CuentaCorrienteService {
         contraparteId,
         tipo: 'pago',
         origen: 'manual',
-        concepto: dto.concepto?.trim() || 'Pago manual',
+        concepto: dto.concepto?.trim() || this.defaultConcepto('pago', !!dto.clienteId),
         importe,
         moneda: dto.moneda?.trim() || 'ARS',
         fecha: new Date(dto.fecha),
@@ -547,18 +555,18 @@ export class CuentaCorrienteService {
       }),
     ]);
     if (!pago) throw new NotFoundException('Pago no encontrado');
-    if (!cargo) throw new NotFoundException('Cargo no encontrado');
+    if (!cargo) throw new NotFoundException('Comprobante no encontrado');
     if (pago.tipo !== 'pago') {
-      throw new BadRequestException('El movimiento de pago debe ser de tipo "pago"');
+      throw new BadRequestException('El movimiento elegido como pago no es un pago');
     }
     if (cargo.tipo !== 'cargo') {
-      throw new BadRequestException('El movimiento de cargo debe ser de tipo "cargo"');
+      throw new BadRequestException('El movimiento elegido no es un comprobante de compra/venta');
     }
     if (pago.contraparteId !== cargo.contraparteId) {
-      throw new BadRequestException('El pago y el cargo deben ser de la misma contraparte');
+      throw new BadRequestException('El pago y el comprobante deben ser de la misma contraparte');
     }
     if (pago.moneda !== cargo.moneda) {
-      throw new BadRequestException('El pago y el cargo deben estar en la misma moneda');
+      throw new BadRequestException('El pago y el comprobante deben estar en la misma moneda');
     }
 
     const [imputadoDelPago, imputadoDelCargo] = await Promise.all([
@@ -570,7 +578,7 @@ export class CuentaCorrienteService {
       throw new BadRequestException('El importe supera el saldo disponible del pago');
     }
     if (imputadoDelCargo + importe > cargo.importe + EPS) {
-      throw new BadRequestException('El importe supera el saldo pendiente del cargo');
+      throw new BadRequestException('El importe supera el saldo pendiente del comprobante');
     }
 
     return this.prisma.$transaction(async (tx) => {

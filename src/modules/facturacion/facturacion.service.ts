@@ -709,7 +709,7 @@ export class FacturacionService {
     },
   ) {
     if (!factura.clienteId) return;
-    const concepto = `Cargo automático por factura ${factura.numero ?? factura.id}`;
+    const concepto = `Venta automática por factura ${factura.numero ?? factura.id}`;
     await tx.movimientoCuentaCorriente.upsert({
       where: { tenantId_facturaId: { tenantId: factura.tenantId, facturaId: factura.id } },
       update: {

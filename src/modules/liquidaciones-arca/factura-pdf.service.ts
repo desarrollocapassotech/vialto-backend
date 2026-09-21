@@ -15,7 +15,7 @@ import {
 } from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
-import { headerCantidad } from './cantidad-unidad.util';
+import { headerCantidad, normalizeUnidadCantidad } from './cantidad-unidad.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -72,6 +72,7 @@ type TenantPdfConfig = {
   idPropio2Habilitado: boolean;
   idPropio2Label: string | null;
   unidadCantidadViajes: string;
+  labelIdentificacionPersonalizadaViajes: string | null;
 } | null;
 
 /**
@@ -90,13 +91,17 @@ function matchViajeItem(
 }
 
 /**
- * Arma el texto de la columna "Detalle": "FLETE S/[LABEL]: [CTG] – [LABEL] [VALOR] –
- * ORIGEN: [ORIGEN] DESTINO: [DESTINO] - PRODUCTO: [PRODUCTO]" (segmento de ID Propio 2
- * y PRODUCTO opcionales). Puramente a nivel de dibujo del PDF (no se persiste, no es
- * texto fiscal: ArcaComprobanteItem es solo presentación/auditoría, WSFEv1 no recibe
- * detalle de líneas). Si el ítem no matchea contra ningún viaje (ej. la línea genérica
- * "Servicios de transporte" de una factura sin viajes vinculados), se deja la
- * descripción original tal cual.
+ * Arma el texto de la columna "Detalle": "FLETE S/[LABEL ID PROPIO 1]: [CTG] – [LABEL
+ * ID PROPIO 2] [VALOR] – ORIGEN: [ORIGEN] DESTINO: [DESTINO] - PRODUCTO: [PRODUCTO]".
+ * El label del primer segmento es `Tenant.labelIdentificacionPersonalizadaViajes`
+ * ("ID propio" por defecto; ej. "CTG" para NyM) — siempre se muestra (no depende de
+ * ningún módulo), a diferencia del segmento de ID Propio 2 (label = `idPropio2Label`)
+ * y el de PRODUCTO, que son opcionales. Puramente a nivel de dibujo del PDF (no se
+ * persiste, no es texto fiscal: ArcaComprobanteItem es solo presentación/auditoría,
+ * WSFEv1 no recibe detalle de líneas). Si el ítem no matchea contra ningún viaje (ej.
+ * la línea genérica "Servicios de transporte" de una factura sin viajes vinculados),
+ * se deja la descripción original
+ * tal cual.
  */
 function buildDetalleFlete(
   item: { descripcion: string; producto?: string },
@@ -107,6 +112,7 @@ function buildDetalleFlete(
   if (!viaje) return item.descripcion;
 
   const ctg = numeroVisibleViaje(viaje);
+  const labelCtg = tenantPdfConfig?.labelIdentificacionPersonalizadaViajes?.trim() || 'ID propio';
   const idPropio2Valor = viaje.idPropio2?.trim();
   const usaIdPropio2 = Boolean(tenantPdfConfig?.idPropio2Habilitado && idPropio2Valor);
   const label = tenantPdfConfig?.idPropio2Label?.trim() || 'ID Propio 2';
@@ -116,8 +122,7 @@ function buildDetalleFlete(
     .filter(Boolean)
     .join(', ');
 
-  const partes: string[] = [];
-  partes.push(usaIdPropio2 ? `FLETE S/${label}: ${ctg}` : `FLETE: ${ctg}`);
+  const partes: string[] = [`FLETE S/${labelCtg}: ${ctg}`];
   if (usaIdPropio2) partes.push(`${label} ${idPropio2Valor}`);
 
   const rutaPartes: string[] = [];
@@ -263,6 +268,7 @@ export class FacturaPdfService {
         idPropio2Habilitado: true,
         idPropio2Label: true,
         unidadCantidadViajes: true,
+        labelIdentificacionPersonalizadaViajes: true,
       },
     });
 
@@ -792,7 +798,10 @@ export class FacturaPdfService {
       const cells = [
         { v: detalleDraw.toUpperCase(), align: 'left' as const },
         {
-          v: item.cantidad != null ? fmtNum(item.cantidad) : '1,00',
+          v:
+            item.cantidad != null
+              ? `${fmtNum(item.cantidad)} ${normalizeUnidadCantidad(tenantPdfConfig?.unidadCantidadViajes)}`
+              : '1,00',
           align: 'right' as const,
         },
         { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },

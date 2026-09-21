@@ -351,6 +351,14 @@ export class ViajesProcessor implements IImportProcessor {
     return viajeId;
   }
 
+  private async tieneModulo(tenantId: string, modulo: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    return tenant?.modules.includes(modulo) ?? false;
+  }
+
   private async create(
     row: ValidatedRow,
     tenantId: string,
@@ -411,44 +419,49 @@ export class ViajesProcessor implements IImportProcessor {
 
       let facturaClienteId: string | null = null;
       if (row.nroFactura) {
-        const numeroFactura = row.nroFactura as string;
-        const montoFila = this.resolveMonto(row) ?? 0;
+        const monedaMonto = (row.monedaMonto as string | null) ?? "ARS";
+        const tieneArca = await this.tieneModulo(tenantId, "emision-facturas-arca");
 
-        // Si ya existe una factura con el mismo número para este cliente
-        // (de una fila anterior de este mismo import, o de un import
-        // previo), no se crea una duplicada: se reutiliza y se le suma el
-        // importe de este viaje — el usuario ya confirmó este
-        // comportamiento antes de llegar acá (ver ImportacionesService
-        // .confirm / detectarFacturasDuplicadas).
-        const existente = await tx.factura.findFirst({
-          where: { tenantId, tipo: "cliente", numero: numeroFactura, clienteId },
-          select: { id: true, importe: true },
-        });
+        if (!tieneArca || monedaMonto !== "USD") {
+          const numeroFactura = row.nroFactura as string;
+          const montoFila = this.resolveMonto(row) ?? 0;
 
-        if (existente) {
-          await tx.factura.update({
-            where: { id: existente.id },
-            data: { importe: existente.importe + montoFila },
+          // Si ya existe una factura con el mismo número para este cliente
+          // (de una fila anterior de este mismo import, o de un import
+          // previo), no se crea una duplicada: se reutiliza y se le suma el
+          // importe de este viaje — el usuario ya confirmó este
+          // comportamiento antes de llegar acá (ver ImportacionesService
+          // .confirm / detectarFacturasDuplicadas).
+          const existente = await tx.factura.findFirst({
+            where: { tenantId, tipo: "cliente", numero: numeroFactura, clienteId },
+            select: { id: true, importe: true },
           });
-          facturaClienteId = existente.id;
-        } else {
-          const fechaEmision =
-            (row.fechaEmisionFactura as Date | null) ?? fechaCarga ?? new Date();
-          const factura = await tx.factura.create({
-            data: {
-              tenantId,
-              numero: numeroFactura,
-              tipo: "cliente",
-              clienteId,
-              importe: montoFila,
-              fechaEmision,
-              fechaVencimiento:
-                (row.fechaVencimientoFactura as Date | null) ?? null,
-              estado: "pendiente",
-            },
-            select: { id: true },
-          });
-          facturaClienteId = factura.id;
+
+          if (existente) {
+            await tx.factura.update({
+              where: { id: existente.id },
+              data: { importe: existente.importe + montoFila },
+            });
+            facturaClienteId = existente.id;
+          } else {
+            const fechaEmision =
+              (row.fechaEmisionFactura as Date | null) ?? fechaCarga ?? new Date();
+            const factura = await tx.factura.create({
+              data: {
+                tenantId,
+                numero: numeroFactura,
+                tipo: "cliente",
+                clienteId,
+                importe: montoFila,
+                fechaEmision,
+                fechaVencimiento:
+                  (row.fechaVencimientoFactura as Date | null) ?? null,
+                estado: "pendiente",
+              },
+              select: { id: true },
+            });
+            facturaClienteId = factura.id;
+          }
         }
       }
 

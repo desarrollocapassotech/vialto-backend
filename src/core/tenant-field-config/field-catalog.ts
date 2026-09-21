@@ -328,6 +328,25 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
       }
     }
   },
+  liquidaciones: {
+    label: "Liquidaciones",
+    formularios: {
+      alta_liquidacion: {
+        label: "Alta de liquidación",
+        campos: [
+          { campo: "fechaDesde", label: "Fecha desde", obligatorioSistema: false },
+          { campo: "fechaHasta", label: "Fecha hasta", obligatorioSistema: false },
+        ],
+      },
+      edicion_liquidacion: {
+        label: "Edición de liquidación",
+        campos: [
+          { campo: "fechaDesde", label: "Fecha desde", obligatorioSistema: false },
+          { campo: "fechaHasta", label: "Fecha hasta", obligatorioSistema: false },
+        ],
+      },
+    },
+  },
 };
 
 export function getCatalogoFormulario(modulo: string, formulario: string): CampoCatalogo[] {

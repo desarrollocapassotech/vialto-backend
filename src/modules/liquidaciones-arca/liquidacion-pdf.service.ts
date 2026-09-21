@@ -16,9 +16,16 @@ import {
   shouldShowHomologacionWatermark,
 } from "./pdf-homologacion-watermark";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
+import { headerCantidad } from "./cantidad-unidad.util";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
+
+type TenantPdfConfig = {
+  idPropio2Habilitado: boolean;
+  idPropio2Label: string | null;
+  unidadCantidadViajes: string;
+} | null;
 
 type PdfCbteAsoc = { tipo: number; ptoVenta: number; nro: number };
 
@@ -257,6 +264,7 @@ export class LiquidacionPdfService {
                 },
                 chofer: { select: { nombre: true } },
                 numeroIdentificacionPersonalizado: true,
+                idPropio2: true,
                 productosViaje: {
                   select: { producto: { select: { nombre: true } } },
                 },
@@ -270,6 +278,15 @@ export class LiquidacionPdfService {
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException("Liquidación no encontrada");
     }
+
+    const tenantIdPropio2 = await this.db.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        unidadCantidadViajes: true,
+      },
+    });
 
     if (kind === "nc") {
       if (
@@ -465,6 +482,7 @@ export class LiquidacionPdfService {
       logoBuffer,
       cvlp,
       drawOpts,
+      tenantIdPropio2,
     );
 
     const cbteNroStr = drawOpts.cbteNro
@@ -500,6 +518,7 @@ export class LiquidacionPdfService {
     logoBuffer: Buffer | null,
     cvlp: ArcaComprobanteCvlp,
     drawOpts: PdfDrawOpts,
+    tenantIdPropio2: TenantPdfConfig = null,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (no acción manual del usuario).
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
@@ -524,6 +543,7 @@ export class LiquidacionPdfService {
           cvlp,
           drawOpts,
           showTestWatermark,
+          tenantIdPropio2,
         );
         doc.addPage();
         this.draw(
@@ -536,6 +556,7 @@ export class LiquidacionPdfService {
           cvlp,
           drawOpts,
           showTestWatermark,
+          tenantIdPropio2,
         );
         doc.end();
       } catch (e) {
@@ -554,6 +575,7 @@ export class LiquidacionPdfService {
     cvlp: ArcaComprobanteCvlp,
     opts: PdfDrawOpts,
     showTestWatermark = false,
+    tenantIdPropio2: TenantPdfConfig = null,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -780,66 +802,6 @@ export class LiquidacionPdfService {
       y += rcpH + 2;
     }
 
-    // ── Sección 3: receptor (cliente del viaje) + origen/destino ─────────────
-    {
-      const isSingleTrip = liq.viajes?.length === 1;
-      const firstViaje = liq.viajes?.[0]?.viaje;
-      const cliente = firstViaje?.cliente;
-      if (
-        isSingleTrip &&
-        (cliente || firstViaje?.origen || firstViaje?.destino)
-      ) {
-        const colW = CW / 2 - 8;
-        const clienteNameText = `Sr.(es): ${cliente?.nombre ?? ""}`;
-        const clienteDomText = `Domicilio: ${cliente?.direccion ?? ""}`;
-
-        const nameH = doc.heightOfString(clienteNameText, { width: colW });
-        const domH = doc.heightOfString(clienteDomText, { width: colW });
-
-        const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 5;
-        const odH = Math.max(leftTotalH, 40);
-
-        doc.rect(M, y, CW, odH).stroke("#aaa");
-        doc
-          .moveTo(M + CW / 2, y)
-          .lineTo(M + CW / 2, y + odH)
-          .stroke("#aaa");
-
-        let ly = y + 5;
-        doc
-          .fontSize(8)
-          .font("Helvetica-Bold")
-          .fillColor("#000")
-          .text(clienteNameText, M + 4, ly, { width: colW });
-        ly += nameH + 2;
-
-        doc
-          .fontSize(7.5)
-          .font("Helvetica")
-          .fillColor("#333")
-          .text(clienteDomText, M + 4, ly, { width: colW });
-        ly += domH + 2;
-
-        doc.text(`C.U.I.T.: ${cliente?.idFiscal ?? ""}`, M + 4, ly, {
-          width: colW,
-        });
-
-        const rx = M + CW / 2 + 4;
-        doc
-          .fontSize(7.5)
-          .font("Helvetica")
-          .fillColor("#333")
-          .text(`Origen: ${firstViaje?.origen ?? ""}`, rx, y + 5, {
-            width: colW,
-          })
-          .text(`Destino: ${firstViaje?.destino ?? ""}`, rx, y + 17, {
-            width: colW,
-          });
-
-        y += odH + 2;
-      }
-    }
-
     // ── Tabla Principal ────────────────────────────────────────────
     const footerY = PAGE_H - MARGIN - 90;
     const isSingleTrip = (liq.viajes?.length ?? 0) <= 1;
@@ -848,12 +810,13 @@ export class LiquidacionPdfService {
     let tHeaders: string[];
     let aligns: string[];
 
+    const cantidadHeader = headerCantidad(tenantIdPropio2?.unidadCantidadViajes);
     if (isSingleTrip) {
       colWidths = [100, 157.28, 40, 65, 65, 42, 70];
       tHeaders = [
         "Producto",
         "Descripción",
-        "Cantidad",
+        cantidadHeader,
         "Precio",
         "SubTotal",
         "IVA %",
@@ -866,7 +829,7 @@ export class LiquidacionPdfService {
         "ID de Viaje",
         "Producto",
         "Descripción",
-        "Cantidad",
+        cantidadHeader,
         "Precio",
         "SubTotal",
         "IVA %",
@@ -924,6 +887,10 @@ export class LiquidacionPdfService {
 
           const descParts = [];
           if (isSingleTrip) descParts.push(`ID: ${idViajeText}`);
+          if (tenantIdPropio2?.idPropio2Habilitado && v.idPropio2?.trim()) {
+            const label = tenantIdPropio2.idPropio2Label?.trim() || "ID Propio 2";
+            descParts.push(`${label}: ${v.idPropio2.trim()}`);
+          }
           const ruta = [v.origen, v.destino].filter(Boolean).join(" - ");
           if (ruta) descParts.push(`${ruta}`);
 
@@ -1080,6 +1047,11 @@ export class LiquidacionPdfService {
             )
               .toString()
               .toUpperCase();
+            const idPropio2Valor = tripMatch?.viaje.idPropio2?.trim();
+            if (tenantIdPropio2?.idPropio2Habilitado && idPropio2Valor) {
+              const label = tenantIdPropio2.idPropio2Label?.trim() || "ID Propio 2";
+              tripIdText = `${tripIdText}\n${label}: ${idPropio2Valor}`.toUpperCase();
+            }
           }
           // Aquí la descripción final (con viaje) se mapea a 'desc', pero mantenemos el 'prodText' limpio
           const descText = match ? item.descripcion.toUpperCase() : baseName;

@@ -14,6 +14,8 @@ import {
   shouldShowHomologacionWatermark,
 } from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
+import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+import { headerCantidad } from './cantidad-unidad.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -55,6 +57,77 @@ function fmtDate(d: Date | string | null | undefined): string {
   const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
   const yy = dt.getUTCFullYear();
   return `${dd}/${mm}/${yy}`;
+}
+
+type ViajeParaDetalle = {
+  numero: string;
+  numeroIdentificacionPersonalizado: string | null;
+  idPropio2: string | null;
+  origen?: string | null;
+  destino?: string | null;
+  productosViaje?: Array<{ producto: { nombre: string } }>;
+};
+
+type TenantPdfConfig = {
+  idPropio2Habilitado: boolean;
+  idPropio2Label: string | null;
+  unidadCantidadViajes: string;
+} | null;
+
+/**
+ * Matchea un ítem del comprobante (solo tiene `producto`/`descripcion`, sin viajeId)
+ * contra `factura.viajes` reconstruyendo el mismo texto que arma `item.producto`
+ * (numeroIdentificacionPersonalizado o `#numero`).
+ */
+function matchViajeItem(
+  item: { producto?: string },
+  viajes: ViajeParaDetalle[],
+): ViajeParaDetalle | undefined {
+  if (!item.producto) return undefined;
+  return viajes.find(
+    (v) => (v.numeroIdentificacionPersonalizado?.trim() || `#${v.numero}`) === item.producto,
+  );
+}
+
+/**
+ * Arma el texto de la columna "Detalle": "FLETE S/[LABEL]: [CTG] – [LABEL] [VALOR] –
+ * ORIGEN: [ORIGEN] DESTINO: [DESTINO] - PRODUCTO: [PRODUCTO]" (segmento de ID Propio 2
+ * y PRODUCTO opcionales). Puramente a nivel de dibujo del PDF (no se persiste, no es
+ * texto fiscal: ArcaComprobanteItem es solo presentación/auditoría, WSFEv1 no recibe
+ * detalle de líneas). Si el ítem no matchea contra ningún viaje (ej. la línea genérica
+ * "Servicios de transporte" de una factura sin viajes vinculados), se deja la
+ * descripción original tal cual.
+ */
+function buildDetalleFlete(
+  item: { descripcion: string; producto?: string },
+  viajes: ViajeParaDetalle[],
+  tenantPdfConfig: TenantPdfConfig,
+): string {
+  const viaje = matchViajeItem(item, viajes);
+  if (!viaje) return item.descripcion;
+
+  const ctg = numeroVisibleViaje(viaje);
+  const idPropio2Valor = viaje.idPropio2?.trim();
+  const usaIdPropio2 = Boolean(tenantPdfConfig?.idPropio2Habilitado && idPropio2Valor);
+  const label = tenantPdfConfig?.idPropio2Label?.trim() || 'ID Propio 2';
+
+  const producto = (viaje.productosViaje ?? [])
+    .map((p) => p.producto?.nombre)
+    .filter(Boolean)
+    .join(', ');
+
+  const partes: string[] = [];
+  partes.push(usaIdPropio2 ? `FLETE S/${label}: ${ctg}` : `FLETE: ${ctg}`);
+  if (usaIdPropio2) partes.push(`${label} ${idPropio2Valor}`);
+
+  const rutaPartes: string[] = [];
+  if (viaje.origen) rutaPartes.push(`ORIGEN: ${viaje.origen}`);
+  if (viaje.destino) rutaPartes.push(`DESTINO: ${viaje.destino}`);
+  if (rutaPartes.length) partes.push(rutaPartes.join(' '));
+
+  let detalle = partes.join(' – ');
+  if (producto) detalle += ` - PRODUCTO: ${producto}`;
+  return detalle;
 }
 
 const UNIDADES = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE',
@@ -165,12 +238,16 @@ export class FacturaPdfService {
           select: {
             numero: true,
             numeroIdentificacionPersonalizado: true,
+            idPropio2: true,
             monto: true,
             cantidadFactura: true,
             precioUnitarioFactura: true,
             origen: true,
             destino: true,
             fechaCarga: true,
+            productosViaje: {
+              select: { producto: { select: { nombre: true } } },
+            },
           },
         },
       },
@@ -179,6 +256,15 @@ export class FacturaPdfService {
     if (!factura || factura.tenantId !== tenantId) {
       throw new NotFoundException('Factura no encontrada');
     }
+
+    const tenantPdfConfig = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        unidadCantidadViajes: true,
+      },
+    });
 
     const facturaExt = factura as typeof factura & {
       cbteTipo?: number | null;
@@ -306,6 +392,7 @@ export class FacturaPdfService {
       comprobante,
       asociados,
       kind,
+      tenantPdfConfig,
     );
 
     const cbteNroStr =
@@ -472,6 +559,7 @@ export class FacturaPdfService {
     comprobante: ArcaComprobanteCvlp,
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }> = [],
     kind: 'factura' | 'nc' = 'factura',
+    tenantPdfConfig: TenantPdfConfig = null,
   ): Promise<Buffer> {
     // Ambiente desde ArcaConfig del tenant (misma condición que PDF CVLP).
     const showTestWatermark = shouldShowHomologacionWatermark(config?.ambiente);
@@ -494,6 +582,7 @@ export class FacturaPdfService {
           asociados,
           showTestWatermark,
           kind,
+          tenantPdfConfig,
         );
         doc.addPage();
         this.draw(
@@ -508,6 +597,7 @@ export class FacturaPdfService {
           asociados,
           showTestWatermark,
           kind,
+          tenantPdfConfig,
         );
         doc.end();
       } catch (e) {
@@ -528,6 +618,7 @@ export class FacturaPdfService {
     asociados: Array<{ tipo: number; ptoVenta: number; nro: number }>,
     showTestWatermark: boolean,
     kind: 'factura' | 'nc',
+    tenantPdfConfig: TenantPdfConfig = null,
   ) {
     const M = MARGIN;
     const CW = COL_W;
@@ -675,8 +766,8 @@ export class FacturaPdfService {
       y += rcpH + 2;
     }
 
-    // Reducimos 30px de Producto y se lo damos a Descripción para que origen/destino entren mejor.
-    const colWidths = [70, 187.28, 40, 65, 65, 42, 70];
+    // Sin columna "Producto" (absorbida por "Detalle"): su ancho pasa a esa columna.
+    const colWidths = [257.28, 40, 65, 65, 42, 70];
     const colX: number[] = [];
     let cx = M;
     for (const w of colWidths) { colX.push(cx); cx += w; }
@@ -685,22 +776,25 @@ export class FacturaPdfService {
     const cellPadY = 4;
     const cellPadX = 2;
 
-    const tHeaders = ['Producto', 'Descripción', 'Cantidad', 'Precio', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+    const tHeaders = ['Detalle', headerCantidad(tenantPdfConfig?.unidadCantidadViajes), 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
     doc.rect(M, y, tableW, headerRowH).fill('#e8e8e8').stroke('#aaa');
     tHeaders.forEach((h, i) => {
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
         .text(h, colX[i] + cellPadX, y + cellPadY, {
           width: colWidths[i] - cellPadX * 2,
-          align: i >= 2 ? 'right' : 'left',
+          align: i >= 1 ? 'right' : 'left',
         });
     });
     y += headerRowH;
 
     for (const item of comprobante.items) {
+      const detalleDraw = buildDetalleFlete(item, factura.viajes, tenantPdfConfig);
       const cells = [
-        { v: (item.producto ?? '').toUpperCase(), align: 'left' as const },
-        { v: item.descripcion.toUpperCase(), align: 'left' as const },
-        { v: item.cantidad != null ? fmtNum(item.cantidad) : '1,00', align: 'right' as const },
+        { v: detalleDraw.toUpperCase(), align: 'left' as const },
+        {
+          v: item.cantidad != null ? fmtNum(item.cantidad) : '1,00',
+          align: 'right' as const,
+        },
         { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },
         { v: fmtNum(item.importeBase), align: 'right' as const },
         { v: fmtNum(item.ivaPct), align: 'right' as const },

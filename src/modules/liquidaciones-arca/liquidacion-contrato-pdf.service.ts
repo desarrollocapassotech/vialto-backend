@@ -12,6 +12,7 @@ import {
   type LiquidacionContratoTotales,
   type LiquidacionContratoViajeInput,
 } from './liquidacion-contrato.util';
+import { normalizeUnidadCantidad, unidadCantidadPlural, type UnidadCantidad } from './cantidad-unidad.util';
 
 const M = 40;
 const PAGE_W = 595.28;
@@ -39,6 +40,10 @@ function fmtNum(n: number | null | undefined): string {
 function dash(v: string | null | undefined): string {
   const s = v?.trim();
   return s ? s : '—';
+}
+
+function capitalizar(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 @Injectable()
@@ -70,6 +75,7 @@ export class LiquidacionContratoPdfService {
               select: {
                 numero: true,
                 numeroIdentificacionPersonalizado: true,
+                idPropio2: true,
                 origen: true,
                 destino: true,
                 fechaCarga: true,
@@ -97,8 +103,26 @@ export class LiquidacionContratoPdfService {
     });
     if (!liq) throw new NotFoundException('Liquidación no encontrada');
 
+    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        unidadCantidadViajes: true,
+      },
+    });
+    const unidad = normalizeUnidadCantidad(tenantIdPropio2?.unidadCantidadViajes);
+
     const viajes: LiquidacionContratoViajeInput[] = liq.viajes.map((lv) => {
       const v = lv.viaje;
+      const idPropio2ValorRaw = v.idPropio2?.trim();
+      const idPropio2Habilitado = Boolean(
+        tenantIdPropio2?.idPropio2Habilitado && idPropio2ValorRaw,
+      );
+      const idPropio2Label = idPropio2Habilitado
+        ? tenantIdPropio2?.idPropio2Label?.trim() || 'ID Propio 2'
+        : null;
+      const idPropio2Valor = idPropio2Habilitado ? idPropio2ValorRaw : null;
       const moneda = (v.monedaPrecioTransportistaExterno || 'ARS').toUpperCase();
       const docs = crtMicRemitoDesdeDocumento(v.documentoAduanero);
       const toneladas = lv.tnDestino ?? v.cantidadTransportista ?? null;
@@ -113,6 +137,8 @@ export class LiquidacionContratoPdfService {
       return {
         numero: numeroVisibleViaje(v),
         numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado,
+        idPropio2Label,
+        idPropio2Valor,
         origen: v.origen,
         destino: v.destino,
         fechaCarga: v.fechaCarga,
@@ -155,7 +181,7 @@ export class LiquidacionContratoPdfService {
       }
     }
 
-    const buffer = await this.buildPdf(liq, emisorNombre, logoBuffer, totales);
+    const buffer = await this.buildPdf(liq, emisorNombre, logoBuffer, totales, unidad);
     const slug = (liq.transportista?.nombre ?? 'transportista')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
@@ -183,6 +209,7 @@ export class LiquidacionContratoPdfService {
     emisorNombre: string,
     logoBuffer: Buffer | null,
     totales: LiquidacionContratoTotales,
+    unidad: UnidadCantidad,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
@@ -195,7 +222,7 @@ export class LiquidacionContratoPdfService {
         doc.on('data', (c: Buffer) => chunks.push(c));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
-        this.draw(doc, liq, emisorNombre, logoBuffer, totales);
+        this.draw(doc, liq, emisorNombre, logoBuffer, totales, unidad);
         doc.end();
       } catch (e) {
         reject(e);
@@ -219,6 +246,7 @@ export class LiquidacionContratoPdfService {
     emisorNombre: string,
     logoBuffer: Buffer | null,
     totales: LiquidacionContratoTotales,
+    unidad: UnidadCantidad,
   ) {
     let y = M;
     if (logoBuffer) {
@@ -278,14 +306,14 @@ export class LiquidacionContratoPdfService {
     ]);
 
     if (totales.cantViajes === 1 && totales.grupos[0]?.viajes[0]) {
-      this.drawViajeUnico(doc, y, totales.grupos[0].viajes[0], totales);
+      this.drawViajeUnico(doc, y, totales.grupos[0].viajes[0], totales, unidad);
       return;
     }
     if (totales.mismoPrecio) {
-      this.drawViajesMismoPrecio(doc, y, totales);
+      this.drawViajesMismoPrecio(doc, y, totales, unidad);
       return;
     }
-    y = this.drawViajesPorPrecio(doc, y, totales);
+    y = this.drawViajesPorPrecio(doc, y, totales, unidad);
     y = this.ensure(doc, y, 90);
     y = this.section(doc, y, 'Total consolidado');
     this.moneyRows(
@@ -306,6 +334,7 @@ export class LiquidacionContratoPdfService {
     y: number,
     v: LiquidacionContratoViajeInput,
     totales: LiquidacionContratoTotales,
+    unidad: UnidadCantidad,
   ): number {
     y = this.section(doc, y, 'Datos del viaje');
     y = this.grid(doc, y, [
@@ -318,7 +347,10 @@ export class LiquidacionContratoPdfService {
       ['CRT N°', dash(v.crt)],
       ['MIC N°', dash(v.mic)],
       ['Remito N°', dash(v.remito)],
-      ['Cantidad de toneladas', fmtNum(v.toneladas)],
+      [`Cantidad de ${unidadCantidadPlural(unidad)}`, fmtNum(v.toneladas)],
+      ...(v.idPropio2Label && v.idPropio2Valor
+        ? [[v.idPropio2Label, v.idPropio2Valor] as [string, string]]
+        : []),
     ]);
     y = this.section(doc, y, 'Flete contratado');
     y = this.grid(doc, y, [
@@ -327,7 +359,7 @@ export class LiquidacionContratoPdfService {
     ]);
     y = this.section(doc, y, 'Detalle de flete');
     y = this.moneyRows(doc, y, [
-      ['Valor acordado x TN', v.precioPorTn != null ? fmtMoney(v.precioPorTn, v.moneda) : '—'],
+      [`Valor acordado x ${unidad}`, v.precioPorTn != null ? fmtMoney(v.precioPorTn, v.moneda) : '—'],
       ['Subtotal', fmtMoney(v.subtotal, v.moneda)],
       [`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)],
       ['Adelanto', fmtMoney(v.adelanto, v.moneda)],
@@ -341,10 +373,11 @@ export class LiquidacionContratoPdfService {
     doc: PDFKit.PDFDocument,
     y: number,
     totales: LiquidacionContratoTotales,
+    unidad: UnidadCantidad,
   ): number {
     const g = totales.grupos[0];
     y = this.section(doc, y, 'Viajes incluidos');
-    y = this.drawViajesTabla(doc, y, g.viajes);
+    y = this.drawViajesTabla(doc, y, g.viajes, unidad);
     y = this.section(doc, y, 'Flete contratado');
     const origenes = [...new Set(g.viajes.map((v) => dash(v.origen)))].join(' / ');
     const destinos = [...new Set(g.viajes.map((v) => dash(v.destino)))].join(' / ');
@@ -355,10 +388,10 @@ export class LiquidacionContratoPdfService {
     y = this.section(doc, y, 'Detalle de flete');
     y = this.moneyRows(doc, y, [
       [
-        'Valor acordado x TN',
+        `Valor acordado x ${unidad}`,
         g.precioPorTn != null ? fmtMoney(g.precioPorTn, totales.moneda) : '—',
       ],
-      ['Toneladas', fmtNum(g.toneladas)],
+      [capitalizar(unidadCantidadPlural(unidad)), fmtNum(g.toneladas)],
       ['Subtotal', fmtMoney(g.subtotal, totales.moneda)],
       [`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)],
       ['Adelanto', fmtMoney(g.adelanto, totales.moneda)],
@@ -372,16 +405,17 @@ export class LiquidacionContratoPdfService {
     doc: PDFKit.PDFDocument,
     y: number,
     totales: LiquidacionContratoTotales,
+    unidad: UnidadCantidad,
   ): number {
     for (const g of totales.grupos) {
       const titulo =
         g.precioPorTn != null
-          ? `Viajes a ${fmtMoney(g.precioPorTn, totales.moneda)} x TN`
-          : 'Viajes sin precio x TN';
+          ? `Viajes a ${fmtMoney(g.precioPorTn, totales.moneda)} x ${unidad}`
+          : `Viajes sin precio x ${unidad}`;
       y = this.section(doc, y, titulo);
-      y = this.drawViajesTabla(doc, y, g.viajes);
+      y = this.drawViajesTabla(doc, y, g.viajes, unidad);
       y = this.moneyRows(doc, y, [
-        ['Toneladas', fmtNum(g.toneladas)],
+        [capitalizar(unidadCantidadPlural(unidad)), fmtNum(g.toneladas)],
         ['Subtotal del grupo', fmtMoney(g.subtotal, totales.moneda)],
       ]);
     }
@@ -392,6 +426,7 @@ export class LiquidacionContratoPdfService {
     doc: PDFKit.PDFDocument,
     y: number,
     viajes: LiquidacionContratoViajeInput[],
+    unidad: UnidadCantidad,
   ): number {
     for (const v of viajes) {
       y = this.ensure(doc, y, 72);
@@ -401,12 +436,16 @@ export class LiquidacionContratoPdfService {
       ].join('  ·  ');
       doc.font('Helvetica-Bold').fontSize(8).fillColor(CHARCOAL).text(line, M, y, { width: CW });
       y += 12;
+      const idPropio2Segmento =
+        v.idPropio2Label && v.idPropio2Valor
+          ? `  ·  ${v.idPropio2Label}: ${v.idPropio2Valor}`
+          : '';
       doc
         .font('Helvetica')
         .fontSize(7.5)
         .fillColor(STEEL)
         .text(
-          `Chofer: ${dash(v.choferNombre)}  ·  Mercadería: ${dash(v.mercaderia)}  ·  TN: ${fmtNum(v.toneladas)}`,
+          `Chofer: ${dash(v.choferNombre)}  ·  Mercadería: ${dash(v.mercaderia)}  ·  ${unidad}: ${fmtNum(v.toneladas)}${idPropio2Segmento}`,
           M,
           y,
           { width: CW },

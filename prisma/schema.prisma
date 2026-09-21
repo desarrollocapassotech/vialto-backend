@@ -27,6 +27,25 @@ model Tenant {
    */
   labelIdentificacionPersonalizadaViajes String?   @default("ID propio")
   /**
+   * true = muestra la columna/campo dedicado "ID Sistema" (numero) en Viajes. Default true (comportamiento actual).
+   * Regla de dependencia (ver TenantsService#update): no puede quedar en false al mismo tiempo que idPropio1Habilitado.
+   */
+  idSistemaHabilitado                    Boolean   @default(true)
+  /**
+   * true = muestra el campo/columna dedicado "ID Propio 1" (numeroIdentificacionPersonalizado) en Viajes. Default true (comportamiento actual).
+   * Regla de dependencia: no puede quedar en false al mismo tiempo que idSistemaHabilitado; al pasar a false, idPropio2Habilitado se apaga en cascada.
+   */
+  idPropio1Habilitado                    Boolean   @default(true)
+  /**
+   * true = habilita el campo "ID Propio 2" (texto libre, no único) en Viajes. Deshabilitado por defecto en todas las empresas.
+   * Regla de dependencia: solo puede ser true si idPropio1Habilitado es true.
+   */
+  idPropio2Habilitado                    Boolean   @default(false)
+  /**
+   * Label configurable del campo "ID Propio 2" (ej. "CPE", "Referencia Cliente"). Solo se usa si idPropio2Habilitado=true.
+   */
+  idPropio2Label                         String?   @default("ID Propio 2")
+  /**
    * true = el admin del tenant no ve la pantalla de import masivo de Excel (superadmin sigue pudiendo usarla).
    */
   importacionesOcultas                   Boolean   @default(false)
@@ -55,6 +74,14 @@ model Tenant {
    * frontend lo trata como "no configurado" y vuelve a mostrar el selector.
    */
   paisOrigenDestinoFijoId        String?
+  /**
+   * Unidad de cantidad de flete del tenant — 'TN' (default, toneladas) | 'UD' (unidades).
+   * Determina cómo se etiqueta la columna/campo "Cantidad" en los PDF de Factura A/B,
+   * Liquidación (CVLP) y Contrato de liquidación, y en los formularios de alta/edición
+   * de Viajes. Configurable solo desde superadmin (panel "Configuración por empresa").
+   * Ver `cantidad-unidad.util.ts`.
+   */
+  unidadCantidadViajes           String   @default("TN")
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]
@@ -464,6 +491,10 @@ model Viaje {
    * ID propio del cliente para identificar el viaje (ej. CTG). Si está cargado, reemplaza a `numero` en toda vista/documento humano; `numero` sigue siendo la clave interna.
    */
   numeroIdentificacionPersonalizado String?
+  /**
+   * Segundo ID propio del cliente, opcional y NO único (a diferencia de numeroIdentificacionPersonalizado). Ej. CPE, Referencia Cliente. Visible solo si Tenant.idPropio2Habilitado=true.
+   */
+  idPropio2                         String?
   /**
    * @deprecated Reemplazado por `etapa` + `facturacionEstado` + `liquidacionEstado`. No se escribe más; se elimina en una migración futura.
    */

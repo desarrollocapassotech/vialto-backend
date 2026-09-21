@@ -1652,6 +1652,7 @@ export class LiquidacionesService {
                 id: true,
                 numero: true,
                 numeroIdentificacionPersonalizado: true,
+                idPropio2: true,
                 fechaCarga: true,
                 fechaDescarga: true,
                 origen: true,

@@ -684,7 +684,44 @@ export class ImportacionesService {
    * contraparte ahí (ej. `choferes`) no se filtran — se muestran todos.
    */
   async getCatalogoCampos(modulo: string, tenantId: string) {
-    const columnas = getCatalogoColumnas(modulo);
+    let columnas = getCatalogoColumnas(modulo);
+
+    // "ID Propio 2" no tiene contraparte en TenantFieldConfig/FIELD_CATALOG (es
+    // un boolean propio del Tenant, no visibilidad de un campo existente) —
+    // se filtra acá puntualmente para que un tenant sin la feature habilitada
+    // no vea la columna en la pantalla de configuración de templates de import.
+    // El label tampoco es estático: se resuelve contra Tenant.idPropio2Label
+    // (ej. "CPE" para NyM) en vez del nombre genérico "ID Propio 2" del catálogo.
+    if (modulo === "viajes") {
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { clerkOrgId: tenantId },
+        select: {
+          idPropio1Habilitado: true,
+          idPropio2Habilitado: true,
+          idPropio2Label: true,
+        },
+      });
+      // "ID Propio 1" (numeroIdentificacionPersonalizado) no tenía toggle
+      // hasta ahora — mismo criterio de filtro puntual que "ID Propio 2"
+      // (Sistema queda afuera: ya está en PRISMA_IMPORT_EXCLUDE, nunca fue
+      // importable).
+      if (!tenant?.idPropio1Habilitado) {
+        columnas = columnas.filter(
+          (c) => c.field !== "numeroIdentificacionPersonalizado",
+        );
+      }
+      if (!tenant?.idPropio2Habilitado) {
+        columnas = columnas.filter((c) => c.field !== "idPropio2");
+      } else {
+        const label = tenant.idPropio2Label?.trim() || "ID Propio 2";
+        columnas = columnas.map((c) =>
+          c.field === "idPropio2"
+            ? { ...c, campoLabel: label, defaultExcelHeader: label }
+            : c,
+        );
+      }
+    }
+
     const altaFormulario = getAltaFormularioDeModulo(modulo);
     if (!altaFormulario) return columnas;
 
@@ -713,6 +750,18 @@ export class ImportacionesService {
     });
     const templatePorModulo = new Map(templates.map((t) => [t.modulo, t]));
 
+    // "ID Propio 1"/"ID Propio 2" no tienen template propio guardado en la
+    // mayoría de los tenants (construirConfigPorDefecto no es tenant-aware) —
+    // se resuelve acá su habilitación/label igual que en getCatalogoCampos.
+    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idPropio1Habilitado: true,
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+      },
+    });
+
     return modulos.map((modulo) => {
       const template = templatePorModulo.get(modulo);
       const config = template
@@ -720,11 +769,30 @@ export class ImportacionesService {
         : construirConfigPorDefecto(modulo);
       const catalogo = getCatalogoColumnas(modulo);
 
-      const columnas: ColumnaEsperada[] = (config?.columns ?? []).map((c) => {
+      const columnasCrudas = (config?.columns ?? []).filter((c) => {
+        if (modulo !== "viajes") return true;
+        if (c.field === "idPropio2" && !tenantIdPropio2?.idPropio2Habilitado)
+          return false;
+        if (
+          c.field === "numeroIdentificacionPersonalizado" &&
+          !tenantIdPropio2?.idPropio1Habilitado
+        )
+          return false;
+        return true;
+      });
+
+      const columnas: ColumnaEsperada[] = columnasCrudas.map((c) => {
         const enCatalogo = catalogo.find((cat) => cat.field === c.field);
+        const esIdPropio2 = modulo === "viajes" && c.field === "idPropio2";
+        const labelDinamico = esIdPropio2
+          ? tenantIdPropio2?.idPropio2Label?.trim() || "ID Propio 2"
+          : null;
         const col: ColumnaEsperada = {
-          excelHeader: c.excelHeader,
-          campoLabel: enCatalogo?.campoLabel ?? c.field,
+          // El excelHeader de un template ya guardado lo eligió el superadmin
+          // para matchear el archivo real del tenant — solo se pisa con el
+          // label dinámico cuando todavía no hay template (config default).
+          excelHeader: labelDinamico && !template ? labelDinamico : c.excelHeader,
+          campoLabel: labelDinamico ?? enCatalogo?.campoLabel ?? c.field,
           tipo: c.type,
           requerido: !!c.required,
         };
@@ -1272,6 +1340,23 @@ export class ImportacionesService {
       where: { tenantId, modulo, activo: true },
     });
 
+    // "ID Propio 1"/"ID Propio 2" no tienen contraparte en el catálogo
+    // genérico (construirConfigPorDefecto no es tenant-aware) — se resuelve
+    // acá para no inyectar/crear una columna mapeada a un campo que el
+    // tenant tiene deshabilitado, evitando que un Excel con un encabezado
+    // que matchee por casualidad termine escribiendo el campo igual.
+    const tenantIdentificadores =
+      modulo === "viajes"
+        ? await this.prisma.tenant.findUnique({
+            where: { clerkOrgId: tenantId },
+            select: { idPropio1Habilitado: true, idPropio2Habilitado: true },
+          })
+        : null;
+    const idPropio1Habilitado =
+      modulo !== "viajes" || Boolean(tenantIdentificadores?.idPropio1Habilitado);
+    const idPropio2Habilitado =
+      modulo !== "viajes" || Boolean(tenantIdentificadores?.idPropio2Habilitado);
+
     if (!template) {
       // Sin template propio todavía: se genera uno por defecto a partir del
       // catálogo fijo (mismos encabezados sugeridos que ve el superadmin), para
@@ -1283,6 +1368,14 @@ export class ImportacionesService {
         throw new NotFoundException(
           `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
         );
+      }
+      if (!idPropio1Habilitado) {
+        config.columns = config.columns.filter(
+          (c) => c.field !== "numeroIdentificacionPersonalizado",
+        );
+      }
+      if (!idPropio2Habilitado) {
+        config.columns = config.columns.filter((c) => c.field !== "idPropio2");
       }
       template = await this.prisma.importTemplate.upsert({
         where: { tenantId_modulo: { tenantId, modulo } },
@@ -1305,6 +1398,12 @@ export class ImportacionesService {
 
       // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
       for (const catCol of catalogo) {
+        if (catCol.field === "idPropio2" && !idPropio2Habilitado) continue;
+        if (
+          catCol.field === "numeroIdentificacionPersonalizado" &&
+          !idPropio1Habilitado
+        )
+          continue;
         if (!configData.columns.some((c) => c.field === catCol.field)) {
           columnasInyectadas.add(catCol.field);
           const nueva: ColumnConfig = {

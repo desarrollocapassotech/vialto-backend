@@ -27,7 +27,18 @@ model Tenant {
    */
   labelIdentificacionPersonalizadaViajes String?   @default("ID propio")
   /**
+   * true = muestra la columna/campo dedicado "ID Sistema" (numero) en Viajes. Default true (comportamiento actual).
+   * Regla de dependencia (ver TenantsService#update): no puede quedar en false al mismo tiempo que idPropio1Habilitado.
+   */
+  idSistemaHabilitado                    Boolean   @default(true)
+  /**
+   * true = muestra el campo/columna dedicado "ID Propio 1" (numeroIdentificacionPersonalizado) en Viajes. Default true (comportamiento actual).
+   * Regla de dependencia: no puede quedar en false al mismo tiempo que idSistemaHabilitado; al pasar a false, idPropio2Habilitado se apaga en cascada.
+   */
+  idPropio1Habilitado                    Boolean   @default(true)
+  /**
    * true = habilita el campo "ID Propio 2" (texto libre, no único) en Viajes. Deshabilitado por defecto en todas las empresas.
+   * Regla de dependencia: solo puede ser true si idPropio1Habilitado es true.
    */
   idPropio2Habilitado                    Boolean   @default(false)
   /**
@@ -63,6 +74,14 @@ model Tenant {
    * frontend lo trata como "no configurado" y vuelve a mostrar el selector.
    */
   paisOrigenDestinoFijoId        String?
+  /**
+   * Unidad de cantidad de flete del tenant — 'TN' (default, toneladas) | 'UD' (unidades).
+   * Determina cómo se etiqueta la columna/campo "Cantidad" en los PDF de Factura A/B,
+   * Liquidación (CVLP) y Contrato de liquidación, y en los formularios de alta/edición
+   * de Viajes. Configurable solo desde superadmin (panel "Configuración por empresa").
+   * Ver `cantidad-unidad.util.ts`.
+   */
+  unidadCantidadViajes           String   @default("TN")
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]

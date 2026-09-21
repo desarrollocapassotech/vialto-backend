@@ -695,8 +695,21 @@ export class ImportacionesService {
     if (modulo === "viajes") {
       const tenant = await this.prisma.tenant.findUnique({
         where: { clerkOrgId: tenantId },
-        select: { idPropio2Habilitado: true, idPropio2Label: true },
+        select: {
+          idPropio1Habilitado: true,
+          idPropio2Habilitado: true,
+          idPropio2Label: true,
+        },
       });
+      // "ID Propio 1" (numeroIdentificacionPersonalizado) no tenía toggle
+      // hasta ahora — mismo criterio de filtro puntual que "ID Propio 2"
+      // (Sistema queda afuera: ya está en PRISMA_IMPORT_EXCLUDE, nunca fue
+      // importable).
+      if (!tenant?.idPropio1Habilitado) {
+        columnas = columnas.filter(
+          (c) => c.field !== "numeroIdentificacionPersonalizado",
+        );
+      }
       if (!tenant?.idPropio2Habilitado) {
         columnas = columnas.filter((c) => c.field !== "idPropio2");
       } else {
@@ -737,12 +750,16 @@ export class ImportacionesService {
     });
     const templatePorModulo = new Map(templates.map((t) => [t.modulo, t]));
 
-    // "ID Propio 2" no tiene template propio guardado en la mayoría de los
-    // tenants (construirConfigPorDefecto no es tenant-aware) — se resuelve
-    // acá su habilitación/label igual que en getCatalogoCampos.
+    // "ID Propio 1"/"ID Propio 2" no tienen template propio guardado en la
+    // mayoría de los tenants (construirConfigPorDefecto no es tenant-aware) —
+    // se resuelve acá su habilitación/label igual que en getCatalogoCampos.
     const tenantIdPropio2 = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: tenantId },
-      select: { idPropio2Habilitado: true, idPropio2Label: true },
+      select: {
+        idPropio1Habilitado: true,
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+      },
     });
 
     return modulos.map((modulo) => {
@@ -752,14 +769,17 @@ export class ImportacionesService {
         : construirConfigPorDefecto(modulo);
       const catalogo = getCatalogoColumnas(modulo);
 
-      const columnasCrudas = (config?.columns ?? []).filter(
-        (c) =>
-          !(
-            modulo === "viajes" &&
-            c.field === "idPropio2" &&
-            !tenantIdPropio2?.idPropio2Habilitado
-          ),
-      );
+      const columnasCrudas = (config?.columns ?? []).filter((c) => {
+        if (modulo !== "viajes") return true;
+        if (c.field === "idPropio2" && !tenantIdPropio2?.idPropio2Habilitado)
+          return false;
+        if (
+          c.field === "numeroIdentificacionPersonalizado" &&
+          !tenantIdPropio2?.idPropio1Habilitado
+        )
+          return false;
+        return true;
+      });
 
       const columnas: ColumnaEsperada[] = columnasCrudas.map((c) => {
         const enCatalogo = catalogo.find((cat) => cat.field === c.field);
@@ -1320,22 +1340,22 @@ export class ImportacionesService {
       where: { tenantId, modulo, activo: true },
     });
 
-    // "ID Propio 2" no tiene contraparte en el catálogo genérico
-    // (construirConfigPorDefecto no es tenant-aware) — se resuelve acá para
-    // no inyectar/crear una columna mapeada a un campo que el tenant tiene
-    // deshabilitado, evitando que un Excel con un encabezado que matchee por
-    // casualidad termine escribiendo el campo igual.
-    const idPropio2Habilitado =
+    // "ID Propio 1"/"ID Propio 2" no tienen contraparte en el catálogo
+    // genérico (construirConfigPorDefecto no es tenant-aware) — se resuelve
+    // acá para no inyectar/crear una columna mapeada a un campo que el
+    // tenant tiene deshabilitado, evitando que un Excel con un encabezado
+    // que matchee por casualidad termine escribiendo el campo igual.
+    const tenantIdentificadores =
       modulo === "viajes"
-        ? Boolean(
-            (
-              await this.prisma.tenant.findUnique({
-                where: { clerkOrgId: tenantId },
-                select: { idPropio2Habilitado: true },
-              })
-            )?.idPropio2Habilitado,
-          )
-        : true;
+        ? await this.prisma.tenant.findUnique({
+            where: { clerkOrgId: tenantId },
+            select: { idPropio1Habilitado: true, idPropio2Habilitado: true },
+          })
+        : null;
+    const idPropio1Habilitado =
+      modulo !== "viajes" || Boolean(tenantIdentificadores?.idPropio1Habilitado);
+    const idPropio2Habilitado =
+      modulo !== "viajes" || Boolean(tenantIdentificadores?.idPropio2Habilitado);
 
     if (!template) {
       // Sin template propio todavía: se genera uno por defecto a partir del
@@ -1347,6 +1367,11 @@ export class ImportacionesService {
       if (!config) {
         throw new NotFoundException(
           `No hay template activo de importación para el módulo "${modulo}". Contactá a soporte.`,
+        );
+      }
+      if (!idPropio1Habilitado) {
+        config.columns = config.columns.filter(
+          (c) => c.field !== "numeroIdentificacionPersonalizado",
         );
       }
       if (!idPropio2Habilitado) {
@@ -1374,6 +1399,11 @@ export class ImportacionesService {
       // 1. Inyectar columnas que falten en la BD pero existan en el catálogo actual
       for (const catCol of catalogo) {
         if (catCol.field === "idPropio2" && !idPropio2Habilitado) continue;
+        if (
+          catCol.field === "numeroIdentificacionPersonalizado" &&
+          !idPropio1Habilitado
+        )
+          continue;
         if (!configData.columns.some((c) => c.field === catCol.field)) {
           columnasInyectadas.add(catCol.field);
           const nueva: ColumnConfig = {

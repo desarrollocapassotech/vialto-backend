@@ -136,10 +136,16 @@ export class ViajesProcessor implements IImportProcessor {
 
     if (numeroIdentificacionPersonalizado) {
       const existing = await this.prisma.viaje.findFirst({
-        where: { tenantId, numeroIdentificacionPersonalizado },
+        where: {
+          tenantId,
+          numeroIdentificacionPersonalizado: {
+            equals: numeroIdentificacionPersonalizado,
+            mode: "insensitive",
+          },
+        },
         select: { id: true },
       });
-      if (existing) return existing.id;
+      return existing?.id ?? null;
     }
 
     const choferId = (row.choferId as string | null) ?? null;
@@ -850,10 +856,11 @@ export class ViajesProcessor implements IImportProcessor {
         if (idKey) {
           if (!rowsByKey.has(idKey)) rowsByKey.set(idKey, []);
           rowsByKey.get(idKey)!.push(rowNum);
+        } else {
+          // Fallback a Clave por Datos Crudos (Ruta, Fechas, Cliente, Transporte, Chofer, Vehículo) sólo cuando NO hay CTG
+          if (!rowsByKey.has(clave)) rowsByKey.set(clave, []);
+          rowsByKey.get(clave)!.push(rowNum);
         }
-        // Clave por Datos Crudos (Ruta, Fechas, Cliente, Transporte, Chofer, Vehículo)
-        if (!rowsByKey.has(clave)) rowsByKey.set(clave, []);
-        rowsByKey.get(clave)!.push(rowNum);
       }
     }
 

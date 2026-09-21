@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   InternalServerErrorException,
+  BadRequestException,
 } from '@nestjs/common';
 import { createClerkClient } from '@clerk/backend';
 import { PrismaService } from '../../shared/prisma/prisma.service';
@@ -179,20 +180,62 @@ export class TenantsService {
     }
   }
 
+  /**
+   * Valida las reglas de dependencia entre los 3 identificadores de Viaje
+   * (ID Sistema, ID Propio 1, ID Propio 2) y aplica la cascada de apagado.
+   * Muta `data` in-place cuando corresponde forzar idPropio2Habilitado=false.
+   * No puede ser un constraint de Prisma (lógica cruzada entre 3 booleans).
+   */
+  private assertIdentificadoresValidos(
+    current: { idSistemaHabilitado: boolean; idPropio1Habilitado: boolean; idPropio2Habilitado: boolean },
+    dto: UpdateTenantDto,
+    data: Record<string, unknown>,
+  ): void {
+    const tocaIdentificadores =
+      dto.idSistemaHabilitado !== undefined ||
+      dto.idPropio1Habilitado !== undefined ||
+      dto.idPropio2Habilitado !== undefined;
+    if (!tocaIdentificadores) return;
+
+    const nextSistema = dto.idSistemaHabilitado ?? current.idSistemaHabilitado;
+    const nextPropio1 = dto.idPropio1Habilitado ?? current.idPropio1Habilitado;
+    let nextPropio2 = dto.idPropio2Habilitado ?? current.idPropio2Habilitado;
+
+    // Cascada silenciosa: apagar Propio 1 sin una decisión explícita sobre
+    // Propio 2 en el mismo request lo apaga también.
+    if (dto.idPropio1Habilitado === false && dto.idPropio2Habilitado === undefined) {
+      nextPropio2 = false;
+      data.idPropio2Habilitado = false;
+    }
+
+    if (!nextSistema && !nextPropio1) {
+      throw new BadRequestException(
+        'Al menos uno de "ID Sistema" o "ID Propio 1" tiene que quedar habilitado.',
+      );
+    }
+    if (nextPropio2 && !nextPropio1) {
+      throw new BadRequestException(
+        'Para habilitar "ID Propio 2" primero tiene que estar habilitado "ID Propio 1".',
+      );
+    }
+  }
+
   async update(clerkOrgId: string, dto: UpdateTenantDto) {
-    await this.findOne(clerkOrgId);
+    const current = await this.findOne(clerkOrgId);
+    const data: Record<string, unknown> = {
+      ...dto,
+      billingStatus: dto.billingStatus,
+      billingRenewsAt:
+        dto.billingRenewsAt === undefined
+          ? undefined
+          : dto.billingRenewsAt
+            ? new Date(dto.billingRenewsAt)
+            : null,
+    };
+    this.assertIdentificadoresValidos(current, dto, data);
     return this.prisma.tenant.update({
       where: { clerkOrgId },
-      data: {
-        ...dto,
-        billingStatus: dto.billingStatus,
-        billingRenewsAt:
-          dto.billingRenewsAt === undefined
-            ? undefined
-            : dto.billingRenewsAt
-              ? new Date(dto.billingRenewsAt)
-              : null,
-      },
+      data,
     });
   }
 

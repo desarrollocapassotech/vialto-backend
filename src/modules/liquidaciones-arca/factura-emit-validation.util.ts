@@ -4,6 +4,12 @@ function blank(v: string | null | undefined): boolean {
   return v == null || String(v).trim() === '';
 }
 
+export function isArgentinaPais(paisRaw?: string | null): boolean {
+  if (!paisRaw || !paisRaw.trim()) return true;
+  const p = paisRaw.trim().toLowerCase();
+  return p === 'ar' || p === 'arg' || p === 'argentina';
+}
+
 export type FacturaEmitEmisor = {
   cuitEmisor?: string | null;
   razonSocial?: string | null;
@@ -17,6 +23,8 @@ export type FacturaEmitCliente = {
   direccion?: string | null;
   idFiscal?: string | null;
   condicionIva?: number | null;
+  pais?: string | null;
+  condicionTributaria?: string | null;
 };
 
 /** Lista legible de datos faltantes para emitir Factura A/B con PDF completo. */
@@ -36,8 +44,16 @@ export function collectFacturaEmitMissingFields(args: {
   if (!c || blank(c.nombre)) missing.push('Cliente: nombre');
   if (!c || blank(c.direccion)) missing.push('Cliente: domicilio');
   if (!c || blank(c.idFiscal)) missing.push('Cliente: CUIT');
-  if (c?.condicionIva == null || !Number.isFinite(c.condicionIva)) {
-    missing.push('Cliente: condición de IVA');
+
+  const esAR = isArgentinaPais(c?.pais);
+  if (esAR) {
+    if (c?.condicionIva == null || !Number.isFinite(c.condicionIva)) {
+      missing.push('Cliente: condición de IVA');
+    }
+  } else {
+    if (blank(c?.condicionTributaria)) {
+      missing.push('Cliente: condición tributaria');
+    }
   }
 
   return missing;
@@ -54,3 +70,4 @@ export function assertFacturaEmitDatosCompletos(args: {
     `No se puede emitir el comprobante. Faltan datos: ${missing.join('; ')}.`,
   );
 }
+

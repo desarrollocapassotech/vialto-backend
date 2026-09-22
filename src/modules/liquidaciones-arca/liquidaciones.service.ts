@@ -642,14 +642,26 @@ export class LiquidacionesService {
                 id: true,
                 numero: true,
                 cliente: {
-                  select: { nombre: true, idFiscal: true, direccion: true },
+                  select: {
+                    nombre: true,
+                    idFiscal: true,
+                    direccion: true,
+                    pais: true,
+                    condicionTributaria: true,
+                  },
                 },
               },
             },
           },
         },
         transportista: {
-          select: { idFiscal: true, condicionIva: true, domicilio: true },
+          select: {
+            idFiscal: true,
+            condicionIva: true,
+            domicilio: true,
+            pais: true,
+            condicionTributaria: true,
+          },
         },
       },
     });
@@ -687,7 +699,10 @@ export class LiquidacionesService {
     // Re-evaluamos el cbteTipo dinámicamente para dar retrocompatibilidad a borradores
     // históricos que hayan quedado con el default(60) siendo monotributistas.
     // Lanza BadRequestException si falta el dato, logrando el fail-fast antes de tocar la BD.
-    const cbteTipoFinal = getCbteTipoCvlp(liquidacion.transportista?.condicionIva);
+    const cbteTipoFinal = getCbteTipoCvlp(
+      liquidacion.transportista?.condicionIva,
+      liquidacion.transportista?.pais,
+    );
 
     // Idempotencia: si el payload no cambió y hay un hash previo, no re-emitir
     const payloadHash = this.buildPayloadHash(liquidacion.id, liquidacion.liquido, config.ambiente);
@@ -1713,6 +1728,8 @@ export class LiquidacionesService {
             idFiscal: true,
             direccion: true,
             condicionIva: true,
+            condicionTributaria: true,
+            pais: true,
           },
         },
       },
@@ -1758,7 +1775,10 @@ export class LiquidacionesService {
       cliente: facturaRaw.cliente,
     });
 
-    const cbteTipoFinal = getCbteTipoFactura(facturaRaw.cliente.condicionIva);
+    const cbteTipoFinal = getCbteTipoFactura(
+      facturaRaw.cliente.condicionIva,
+      facturaRaw.cliente.pais,
+    );
     const ivaPctDefault = resolveIvaPct(facturaRaw.ivaPct ?? config.ivaGastosAdmin);
 
     const lineasInput: FacturaLineaInput[] =

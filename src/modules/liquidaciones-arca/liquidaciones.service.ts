@@ -1787,6 +1787,9 @@ export class LiquidacionesService {
             descripcion: l.descripcion,
             importe: l.importe,
             ivaPct: l.ivaPct,
+            producto: l.producto,
+            cantidad: l.cantidad,
+            precioUnitario: l.precioUnitario,
           }))
         : defaultFacturaLineas(facturaRaw, facturaRaw.viajes);
 

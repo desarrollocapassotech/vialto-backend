@@ -145,7 +145,6 @@ export class ImportacionesController {
       dto.ciudadesNormalizadas,
       dto.filasExcluidas,
       dto.confirmarCamposFaltantes,
-      dto.confirmarFacturasDuplicadas,
       dto.decisionesCampoUnicoDuplicado,
     );
   }

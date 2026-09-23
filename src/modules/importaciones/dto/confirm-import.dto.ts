@@ -59,10 +59,6 @@ export class ConfirmImportDto {
   @IsBoolean()
   confirmarCamposFaltantes?: boolean;
 
-  /** Solo viajes: el usuario confirmó que varios viajes nuevos comparten número de factura (se reutiliza y suma en vez de duplicar). */
-  @IsOptional()
-  @IsBoolean()
-  confirmarFacturasDuplicadas?: boolean;
 
   /** Clientes/Transportistas/Choferes: decisión por fila ("ignorar" o "actualizar") para cada conflicto de campo único (ID Fiscal/DNI) detectado en el preview (ver `PreviewResult.advertenciasCampoUnicoDuplicado`). */
   @IsOptional()

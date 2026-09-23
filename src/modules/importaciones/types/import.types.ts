@@ -215,13 +215,8 @@ export interface PreviewResult {
    */
   entidadesNuevas?: number;
   entidadesActualizadas?: number;
-  /**
-   * Solo viajes: números de factura que van a terminar compartidos por más
-   * de un viaje nuevo (o que ya existen de otro import) — `confirm()` los
-   * reutiliza y suma el importe en vez de duplicarlos, pero necesita
-   * confirmación explícita antes (`ConfirmImportDto.confirmarFacturasDuplicadas`).
-   */
-  advertenciasFacturasDuplicadas?: { numero: string; filas: number[] }[];
+
+  erroresConsistenciaFacturas?: { numero: string; clientes: string[] }[];
   /**
    * Clientes/Transportistas/Choferes: filas con un conflicto de campo único
    * (ID Fiscal o DNI) — ver `CampoUnicoConflicto`. `confirm()` exige una

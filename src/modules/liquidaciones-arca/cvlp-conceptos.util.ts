@@ -27,12 +27,55 @@ export function buildCvlpConceptosList(args: {
   comision: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
-  viajes?: { id: string; numero: string | number }[];
+  viajes?: {
+    id: string;
+    numero: string | number;
+    bruto?: number;
+    comision?: number;
+    ivaPct?: number;
+  }[];
 }): ConceptoFacturable[] {
-  const conceptos: ConceptoFacturable[] = [
-    { descripcion: 'Fletes', importe: args.bruto, ivaPct: args.ivaPctDefault },
-    { descripcion: 'Comisión', importe: -args.comision, ivaPct: args.ivaPctDefault },
-  ];
+  const conceptos: ConceptoFacturable[] = [];
+
+  const tieneDesgloseViajes =
+    args.viajes &&
+    args.viajes.length > 0 &&
+    args.viajes.some((v) => v.bruto != null);
+
+  if (tieneDesgloseViajes) {
+    const fletesPorIva = new Map<number, number>();
+    const comisionPorIva = new Map<number, number>();
+
+    for (const v of args.viajes!) {
+      const vIva = v.ivaPct ?? args.ivaPctDefault;
+      fletesPorIva.set(vIva, round2((fletesPorIva.get(vIva) ?? 0) + (v.bruto ?? 0)));
+      comisionPorIva.set(vIva, round2((comisionPorIva.get(vIva) ?? 0) + (v.comision ?? 0)));
+    }
+
+    const hasMultipleIvas = fletesPorIva.size > 1;
+
+    for (const [iva, monto] of fletesPorIva.entries()) {
+      if (monto !== 0) {
+        conceptos.push({
+          descripcion: hasMultipleIvas ? `Fletes (IVA ${iva}%)` : 'Fletes',
+          importe: monto,
+          ivaPct: iva,
+        });
+      }
+    }
+    for (const [iva, monto] of comisionPorIva.entries()) {
+      if (monto !== 0) {
+        conceptos.push({
+          descripcion: hasMultipleIvas ? `Comisión (IVA ${iva}%)` : 'Comisión',
+          importe: -monto,
+          ivaPct: iva,
+        });
+      }
+    }
+  } else {
+    conceptos.push({ descripcion: 'Fletes', importe: args.bruto, ivaPct: args.ivaPctDefault });
+    conceptos.push({ descripcion: 'Comisión', importe: -args.comision, ivaPct: args.ivaPctDefault });
+  }
   for (const l of args.lineas ?? []) {
     if (!l.monto || l.monto === 0) continue;
     
@@ -83,15 +126,41 @@ export function computeLiquidacionTotales(args: {
   comision: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
-  viajes?: { id: string; numero: string | number }[];
+  viajes?: {
+    id: string;
+    numero: string | number;
+    bruto?: number;
+    comision?: number;
+    ivaPct?: number;
+  }[];
 }): { impNeto: number; impIva: number; liquido: number } {
   const defaultPct = Number(args.ivaPctDefault);
-  const ivaPct = Number.isFinite(defaultPct) ? defaultPct : 0;
+  const ivaPctFallback = Number.isFinite(defaultPct) ? defaultPct : 0;
   const bruto = round2(args.bruto);
   const comision = round2(args.comision);
   const baseFleteComision = round2(bruto - comision);
-  const ivaGeneral =
-    ivaPct > 0 ? round2((baseFleteComision * ivaPct) / 100) : 0;
+
+  let ivaGeneral = 0;
+
+  const tieneDesgloseViajes =
+    args.viajes &&
+    args.viajes.length > 0 &&
+    args.viajes.some((v) => v.bruto != null);
+
+  if (tieneDesgloseViajes) {
+    for (const v of args.viajes!) {
+      const vIva = v.ivaPct ?? ivaPctFallback;
+      const vBase = round2((v.bruto ?? 0) - (v.comision ?? 0));
+      if (vIva > 0) {
+        ivaGeneral = round2(ivaGeneral + round2((vBase * vIva) / 100));
+      }
+    }
+  } else {
+    ivaGeneral =
+      ivaPctFallback > 0
+        ? round2((baseFleteComision * ivaPctFallback) / 100)
+        : 0;
+  }
 
   let conceptosBase = 0;
   let conceptosIva = 0;
@@ -100,7 +169,7 @@ export function computeLiquidacionTotales(args: {
     const pct =
       typeof l.ivaPct === 'number' && Number.isFinite(l.ivaPct)
         ? l.ivaPct
-        : ivaPct;
+        : ivaPctFallback;
     const veces =
       l.modoAplicacion === 'TODOS_LOS_VIAJES' &&
       args.viajes &&

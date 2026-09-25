@@ -573,6 +573,12 @@ export class FacturacionService {
     tramos: { select: this.TRAMO_SELECT, orderBy: { orden: "asc" as const } },
   };
 
+  /** Más nueva primero; `createdAt` desempata facturas con la misma fecha de emisión. */
+  private readonly FACTURAS_ORDER_BY = [
+    { fechaEmision: "desc" as const },
+    { createdAt: "desc" as const },
+  ];
+
   async uploadComprobante(
     tenantId: string,
     file: Express.Multer.File,
@@ -674,7 +680,7 @@ export class FacturacionService {
     const tieneArca = await this.tieneArca(tenantId);
     const rows = await this.prisma.factura.findMany({
       where: { tenantId, ...(clienteId ? { clienteId } : {}) },
-      orderBy: { fechaEmision: "desc" },
+      orderBy: this.FACTURAS_ORDER_BY,
       include: this.FACTURA_INCLUDE,
       take: 200,
     });
@@ -691,7 +697,7 @@ export class FacturacionService {
     if (query.estado) {
       const rows = await this.prisma.factura.findMany({
         where,
-        orderBy: { fechaEmision: "desc" },
+        orderBy: this.FACTURAS_ORDER_BY,
         include,
       });
       const shaped = await this.shapeManyConNombre(rows, tieneArca);
@@ -711,7 +717,7 @@ export class FacturacionService {
       this.prisma.factura.count({ where }),
       this.prisma.factura.findMany({
         where,
-        orderBy: { fechaEmision: "desc" },
+        orderBy: this.FACTURAS_ORDER_BY,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include,

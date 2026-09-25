@@ -5,6 +5,7 @@ import { NotificacionesCronService } from './notificaciones-cron.service';
 import { NotificacionesFeedService } from './notificaciones-feed.service';
 import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
+import { CuentaCorrienteVencimientoEvaluator } from './evaluators/cuenta-corriente-vencimiento.evaluator';
 import { EmailModule } from '../../shared/email/email.module';
 import { UsersModule } from '../../core/users/users.module';
 
@@ -17,6 +18,7 @@ import { UsersModule } from '../../core/users/users.module';
     NotificacionesFeedService,
     FacturaPorVencerEvaluator,
     CargaSospechosaEvaluator,
+    CuentaCorrienteVencimientoEvaluator,
   ],
   exports: [NotificacionesConfigService, NotificacionesCronService],
 })

@@ -250,7 +250,7 @@ export class CuentaCorrienteService {
     return row;
   }
 
-  async create(tenantId: string, dto: CreateMovimientoCcDto) {
+  async create(tenantId: string, dto: CreateMovimientoCcDto, userId?: string) {
     const { contraparteId, condicionPagoDias } = await this.assertContraparte(
       tenantId,
       dto,
@@ -279,6 +279,7 @@ export class CuentaCorrienteService {
           dto.formaPago?.trim() ||
           dto.referencia?.trim() ||
           null,
+        createdBy: userId ?? null,
       },
     });
   }
@@ -352,7 +353,7 @@ export class CuentaCorrienteService {
     return this.prisma.movimientoCuentaCorriente.delete({ where: { id } });
   }
 
-  async registrarPago(tenantId: string, dto: RegistrarPagoDto) {
+  async registrarPago(tenantId: string, dto: RegistrarPagoDto, userId?: string) {
     const { contraparteId } = await this.assertContraparte(tenantId, dto);
     const importe = this.normalizeImporte(dto.importe);
     return this.prisma.movimientoCuentaCorriente.create({
@@ -368,6 +369,7 @@ export class CuentaCorrienteService {
         moneda: dto.moneda?.trim() || 'ARS',
         fecha: new Date(dto.fecha),
         referencia: dto.formaPago?.trim() || dto.referencia?.trim() || null,
+        createdBy: userId ?? null,
       },
     });
   }
@@ -544,7 +546,7 @@ export class CuentaCorrienteService {
     });
   }
 
-  async crearImputacion(tenantId: string, dto: CreateImputacionCcDto) {
+  async crearImputacion(tenantId: string, dto: CreateImputacionCcDto, userId?: string) {
     const importe = this.normalizeImporte(dto.importe);
     const [pago, cargo] = await Promise.all([
       this.prisma.movimientoCuentaCorriente.findFirst({
@@ -583,7 +585,7 @@ export class CuentaCorrienteService {
 
     return this.prisma.$transaction(async (tx) => {
       const creada = await tx.imputacionCuentaCorriente.create({
-        data: { tenantId, pagoId: pago.id, cargoId: cargo.id, importe },
+        data: { tenantId, pagoId: pago.id, cargoId: cargo.id, importe, createdBy: userId ?? null },
       });
       await this.recalcularEstados(tx, pago.id, cargo.id);
 

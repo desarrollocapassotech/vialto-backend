@@ -229,7 +229,10 @@ export class LiquidacionesService {
       where: {
         id: { in: dto.viajeIds },
         tenantId,
-        transportistaId: dto.transportistaId,
+        OR: [
+          { transportistaId: dto.transportistaId },
+          { transportistaEfectivoId: dto.transportistaId },
+        ],
       },
     });
 
@@ -486,7 +489,14 @@ export class LiquidacionesService {
     if (dto.viajeIds !== undefined) {
       const nuevosIds = [...new Set(dto.viajeIds)];
       const viajesConMeta = await this.prisma.viaje.findMany({
-        where: { id: { in: nuevosIds }, tenantId, transportistaId: liq.transportistaId },
+        where: {
+          id: { in: nuevosIds },
+          tenantId,
+          OR: [
+            { transportistaId: liq.transportistaId },
+            { transportistaEfectivoId: liq.transportistaId },
+          ],
+        },
       });
       if (viajesConMeta.length !== nuevosIds.length) {
         throw new BadRequestException(
@@ -1558,7 +1568,7 @@ export class LiquidacionesService {
         );
       }
 
-      return this.prisma.factura.findUnique({
+      const resultado = await this.prisma.factura.findUnique({
         where: { id: facturaId },
         include: {
           viajes: { select: { id: true } },
@@ -1572,6 +1582,14 @@ export class LiquidacionesService {
           },
         },
       });
+      // `viajeIds` no es una columna real — el frontend (`Factura.viajeIds: string[]`,
+      // requerido, ver `FacturaLineasEditor.tsx`) lo espera siempre presente, igual que
+      // `toShape()` en `facturacion.service.ts` lo arma para el resto de los endpoints
+      // de Factura. Sin esto, `AnularFacturaModal` crasheaba (pantalla en blanco) al
+      // recibir la factura recién anulada — bug real reportado por QA.
+      return resultado
+        ? { ...resultado, viajeIds: resultado.viajes.map((v) => v.id) }
+        : resultado;
     } catch (err) {
       const isConectividad =
         err instanceof ArcaException &&
@@ -1605,7 +1623,15 @@ export class LiquidacionesService {
         this.logger.warn(
           `[anularFacturaArca] ${facturaId} pendiente_cae por fallo de conectividad`,
         );
-        return this.prisma.factura.findUnique({ where: { id: facturaId } });
+        const resultado = await this.prisma.factura.findUnique({
+          where: { id: facturaId },
+          include: { viajes: { select: { id: true } } },
+        });
+        // Mismo motivo que el return de éxito más arriba: `viajeIds` es requerido en
+        // el frontend (`Factura.viajeIds: string[]`).
+        return resultado
+          ? { ...resultado, viajeIds: resultado.viajes.map((v) => v.id) }
+          : resultado;
       }
 
       this.logger.error(`Error al anular factura ${facturaId}: ${errMsg}`);
@@ -2060,7 +2086,7 @@ export class LiquidacionesService {
         );
       }
 
-      return this.prisma.factura.findUnique({
+      const resultadoEmision = await this.prisma.factura.findUnique({
         where: { id: facturaId },
         include: {
           viajes: { select: { id: true } },
@@ -2069,6 +2095,12 @@ export class LiquidacionesService {
           },
         },
       });
+      // `viajeIds` no es una columna real — el frontend (`Factura.viajeIds: string[]`,
+      // requerido) lo espera siempre presente, igual que `toShape()` en
+      // `facturacion.service.ts` lo arma para el resto de los endpoints de Factura.
+      return resultadoEmision
+        ? { ...resultadoEmision, viajeIds: resultadoEmision.viajes.map((v) => v.id) }
+        : resultadoEmision;
     } catch (err) {
       const isConectividad =
         err instanceof ArcaException && err.code === ARCA_ERROR_CODES.CONECTIVIDAD;
@@ -2092,7 +2124,13 @@ export class LiquidacionesService {
         this.logger.warn(
           `[emitirFacturaArca] ${facturaId} pendiente_cae por fallo de conectividad`,
         );
-        return this.prisma.factura.findUnique({ where: { id: facturaId } });
+        const resultadoPendiente = await this.prisma.factura.findUnique({
+          where: { id: facturaId },
+          include: { viajes: { select: { id: true } } },
+        });
+        return resultadoPendiente
+          ? { ...resultadoPendiente, viajeIds: resultadoPendiente.viajes.map((v) => v.id) }
+          : resultadoPendiente;
       }
 
       this.logger.error(`Error al emitir factura ${facturaId}: ${errMsg}`);

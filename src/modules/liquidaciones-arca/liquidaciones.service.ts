@@ -310,12 +310,28 @@ export class LiquidacionesService {
         ? dto.ivaPct
         : (config?.ivaGastosAdmin ?? 21);
     const lineasResueltas = await this.resolveConceptoLineas(tenantId, dto.conceptosLineas);
+    const viajesPayload = viajesConMeta.map(v => {
+      const tnDestino = v.cantidadTransportista ?? null;
+      const tarifaTransportista = v.precioUnitarioTransportista ?? null;
+      const subtotal = tnDestino != null && tarifaTransportista != null
+        ? round2(tnDestino * tarifaTransportista)
+        : round2(v.precioTransportistaExterno ?? 0);
+      const vComision = round2(subtotal * comisionPct / 100);
+      return {
+        id: v.id,
+        numero: v.numero ?? '',
+        bruto: subtotal,
+        comision: vComision,
+        ivaPct: v.precioTransportistaIvaIncluidoPct ?? 0,
+      };
+    });
+
     const montos = computeLiquidacionTotales({
       bruto,
       comision,
       ivaPctDefault: ivaPct,
       lineas: lineasResueltas,
-      viajes,
+      viajes: viajesPayload,
     });
     const gastosAdminIva = montos.impIva;
     const liquido = montos.liquido;
@@ -396,7 +412,7 @@ export class LiquidacionesService {
     const liq = await this.prisma.liquidacion.findUnique({
       where: { id },
       include: {
-        viajes: { select: { viajeId: true, viaje: { select: { numero: true } } } },
+        viajes: { select: { viajeId: true, viaje: { select: { numero: true, cantidadTransportista: true, precioUnitarioTransportista: true, precioTransportistaExterno: true, precioTransportistaIvaIncluidoPct: true } } } },
       },
     });
     if (!liq || liq.tenantId !== tenantId) {
@@ -450,12 +466,22 @@ export class LiquidacionesService {
     }
 
     // ── Reemplazo del conjunto de viajes (solo borrador) ────────────────────
-    let viajesVigentes = liq.viajes.map((v) => ({
-      id: v.viajeId,
-      numero: v.viaje.numero ?? '',
-    }));
+    let viajesPayload = liq.viajes.map((v) => {
+      const tnDestino = v.viaje.cantidadTransportista ?? null;
+      const tarifaTransportista = v.viaje.precioUnitarioTransportista ?? null;
+      const subtotal = tnDestino != null && tarifaTransportista != null
+        ? round2(tnDestino * tarifaTransportista)
+        : round2(v.viaje.precioTransportistaExterno ?? 0);
+      return {
+        id: v.viajeId,
+        numero: v.viaje.numero ?? '',
+        bruto: subtotal,
+        comision: 0,
+        ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+      };
+    });
     let brutoActual = liq.bruto as number;
-    let viajeIdsParaSync = viajesVigentes.map((v) => v.id);
+    let viajeIdsParaSync = viajesPayload.map((v) => v.id);
 
     if (dto.viajeIds !== undefined) {
       const nuevosIds = [...new Set(dto.viajeIds)];
@@ -468,7 +494,7 @@ export class LiquidacionesService {
         );
       }
 
-      const existentesSet = new Set(viajesVigentes.map((v) => v.id));
+      const existentesSet = new Set(viajesPayload.map((v) => v.id));
       const agregados = viajesConMeta.filter((v) => !existentesSet.has(v.id));
       if (agregados.length > 0) {
         await this.assertViajesSinLiquidacionActiva(
@@ -529,7 +555,21 @@ export class LiquidacionesService {
       }
 
       viajeIdsParaSync = [...new Set([...viajeIdsParaSync, ...nuevosIds])];
-      viajesVigentes = viajesConMeta.map((v) => ({ id: v.id, numero: v.numero ?? '' }));
+      viajesPayload = viajesConMeta.map((v) => {
+        const tnDestino = v.cantidadTransportista ?? null;
+        const tarifaTransportista = v.precioUnitarioTransportista ?? null;
+        const subtotal =
+          tnDestino != null && tarifaTransportista != null
+            ? round2(tnDestino * tarifaTransportista)
+            : round2(v.precioTransportistaExterno ?? 0);
+        return {
+          id: v.id,
+          numero: v.numero ?? '',
+          bruto: subtotal,
+          comision: 0,
+          ivaPct: v.precioTransportistaIvaIncluidoPct ?? 0,
+        };
+      });
       brutoActual = brutoNuevo;
       data.cantViajes = nuevosIds.length;
       data.bruto = brutoNuevo;
@@ -545,6 +585,10 @@ export class LiquidacionesService {
       const comisionPct =
         dto.comisionPct !== undefined ? dto.comisionPct : liq.comisionPct;
       const bruto = brutoActual;
+      
+      for (const v of viajesPayload) {
+        v.comision = round2((v.bruto ?? 0) * comisionPct / 100);
+      }
       const comision = round2(bruto * comisionPct / 100);
 
       let ivaPct = dto.ivaPct;
@@ -575,7 +619,7 @@ export class LiquidacionesService {
         comision,
         ivaPctDefault: ivaPct,
         lineas: lineasResueltas,
-        viajes: viajesVigentes,
+        viajes: viajesPayload,
       });
       data.comisionPct = comisionPct;
       data.comision = comision;
@@ -641,6 +685,10 @@ export class LiquidacionesService {
               select: {
                 id: true,
                 numero: true,
+                cantidadTransportista: true,
+                precioUnitarioTransportista: true,
+                precioTransportistaExterno: true,
+                precioTransportistaIvaIncluidoPct: true,
                 cliente: {
                   select: {
                     nombre: true,
@@ -783,12 +831,27 @@ export class LiquidacionesService {
       });
       const lineas = this.lineasFromStored(lineasDb);
       this.assertAfipIvaRates(ivaPct, lineas);
+      const viajesPayload = liquidacion.viajes.map((v) => {
+        const tnDestino = v.viaje.cantidadTransportista ?? null;
+        const tarifaTransportista = v.viaje.precioUnitarioTransportista ?? null;
+        const subtotal = tnDestino != null && tarifaTransportista != null
+          ? round2(tnDestino * tarifaTransportista)
+          : round2(v.viaje.precioTransportistaExterno ?? 0);
+        return {
+          id: v.viajeId,
+          numero: v.viaje.numero ?? '',
+          bruto: subtotal,
+          comision: round2(subtotal * liquidacion.comisionPct / 100),
+          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+        };
+      });
+
       const conceptos = buildCvlpConceptosList({
         bruto: liquidacion.bruto,
         comision: liquidacion.comision,
         ivaPctDefault: ivaPct,
         lineas,
-        viajes: liquidacion.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
+        viajes: viajesPayload,
       });
       // Autocuración: si se editaron conceptos y el líquido quedó desfasado, alinear antes de AFIP.
       const montos = computeLiquidacionTotales({
@@ -796,7 +859,7 @@ export class LiquidacionesService {
         comision: liquidacion.comision,
         ivaPctDefault: ivaPct,
         lineas,
-        viajes: liquidacion.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
+        viajes: viajesPayload,
       });
       if (
         montos.liquido !== liquidacion.liquido ||
@@ -920,7 +983,7 @@ export class LiquidacionesService {
 
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
-      include: { viajes: { select: { viajeId: true, viaje: { select: { numero: true } } } } },
+      include: { viajes: { select: { viajeId: true, viaje: { select: { numero: true, cantidadTransportista: true, precioUnitarioTransportista: true, precioTransportistaExterno: true, precioTransportistaIvaIncluidoPct: true } } } } },
     });
     if (!liquidacion || liquidacion.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
@@ -995,12 +1058,27 @@ export class LiquidacionesService {
         where: { liquidacionId },
         orderBy: { orden: 'asc' },
       });
+      const viajesPayload = liquidacion.viajes.map((v) => {
+        const tnDestino = v.viaje.cantidadTransportista ?? null;
+        const tarifaTransportista = v.viaje.precioUnitarioTransportista ?? null;
+        const subtotal = tnDestino != null && tarifaTransportista != null
+          ? round2(tnDestino * tarifaTransportista)
+          : round2(v.viaje.precioTransportistaExterno ?? 0);
+        return {
+          id: v.viajeId,
+          numero: v.viaje.numero ?? '',
+          bruto: subtotal,
+          comision: round2(subtotal * liquidacion.comisionPct / 100),
+          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+        };
+      });
+
       const conceptos = buildCvlpConceptosList({
         bruto: Number(liquidacion.bruto || 0),
         comision: Number(liquidacion.comision || 0),
         ivaPctDefault: ivaPct,
         lineas: this.lineasFromStored(lineasDb),
-        viajes: liquidacion.viajes.map((v) => ({ id: v.viajeId, numero: v.viaje.numero ?? '' })),
+        viajes: viajesPayload,
       });
 
       const fechaNc = formatFechaCbte(new Date());
@@ -1672,6 +1750,10 @@ export class LiquidacionesService {
                 fechaDescarga: true,
                 origen: true,
                 destino: true,
+                cantidadTransportista: true,
+                precioUnitarioTransportista: true,
+                precioTransportistaExterno: true,
+                precioTransportistaIvaIncluidoPct: true,
                 cliente: {
                   select: {
                     id: true,

@@ -280,7 +280,7 @@ src/
   modules/
     viajes/                 ← ✅ implementado — multi-vehículo/destino/producto, moneda, MIC·CRT
     facturacion/            ← ✅ implementado — extiende viajes, campos ARCA (CAE) en Factura
-    cuenta-corriente/       ← ✅ implementado
+    cuenta-corriente/       ← ✅ implementado — por cliente (a cobrar) y proveedor/fletero (a pagar), imputación de pagos a cargos, sync bidireccional con viajes/facturación, tablero, alertas por email, export PDF/Excel
     stock/                  ← ✅ implementado — operaciones (ingreso/egreso/división), lotes, presentaciones por producto, remito interno
     combustible/            ← ✅ implementado — CRUD, detección de cargas sospechosas, dashboard, export Excel, fotos (Cloudinary), API paralela para choferes vía chofer-auth. El tag Swagger "[Próximamente]" quedó desactualizado: el módulo está activo.
     mantenimiento/          ← ✅ implementado (parcial) — CRUD de `Intervencion` en Postgres; el checklist diario en Firestore que describe este documento NO está implementado todavía
@@ -556,29 +556,66 @@ Pedido real de LSF: facturan a clientes separando cada viaje en tramos con disti
 
 ---
 
-### `cuenta-corriente` — Cuenta corriente por cliente
-`origen` distingue movimientos manuales de los generados automáticamente al cerrar un viaje (uno por viaje, `@@unique([tenantId, viajeId])`). Ya no calcula/persiste `saldoPost` por movimiento.
+### `cuenta-corriente` — Cuenta corriente por cliente y por proveedor/fletero (rediseñado sep 2026)
+
+Reescrito desde cero respecto a la versión inicial (que era solo por cliente, un movimiento por viaje, sin moneda/vencimiento/estados). Hoy cubre ambos lados: **cliente** (a cobrar) y **proveedor/fletero** — un `Transportista` actuando como proveedor, ej. Riedel pagándole a sus fleteros — (a pagar), con el mismo modelo.
+
+- **`contraparteId`** = `clienteId ?? proveedorId`, columna auxiliar no nula que existe solo para que el unique por viaje funcione: en Postgres un unique constraint con columnas nullable no bloquea duplicados cuando la columna que falta es NULL.
+- **Dos ejes de estado independientes, nunca mezclados** (mismo criterio que `Factura`/`Liquidacion`, ver más arriba): un `cargo` (venta/compra) usa `estadoDisponibilidad` (`pendiente|parcial|cancelado|anulado`, cuánto de su importe cubren las imputaciones recibidas); un `pago` (cobro/pago) usa `estadoImputacion` (`no_imputado|imputado_parcial|imputado`, cuánto de su importe fue aplicado a cargos puntuales). Ambos se recalculan siempre vía `ImputacionCuentaCorriente`, nunca se editan a mano.
+- **`origen`**: `manual | viaje | factura` — distingue movimientos cargados a mano de los generados automáticamente al cerrar un viaje (`@@unique([tenantId, viajeId, contraparteId])`) o al emitir/editar una Factura (`@@unique([tenantId, facturaId])`).
+- **Se genera siempre, esté o no contratado el módulo**: `RequireModule('cuenta-corriente')` solo gatea la *exposición* (el controller), no la generación — un tenant con `viajes`/`facturacion` pero sin `cuenta-corriente` igual acumula sus movimientos por dentro. El día que contrata el módulo, ya tiene el historial completo sin migración (ver `ViajesService.backfillCuentaCorriente` / `FacturacionService.backfillCuentaCorriente` para poblar retroactivamente el historial previo a este rediseño).
+- **Sync bidireccional** con Viajes (`upsertCargoFinalizacion`/`revertirCargoFinalizacionSiCorresponde` para el cliente, `upsertCargoTransportista`/`sincronizarCargoCcTransportista` + `registrarPagoTransportistaDesdeCuentaCorriente` para el fletero, espejando `Viaje.pagosTransportista`) y con Facturación (`upsertCargoFactura`/`revertirCargoFacturaSiCorresponde`, `registrarPagoDesdeCuentaCorriente`/`eliminarPagoDesdeCuentaCorriente`, con `ImputacionCuentaCorriente.pagoFacturacionId` espejando el `Pago` de Facturación cuando el cargo tiene `facturaId`) — anular/reabrir en el módulo de origen revierte el movimiento acá, e imputar un pago acá genera el `Pago` allá.
+- **`Cliente.condicionPagoDias`/`Transportista.condicionPagoDias`** (`Int?`) alimentan la `fechaVencimiento` por defecto de los cargos que se autogeneran.
+- **Moneda por movimiento** (`moneda`, default `ARS`) — los saldos y el tablero agrupan/suman por moneda, nunca la mezclan.
 
 ```prisma
 model MovimientoCuentaCorriente {
-  id         String   @id @default(cuid())
-  tenantId   String
-  clienteId  String
-  viajeId    String?
-  tipo       String   // cargo | pago
-  origen     String   @default("manual") // manual | viaje
-  concepto   String
-  importe    Float
-  fecha      DateTime
-  referencia String?
-  createdAt  DateTime @default(now())
+  id                   String         @id @default(cuid())
+  tenantId             String
+  clienteId            String?
+  proveedorId          String?        // Transportista actuando como proveedor/fletero
+  contraparteId        String         // = clienteId ?? proveedorId (ver arriba)
+  viajeId              String?
+  facturaId            String?
+  tipo                 String         // cargo | pago
+  origen               String         @default("manual") // manual | viaje | factura
+  concepto             String
+  importe              Float
+  moneda               String         @default("ARS")
+  fecha                DateTime
+  fechaVencimiento     DateTime?
+  numeroComprobante    String?        // comprobante externo (sin módulo Facturación) — no confundir con facturaId
+  referencia           String?
+  estadoDisponibilidad String         @default("pendiente") // cargos: pendiente|parcial|cancelado|anulado
+  estadoImputacion     String         @default("no_imputado") // pagos: no_imputado|imputado_parcial|imputado
+  createdAt            DateTime       @default(now())
+  createdBy            String?
 
-  @@unique([tenantId, viajeId])
-  @@index([tenantId])
-  @@index([tenantId, clienteId])
-  @@index([tenantId, clienteId, tipo])
+  imputacionesComoCargo ImputacionCuentaCorriente[] @relation("ImputacionCargo")
+  imputacionesComoPago  ImputacionCuentaCorriente[] @relation("ImputacionPago")
+
+  @@unique([tenantId, viajeId, contraparteId])
+  @@unique([tenantId, facturaId])
+}
+
+/** Aplica un pago/cobro a un cargo puntual (factura/comprobante) — N a N entre pagos y cargos. */
+model ImputacionCuentaCorriente {
+  id                String                    @id @default(cuid())
+  tenantId          String
+  pagoId            String
+  cargoId           String
+  importe           Float
+  createdAt         DateTime                  @default(now())
+  createdBy         String?
+  pagoFacturacionId String?  // espejo del Pago de Facturación cuando el cargo tiene facturaId
+
+  @@unique([pagoId, cargoId])
 }
 ```
+
+**Endpoints** (`cuenta-corriente.controller.ts`): CRUD de movimientos, `POST pagos` (registrar cobro/pago), `GET saldo/cliente/:id` / `GET saldo/proveedor/:id`, `GET tablero` (vencidos / próximos a vencer / sin vencimiento, cada uno `{cobrar, pagar}`, filtrable por período), `POST/DELETE imputaciones`, `GET movimientos/exportar` (movimientos de un período con saldo inicial/final ya calculados — usado tanto por el PDF como por el Excel del frontend), `GET estado-cuenta/pdf` (estado de cuenta de una contraparte por período) y `GET listado-deudores/pdf` (listado agregado de todo lo pendiente de cobro y de pago del tenant) — ambos PDF vía `pdfkit` en `estado-cuenta-pdf.service.ts`, mismo patrón que `liquidaciones-arca/factura-pdf.service.ts`.
+
+**Notificación**: `cuenta-corriente.vencimiento` en el catálogo de `notificaciones/` — avisa por email cuando un cargo vence en los próximos días y sigue con saldo pendiente (evaluator `CuentaCorrienteVencimientoEvaluator`).
 
 ---
 
@@ -1265,7 +1302,7 @@ FASE 1 — Fernández (primer cliente confirmado)
 
 FASE 2 — Riedel
   → módulo: stock ✅ (inventario por depósito, ingresos, egresos con remito automático, divisiones, presentaciones configurables)
-  → módulo: cuenta-corriente (saldo por cliente, pagos, historial)
+  → módulo: cuenta-corriente ✅ (saldo por cliente y por proveedor/fletero, imputación de pagos, tablero, historial)
 
 FASE 3 — Melisa
   → módulo: remitos (PWA para chofer, firma digital) — ⚠️ el que existía se borró en ago 2026 (sin uso real, sin frontend nunca conectado); reconstruir desde cero llegado el momento, ver "`remitos` — eliminado"

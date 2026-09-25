@@ -84,7 +84,7 @@ export class CuentaCorrienteController {
   @Roles('admin', 'superadmin')
   create(@Body() dto: CreateMovimientoCcDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    return this.service.create(auth.tenantId, dto);
+    return this.service.create(auth.tenantId, dto, auth.userId);
   }
 
   @ApiOperation({ summary: 'Registrar pago/cobranza (genera movimiento automáticamente)' })
@@ -92,7 +92,7 @@ export class CuentaCorrienteController {
   @Roles('admin', 'superadmin')
   registrarPago(@Body() dto: RegistrarPagoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    return this.service.registrarPago(auth.tenantId, dto);
+    return this.service.registrarPago(auth.tenantId, dto, auth.userId);
   }
 
   @ApiOperation({ summary: 'Saldo actual de un cliente en cuenta corriente' })
@@ -145,7 +145,7 @@ export class CuentaCorrienteController {
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.crearImputacion(auth.tenantId, dto);
+    return this.service.crearImputacion(auth.tenantId, dto, auth.userId);
   }
 
   @ApiOperation({ summary: 'Deshacer una imputación de pago a cargo' })

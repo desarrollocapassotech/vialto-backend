@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { isArgentinaPais } from './factura-emit-validation.util';
 
 function blank(v: string | null | undefined): boolean {
   return v == null || String(v).trim() === '';
@@ -15,12 +16,16 @@ export type CvlpEmitTransportista = {
   domicilio?: string | null;
   idFiscal?: string | null;
   condicionIva?: number | null;
+  pais?: string | null;
+  condicionTributaria?: string | null;
 };
 
 export type CvlpEmitCliente = {
   nombre?: string | null;
   direccion?: string | null;
   idFiscal?: string | null;
+  pais?: string | null;
+  condicionTributaria?: string | null;
 };
 
 /**
@@ -42,8 +47,15 @@ export function collectCvlpEmitMissingFields(args: {
   const t = args.transportista;
   if (!t || blank(t.domicilio)) missing.push('Transportista: domicilio');
   if (!t || blank(t.idFiscal)) missing.push('Transportista: CUIT');
-  if (t?.condicionIva == null || !Number.isFinite(t.condicionIva)) {
-    missing.push('Transportista: condición de IVA');
+  const esArTransportista = isArgentinaPais(t?.pais);
+  if (esArTransportista) {
+    if (t?.condicionIva == null || !Number.isFinite(t.condicionIva)) {
+      missing.push('Transportista: condición de IVA');
+    }
+  } else {
+    if (blank(t?.condicionTributaria)) {
+      missing.push('Transportista: condición tributaria');
+    }
   }
 
   const c = args.cliente;
@@ -66,3 +78,4 @@ export function assertCvlpEmitDatosCompletos(args: {
     `No se puede emitir el comprobante. Faltan datos: ${missing.join('; ')}.`,
   );
 }
+

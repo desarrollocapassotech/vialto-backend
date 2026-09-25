@@ -612,7 +612,7 @@ export class ViajesService {
     const monto = this.getMontoFinal(viaje);
     const fecha = viaje.fechaFinalizado ?? new Date();
     const numeroVisible = numeroVisibleViaje(viaje);
-    const concepto = `Cargo automático por viaje ${numeroVisible}`;
+    const concepto = `Venta automática por viaje ${numeroVisible}`;
 
     // NOTA: si el cliente del viaje cambia luego de ya tener un cargo generado,
     // este upsert crea un cargo nuevo bajo el cliente nuevo y deja el anterior
@@ -746,7 +746,7 @@ export class ViajesService {
     const moneda = viaje.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS";
     const fecha = viaje.fechaFinalizado ?? new Date();
     const numeroVisible = numeroVisibleViaje(viaje);
-    const concepto = `Cargo automático por viaje ${numeroVisible} (transportista)`;
+    const concepto = `Compra automática por viaje ${numeroVisible}`;
     const pagosJson = Array.isArray(viaje.pagosTransportista)
       ? (viaje.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
       : [];

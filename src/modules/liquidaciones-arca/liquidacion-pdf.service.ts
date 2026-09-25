@@ -10,6 +10,7 @@ import { ArcaConfigService } from "./arca-config.service";
 import { buildComprobanteCvlp } from "./arca-cvlp.util";
 import { cvlpPdfPieFinanciero, resolveIvaPct } from "./arca-iva.util";
 import { buildCvlpConceptosList } from "./cvlp-conceptos.util";
+import { round2 } from "./arca-iva.util";
 import { CBTE_TIPO_NC_CVLP, esNotaDebitoAnulacion } from "./arca.util";
 import {
   drawHomologacionWatermark,
@@ -254,6 +255,10 @@ export class LiquidacionPdfService {
                 fechaDescarga: true,
                 origen: true,
                 destino: true,
+                cantidadTransportista: true,
+                precioUnitarioTransportista: true,
+                precioTransportistaExterno: true,
+                precioTransportistaIvaIncluidoPct: true,
                 cliente: {
                   select: {
                     id: true,
@@ -409,10 +414,27 @@ export class LiquidacionPdfService {
       const ivaDefault = resolveIvaPct(
         (liq as { ivaPct?: number | null }).ivaPct ?? config?.ivaGastosAdmin,
       );
+      
+      const viajesPayload = liq.viajes.map((v) => {
+        const tnDestino = v.viaje.cantidadTransportista ?? null;
+        const tarifaTransportista = v.viaje.precioUnitarioTransportista ?? null;
+        const subtotal = tnDestino != null && tarifaTransportista != null
+          ? round2(tnDestino * tarifaTransportista)
+          : round2(v.viaje.precioTransportistaExterno ?? 0);
+        return {
+          id: v.viajeId,
+          numero: v.viaje.numero ?? '',
+          bruto: subtotal,
+          comision: round2(subtotal * liq.comisionPct / 100),
+          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+        };
+      });
+
       const conceptos = buildCvlpConceptosList({
         bruto: liq.bruto,
         comision: liq.comision,
         ivaPctDefault: ivaDefault,
+        viajes: viajesPayload,
         lineas: (lineasDb ?? []).map(
           (r: {
             nombreSnapshot: string;

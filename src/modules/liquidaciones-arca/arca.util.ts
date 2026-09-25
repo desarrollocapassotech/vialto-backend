@@ -2,6 +2,7 @@
  * Utilidades operativas y de negocio para la integración ARCA / AFIP.
  */
 import { BadRequestException } from '@nestjs/common';
+import { isArgentinaPais } from './factura-emit-validation.util';
 
 /**
  * NOTA DE DISEÑO: En el modelo de base de datos, `factura.numero` es un campo de texto libre
@@ -36,8 +37,15 @@ export function parseNumeroFactura(numero: string): number {
  * (anulación, Facturas A/B) sigue dependiendo de ese dato.
  *
  * @param condicionIva ID de la condición frente al IVA en AFIP
+ * @param pais País del cliente/proveedor
  */
-export function getCbteTipoCvlp(condicionIva?: number | null): number {
+export function getCbteTipoCvlp(
+  condicionIva?: number | null,
+  pais?: string | null,
+): number {
+  if (pais && !isArgentinaPais(pais)) {
+    return 60;
+  }
   if (condicionIva == null) {
     throw new BadRequestException(
       'El transportista no tiene configurada su condición frente al IVA. Actualice sus datos maestros antes de operar.',
@@ -174,9 +182,15 @@ export function normalizeArcaAmbiente(raw: unknown): 'homologacion' | 'produccio
 /**
  * Determina el tipo de Factura A/B según la condición frente al IVA del cliente.
  * - 1: Responsable Inscripto → Factura A (cbteTipo 1)
- * - Resto (monotributo, CF, exento, etc.) → Factura B (cbteTipo 6)
+ * - Resto (monotributo, CF, exento, exterior, etc.) → Factura B (cbteTipo 6)
  */
-export function getCbteTipoFactura(condicionIva?: number | null): number {
+export function getCbteTipoFactura(
+  condicionIva?: number | null,
+  pais?: string | null,
+): number {
+  if (pais && !isArgentinaPais(pais)) {
+    return 6;
+  }
   if (condicionIva == null) {
     throw new BadRequestException(
       'El cliente no tiene configurada su condición frente al IVA. Actualice sus datos maestros antes de operar.',
@@ -195,9 +209,11 @@ export function getCbteTipoFactura(condicionIva?: number | null): number {
 export function getCbteTipoAnulacionFactura(
   cbteTipoOriginal?: number | null,
   condicionIvaCliente?: number | null,
+  pais?: string | null,
 ): number {
   if (cbteTipoOriginal === 1 || cbteTipoOriginal === 3) return 3;
   if (cbteTipoOriginal === 6 || cbteTipoOriginal === 8) return 8;
+  if (pais && !isArgentinaPais(pais)) return 8;
   if (condicionIvaCliente == null) {
     throw new BadRequestException(
       'No se puede determinar el tipo de Nota de Crédito: falta cbteTipo de la factura y condición IVA del cliente.',

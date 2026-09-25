@@ -25,6 +25,27 @@ export class FacturaLineaDto {
   @IsNumber()
   @Type(() => Number)
   ivaPct?: number;
+
+  /**
+   * CTG/ID visible del viaje (`numeroIdentificacionPersonalizado || '#'+numero`) —
+   * solo presente cuando la línea corresponde 1:1 a un viaje vinculado. Permite
+   * reconstruir el "Detalle" enriquecido del PDF de factura ARCA (ver
+   * `buildDetalleFlete`/`matchViajeItem` en `factura-pdf.service.ts`).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  producto?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  cantidad?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  precioUnitario?: number;
 }
 
 export class EmitirFacturaArcaDto {

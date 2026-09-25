@@ -324,8 +324,10 @@ export class ImportacionesService {
         result,
         await this.buildViajesPreview(parsed, valid, created, tenantId, fusionados),
       );
-      result.advertenciasFacturasDuplicadas =
-        await this.viajesProcessor.detectarFacturasDuplicadas(valid, tenantId);
+      result.erroresConsistenciaFacturas = (
+        await this.viajesProcessor.validarConsistenciaFacturas(valid, tenantId)
+      ).map((i) => ({ numero: i.numero, clientes: i.clienteIds }));
+
       result.advertenciasViajesFusionados = fusionados;
     } else if (processorModulo?.filasNuevas) {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
@@ -374,7 +376,6 @@ export class ImportacionesService {
     }[],
     filasExcluidas?: number[],
     confirmarCamposFaltantes?: boolean,
-    confirmarFacturasDuplicadas?: boolean,
     decisionesCampoUnicoDuplicado?: { fila: number; accion: "ignorar" | "actualizar" }[],
   ) {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
@@ -486,19 +487,19 @@ export class ImportacionesService {
     }
 
     // Viajes: si varios viajes nuevos van a compartir número de factura (o
-    // ese número ya existe de otro import), confirm() los reutiliza y suma
-    // el importe en vez de duplicarlos - pero necesita confirmación
-    // explícita antes, mismo criterio que los campos recomendados.
-    if (session.template.modulo === "viajes" && !confirmarFacturasDuplicadas) {
-      const duplicadas = await this.viajesProcessor.detectarFacturasDuplicadas(
+    // ese número ya existe en base de datos), validar que correspondan al
+    // mismo cliente. Si no coinciden, es una inconsistencia que el usuario
+    // debe resolver manualmente en su Excel.
+    if (session.template.modulo === "viajes") {
+      const inconsistencias = await this.viajesProcessor.validarConsistenciaFacturas(
         filasValidas,
         tenantId,
       );
-      if (duplicadas.length > 0) {
+      if (inconsistencias.length > 0) {
         throw new BadRequestException(
-          "Hay números de factura repetidos entre varios viajes nuevos (" +
-          duplicadas.map((d) => d.numero).join(", ") +
-          ") — confirmá que querés unificarlos en una sola factura.",
+          "Inconsistencia de datos: Los siguientes números de factura están asignados a clientes diferentes (" +
+          inconsistencias.map((i) => i.numero).join(", ") +
+          "). Revise el archivo y asigne un número único por cliente."
         );
       }
     }

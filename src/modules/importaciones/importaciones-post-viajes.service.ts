@@ -14,6 +14,7 @@ interface ViajeParaAgrupar {
   monto: number | null;
   monedaMonto: string;
   monedaPrecioTransportistaExterno: string;
+  facturaId: string | null;
 }
 
 export interface LiquidacionPreviewGrupo {
@@ -85,6 +86,7 @@ export class ImportacionesPostViajesService {
         monto: true,
         monedaMonto: true,
         monedaPrecioTransportistaExterno: true,
+        facturaId: true,
       },
     });
     if (viajes.length !== uniqueIds.length) {
@@ -255,6 +257,7 @@ export class ImportacionesPostViajesService {
       { clienteId: string; moneda: string; viajes: ViajeParaAgrupar[] }
     >();
     for (const v of viajes) {
+      if (v.facturaId != null) continue;
       const clienteId = v.clienteId;
       const moneda = v.monedaMonto || "ARS";
       const key = `${clienteId}|${moneda}`;
@@ -314,6 +317,7 @@ export class ImportacionesPostViajesService {
       { clienteId: string; moneda: string; viajes: ViajeParaAgrupar[] }
     >();
     for (const v of viajes) {
+      if (v.facturaId != null) continue;
       const clienteId = v.clienteId;
       const moneda = v.monedaMonto || "ARS";
       const key = `${clienteId}|${moneda}`;

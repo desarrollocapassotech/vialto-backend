@@ -351,6 +351,14 @@ export class ViajesProcessor implements IImportProcessor {
     return viajeId;
   }
 
+  private async tieneModulo(tenantId: string, modulo: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    return tenant?.modules.includes(modulo) ?? false;
+  }
+
   private async create(
     row: ValidatedRow,
     tenantId: string,
@@ -411,44 +419,49 @@ export class ViajesProcessor implements IImportProcessor {
 
       let facturaClienteId: string | null = null;
       if (row.nroFactura) {
-        const numeroFactura = row.nroFactura as string;
-        const montoFila = this.resolveMonto(row) ?? 0;
+        const monedaMonto = (row.monedaMonto as string | null) ?? "ARS";
+        const tieneArca = await this.tieneModulo(tenantId, "emision-facturas-arca");
 
-        // Si ya existe una factura con el mismo número para este cliente
-        // (de una fila anterior de este mismo import, o de un import
-        // previo), no se crea una duplicada: se reutiliza y se le suma el
-        // importe de este viaje — el usuario ya confirmó este
-        // comportamiento antes de llegar acá (ver ImportacionesService
-        // .confirm / detectarFacturasDuplicadas).
-        const existente = await tx.factura.findFirst({
-          where: { tenantId, tipo: "cliente", numero: numeroFactura, clienteId },
-          select: { id: true, importe: true },
-        });
+        if (!tieneArca || monedaMonto !== "USD") {
+          const numeroFactura = row.nroFactura as string;
+          const montoFila = this.resolveMonto(row) ?? 0;
 
-        if (existente) {
-          await tx.factura.update({
-            where: { id: existente.id },
-            data: { importe: existente.importe + montoFila },
+          // Si ya existe una factura con el mismo número para este cliente
+          // (de una fila anterior de este mismo import, o de un import
+          // previo), no se crea una duplicada: se reutiliza y se le suma el
+          // importe de este viaje — el usuario ya confirmó este
+          // comportamiento antes de llegar acá (ver ImportacionesService
+          // .confirm / detectarFacturasDuplicadas).
+          const existente = await tx.factura.findFirst({
+            where: { tenantId, tipo: "cliente", numero: numeroFactura, clienteId },
+            select: { id: true, importe: true },
           });
-          facturaClienteId = existente.id;
-        } else {
-          const fechaEmision =
-            (row.fechaEmisionFactura as Date | null) ?? fechaCarga ?? new Date();
-          const factura = await tx.factura.create({
-            data: {
-              tenantId,
-              numero: numeroFactura,
-              tipo: "cliente",
-              clienteId,
-              importe: montoFila,
-              fechaEmision,
-              fechaVencimiento:
-                (row.fechaVencimientoFactura as Date | null) ?? null,
-              estado: "pendiente",
-            },
-            select: { id: true },
-          });
-          facturaClienteId = factura.id;
+
+          if (existente) {
+            await tx.factura.update({
+              where: { id: existente.id },
+              data: { importe: existente.importe + montoFila },
+            });
+            facturaClienteId = existente.id;
+          } else {
+            const fechaEmision =
+              (row.fechaEmisionFactura as Date | null) ?? fechaCarga ?? new Date();
+            const factura = await tx.factura.create({
+              data: {
+                tenantId,
+                numero: numeroFactura,
+                tipo: "cliente",
+                clienteId,
+                importe: montoFila,
+                fechaEmision,
+                fechaVencimiento:
+                  (row.fechaVencimientoFactura as Date | null) ?? null,
+                estado: "pendiente",
+              },
+              select: { id: true },
+            });
+            facturaClienteId = factura.id;
+          }
         }
       }
 
@@ -911,49 +924,60 @@ export class ViajesProcessor implements IImportProcessor {
   }
 
 
-  async detectarFacturasDuplicadas(
+  async validarConsistenciaFacturas(
     rows: ValidatedRow[],
     tenantId: string,
-  ): Promise<{ numero: string; filas: number[] }[]> {
+  ): Promise<{ numero: string; clienteIds: string[]; filas: number[] }[]> {
     const filasExistentes = await this.resolverFilasExistentes(rows, tenantId);
     const nuevas = rows.filter((r) => !filasExistentes.has(r._rowNum));
 
-    const porClave = new Map<
+    const porNumero = new Map<
       string,
-      { numero: string; clienteId: string; filas: number[] }
+      { clienteIds: Set<string>; filas: number[] }
     >();
+    
     for (const r of nuevas) {
       const numero = (r.nroFactura as string | null)?.toString().trim();
       const clienteId = r.clienteId as string | undefined;
       if (!numero || !clienteId) continue;
-      const clave = `${clienteId}::${numero.toLowerCase()}`;
-      const grupo = porClave.get(clave);
+      
+      const numeroLower = numero.toLowerCase();
+      const grupo = porNumero.get(numeroLower);
       if (grupo) {
+        grupo.clienteIds.add(clienteId);
         grupo.filas.push(r._rowNum);
       } else {
-        porClave.set(clave, { numero, clienteId, filas: [r._rowNum] });
+        porNumero.set(numeroLower, { clienteIds: new Set([clienteId]), filas: [r._rowNum] });
       }
     }
-    if (porClave.size === 0) return [];
 
-    const numerosUnicos = [...new Set([...porClave.values()].map((g) => g.numero))];
+    if (porNumero.size === 0) return [];
+
+    const numerosAControlar = [...nuevas]
+      .map(r => (r.nroFactura as string | null)?.toString().trim())
+      .filter(Boolean) as string[];
+
     const existentesEnBd = await this.prisma.factura.findMany({
-      where: { tenantId, tipo: "cliente", numero: { in: numerosUnicos } },
+      where: { tenantId, tipo: "cliente", numero: { in: numerosAControlar } },
       select: { numero: true, clienteId: true },
     });
-    const clavesEnBd = new Set(
-      existentesEnBd
-        .filter((f) => f.clienteId)
-        .map((f) => `${f.clienteId}::${(f.numero as string).toLowerCase()}`),
-    );
 
-    const resultado: { numero: string; filas: number[] }[] = [];
-    for (const [clave, grupo] of porClave) {
-      if (grupo.filas.length > 1 || clavesEnBd.has(clave)) {
-        resultado.push({ numero: grupo.numero, filas: grupo.filas });
+    for (const f of existentesEnBd) {
+      if (f.clienteId && f.numero) {
+        const numeroLower = (f.numero as string).toLowerCase();
+        porNumero.get(numeroLower)?.clienteIds.add(f.clienteId);
       }
     }
-    return resultado;
+
+    const inconsistencias = [];
+    for (const [numeroLower, grupo] of porNumero) {
+      if (grupo.clienteIds.size > 1) {
+        const numeroOriginal = nuevas.find(r => (r.nroFactura as string | null)?.toString().trim().toLowerCase() === numeroLower)?.nroFactura as string;
+        inconsistencias.push({ numero: numeroOriginal, clienteIds: [...grupo.clienteIds], filas: grupo.filas });
+      }
+    }
+    
+    return inconsistencias;
   }
 
   /**

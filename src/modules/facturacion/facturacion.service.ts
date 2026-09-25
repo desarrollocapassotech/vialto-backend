@@ -30,6 +30,12 @@ const FACTURA_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 
 type ViajeSnap = {
   id: string;
+  numero: string;
+  numeroIdentificacionPersonalizado: string | null;
+  idPropio2: string | null;
+  fechaCarga: Date | null;
+  origen: string | null;
+  destino: string | null;
   facturacionEstado: string;
   monto: number | null;
   monedaMonto: string;
@@ -191,6 +197,7 @@ export class FacturacionService {
       tramos?: TramoSnap[];
     },
     tieneArca: boolean,
+    includeViajes = false,
   ) {
     const { viajes, pagos = [], tramos = [], ...f } = row;
     const cobroOpts = cobroOptsDeFactura(
@@ -223,6 +230,21 @@ export class FacturacionService {
       facturarPorTramo: f.facturarPorTramo ?? false,
       ivaMonto: f.ivaMonto ?? null,
       viajeIds: viajes.map((v) => v.id),
+      viajes: includeViajes
+        ? viajes.map((v) => ({
+            id: v.id,
+            numero: v.numero,
+            numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado,
+            idPropio2: v.idPropio2,
+            fechaCarga: v.fechaCarga ? v.fechaCarga.toISOString() : null,
+            origen: v.origen,
+            destino: v.destino,
+            monto: v.monto,
+            monedaMonto: v.monedaMonto,
+            cantidadFactura: v.cantidadFactura,
+            precioUnitarioFactura: v.precioUnitarioFactura,
+          }))
+        : undefined,
       tramos: tramosOrdenados.map((t) => ({
         id: t.id,
         viajeId: t.viajeId,
@@ -244,8 +266,9 @@ export class FacturacionService {
   private async shapeConNombre(
     row: Parameters<FacturacionService["toShape"]>[0],
     tieneArca: boolean,
+    includeViajes = false,
   ) {
-    const shaped = this.toShape(row, tieneArca);
+    const shaped = this.toShape(row, tieneArca, includeViajes);
     await this.alignViajesCobroPorTramo(row, tieneArca, shaped.cobrado);
     const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [
       shaped,
@@ -442,6 +465,12 @@ export class FacturacionService {
       where: { id: { in: viajeIds }, tenantId },
       select: {
         id: true,
+        numero: true,
+        numeroIdentificacionPersonalizado: true,
+        idPropio2: true,
+        fechaCarga: true,
+        origen: true,
+        destino: true,
         facturacionEstado: true,
         monto: true,
         monedaMonto: true,
@@ -472,6 +501,12 @@ export class FacturacionService {
         if (vc) {
           return {
             id: r.id,
+            numero: r.numero,
+            numeroIdentificacionPersonalizado: r.numeroIdentificacionPersonalizado,
+            idPropio2: r.idPropio2,
+            fechaCarga: r.fechaCarga,
+            origen: r.origen,
+            destino: r.destino,
             facturacionEstado: r.facturacionEstado,
             monto: vc.monto,
             monedaMonto: vc.monedaMonto,
@@ -482,6 +517,12 @@ export class FacturacionService {
       }
       return {
         id: r.id,
+        numero: r.numero,
+        numeroIdentificacionPersonalizado: r.numeroIdentificacionPersonalizado,
+        idPropio2: r.idPropio2,
+        fechaCarga: r.fechaCarga,
+        origen: r.origen,
+        destino: r.destino,
         facturacionEstado: r.facturacionEstado,
         monto: r.monto,
         monedaMonto: r.monedaMonto,
@@ -504,6 +545,12 @@ export class FacturacionService {
 
   private readonly VIAJE_SELECT = {
     id: true,
+    numero: true,
+    numeroIdentificacionPersonalizado: true,
+    idPropio2: true,
+    fechaCarga: true,
+    origen: true,
+    destino: true,
     facturacionEstado: true,
     monto: true,
     monedaMonto: true,
@@ -684,7 +731,7 @@ export class FacturacionService {
     });
     if (!row) throw new NotFoundException("Factura no encontrada");
     const tieneArca = await this.tieneArca(tenantId);
-    return this.shapeConNombre(row, tieneArca);
+    return this.shapeConNombre(row, tieneArca, true);
   }
 
   /**
@@ -709,7 +756,7 @@ export class FacturacionService {
     },
   ) {
     if (!factura.clienteId) return;
-    const concepto = `Cargo automático por factura ${factura.numero ?? factura.id}`;
+    const concepto = `Venta automática por factura ${factura.numero ?? factura.id}`;
     await tx.movimientoCuentaCorriente.upsert({
       where: { tenantId_facturaId: { tenantId: factura.tenantId, facturaId: factura.id } },
       update: {

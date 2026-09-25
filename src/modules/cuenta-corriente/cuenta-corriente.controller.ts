@@ -1,8 +1,10 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CuentaCorrienteService } from './cuenta-corriente.service';
+import { EstadoCuentaPdfService } from './estado-cuenta-pdf.service';
 import { CreateMovimientoCcDto } from './dto/create-movimiento-cc.dto';
 import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
@@ -24,7 +26,10 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('cuenta-corriente')
 export class CuentaCorrienteController {
-  constructor(private readonly service: CuentaCorrienteService) {}
+  constructor(
+    private readonly service: CuentaCorrienteService,
+    private readonly pdfService: EstadoCuentaPdfService,
+  ) {}
 
   @ApiOperation({ summary: 'Listar movimientos de cuenta corriente (filtros opcionales: cliente, proveedor, estado, rango de fechas)' })
   @Get('movimientos')
@@ -69,6 +74,24 @@ export class CuentaCorrienteController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.exportarMovimientos(auth.tenantId, query);
+  }
+
+  @ApiOperation({ summary: 'Descargar el estado de cuenta en PDF de un cliente o proveedor, por período' })
+  @Get('estado-cuenta/pdf')
+  @Roles('admin', 'member', 'superadmin')
+  async estadoCuentaPdf(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: ExportarMovimientosQueryDto,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    const { buffer, filename } = await this.pdfService.generate(auth.tenantId, query);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+    });
+    res.end(buffer);
   }
 
   @ApiOperation({ summary: 'Obtener movimiento por ID' })

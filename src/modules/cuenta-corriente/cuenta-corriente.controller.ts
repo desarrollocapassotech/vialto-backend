@@ -94,6 +94,28 @@ export class CuentaCorrienteController {
     res.end(buffer);
   }
 
+  @ApiOperation({ summary: 'Descargar el listado completo de deudores (pendientes de cobro y de pago) en PDF' })
+  @Get('listado-deudores/pdf')
+  @Roles('admin', 'member', 'superadmin')
+  async listadoDeudoresPdf(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('diasProximos') diasProximos: string | undefined,
+    @Res() res: Response,
+  ) {
+    assertTenantId(auth.tenantId);
+    const dias = diasProximos ? Number(diasProximos) : undefined;
+    const { buffer, filename } = await this.pdfService.generateListadoDeudores(
+      auth.tenantId,
+      Number.isFinite(dias) ? dias : undefined,
+    );
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+    });
+    res.end(buffer);
+  }
+
   @ApiOperation({ summary: 'Obtener movimiento por ID' })
   @Get('movimientos/:id')
   @Roles('admin', 'member', 'superadmin')

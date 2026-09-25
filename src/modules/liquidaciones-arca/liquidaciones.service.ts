@@ -229,7 +229,10 @@ export class LiquidacionesService {
       where: {
         id: { in: dto.viajeIds },
         tenantId,
-        transportistaId: dto.transportistaId,
+        OR: [
+          { transportistaId: dto.transportistaId },
+          { transportistaEfectivoId: dto.transportistaId },
+        ],
       },
     });
 
@@ -486,7 +489,14 @@ export class LiquidacionesService {
     if (dto.viajeIds !== undefined) {
       const nuevosIds = [...new Set(dto.viajeIds)];
       const viajesConMeta = await this.prisma.viaje.findMany({
-        where: { id: { in: nuevosIds }, tenantId, transportistaId: liq.transportistaId },
+        where: {
+          id: { in: nuevosIds },
+          tenantId,
+          OR: [
+            { transportistaId: liq.transportistaId },
+            { transportistaEfectivoId: liq.transportistaId },
+          ],
+        },
       });
       if (viajesConMeta.length !== nuevosIds.length) {
         throw new BadRequestException(

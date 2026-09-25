@@ -703,6 +703,18 @@ export class ViajesService {
     return modules.includes("facturacion") || modules.includes("emision-facturas-arca");
   }
 
+  private async tieneArca(tenantId: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    const modules = (tenant?.modules ?? []).map((m) => m.toLowerCase());
+    return (
+      modules.includes("emision-facturas-arca") ||
+      modules.includes("emision-liquido-producto-arca")
+    );
+  }
+
   private estadoDisponibilidadCcDesde(pagado: number, importe: number): string {
     const EPS = 1e-6;
     if (pagado <= EPS) return "pendiente";
@@ -1793,7 +1805,40 @@ export class ViajesService {
       );
 
     if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {
-      const camposTocados = ViajesService.CAMPOS_FISCALES_VIAJE.filter(
+      const tieneArca = await this.tieneArca(tenantId);
+
+      let camposBloqueados: readonly string[];
+      if (tieneArca) {
+        camposBloqueados = ViajesService.CAMPOS_FISCALES_VIAJE;
+      } else {
+        const camposCliente = [
+          "clienteId",
+          "monto",
+          "monedaMonto",
+          "cantidadFactura",
+          "precioUnitarioFactura",
+        ];
+        const camposTransporte = [
+          "transportistaId",
+          "transportistaEfectivoId",
+          "contratanteRealizaFlete",
+          "precioTransportistaExterno",
+          "monedaPrecioTransportistaExterno",
+          "cantidadTransportista",
+          "precioUnitarioTransportista",
+          "gananciaBrutaManual",
+          "monedaGananciaBrutaManual",
+          "otrosGastos",
+          "pagosTransportista",
+        ];
+
+        const bloqueados: string[] = [];
+        if (bloqueadoPorFactura) bloqueados.push(...camposCliente);
+        if (bloqueadoPorLiquidacion) bloqueados.push(...camposTransporte);
+        camposBloqueados = bloqueados;
+      }
+
+      const camposTocados = camposBloqueados.filter(
         (campo) => (dto as Record<string, unknown>)[campo] !== undefined,
       );
       if (camposTocados.length > 0) {
@@ -1803,8 +1848,17 @@ export class ViajesService {
             : bloqueadoPorFactura
               ? "facturado"
               : "liquidado";
+              
+        const detalle = tieneArca
+          ? "los datos comerciales"
+          : (bloqueadoPorFactura && bloqueadoPorLiquidacion)
+            ? "los datos comerciales"
+            : bloqueadoPorFactura
+              ? "los datos del cliente"
+              : "los montos de transporte";
+
         throw new ConflictException(
-          `No se puede editar los datos comerciales porque el viaje ya fue ${motivo}. ` +
+          `No se puede editar ${detalle} porque el viaje ya fue ${motivo}. ` +
             "Los datos operativos (fechas, km, litros, observaciones) sí se pueden seguir editando.",
         );
       }

@@ -7,6 +7,7 @@ import { NotificacionesConfigService } from './notificaciones-config.service';
 import { getNotificacionesCatalogoPorModulos, type NotificacionFrecuencia } from './notificaciones-catalog';
 import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
+import { CuentaCorrienteVencimientoEvaluator } from './evaluators/cuenta-corriente-vencimiento.evaluator';
 import type { NotificacionEvaluator, NotificacionItem } from './evaluators/notificacion-evaluator.interface';
 
 function escapeHtml(s: string): string {
@@ -45,8 +46,9 @@ export class NotificacionesCronService {
     private readonly usersService: UsersService,
     facturaPorVencer: FacturaPorVencerEvaluator,
     cargaSospechosa: CargaSospechosaEvaluator,
+    cuentaCorrienteVencimiento: CuentaCorrienteVencimientoEvaluator,
   ) {
-    this.evaluators = [facturaPorVencer, cargaSospechosa];
+    this.evaluators = [facturaPorVencer, cargaSospechosa, cuentaCorrienteVencimiento];
   }
 
   /**

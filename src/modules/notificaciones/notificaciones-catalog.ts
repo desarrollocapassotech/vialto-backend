@@ -34,6 +34,17 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     frecuencia: 'diaria',
   },
   {
+    tipo: 'cuenta-corriente.vencimiento',
+    modulo: 'cuenta-corriente',
+    label: 'Vencimientos de cuenta corriente',
+    descripcion:
+      'Avisa cuando una venta o compra de cuenta corriente vence en los próximos días y todavía tiene saldo pendiente (a cobrar o a pagar).',
+    defaultActivo: true,
+    requiereModulo: 'cuenta-corriente',
+    frecuencia: 'diaria',
+    urlDestino: '/cuenta-corriente',
+  },
+  {
     tipo: 'combustible.cargaSospechosa',
     modulo: 'combustible',
     label: 'Cargas de combustible sospechosas',

@@ -896,10 +896,13 @@ export class LiquidacionPdfService {
 
     for (const item of cvlp.items) {
       if (
-        item.descripcion.toUpperCase() === "FLETES" &&
+        item.descripcion.toUpperCase().startsWith("FLETES") &&
         liq.viajes?.length > 0
       ) {
         for (const lViaje of liq.viajes) {
+          const tripIva = lViaje.viaje.precioTransportistaIvaIncluidoPct ?? 0;
+          if (tripIva !== item.ivaPct) continue;
+
           const v = lViaje.viaje;
 
           const idViajeText = (v.numeroIdentificacionPersonalizado ?? v.numero)
@@ -915,6 +918,9 @@ export class LiquidacionPdfService {
           }
           const ruta = [v.origen, v.destino].filter(Boolean).join(" - ");
           if (ruta) descParts.push(`${ruta}`);
+          if (v.chofer?.nombre) {
+            descParts.push(`Chofer: ${v.chofer.nombre.trim()}`);
+          }
 
           const descText = descParts.join("\n").toUpperCase();
 
@@ -996,7 +1002,7 @@ export class LiquidacionPdfService {
     // Procesamiento de Conceptos Adicionales
     // Procesamiento de Conceptos Adicionales
     const otrosItems = cvlp.items.filter(
-      (i) => i.descripcion.toUpperCase() !== "FLETES",
+      (i) => !i.descripcion.toUpperCase().startsWith("FLETES"),
     );
     const gruposOtros: { [baseName: string]: typeof otrosItems } = {};
     for (const item of otrosItems) {

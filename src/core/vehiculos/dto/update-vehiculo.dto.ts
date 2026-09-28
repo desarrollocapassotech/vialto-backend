@@ -5,7 +5,7 @@ export class UpdateVehiculoDto {
   @IsOptional() @IsString() patente?: string;
 
   @IsOptional()
-  @IsIn(['tractor', 'semirremolque', 'camion', 'utilitario', 'otro'])
+  @IsIn(['tractor', 'semirremolque', 'camion', 'acoplado', 'utilitario', 'otro'])
   tipo?: string;
 
   @IsOptional() @IsString() marca?: string;

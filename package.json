@@ -31,7 +31,8 @@
     "backfill:asignacion-vehiculo:dry": "ts-node scripts/backfill-asignacion-vehiculo.ts --dry-run",
     "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts",
     "test:viaje-estado-financiero": "ts-node src/modules/viajes/viaje-estado-financiero.spec.ts",
-    "test:importaciones": "ts-node src/modules/importaciones/engine/importaciones.spec.ts"
+    "test:importaciones": "ts-node src/modules/importaciones/engine/importaciones.spec.ts",
+    "test:padron": "ts-node src/core/padron/padron.service.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

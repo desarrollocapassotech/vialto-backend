@@ -1,6 +1,8 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { StockService } from "../../stock/stock.service";
+import { validarIdFiscal } from "../../../shared/util/validar-id-fiscal";
+import { cuitDigitoVerificadorValido } from "../../../shared/util/cuit";
 import type {
   ColumnConfig,
   ParsedRow,
@@ -149,11 +151,27 @@ export class ValidatorService {
       }
     }
 
+    const idFiscalHeader =
+      columns.find((c) => c.field === "idFiscal")?.excelHeader ?? "CUIT";
+
     const validFinal: ValidatedRow[] = [];
     for (const row of valid) {
       const rowErrors: RowError[] = [];
 
-      if (modulo === "vehiculos") {
+      if (modulo === "clientes" || modulo === "transportistas") {
+        // Mismo chequeo que el alta manual (validarIdFiscal del frontend): formato
+        // + dígito verificador del CUIT, en el preview y no recién al confirmar.
+        // Sin consultar ARCA a propósito (cuota del padrón, ver core/padron).
+        const error = this.errorIdFiscal(row.pais, row.idFiscal);
+        if (error) {
+          rowErrors.push({
+            fila: row._rowNum,
+            campo: idFiscalHeader,
+            error,
+            valor: row.idFiscal,
+          });
+        }
+      } else if (modulo === "vehiculos") {
         const partes = (row.patente as string | null)?.toString().trim().split("/").filter((p) => p !== "") || [];
         const tipoFila = String(row.tipo ?? "").trim();
         if (partes.length < 2 && !tipoFila) {
@@ -288,6 +306,22 @@ export class ValidatorService {
         choferes: created["choferes"] ?? [],
       },
     };
+  }
+
+  /** Error de formato / dígito verificador del ID fiscal según el país, o null si es válido o vacío. */
+  private errorIdFiscal(pais: unknown, idFiscal: unknown): string | null {
+    const paisStr = pais == null ? "" : String(pais).trim();
+    const idStr = idFiscal == null ? "" : String(idFiscal).trim();
+    if (!paisStr || !idStr) return null;
+    try {
+      validarIdFiscal(paisStr, idStr);
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+    if (paisStr === "AR" && !cuitDigitoVerificadorValido(idStr)) {
+      return "El CUIT/CUIL no es válido: revisá los números (el dígito verificador no coincide).";
+    }
+    return null;
   }
 
   /**

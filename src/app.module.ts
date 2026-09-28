@@ -27,6 +27,7 @@ import { HealthController } from './health.controller';
 import { PlatformModule } from './core/platform/platform.module';
 import { TenantFieldConfigModule } from './core/tenant-field-config/tenant-field-config.module';
 import { PaisesModule } from './core/paises/paises.module';
+import { PadronModule } from './core/padron/padron.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 
 @Module({
@@ -58,6 +59,7 @@ import { NotificacionesModule } from './modules/notificaciones/notificaciones.mo
     PlatformModule,
     TenantFieldConfigModule,
     PaisesModule,
+    PadronModule,
     NotificacionesModule,
   ],
   controllers: [HealthController],

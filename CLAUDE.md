@@ -275,6 +275,7 @@ src/
     vehiculos/              ← ✅ entidad compartida
     destinatarios/          ← ✅ catálogo compartido (viajes, stock)
     direcciones-entrega/    ← ✅ catálogo compartido (viajes, stock)
+    padron/                 ← ✅ consulta de CUIT al padrón de ARCA (nombre/domicilio/estado) con certificado de plataforma, para todo tenant — ver sección "`core/padron`"
     platform/               ← ✅ superadmin: CRUD cross-tenant sobre casi todas las entidades (viajes, clientes, choferes, vehículos, transportistas, destinatarios, direcciones, users, facturas/pagos, stock completo, config/liquidaciones/facturas/logs ARCA)
 
   modules/
@@ -1253,6 +1254,22 @@ Ocultar un campo en el formulario **no alcanza** cuando ese campo alimenta un c�
 
 ---
 
+### `core/padron` — validación de CUIT contra el padrón de ARCA (sep 2026)
+
+Al cargar/editar un CUIT argentino en Cliente o Transportista, el frontend consulta `GET /api/padron/cuit/:cuit` y autocompleta nombre (tal cual figura en ARCA), domicilio fiscal y condición IVA. **Disponible para todo tenant, tenga o no un módulo ARCA** — por eso vive en `core/` y no tiene `ModuleGuard` (solo `@Roles('admin','superadmin')`, los mismos que pueden crear/editar).
+
+- **Certificado de plataforma, no del tenant**: consulta `ws_sr_constancia_inscripcion` (padrón A5) vía `@afipsdk/afip.js` (`RegisterInscriptionProof.getTaxpayerDetails`) con un único certificado de producción asociado al CUIT personal de Elias (ni CapassoTech ni Vialto tienen CUIT). Con el padrón A5 el consultante puede ser cualquiera: el `cuitRepresentada` es el dueño del certificado, no el tenant. **No usa `ArcaConfig` ni `ArcaClientService`** (el core no puede depender de `modules/liquidaciones-arca`) — cliente AFIP propio en `PadronService`.
+- **Cuenta de afipsdk separada** (`PADRON_AFIP_SDK_API_KEY`), distinta de la de facturación de NyM (`AFIP_SDK_API_KEY`), para no consumir su cuota. Plan Free: 1 CUIT, 1.000 requests/mes.
+- **Setup/prueba**: `scripts/setup-padron-cert.js` (automatizaciones afipsdk que crearon y autorizaron el certificado; no hace falta volver a correrlo salvo al renovar el certificado, que vence a los ~2 años) y `scripts/test-padron.js [CUIT]` (consulta real, gasta 1 request).
+- **Estados** (`padron.types.ts`): `activo` (autocompleta todo) | `con_observaciones` (ARCA no emite la constancia pero el CUIT existe — aceptable, solo trae nombre) | `inactivo` (clave no ACTIVA — no autocompleta, aviso rojo) | `no_encontrado`.
+- **Protección de cuota**: caché en memoria por CUIT (7 días, solo respuestas exitosas) + tope de 100 consultas reales por tenant por día (429). En memoria a propósito: una sola instancia en Render; si se escala a varias, mover a DB.
+- **Nunca bloquea la carga**: ARCA caído / sin configurar → 503 con mensaje amigable; el frontend muestra "No se pudo validar" y la carga manual sigue igual. El dígito verificador (`shared/util/cuit.ts`) se valida antes de consultar (400 sin gastar request).
+- **Dígito verificador — dónde se exige**: en los formularios del frontend (`validarIdFiscal` de `lib/ciudades/paises.ts`) y en el **preview de la importación masiva** de clientes/transportistas (`ValidatorService.errorIdFiscal`: la fila sale como error de campo, antes de confirmar). **No** en `shared/util/validar-id-fiscal.ts` (create/update del API), a propósito, para no romper registros viejos al editarlos por API.
+- **La importación NO consulta ARCA** (decisión sep 2026): 1.000 requests/mes y el tope de 100/día por tenant no alcanzan para planillas grandes, y cada consulta tarda 1-2 s. Si se pasa a un plan pago de afipsdk, la idea pendiente es un botón opt-in "Completar datos faltantes con ARCA" en el preview, solo para filas sin nombre/domicilio.
+- Pruebas: `npm run test:padron` (mapeo, estados, caché, tope, errores — cliente AFIP mockeado).
+
+---
+
 ## Clientes actuales y estado
 
 | Cliente | Estado | Módulos contratados | Prioridad |
@@ -1397,6 +1414,13 @@ NODE_ENV=production
 # Módulos emision-facturas-arca / emision-liquido-producto-arca — carpeta liquidaciones-arca (NyM Logística) — fail-fast si falta en runtime
 ARCA_ENCRYPTION_KEY=              # clave AES-256 (hex 64 chars) para cifrar cert/key/credenciales AFIP en DB
 AFIP_SDK_API_KEY=                 # token de AfipSDK (afipsdk.com)
+
+# core/padron — validación de CUIT contra el padrón de ARCA (todos los tenants). Sin estas
+# variables el endpoint responde 503 y los formularios siguen funcionando a mano.
+PADRON_AFIP_SDK_API_KEY=          # token de la cuenta de afipsdk dedicada al padrón (≠ AFIP_SDK_API_KEY)
+PADRON_CUIT=                      # CUIT dueño del certificado de plataforma
+PADRON_CERT=                      # certificado PEM (una línea con \n literales)
+PADRON_KEY=                       # clave privada PEM (una línea con \n literales)
 
 # Módulo notificaciones (alertas por email vía Resend) — sin RESEND_API_KEY el cron
 # sigue corriendo pero solo loguea, no envía nada (ver ResendEmailService)

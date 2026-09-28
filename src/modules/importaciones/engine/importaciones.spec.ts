@@ -73,31 +73,48 @@ const templateBase: TemplateConfig = {
 
   await test("Validator: Transportista existente por nombre", async () => {
     const { rows } = parser.parse(createDummyExcel(["Transporte"], ["Juan"]), templateBase);
-    const res = await validator.validate(rows, templateBase.columns, "tenant-1");
+    const res = await validator.validate(rows, templateBase.columns, "tenant-1", "");
     assert.equal(res.valid[0].transportistaId, "t1");
   });
 
   await test("Validator: Transportista existente por CUIT", async () => {
     const { rows } = parser.parse(createDummyExcel(["Transporte"], ["20123456789"]), templateBase);
-    const res = await validator.validate(rows, templateBase.columns, "tenant-1");
+    const res = await validator.validate(rows, templateBase.columns, "tenant-1", "");
     assert.equal(res.valid[0].transportistaId, "t1");
   });
 
   await test("Validator: Transportista inexistente + nombre -> autocrea", async () => {
     const { rows } = parser.parse(createDummyExcel(["Transporte"], ["Transporte Nuevo"]), templateBase);
-    const res = await validator.validate(rows, templateBase.columns, "tenant-1");
+    const res = await validator.validate(rows, templateBase.columns, "tenant-1", "");
     assert.equal(res.valid[0].transportistaId, "new-t");
   });
 
   await test("Validator: Transportista inexistente + CUIT/DNI -> falla", async () => {
     const { rows } = parser.parse(createDummyExcel(["Transporte"], ["20-11111111-9"]), templateBase);
-    let threw = false;
-    try {
-      await validator.validate(rows, templateBase.columns, "tenant-1");
-    } catch (e: any) {
-      threw = true;
-      assert.match(e.message, /No se puede crear automáticamente un transportista usando solo un DNI\/CUIT/);
-    }
-    assert.equal(threw, true);
+    // Se reporta como error de fila (no excepción), para que el resto del archivo se pueda revisar.
+    const res = await validator.validate(rows, templateBase.columns, "tenant-1", "");
+    assert.equal(res.valid.length, 0);
+    assert.equal(res.errors.length, 1);
+    assert.equal(res.errors[0].campo, "Transporte");
+  });
+
+  await test("Validator: clientes — CUIT con dígito verificador inválido es error en el preview", async () => {
+    const columns: TemplateConfig["columns"] = [
+      { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+      { field: "pais", excelHeader: "País", type: "string" },
+      { field: "idFiscal", excelHeader: "CUIT", type: "string" },
+    ];
+    const rows = [
+      { _rowNum: 2, nombre: "OK", pais: "Argentina", idFiscal: "30-71674179-2" },
+      { _rowNum: 3, nombre: "DV mal", pais: "AR", idFiscal: "30716741793" },
+      { _rowNum: 4, nombre: "Corto", pais: "AR", idFiscal: "3071674179" },
+      { _rowNum: 5, nombre: "Uruguay", pais: "UY", idFiscal: "211234560001" },
+      { _rowNum: 6, nombre: "Sin CUIT", pais: "AR", idFiscal: "" },
+    ] as any[];
+    const res = await validator.validate(rows, columns, "tenant-1", "clientes");
+    assert.deepEqual(res.valid.map((r) => r._rowNum), [2, 5, 6]);
+    assert.deepEqual(res.errors.map((e) => [e.fila, e.campo]), [[3, "CUIT"], [4, "CUIT"]]);
+    assert.match(res.errors[0].error, /dígito verificador/);
+    assert.match(res.errors[1].error, /11 dígitos/);
   });
 })();

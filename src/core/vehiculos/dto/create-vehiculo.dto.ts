@@ -5,7 +5,7 @@ export class CreateVehiculoDto {
   /** Opcional: si no se envía, se genera un placeholder (PENDIENTE-xxxxxx) y queda marcado `patentePendiente`. */
   @IsOptional() @IsString() patente?: string;
 
-  @IsIn(['tractor', 'semirremolque', 'camion', 'utilitario', 'otro'])
+  @IsIn(['tractor', 'semirremolque', 'camion', 'acoplado', 'utilitario', 'otro'])
   tipo: string;
 
   @IsOptional() @IsString() marca?: string;

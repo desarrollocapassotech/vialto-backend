@@ -114,8 +114,8 @@ Ejemplos de uso:
 3. **Todo endpoint de módulo DEBE tener `@UseGuards(ModuleGuard)`** con el nombre del módulo.
 4. **Nuevos módulos van en `src/modules/{nombre}/`** con su propio NestJS module, controller, service y schema Prisma.
 5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí.
-6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** de Neon (entorno QA); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
-   - **OJO — la base develop es compartida entre ramas.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
+6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** del proyecto Neon **`vialto-desarrollo`** (entorno QA — proyecto separado del de producción desde sep 2026, ver `MIGRATIONS.md`); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
+   - **OJO — la base develop (QA) es compartida entre ramas de git.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
 
 ### Configuración del tenant en PostgreSQL
 
@@ -1375,7 +1375,7 @@ FASE 8 — Transversal
 ### Hoy (hasta ~5 clientes)
 - **Frontend:** Render Static Site — gratis
 - **Backend:** Render Web Service — gratis (cold starts) o $7/mes sin cold starts
-- **PostgreSQL:** Neon.tech — gratis hasta 0.5 GB / 190 hs compute/mes
+- **PostgreSQL:** Neon.tech — plan pago por uso desde sep 2026 (el free agotó su cuota de cómputo y suspendió producción). Dos proyectos separados porque la cuota/consumo es por proyecto: `vialto` (solo rama `production`, máx. 2 CU) y `vialto-desarrollo` (QA, rama `develop`, máx. 1 CU). No crear ramas de desarrollo dentro de `vialto`.
 - **Firestore:** Google — gratis hasta ~50k lecturas/día
 - **Auth:** Clerk — gratis hasta 10.000 MAU
 

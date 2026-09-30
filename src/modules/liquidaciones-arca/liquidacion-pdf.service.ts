@@ -426,7 +426,7 @@ export class LiquidacionPdfService {
           numero: v.viaje.numero ?? '',
           bruto: subtotal,
           comision: round2(subtotal * liq.comisionPct / 100),
-          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
         };
       });
 
@@ -900,7 +900,7 @@ export class LiquidacionPdfService {
         liq.viajes?.length > 0
       ) {
         for (const lViaje of liq.viajes) {
-          const tripIva = lViaje.viaje.precioTransportistaIvaIncluidoPct ?? 0;
+          const tripIva = lViaje.viaje.precioTransportistaIvaIncluidoPct || resolveIvaPct((liq as any).ivaPct ?? config?.ivaGastosAdmin);
           if (tripIva !== item.ivaPct) continue;
 
           const v = lViaje.viaje;

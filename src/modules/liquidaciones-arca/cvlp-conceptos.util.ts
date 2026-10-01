@@ -49,9 +49,7 @@ export function buildCvlpConceptosList(args: {
     for (const v of args.viajes!) {
       const vIva = v.ivaPct ?? args.ivaPctDefault;
       fletesPorIva.set(vIva, round2((fletesPorIva.get(vIva) ?? 0) + (v.bruto ?? 0)));
-      // La comisión siempre tributa a la alícuota por defecto del tenant (ej. 21%)
-      const comisionIva = args.ivaPctDefault;
-      comisionPorIva.set(comisionIva, round2((comisionPorIva.get(comisionIva) ?? 0) + (v.comision ?? 0)));
+      comisionPorIva.set(vIva, round2((comisionPorIva.get(vIva) ?? 0) + (v.comision ?? 0)));
     }
 
     const hasMultipleIvas = fletesPorIva.size > 1;
@@ -150,16 +148,13 @@ export function computeLiquidacionTotales(args: {
     args.viajes.some((v) => v.bruto != null);
 
   if (tieneDesgloseViajes) {
-    let ivaFletes = 0;
     for (const v of args.viajes!) {
       const vIva = v.ivaPct ?? ivaPctFallback;
-      const vBruto = round2(v.bruto ?? 0);
+      const vBase = round2((v.bruto ?? 0) - (v.comision ?? 0));
       if (vIva > 0) {
-        ivaFletes = round2(ivaFletes + round2((vBruto * vIva) / 100));
+        ivaGeneral = round2(ivaGeneral + round2((vBase * vIva) / 100));
       }
     }
-    const ivaComision = ivaPctFallback > 0 ? round2((comision * ivaPctFallback) / 100) : 0;
-    ivaGeneral = round2(ivaFletes - ivaComision);
   } else {
     ivaGeneral =
       ivaPctFallback > 0

@@ -35,6 +35,7 @@ import {
   getCbteTipoAnulacionFactura,
   getCbteTipoFactura,
   fechaCbteDentroDeVentanaAfip,
+  formatNumeroComprobante,
   parseNumeroFactura,
   resolveFechaCbteEmision,
   resolveReceptorAfip,
@@ -59,6 +60,7 @@ import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
 import { assertCvlpEmitDatosCompletos } from './cvlp-emit-validation.util';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { AnularFacturaDto } from './dto/anular-factura.dto';
+import { conceptoCargoFactura } from '../facturacion/cargo-factura.util';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 // Tipos para los nuevos modelos Prisma hasta que se ejecute `prisma generate`
@@ -2111,6 +2113,11 @@ export class LiquidacionesService {
         where: { id: facturaId },
         data: {
           cbteNro,
+          // Sin número local cargado (en homologación no se exige), la grilla
+          // mostraba "—": se completa con el número que asignó AFIP.
+          ...(facturaRaw.numero?.trim()
+            ? {}
+            : { numero: formatNumeroComprobante(ptoVenta, cbteNro) }),
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaEstado: 'autorizado',
@@ -2120,6 +2127,19 @@ export class LiquidacionesService {
         },
       });
       await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
+
+      // El cargo de cuenta corriente se creó con la factura, antes de tener
+      // número: se le completa ahora el comprobante que asignó AFIP.
+      if (!facturaRaw.numero?.trim()) {
+        const numeroAfip = formatNumeroComprobante(ptoVenta, cbteNro);
+        await this.db.movimientoCuentaCorriente.updateMany({
+          where: { tenantId, facturaId, tipo: 'cargo' },
+          data: {
+            numeroComprobante: numeroAfip,
+            concepto: conceptoCargoFactura(numeroAfip),
+          },
+        });
+      }
 
       // Generar PDF y subir a Cloudinary
       let comprobanteUrl: string | null = null;

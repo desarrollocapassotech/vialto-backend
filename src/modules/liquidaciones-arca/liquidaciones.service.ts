@@ -34,6 +34,7 @@ import {
   getCbteTipoAnulacionCvlp,
   getCbteTipoAnulacionFactura,
   getCbteTipoFactura,
+  fechaCbteDentroDeVentanaAfip,
   parseNumeroFactura,
   resolveFechaCbteEmision,
   resolveReceptorAfip,
@@ -64,6 +65,9 @@ import { AnularFacturaDto } from './dto/anular-factura.dto';
 // (los campos existen en schema.prisma; el cliente generado los tendrá sin cast)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
+
+/** Puntos de venta del CUIT de prueba de AFIP SDK que se prueban en homologación (ver `elegirPtoVentaHomologacion`). */
+const PTOS_VENTA_HOMOLOGACION = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 @Injectable()
 export class LiquidacionesService {
@@ -1643,6 +1647,69 @@ export class LiquidacionesService {
   }
 
   /** Fecha yyyymmdd del CVLP original (para CbteAsoc de la NC). */
+  /**
+   * Homologación: punto de venta del CUIT de prueba en el que se puede emitir
+   * ahora. Ese CUIT lo comparten todos los usuarios de AFIP SDK — si el último
+   * comprobante de un PV quedó con fecha futura (fuera de la ventana de AFIP,
+   * ver `fechaCbteDentroDeVentanaAfip`), el CbteFch no puede ser ni anterior a
+   * ese ni tan adelante, y AFIP rechaza con 10016 hasta que pase esa fecha.
+   * Se prueba primero el PV configurado y, si está bloqueado, los siguientes.
+   * Bug real (QA, oct 2026): PV 1 / Factura A tenía el último comprobante con
+   * fecha +9 días y toda emisión de prueba fallaba con 10016.
+   */
+  private async elegirPtoVentaHomologacion(
+    config: { apiKey: string; cuitEmisor: string; ptoVentaFactura: number },
+    cbteTipo: number,
+    fechaEmision: Date,
+    tenantId: string,
+    facturaId: string,
+  ): Promise<{ ptoVenta: number; ultimoCbte: number; fechaCbte: string }> {
+    const candidatos = [
+      config.ptoVentaFactura,
+      ...PTOS_VENTA_HOMOLOGACION.filter((pv) => pv !== config.ptoVentaFactura),
+    ];
+    for (const ptoVenta of candidatos) {
+      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+        config.apiKey,
+        config.cuitEmisor,
+        'homologacion',
+        ptoVenta,
+        cbteTipo,
+        tenantId,
+        undefined,
+        facturaId,
+        null,
+        null,
+      );
+      const ultimoFecha =
+        ultimoCbte > 0
+          ? await this.arcaClient.getFechaComprobanteAutorizado(
+              config.apiKey,
+              config.cuitEmisor,
+              'homologacion',
+              ptoVenta,
+              cbteTipo,
+              ultimoCbte,
+              null,
+              null,
+            )
+          : null;
+      const fechaCbte = resolveFechaCbteEmision('homologacion', fechaEmision, ultimoFecha);
+      if (fechaCbteDentroDeVentanaAfip(fechaCbte)) {
+        if (ptoVenta !== config.ptoVentaFactura) {
+          this.logger.warn(
+            `[homologación] PV ${config.ptoVentaFactura} tipo ${cbteTipo} bloqueado (último comprobante del ${ultimoFecha}); se emite en PV ${ptoVenta}.`,
+          );
+        }
+        return { ptoVenta, ultimoCbte, fechaCbte };
+      }
+    }
+    throw new ArcaException(
+      ARCA_ERROR_CODES.GENERICO,
+      'No hay un punto de venta de prueba disponible en este momento: el CUIT de homologación compartido de AFIP tiene comprobantes con fecha futura. Intentá de nuevo más tarde.',
+    );
+  }
+
   private async resolveFechaCbteOriginal(
     liquidacionId: string,
     liquidacion: { updatedAt: Date; createdAt: Date },
@@ -1948,38 +2015,34 @@ export class LiquidacionesService {
       // Mismo camino que CVLP / anulación NC: FECAESolicitar vía autorizarComprobante.
       // Homologación no usa createNextVoucher: el SDK proxy a veces responde
       // "Invalid XML Error: Unexpected close tag" en ese helper.
-      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-        config.apiKey,
-        config.cuitEmisor,
-        ambiente,
-        config.ptoVentaFactura,
-        cbteTipoFinal,
-        tenantId,
-        undefined,
-        facturaId,
-        config.certPem,
-        config.keyPem,
-      );
-      cbteNro = ultimoCbte + 1;
-
-      const ultimoFecha =
-        esHomologacion && ultimoCbte > 0
-          ? await this.arcaClient.getFechaComprobanteAutorizado(
-              config.apiKey,
-              config.cuitEmisor,
-              ambiente,
-              config.ptoVentaFactura,
-              cbteTipoFinal,
-              ultimoCbte,
-              config.certPem,
-              config.keyPem,
-            )
-          : null;
-      fechaCbte = resolveFechaCbteEmision(
-        ambiente,
-        facturaRaw.fechaEmision,
-        ultimoFecha,
-      );
+      let ptoVenta: number = config.ptoVentaFactura;
+      if (esHomologacion) {
+        const elegido = await this.elegirPtoVentaHomologacion(
+          config,
+          cbteTipoFinal,
+          facturaRaw.fechaEmision,
+          tenantId,
+          facturaId,
+        );
+        ptoVenta = elegido.ptoVenta;
+        cbteNro = elegido.ultimoCbte + 1;
+        fechaCbte = elegido.fechaCbte;
+      } else {
+        const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+          config.apiKey,
+          config.cuitEmisor,
+          ambiente,
+          ptoVenta,
+          cbteTipoFinal,
+          tenantId,
+          undefined,
+          facturaId,
+          config.certPem,
+          config.keyPem,
+        );
+        cbteNro = ultimoCbte + 1;
+        fechaCbte = resolveFechaCbteEmision(ambiente, facturaRaw.fechaEmision, null);
+      }
 
       if (!esHomologacion) {
         if (facturaExt.cbteNro != null) {
@@ -1998,7 +2061,7 @@ export class LiquidacionesService {
 
       const cabeceraBase = {
         cuit: config.cuitEmisor,
-        ptoVenta: config.ptoVentaFactura,
+        ptoVenta,
         cbteTipo: cbteTipoFinal,
         cbteNro,
         fechaCbte,
@@ -2013,7 +2076,7 @@ export class LiquidacionesService {
       if (esHomologacion) {
         await (this.prisma as PrismaAny).factura.update({
           where: { id: facturaId },
-          data: { cbteNro, fechaEmision: parseAfipDate(fechaCbte) },
+          data: { cbteNro, ptoVenta, fechaEmision: parseAfipDate(fechaCbte) },
         });
       }
 
@@ -2031,7 +2094,7 @@ export class LiquidacionesService {
       const comprobanteFinal = buildComprobanteCvlp(
         {
           cuit: config.cuitEmisor,
-          ptoVenta: config.ptoVentaFactura,
+          ptoVenta,
           cbteTipo: cbteTipoFinal,
           cbteNro,
           fechaCbte,

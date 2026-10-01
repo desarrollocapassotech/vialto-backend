@@ -164,7 +164,7 @@ export class LiquidacionContratoPdfService {
     let emisorNombre = liq.tenant?.name?.trim() || 'Liquidación';
     let logoUrl: string | null = null;
     try {
-      const config = await this.arcaConfig.findPublic(tenantId);
+      const config = await this.arcaConfig.findParaComprobante(tenantId);
       if (config?.razonSocial?.trim()) emisorNombre = config.razonSocial.trim();
       logoUrl = config?.logoUrl ?? null;
     } catch {

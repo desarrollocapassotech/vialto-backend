@@ -343,7 +343,7 @@ export class FacturaPdfService {
           ]
         : [];
 
-    const config = await this.arcaConfig.findPublic(tenantId);
+    const config = await this.arcaConfig.findParaComprobante(tenantId);
 
     let qrBuffer: Buffer | null = null;
     if (drawCae && drawCbteNro && drawPtoVenta) {

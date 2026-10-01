@@ -170,13 +170,63 @@ export class ArcaConfigService {
     };
   }
 
+  /**
+   * Configuración que se usa cuando el tenant todavía no cargó la suya. Sin
+   * configuración el tenant está, en la práctica, en homologación (toda config
+   * nueva arranca ahí — ver `upsert`), y en homologación AFIP SDK no usa el
+   * CUIT ni el certificado del tenant: se puede emitir igual, con datos de
+   * emisor de prueba. El PDF ya sale con la marca de agua de homologación.
+   * Para producción sí hace falta cargar la configuración real.
+   */
+  private async configHomologacionPorDefecto(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { name: true },
+    });
+    return {
+      tenantId,
+      cuitEmisor: CUIT_TEST_HOMOLOGACION,
+      razonSocial: tenant?.name?.trim() || 'Emisor de prueba',
+      domicilioEmisor: 'Domicilio de prueba (homologación)',
+      condicionIvaEmisor: '1', // IVA Responsable Inscripto
+      ingBrutos: CUIT_TEST_HOMOLOGACION,
+      inicActEmisor: '01/01/2020',
+      logoUrl: null as string | null,
+      ptoVentaCvlp: 1,
+      ptoVentaFactura: 1,
+      ambiente: 'homologacion' as const,
+      comisionPctDefault: 8,
+      ivaGastosAdmin: 21,
+      anulacionTipoComprobante: 'nota_credito',
+      updatedAt: new Date(),
+      certPemProduccion: null as string | null,
+      keyPemProduccion: null as string | null,
+    };
+  }
+
+  /**
+   * Datos del emisor para dibujar un comprobante (PDF): la config real del
+   * tenant o, si no tiene, la de homologación por defecto — la misma con la
+   * que `findWithApiKey` emitió el comprobante. No usar para la API pública:
+   * ahí `findPublic` sigue devolviendo null para que la UI avise que falta
+   * configurar ARCA para emitir en producción.
+   */
+  async findParaComprobante(tenantId: string) {
+    const config = await this.findPublic(tenantId);
+    if (config) return config;
+    const { certPemProduccion, keyPemProduccion, ...rest } =
+      await this.configHomologacionPorDefecto(tenantId);
+    return {
+      ...rest,
+      certConfiguradoProduccion: Boolean(certPemProduccion),
+      keyConfiguradoProduccion: Boolean(keyPemProduccion),
+    };
+  }
+
   async findWithApiKey(tenantId: string) {
-    const config = await this.db.arcaConfig.findUnique({ where: { tenantId } });
-    if (!config) {
-      throw new NotFoundException(
-        'No hay configuración de ARCA para este tenant. Configurarla en el panel de superadmin.',
-      );
-    }
+    const config =
+      (await this.db.arcaConfig.findUnique({ where: { tenantId } })) ??
+      (await this.configHomologacionPorDefecto(tenantId));
     const ambiente = normalizeArcaAmbiente(config.ambiente);
     // Homologación: se usa el CUIT de prueba estándar de AFIP SDK, sin certificado propio
     // (mismo mecanismo que scripts/test-*.js) — evita depender de que cada tenant registre

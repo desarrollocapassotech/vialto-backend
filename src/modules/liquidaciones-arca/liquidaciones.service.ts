@@ -1434,19 +1434,40 @@ export class LiquidacionesService {
     });
 
     try {
-      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-        config.apiKey,
-        config.cuitEmisor,
-        ambiente,
-        config.ptoVentaFactura,
-        cbteTipoNc,
-        tenantId,
-        undefined,
-        facturaId,
-        config.certPem,
-        config.keyPem,
-      );
-      const cbteNro = ultimoCbte + 1;
+      // Homologación: mismo ajuste de PV + fecha que la emisión (ver
+      // `elegirPtoVentaHomologacion`) — sin esto la NC salía con fecha de hoy en
+      // el PV configurado y AFIP la rechazaba si el último comprobante de ese PV
+      // tenía fecha posterior (bug real QA, oct 2026: PV 1 / NC A con fecha +5 días).
+      let ptoVentaNc: number = config.ptoVentaFactura;
+      let cbteNro: number;
+      let fechaNc: string;
+      if (ambiente !== 'produccion') {
+        const elegido = await this.elegirPtoVentaHomologacion(
+          config,
+          cbteTipoNc,
+          new Date(),
+          tenantId,
+          facturaId,
+        );
+        ptoVentaNc = elegido.ptoVenta;
+        cbteNro = elegido.ultimoCbte + 1;
+        fechaNc = elegido.fechaCbte;
+      } else {
+        const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+          config.apiKey,
+          config.cuitEmisor,
+          ambiente,
+          ptoVentaNc,
+          cbteTipoNc,
+          tenantId,
+          undefined,
+          facturaId,
+          config.certPem,
+          config.keyPem,
+        );
+        cbteNro = ultimoCbte + 1;
+        fechaNc = formatFechaCbte(new Date());
+      }
 
       const docNroReal = facturaRaw.cliente.idFiscal
         ? Number(facturaRaw.cliente.idFiscal.replace(/-/g, ''))
@@ -1459,7 +1480,6 @@ export class LiquidacionesService {
         condicionIvaReceptorId,
       });
 
-      const fechaNc = formatFechaCbte(new Date());
       const fechaFacturaAsoc = await this.resolveFechaCbteFacturaOriginal(
         facturaId,
         facturaRaw.fechaEmision,
@@ -1467,7 +1487,7 @@ export class LiquidacionesService {
 
       const cabeceraBase = {
         cuit: config.cuitEmisor,
-        ptoVenta: config.ptoVentaFactura,
+        ptoVenta: ptoVentaNc,
         cbteTipo: cbteTipoNc,
         cbteNro,
         fechaCbte: fechaNc,
@@ -1522,10 +1542,13 @@ export class LiquidacionesService {
           arcaError: null,
           anulacionCbteTipo: cbteTipoNc,
           anulacionCbteNro: cbteNro,
-          anulacionPtoVenta: config.ptoVentaFactura,
+          anulacionPtoVenta: ptoVentaNc,
           anulacionCae: authResult.CAE,
           anulacionCaeFechaVto: caeFechaVto,
-          anulacionFecha: anuladoAt,
+          // Fecha con la que AFIP autorizó la NC (en homologación puede no ser
+          // hoy, ver `elegirPtoVentaHomologacion`); `anuladoAt` queda como el
+          // momento real de la anulación.
+          anulacionFecha: parseAfipDate(fechaNc) ?? anuladoAt,
           motivoAnulacion: motivo,
           anuladoPor: userId,
           anuladoAt,

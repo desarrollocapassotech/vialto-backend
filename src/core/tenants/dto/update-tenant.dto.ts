@@ -39,4 +39,7 @@ export class UpdateTenantDto {
 
   /** true = valida el CUIT de clientes/transportistas contra el padrón de ARCA (ver core/padron). */
   @IsOptional() @IsBoolean() validacionCuitArcaHabilitada?: boolean;
+
+  /** Con qué flota trabaja la empresa (ver Tenant.tipoFlota en schema.prisma). */
+  @IsOptional() @IsIn(['mixta', 'propia', 'externa']) tipoFlota?: string;
 }

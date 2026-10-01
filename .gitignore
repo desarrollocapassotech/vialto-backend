@@ -8,5 +8,6 @@ env.qa
 env.local
 serviceAccountKey.json
 scripts/*.json
+scripts/.padron-cert/
 *.log
 dist/

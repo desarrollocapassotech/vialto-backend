@@ -114,8 +114,8 @@ Ejemplos de uso:
 3. **Todo endpoint de módulo DEBE tener `@UseGuards(ModuleGuard)`** con el nombre del módulo.
 4. **Nuevos módulos van en `src/modules/{nombre}/`** con su propio NestJS module, controller, service y schema Prisma.
 5. **El core no depende de módulos** — los módulos pueden depender del core pero no entre sí.
-6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** de Neon (entorno QA); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
-   - **OJO — la base develop es compartida entre ramas.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
+6. **Migraciones Prisma** — se crean y prueban con `prisma migrate dev` en la rama **develop** del proyecto Neon **`vialto-desarrollo`** (entorno QA — proyecto separado del de producción desde sep 2026, ver `MIGRATIONS.md`); en **producción** se aplican solas con `prisma migrate deploy` vía el **Pre-Deploy Command** de Render al mergear a `main`. Nunca correr `migrate dev` ni `migrate reset` contra producción. Guía completa en `MIGRATIONS.md`.
+   - **OJO — la base develop (QA) es compartida entre ramas de git.** `migrate dev` puede detectar *drift* / "migration modified after applied" / "migration missing" cuando otra rama aplicó una migración que no tenés local. **Nunca resetear** (borra la base compartida y todos sus datos). Para resolver: sincronizar migraciones con `git pull`; y si solo necesitás agregar una columna aislada sin pelear con el drift, aplicarla con `npx prisma db execute --file ...` (ALTER TABLE aditivo e idempotente) + `npx prisma generate`. A futuro conviene una base por rama/dev (Neon branching).
 
 ### Configuración del tenant en PostgreSQL
 
@@ -275,6 +275,7 @@ src/
     vehiculos/              ← ✅ entidad compartida
     destinatarios/          ← ✅ catálogo compartido (viajes, stock)
     direcciones-entrega/    ← ✅ catálogo compartido (viajes, stock)
+    padron/                 ← ✅ consulta de CUIT al padrón de ARCA (nombre/domicilio/estado) con certificado de plataforma, para todo tenant — ver sección "`core/padron`"
     platform/               ← ✅ superadmin: CRUD cross-tenant sobre casi todas las entidades (viajes, clientes, choferes, vehículos, transportistas, destinatarios, direcciones, users, facturas/pagos, stock completo, config/liquidaciones/facturas/logs ARCA)
 
   modules/
@@ -1253,6 +1254,24 @@ Ocultar un campo en el formulario **no alcanza** cuando ese campo alimenta un c�
 
 ---
 
+### `core/padron` — validación de CUIT contra el padrón de ARCA (sep 2026)
+
+Al cargar/editar un CUIT argentino en Cliente o Transportista, el frontend consulta `GET /api/padron/cuit/:cuit` y autocompleta nombre (tal cual figura en ARCA), domicilio fiscal y condición IVA. **No depende de ningún módulo ARCA** — por eso vive en `core/` y no tiene `ModuleGuard` (solo `@Roles('admin','superadmin')`, los mismos que pueden crear/editar).
+
+- **Opt-in por empresa, deshabilitado por defecto** (sep 2026): un único flag general `Tenant.validacionCuitArcaHabilitada` (`Boolean @default(false)`, migración `20260930120000_tenant_validacion_cuit_arca`), editable solo por superadmin (`PATCH /tenants/:orgId`) desde "Campos por empresa" → pestaña General. **No es por formulario a propósito** (decisión de producto: un switch y listo — se descartó usar `tenant-field-config`). `PadronController` lo exige también del lado del servidor (403 si la empresa no lo tiene; superadmin siempre pasa), así una empresa sin la opción no puede gastar la cuota de afipsdk llamando al endpoint a mano.
+
+- **Certificado de plataforma, no del tenant**: consulta `ws_sr_constancia_inscripcion` (padrón A5) vía `@afipsdk/afip.js` (`RegisterInscriptionProof.getTaxpayerDetails`) con un único certificado de producción asociado al CUIT personal de Elias (ni CapassoTech ni Vialto tienen CUIT). Con el padrón A5 el consultante puede ser cualquiera: el `cuitRepresentada` es el dueño del certificado, no el tenant. **No usa `ArcaConfig` ni `ArcaClientService`** (el core no puede depender de `modules/liquidaciones-arca`) — cliente AFIP propio en `PadronService`.
+- **Cuenta de afipsdk separada** (`PADRON_AFIP_SDK_API_KEY`), distinta de la de facturación de NyM (`AFIP_SDK_API_KEY`), para no consumir su cuota. Plan Free: 1 CUIT, 1.000 requests/mes.
+- **Setup/prueba**: `scripts/setup-padron-cert.js` (automatizaciones afipsdk que crearon y autorizaron el certificado; no hace falta volver a correrlo salvo al renovar el certificado, que vence a los ~2 años) y `scripts/test-padron.js [CUIT]` (consulta real, gasta 1 request).
+- **Estados** (`padron.types.ts`): `activo` (autocompleta todo) | `con_observaciones` (ARCA no emite la constancia pero el CUIT existe — aceptable, solo trae nombre) | `inactivo` (clave no ACTIVA — no autocompleta, aviso rojo) | `no_encontrado`.
+- **Protección de cuota**: caché en memoria por CUIT (7 días, solo respuestas exitosas) + tope de 100 consultas reales por tenant por día (429). En memoria a propósito: una sola instancia en Render; si se escala a varias, mover a DB.
+- **Nunca bloquea la carga**: ARCA caído / sin configurar → 503 con mensaje amigable; el frontend muestra "No se pudo validar" y la carga manual sigue igual. El dígito verificador (`shared/util/cuit.ts`) se valida antes de consultar (400 sin gastar request).
+- **Dígito verificador — dónde se exige**: en los formularios del frontend (`validarIdFiscal` de `lib/ciudades/paises.ts`) y en el **preview de la importación masiva** de clientes/transportistas (`ValidatorService.errorIdFiscal`: la fila sale como error de campo, antes de confirmar). **No** en `shared/util/validar-id-fiscal.ts` (create/update del API), a propósito, para no romper registros viejos al editarlos por API.
+- **La importación NO consulta ARCA** (decisión sep 2026): 1.000 requests/mes y el tope de 100/día por tenant no alcanzan para planillas grandes, y cada consulta tarda 1-2 s. Si se pasa a un plan pago de afipsdk, la idea pendiente es un botón opt-in "Completar datos faltantes con ARCA" en el preview, solo para filas sin nombre/domicilio.
+- Pruebas: `npm run test:padron` (mapeo, estados, caché, tope, errores — cliente AFIP mockeado).
+
+---
+
 ## Clientes actuales y estado
 
 | Cliente | Estado | Módulos contratados | Prioridad |
@@ -1358,7 +1377,7 @@ FASE 8 — Transversal
 ### Hoy (hasta ~5 clientes)
 - **Frontend:** Render Static Site — gratis
 - **Backend:** Render Web Service — gratis (cold starts) o $7/mes sin cold starts
-- **PostgreSQL:** Neon.tech — gratis hasta 0.5 GB / 190 hs compute/mes
+- **PostgreSQL:** Neon.tech — plan pago por uso desde sep 2026 (el free agotó su cuota de cómputo y suspendió producción). Dos proyectos separados porque la cuota/consumo es por proyecto: `vialto` (solo rama `production`, máx. 2 CU) y `vialto-desarrollo` (QA, rama `develop`, máx. 1 CU). No crear ramas de desarrollo dentro de `vialto`.
 - **Firestore:** Google — gratis hasta ~50k lecturas/día
 - **Auth:** Clerk — gratis hasta 10.000 MAU
 
@@ -1397,6 +1416,13 @@ NODE_ENV=production
 # Módulos emision-facturas-arca / emision-liquido-producto-arca — carpeta liquidaciones-arca (NyM Logística) — fail-fast si falta en runtime
 ARCA_ENCRYPTION_KEY=              # clave AES-256 (hex 64 chars) para cifrar cert/key/credenciales AFIP en DB
 AFIP_SDK_API_KEY=                 # token de AfipSDK (afipsdk.com)
+
+# core/padron — validación de CUIT contra el padrón de ARCA (todos los tenants). Sin estas
+# variables el endpoint responde 503 y los formularios siguen funcionando a mano.
+PADRON_AFIP_SDK_API_KEY=          # token de la cuenta de afipsdk dedicada al padrón (≠ AFIP_SDK_API_KEY)
+PADRON_CUIT=                      # CUIT dueño del certificado de plataforma
+PADRON_CERT=                      # certificado PEM (una línea con \n literales)
+PADRON_KEY=                       # clave privada PEM (una línea con \n literales)
 
 # Módulo notificaciones (alertas por email vía Resend) — sin RESEND_API_KEY el cron
 # sigue corriendo pero solo loguea, no envía nada (ver ResendEmailService)

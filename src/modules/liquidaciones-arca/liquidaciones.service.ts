@@ -325,7 +325,7 @@ export class LiquidacionesService {
         numero: v.numero ?? '',
         bruto: subtotal,
         comision: vComision,
-        ivaPct: v.precioTransportistaIvaIncluidoPct ?? 0,
+        ivaPct: v.precioTransportistaIvaIncluidoPct || undefined,
       };
     });
 
@@ -480,7 +480,7 @@ export class LiquidacionesService {
         numero: v.viaje.numero ?? '',
         bruto: subtotal,
         comision: 0,
-        ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+        ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
       };
     });
     let brutoActual = liq.bruto as number;
@@ -577,7 +577,7 @@ export class LiquidacionesService {
           numero: v.numero ?? '',
           bruto: subtotal,
           comision: 0,
-          ivaPct: v.precioTransportistaIvaIncluidoPct ?? 0,
+          ivaPct: v.precioTransportistaIvaIncluidoPct || undefined,
         };
       });
       brutoActual = brutoNuevo;
@@ -852,7 +852,7 @@ export class LiquidacionesService {
           numero: v.viaje.numero ?? '',
           bruto: subtotal,
           comision: round2(subtotal * liquidacion.comisionPct / 100),
-          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
         };
       });
 
@@ -1079,7 +1079,7 @@ export class LiquidacionesService {
           numero: v.viaje.numero ?? '',
           bruto: subtotal,
           comision: round2(subtotal * liquidacion.comisionPct / 100),
-          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct ?? 0,
+          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
         };
       });
 

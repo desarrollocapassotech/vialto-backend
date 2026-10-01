@@ -36,4 +36,7 @@ export class UpdateTenantDto {
 
   /** Unidad de cantidad de flete del tenant — 'TN' | 'UD'. Afecta PDFs (Factura/Liquidación/Contrato) y formularios de Viajes. */
   @IsOptional() @IsIn(['TN', 'UD']) unidadCantidadViajes?: string;
+
+  /** true = valida el CUIT de clientes/transportistas contra el padrón de ARCA (ver core/padron). */
+  @IsOptional() @IsBoolean() validacionCuitArcaHabilitada?: boolean;
 }

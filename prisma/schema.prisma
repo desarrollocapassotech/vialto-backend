@@ -82,6 +82,13 @@ model Tenant {
    * Ver `cantidad-unidad.util.ts`.
    */
   unidadCantidadViajes           String   @default("TN")
+  /**
+   * true = al cargar el CUIT de un Cliente/Transportista se valida contra el padrón de
+   * ARCA y se autocompletan nombre/domicilio (ver core/padron). Deshabilitado por defecto;
+   * se prende solo desde superadmin ("Campos por empresa" → General). No depende de
+   * ningún módulo ARCA.
+   */
+  validacionCuitArcaHabilitada   Boolean  @default(false)
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]

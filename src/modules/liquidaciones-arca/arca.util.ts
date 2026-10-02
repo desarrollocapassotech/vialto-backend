@@ -253,7 +253,14 @@ export function resolveFechaCbteEmision(
   return emision > hoy ? hoy : emision;
 }
 
-/** Homologación: evita 10016 por desfase UTC vs AR o fecha anterior al último comprobante. */
+/**
+ * Homologación: evita 10016 por desfase UTC vs AR o fecha anterior al último comprobante.
+ * No valida la ventana de AFIP a propósito: si el PV quedó bloqueado (último
+ * comprobante con fecha futura fuera de ventana), devuelve esa fecha igual y es
+ * el caller quien decide — `elegirPtoVentaHomologacion` prueba el siguiente PV,
+ * la NC de anulación (PV fijo) corta con `assertFechaCbteHomologacionEnVentana`.
+ * Tirar acá cortaba el fallback de PV (bug QA oct 2026).
+ */
 export function resolveFechaCbteHomologacion(ultimoCbteFechaYmd?: string | null): string {
   const now = new Date();
   const ar = formatFechaCbteArgentina(now);
@@ -261,19 +268,18 @@ export function resolveFechaCbteHomologacion(ultimoCbteFechaYmd?: string | null)
   let fecha = ar > utc ? ar : utc;
   const min = ultimoCbteFechaYmd?.replace(/\D/g, '').slice(0, 8);
   if (min && /^\d{8}$/.test(min) && min > fecha) {
-    const limitDate = new Date(now);
-    limitDate.setDate(limitDate.getDate() + 5);
-    const limitYmd = formatFechaCbteArgentina(limitDate);
-    
-    if (min > limitYmd) {
-      const displayDate = `${min.slice(6,8)}/${min.slice(4,6)}/${min.slice(0,4)}`;
-      throw new BadRequestException(
-        `El punto de venta de pruebas está bloqueado porque el último comprobante autorizado tiene fecha ${displayDate} (supera el límite de 5 días desde hoy). Para continuar probando, cambiá a otro tipo de factura o contactá a soporte.`
-      );
-    }
     fecha = min;
   }
   return fecha;
+}
+
+/** Homologación con PV fijo: error amigable si la fecha resuelta cae fuera de la ventana de AFIP. */
+export function assertFechaCbteHomologacionEnVentana(fechaYmd: string): void {
+  if (fechaCbteDentroDeVentanaAfip(fechaYmd)) return;
+  const display = `${fechaYmd.slice(6, 8)}/${fechaYmd.slice(4, 6)}/${fechaYmd.slice(0, 4)}`;
+  throw new BadRequestException(
+    `El punto de venta de pruebas está bloqueado porque el último comprobante autorizado tiene fecha ${display} (supera el límite de 5 días desde hoy). El CUIT de homologación de AFIP es compartido; intentá de nuevo más tarde o contactá a soporte.`,
+  );
 }
 
 /**

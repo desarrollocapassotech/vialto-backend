@@ -149,8 +149,8 @@ export function resolveReceptorAfip(args: {
     };
   }
 
-  // Factura B: consumidor final (Doc 99/0) — patrón oficial AfipSDK en homologación.
-  if (args.cbteTipo === 6) {
+  // Factura B (6) y NC B (8): consumidor final (Doc 99/0) — patrón oficial AfipSDK en homologación.
+  if (args.cbteTipo === 6 || args.cbteTipo === 8) {
     return {
       docTipo: DOC_TIPO_CF,
       docNro: 0,
@@ -158,7 +158,7 @@ export function resolveReceptorAfip(args: {
     };
   }
 
-  // CVLP B (61), NC/ND B (7/8): CUIT de prueba + condición del receptor real.
+  // CVLP B (61), ND B (7): CUIT de prueba + condición del receptor real.
   return {
     docTipo: DOC_TIPO_CUIT,
     docNro: CUIT_RECEPTOR_TEST_HOMOLOGACION,
@@ -249,20 +249,46 @@ export function resolveFechaCbteEmision(
     return resolveFechaCbteHomologacion(ultimoCbteFechaYmd);
   }
   const hoy = formatFechaCbteArgentina(new Date());
-  const emision = formatFechaCbteArgentina(fechaEmision);
+  const emision = formatFechaCbteUtc(fechaEmision);
   return emision > hoy ? hoy : emision;
 }
 
 /** Homologación: evita 10016 por desfase UTC vs AR o fecha anterior al último comprobante. */
 export function resolveFechaCbteHomologacion(ultimoCbteFechaYmd?: string | null): string {
-  const ar = formatFechaCbteArgentina(new Date());
-  const utc = formatFechaCbteUtc(new Date());
+  const now = new Date();
+  const ar = formatFechaCbteArgentina(now);
+  const utc = formatFechaCbteUtc(now);
   let fecha = ar > utc ? ar : utc;
   const min = ultimoCbteFechaYmd?.replace(/\D/g, '').slice(0, 8);
   if (min && /^\d{8}$/.test(min) && min > fecha) {
+    const limitDate = new Date(now);
+    limitDate.setDate(limitDate.getDate() + 5);
+    const limitYmd = formatFechaCbteArgentina(limitDate);
+    
+    if (min > limitYmd) {
+      const displayDate = `${min.slice(6,8)}/${min.slice(4,6)}/${min.slice(0,4)}`;
+      throw new BadRequestException(
+        `El punto de venta de pruebas está bloqueado porque el último comprobante autorizado tiene fecha ${displayDate} (supera el límite de 5 días desde hoy). Para continuar probando, cambiá a otro tipo de factura o contactá a soporte.`
+      );
+    }
     fecha = min;
   }
   return fecha;
+}
+
+/**
+ * AFIP rechaza con 10016 un CbteFch más de N días después de hoy (5 para
+ * Concepto 1 — productos, que es el que mandan las facturas). Sirve para
+ * detectar de antemano un punto de venta inutilizable en homologación: el
+ * CUIT de prueba lo comparten todos los usuarios de AFIP SDK y alguno puede
+ * dejar el último comprobante con fecha futura (ej. un servicio, que admite
+ * hasta N+10) — y como el CbteFch nunca puede ser anterior al último, ese PV
+ * queda bloqueado hasta que pase esa fecha.
+ */
+export function fechaCbteDentroDeVentanaAfip(fechaYmd: string, diasMax = 5): boolean {
+  const limite = new Date();
+  limite.setUTCDate(limite.getUTCDate() + diasMax);
+  return fechaYmd <= formatFechaCbteArgentina(limite);
 }
 
 /** Formato estándar PV-número para facturas/comprobantes (ej. 0001-00000045). */

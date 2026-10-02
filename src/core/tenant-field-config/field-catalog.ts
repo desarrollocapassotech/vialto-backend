@@ -259,8 +259,8 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
           { campo: "licencia", label: "N.° licencia", obligatorioSistema: false },
           { campo: "licenciaVence", label: "Vencimiento de licencia", obligatorioSistema: false },
-          { campo: "flotaPropia", label: "Opción \"Flota propia\"", obligatorioSistema: false },
-          { campo: "transportistaExterno", label: "Opción \"Transportista externo\"", obligatorioSistema: false },
+          // Las opciones de pertenencia (flota propia / transportista externo) ya no
+          // van acá: se configuran con Tenant.tipoFlota ("Campos por empresa" → General).
         ],
       },
       edicion_chofer: {
@@ -272,8 +272,6 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "telefono", label: "Teléfono", obligatorioSistema: false },
           { campo: "licencia", label: "N.° licencia", obligatorioSistema: false },
           { campo: "licenciaVence", label: "Vencimiento de licencia", obligatorioSistema: false },
-          { campo: "flotaPropia", label: "Opción \"Flota propia\"", obligatorioSistema: false },
-          { campo: "transportistaExterno", label: "Opción \"Transportista externo\"", obligatorioSistema: false },
         ],
       },
     },

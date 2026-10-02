@@ -89,6 +89,15 @@ model Tenant {
    * ningún módulo ARCA.
    */
   validacionCuitArcaHabilitada   Boolean  @default(false)
+  /**
+   * Con qué flota trabaja la empresa — 'mixta' (default: flota propia + transportistas
+   * externos) | 'propia' (solo flota propia) | 'externa' (solo transportistas externos).
+   * Define qué opciones de pertenencia ven Choferes/Vehículos, el "Tipo de flota" de
+   * Viajes y si se muestra la pestaña Transportistas. Se configura solo desde superadmin
+   * ("Campos por empresa" → General). Reemplaza a las opciones "flotaPropia" /
+   * "transportistaExterno" que vivían en la config de campos de Choferes.
+   */
+  tipoFlota                      String   @default("mixta")
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]

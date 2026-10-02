@@ -340,7 +340,7 @@ export class LiquidacionPdfService {
             fecha: liq.createdAt,
           };
 
-    const config = await this.arcaConfig.findPublic(tenantId);
+    const config = await this.arcaConfig.findParaComprobante(tenantId);
 
     // QR solo si tiene CAE
     let qrBuffer: Buffer | null = null;

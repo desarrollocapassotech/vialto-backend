@@ -34,6 +34,8 @@ import {
   getCbteTipoAnulacionCvlp,
   getCbteTipoAnulacionFactura,
   getCbteTipoFactura,
+  fechaCbteDentroDeVentanaAfip,
+  formatNumeroComprobante,
   parseNumeroFactura,
   resolveFechaCbteEmision,
   resolveReceptorAfip,
@@ -58,12 +60,16 @@ import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
 import { assertCvlpEmitDatosCompletos } from './cvlp-emit-validation.util';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { AnularFacturaDto } from './dto/anular-factura.dto';
+import { conceptoCargoFactura } from '../facturacion/cargo-factura.util';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 // Tipos para los nuevos modelos Prisma hasta que se ejecute `prisma generate`
 // (los campos existen en schema.prisma; el cliente generado los tendrá sin cast)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
+
+/** Puntos de venta del CUIT de prueba de AFIP SDK que se prueban en homologación (ver `elegirPtoVentaHomologacion`). */
+const PTOS_VENTA_HOMOLOGACION = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 @Injectable()
 export class LiquidacionesService {
@@ -1091,7 +1097,24 @@ export class LiquidacionesService {
         viajes: viajesPayload,
       });
 
-      const fechaNc = formatFechaCbte(new Date());
+      const ultimoFecha =
+        config.ambiente !== 'produccion' && ultimoCbte > 0
+          ? await this.arcaClient.getFechaComprobanteAutorizado(
+              config.apiKey,
+              config.cuitEmisor,
+              config.ambiente as 'homologacion' | 'produccion',
+              config.ptoVentaCvlp,
+              cbteTipoAnulacion,
+              ultimoCbte,
+              config.certPem,
+              config.keyPem,
+            )
+          : null;
+      const fechaNc = resolveFechaCbteEmision(
+        config.ambiente as 'homologacion' | 'produccion',
+        new Date(),
+        ultimoFecha,
+      );
       const fechaCvlpAsoc = await this.resolveFechaCbteOriginal(liquidacionId, liquidacion);
 
       const cabeceraBase = {
@@ -1428,19 +1451,40 @@ export class LiquidacionesService {
     });
 
     try {
-      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-        config.apiKey,
-        config.cuitEmisor,
-        ambiente,
-        config.ptoVentaFactura,
-        cbteTipoNc,
-        tenantId,
-        undefined,
-        facturaId,
-        config.certPem,
-        config.keyPem,
-      );
-      const cbteNro = ultimoCbte + 1;
+      // Homologación: mismo ajuste de PV + fecha que la emisión (ver
+      // `elegirPtoVentaHomologacion`) — sin esto la NC salía con fecha de hoy en
+      // el PV configurado y AFIP la rechazaba si el último comprobante de ese PV
+      // tenía fecha posterior (bug real QA, oct 2026: PV 1 / NC A con fecha +5 días).
+      let ptoVentaNc: number = config.ptoVentaFactura;
+      let cbteNro: number;
+      let fechaNc: string;
+      if (ambiente !== 'produccion') {
+        const elegido = await this.elegirPtoVentaHomologacion(
+          config,
+          cbteTipoNc,
+          new Date(),
+          tenantId,
+          facturaId,
+        );
+        ptoVentaNc = elegido.ptoVenta;
+        cbteNro = elegido.ultimoCbte + 1;
+        fechaNc = elegido.fechaCbte;
+      } else {
+        const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+          config.apiKey,
+          config.cuitEmisor,
+          ambiente,
+          ptoVentaNc,
+          cbteTipoNc,
+          tenantId,
+          undefined,
+          facturaId,
+          config.certPem,
+          config.keyPem,
+        );
+        cbteNro = ultimoCbte + 1;
+        fechaNc = formatFechaCbte(new Date());
+      }
 
       const docNroReal = facturaRaw.cliente.idFiscal
         ? Number(facturaRaw.cliente.idFiscal.replace(/-/g, ''))
@@ -1453,7 +1497,6 @@ export class LiquidacionesService {
         condicionIvaReceptorId,
       });
 
-      const fechaNc = formatFechaCbte(new Date());
       const fechaFacturaAsoc = await this.resolveFechaCbteFacturaOriginal(
         facturaId,
         facturaRaw.fechaEmision,
@@ -1461,7 +1504,7 @@ export class LiquidacionesService {
 
       const cabeceraBase = {
         cuit: config.cuitEmisor,
-        ptoVenta: config.ptoVentaFactura,
+        ptoVenta: ptoVentaNc,
         cbteTipo: cbteTipoNc,
         cbteNro,
         fechaCbte: fechaNc,
@@ -1516,10 +1559,13 @@ export class LiquidacionesService {
           arcaError: null,
           anulacionCbteTipo: cbteTipoNc,
           anulacionCbteNro: cbteNro,
-          anulacionPtoVenta: config.ptoVentaFactura,
+          anulacionPtoVenta: ptoVentaNc,
           anulacionCae: authResult.CAE,
           anulacionCaeFechaVto: caeFechaVto,
-          anulacionFecha: anuladoAt,
+          // Fecha con la que AFIP autorizó la NC (en homologación puede no ser
+          // hoy, ver `elegirPtoVentaHomologacion`); `anuladoAt` queda como el
+          // momento real de la anulación.
+          anulacionFecha: parseAfipDate(fechaNc) ?? anuladoAt,
           motivoAnulacion: motivo,
           anuladoPor: userId,
           anuladoAt,
@@ -1643,6 +1689,69 @@ export class LiquidacionesService {
   }
 
   /** Fecha yyyymmdd del CVLP original (para CbteAsoc de la NC). */
+  /**
+   * Homologación: punto de venta del CUIT de prueba en el que se puede emitir
+   * ahora. Ese CUIT lo comparten todos los usuarios de AFIP SDK — si el último
+   * comprobante de un PV quedó con fecha futura (fuera de la ventana de AFIP,
+   * ver `fechaCbteDentroDeVentanaAfip`), el CbteFch no puede ser ni anterior a
+   * ese ni tan adelante, y AFIP rechaza con 10016 hasta que pase esa fecha.
+   * Se prueba primero el PV configurado y, si está bloqueado, los siguientes.
+   * Bug real (QA, oct 2026): PV 1 / Factura A tenía el último comprobante con
+   * fecha +9 días y toda emisión de prueba fallaba con 10016.
+   */
+  private async elegirPtoVentaHomologacion(
+    config: { apiKey: string; cuitEmisor: string; ptoVentaFactura: number },
+    cbteTipo: number,
+    fechaEmision: Date,
+    tenantId: string,
+    facturaId: string,
+  ): Promise<{ ptoVenta: number; ultimoCbte: number; fechaCbte: string }> {
+    const candidatos = [
+      config.ptoVentaFactura,
+      ...PTOS_VENTA_HOMOLOGACION.filter((pv) => pv !== config.ptoVentaFactura),
+    ];
+    for (const ptoVenta of candidatos) {
+      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+        config.apiKey,
+        config.cuitEmisor,
+        'homologacion',
+        ptoVenta,
+        cbteTipo,
+        tenantId,
+        undefined,
+        facturaId,
+        null,
+        null,
+      );
+      const ultimoFecha =
+        ultimoCbte > 0
+          ? await this.arcaClient.getFechaComprobanteAutorizado(
+              config.apiKey,
+              config.cuitEmisor,
+              'homologacion',
+              ptoVenta,
+              cbteTipo,
+              ultimoCbte,
+              null,
+              null,
+            )
+          : null;
+      const fechaCbte = resolveFechaCbteEmision('homologacion', fechaEmision, ultimoFecha);
+      if (fechaCbteDentroDeVentanaAfip(fechaCbte)) {
+        if (ptoVenta !== config.ptoVentaFactura) {
+          this.logger.warn(
+            `[homologación] PV ${config.ptoVentaFactura} tipo ${cbteTipo} bloqueado (último comprobante del ${ultimoFecha}); se emite en PV ${ptoVenta}.`,
+          );
+        }
+        return { ptoVenta, ultimoCbte, fechaCbte };
+      }
+    }
+    throw new ArcaException(
+      ARCA_ERROR_CODES.GENERICO,
+      'No hay un punto de venta de prueba disponible en este momento: el CUIT de homologación compartido de AFIP tiene comprobantes con fecha futura. Intentá de nuevo más tarde.',
+    );
+  }
+
   private async resolveFechaCbteOriginal(
     liquidacionId: string,
     liquidacion: { updatedAt: Date; createdAt: Date },
@@ -1948,38 +2057,34 @@ export class LiquidacionesService {
       // Mismo camino que CVLP / anulación NC: FECAESolicitar vía autorizarComprobante.
       // Homologación no usa createNextVoucher: el SDK proxy a veces responde
       // "Invalid XML Error: Unexpected close tag" en ese helper.
-      const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
-        config.apiKey,
-        config.cuitEmisor,
-        ambiente,
-        config.ptoVentaFactura,
-        cbteTipoFinal,
-        tenantId,
-        undefined,
-        facturaId,
-        config.certPem,
-        config.keyPem,
-      );
-      cbteNro = ultimoCbte + 1;
-
-      const ultimoFecha =
-        esHomologacion && ultimoCbte > 0
-          ? await this.arcaClient.getFechaComprobanteAutorizado(
-              config.apiKey,
-              config.cuitEmisor,
-              ambiente,
-              config.ptoVentaFactura,
-              cbteTipoFinal,
-              ultimoCbte,
-              config.certPem,
-              config.keyPem,
-            )
-          : null;
-      fechaCbte = resolveFechaCbteEmision(
-        ambiente,
-        facturaRaw.fechaEmision,
-        ultimoFecha,
-      );
+      let ptoVenta: number = config.ptoVentaFactura;
+      if (esHomologacion) {
+        const elegido = await this.elegirPtoVentaHomologacion(
+          config,
+          cbteTipoFinal,
+          facturaRaw.fechaEmision,
+          tenantId,
+          facturaId,
+        );
+        ptoVenta = elegido.ptoVenta;
+        cbteNro = elegido.ultimoCbte + 1;
+        fechaCbte = elegido.fechaCbte;
+      } else {
+        const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
+          config.apiKey,
+          config.cuitEmisor,
+          ambiente,
+          ptoVenta,
+          cbteTipoFinal,
+          tenantId,
+          undefined,
+          facturaId,
+          config.certPem,
+          config.keyPem,
+        );
+        cbteNro = ultimoCbte + 1;
+        fechaCbte = resolveFechaCbteEmision(ambiente, facturaRaw.fechaEmision, null);
+      }
 
       if (!esHomologacion) {
         if (facturaExt.cbteNro != null) {
@@ -1998,7 +2103,7 @@ export class LiquidacionesService {
 
       const cabeceraBase = {
         cuit: config.cuitEmisor,
-        ptoVenta: config.ptoVentaFactura,
+        ptoVenta,
         cbteTipo: cbteTipoFinal,
         cbteNro,
         fechaCbte,
@@ -2013,7 +2118,7 @@ export class LiquidacionesService {
       if (esHomologacion) {
         await (this.prisma as PrismaAny).factura.update({
           where: { id: facturaId },
-          data: { cbteNro, fechaEmision: parseAfipDate(fechaCbte) },
+          data: { cbteNro, ptoVenta, fechaEmision: parseAfipDate(fechaCbte) },
         });
       }
 
@@ -2031,7 +2136,7 @@ export class LiquidacionesService {
       const comprobanteFinal = buildComprobanteCvlp(
         {
           cuit: config.cuitEmisor,
-          ptoVenta: config.ptoVentaFactura,
+          ptoVenta,
           cbteTipo: cbteTipoFinal,
           cbteNro,
           fechaCbte,
@@ -2048,6 +2153,11 @@ export class LiquidacionesService {
         where: { id: facturaId },
         data: {
           cbteNro,
+          // Sin número local cargado (en homologación no se exige), la grilla
+          // mostraba "—": se completa con el número que asignó AFIP.
+          ...(facturaRaw.numero?.trim()
+            ? {}
+            : { numero: formatNumeroComprobante(ptoVenta, cbteNro) }),
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaEstado: 'autorizado',
@@ -2057,6 +2167,19 @@ export class LiquidacionesService {
         },
       });
       await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
+
+      // El cargo de cuenta corriente se creó con la factura, antes de tener
+      // número: se le completa ahora el comprobante que asignó AFIP.
+      if (!facturaRaw.numero?.trim()) {
+        const numeroAfip = formatNumeroComprobante(ptoVenta, cbteNro);
+        await this.db.movimientoCuentaCorriente.updateMany({
+          where: { tenantId, facturaId, tipo: 'cargo' },
+          data: {
+            numeroComprobante: numeroAfip,
+            concepto: conceptoCargoFactura(numeroAfip),
+          },
+        });
+      }
 
       // Generar PDF y subir a Cloudinary
       let comprobanteUrl: string | null = null;

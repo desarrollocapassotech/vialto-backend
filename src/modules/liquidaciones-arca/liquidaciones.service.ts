@@ -30,6 +30,7 @@ import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { ConfirmarAnulacionManualDto } from './dto/confirmar-anulacion-manual.dto';
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import {
+  assertFechaCbteHomologacionEnVentana,
   getCbteTipoCvlp,
   getCbteTipoAnulacionCvlp,
   getCbteTipoAnulacionFactura,
@@ -1115,6 +1116,9 @@ export class LiquidacionesService {
         new Date(),
         ultimoFecha,
       );
+      if (config.ambiente !== 'produccion') {
+        assertFechaCbteHomologacionEnVentana(fechaNc);
+      }
       const fechaCvlpAsoc = await this.resolveFechaCbteOriginal(liquidacionId, liquidacion);
 
       const cabeceraBase = {

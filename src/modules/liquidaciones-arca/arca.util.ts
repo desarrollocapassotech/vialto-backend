@@ -276,6 +276,21 @@ export function resolveFechaCbteHomologacion(ultimoCbteFechaYmd?: string | null)
   return fecha;
 }
 
+/**
+ * AFIP rechaza con 10016 un CbteFch más de N días después de hoy (5 para
+ * Concepto 1 — productos, que es el que mandan las facturas). Sirve para
+ * detectar de antemano un punto de venta inutilizable en homologación: el
+ * CUIT de prueba lo comparten todos los usuarios de AFIP SDK y alguno puede
+ * dejar el último comprobante con fecha futura (ej. un servicio, que admite
+ * hasta N+10) — y como el CbteFch nunca puede ser anterior al último, ese PV
+ * queda bloqueado hasta que pase esa fecha.
+ */
+export function fechaCbteDentroDeVentanaAfip(fechaYmd: string, diasMax = 5): boolean {
+  const limite = new Date();
+  limite.setUTCDate(limite.getUTCDate() + diasMax);
+  return fechaYmd <= formatFechaCbteArgentina(limite);
+}
+
 /** Formato estándar PV-número para facturas/comprobantes (ej. 0001-00000045). */
 export function formatNumeroComprobante(ptoVenta: number, cbteNro: number): string {
   return `${String(ptoVenta).padStart(4, '0')}-${String(cbteNro).padStart(8, '0')}`;

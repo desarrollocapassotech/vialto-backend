@@ -22,6 +22,7 @@ import {
   roundMoney2,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
+import { conceptoCargoFactura } from "./cargo-factura.util";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
 import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
 
@@ -762,7 +763,7 @@ export class FacturacionService {
     },
   ) {
     if (!factura.clienteId) return;
-    const concepto = `Venta automática por factura ${factura.numero ?? factura.id}`;
+    const concepto = conceptoCargoFactura(factura.numero);
     await tx.movimientoCuentaCorriente.upsert({
       where: { tenantId_facturaId: { tenantId: factura.tenantId, facturaId: factura.id } },
       update: {

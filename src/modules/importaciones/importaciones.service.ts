@@ -44,6 +44,14 @@ const SHEET_LABEL_DEFAULT: Record<string, string> = {
   viajes: "Viajes",
 };
 
+/** Columnas de Viajes que referencian a un transportista externo. */
+const CAMPOS_TRANSPORTISTA_VIAJE = new Set(["transportistaId", "transportistaEfectivoId"]);
+
+/** Tenant.tipoFlota = 'propia': la empresa no terceriza, sus viajes nunca llevan transportista. */
+function esSoloFlotaPropia(modulo: string, tipoFlota: string | null | undefined): boolean {
+  return modulo === "viajes" && tipoFlota === "propia";
+}
+
 @Injectable()
 export class ImportacionesService {
   private readonly processors: Record<string, IImportProcessor>;
@@ -760,6 +768,7 @@ export class ImportacionesService {
         idPropio1Habilitado: true,
         idPropio2Habilitado: true,
         idPropio2Label: true,
+        tipoFlota: true,
       },
     });
 
@@ -795,7 +804,14 @@ export class ImportacionesService {
           excelHeader: labelDinamico && !template ? labelDinamico : c.excelHeader,
           campoLabel: labelDinamico ?? enCatalogo?.campoLabel ?? c.field,
           tipo: c.type,
-          requerido: !!c.required,
+          // Mismo criterio que getActiveTemplate (paso 3): sin transportista
+          // obligatorio para una empresa solo de flota propia.
+          requerido:
+            !!c.required &&
+            !(
+              esSoloFlotaPropia(modulo, tenantIdPropio2?.tipoFlota) &&
+              CAMPOS_TRANSPORTISTA_VIAJE.has(c.field)
+            ),
         };
         if (c.warnIfEmpty) col.recomendado = true;
         if (c.allowedValues) col.allowedValues = c.allowedValues;
@@ -1350,7 +1366,11 @@ export class ImportacionesService {
       modulo === "viajes"
         ? await this.prisma.tenant.findUnique({
             where: { clerkOrgId: tenantId },
-            select: { idPropio1Habilitado: true, idPropio2Habilitado: true },
+            select: {
+              idPropio1Habilitado: true,
+              idPropio2Habilitado: true,
+              tipoFlota: true,
+            },
           })
         : null;
     const idPropio1Habilitado =
@@ -1449,6 +1469,16 @@ export class ImportacionesService {
           (!col.excelHeaderAliases || col.excelHeaderAliases.length === 0)
         ) {
           col.excelHeaderAliases = catCol.excelHeaderAliases;
+        }
+      }
+
+      // 3. Empresa solo de flota propia: sus viajes no llevan transportista,
+      // así que esas columnas no pueden ser obligatorias (aunque el template
+      // guardado las marque así) — si no, "Campo obligatorio vacío" choca con
+      // la regla "Flota PROPIA con transportista externo asignado".
+      if (esSoloFlotaPropia(modulo, tenantIdentificadores?.tipoFlota)) {
+        for (const col of configData.columns) {
+          if (CAMPOS_TRANSPORTISTA_VIAJE.has(col.field)) col.required = false;
         }
       }
     }

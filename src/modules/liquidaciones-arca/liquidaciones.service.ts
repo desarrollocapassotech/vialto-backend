@@ -1097,7 +1097,24 @@ export class LiquidacionesService {
         viajes: viajesPayload,
       });
 
-      const fechaNc = formatFechaCbte(new Date());
+      const ultimoFecha =
+        config.ambiente !== 'produccion' && ultimoCbte > 0
+          ? await this.arcaClient.getFechaComprobanteAutorizado(
+              config.apiKey,
+              config.cuitEmisor,
+              config.ambiente as 'homologacion' | 'produccion',
+              config.ptoVentaCvlp,
+              cbteTipoAnulacion,
+              ultimoCbte,
+              config.certPem,
+              config.keyPem,
+            )
+          : null;
+      const fechaNc = resolveFechaCbteEmision(
+        config.ambiente as 'homologacion' | 'produccion',
+        new Date(),
+        ultimoFecha,
+      );
       const fechaCvlpAsoc = await this.resolveFechaCbteOriginal(liquidacionId, liquidacion);
 
       const cabeceraBase = {

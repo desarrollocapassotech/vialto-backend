@@ -1,11 +1,11 @@
 /**
- * Catálogo de tipos de intervención válidos, agrupado por sistema del vehículo.
- * Debe reflejar el mismo catálogo que `TIPO_INTERVENCION_CATEGORIAS` en el frontend
- * (vialto-frontend/src/lib/mantenimientoLabels.ts) — no hay paquete compartido entre
- * backend y frontend, así que se mantiene duplicado a propósito (mismo criterio que el
- * resto de los enums de este módulo).
+ * Catálogo de tareas de mantenimiento válidas (`PlanMantenimiento.tareas`,
+ * `OrdenTrabajo.tareas`), agrupado por sistema del vehículo.
+ * Debe reflejar el mismo catálogo que el frontend (vialto-frontend/src/lib/mantenimientoLabels.ts;
+ * se renombra en MANT-04) — no hay paquete compartido entre backend y frontend, así que se
+ * mantiene duplicado a propósito (mismo criterio que el resto de los enums de este módulo).
  */
-export const TIPOS_INTERVENCION_VALIDOS = [
+export const TAREAS_MANTENIMIENTO_VALIDAS = [
   // Motor y sistema de propulsión
   'cambio_aceite_motor',
   'revision_filtros',

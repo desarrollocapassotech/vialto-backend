@@ -1,20 +1,17 @@
-import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
-} from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Controller, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { MantenimientoService } from './mantenimiento.service';
-import { CreateIntervencionDto } from './dto/create-intervencion.dto';
-import { UpdateIntervencionDto } from './dto/update-intervencion.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
-import { Roles } from '../../core/auth/roles.decorator';
-import { CurrentAuth } from '../../core/auth/current-auth.decorator';
-import { AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { ModuleGuard } from '../../shared/guards/module.guard';
 import { RequireModule } from '../../shared/decorators/require-module.decorator';
-import { assertTenantId } from '../../shared/util/assert-tenant';
 
+/**
+ * Sin rutas a propósito: el CRUD de Intervencion se eliminó en MANT-01-T1 y los
+ * endpoints de planes, talleres, órdenes de trabajo y vencimientos llegan en MANT-02
+ * (ver docs/mantenimiento-plan.md).
+ */
 @ApiTags('Mantenimiento')
 @ApiBearerAuth('clerk-jwt')
 @Controller('mantenimiento')
@@ -22,51 +19,4 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 @RequireModule('mantenimiento')
 export class MantenimientoController {
   constructor(private readonly service: MantenimientoService) {}
-
-  @ApiOperation({ summary: 'Listar intervenciones de mantenimiento' })
-  @Get('intervenciones')
-  @Roles('admin', 'member', 'superadmin')
-  list(
-    @CurrentAuth() auth: AuthPayload,
-    @Query('vehiculoId') vehiculoId?: string,
-  ) {
-    assertTenantId(auth.tenantId);
-    return this.service.findAll(auth.tenantId, vehiculoId);
-  }
-
-  @ApiOperation({ summary: 'Obtener intervención por ID' })
-  @Get('intervenciones/:id')
-  @Roles('admin', 'member', 'superadmin')
-  findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.findOne(id, auth.tenantId);
-  }
-
-  @ApiOperation({ summary: 'Registrar intervención de mantenimiento' })
-  @Post('intervenciones')
-  @Roles('admin', 'superadmin')
-  create(@Body() dto: CreateIntervencionDto, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.create(auth.tenantId, auth.userId, dto);
-  }
-
-  @ApiOperation({ summary: 'Actualizar intervención' })
-  @Patch('intervenciones/:id')
-  @Roles('admin', 'superadmin')
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateIntervencionDto,
-    @CurrentAuth() auth: AuthPayload,
-  ) {
-    assertTenantId(auth.tenantId);
-    return this.service.update(id, auth.tenantId, dto);
-  }
-
-  @ApiOperation({ summary: 'Eliminar intervención' })
-  @Delete('intervenciones/:id')
-  @Roles('admin', 'superadmin')
-  remove(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.remove(id, auth.tenantId);
-  }
 }

@@ -12,7 +12,7 @@
 | MANT-01 | T1 — Reemplazar `Intervencion` por los modelos nuevos | ✅ Hecho (2026-10-05) | `develop` | Migración `20261005130000_mantenimiento_ordenes_trabajo` aplicada en QA (count previo en QA: 1 fila de prueba de LSF). Incluye `OrdenTrabajoSecuencia` y triggers de defensa multi-tenant. Módulo sin endpoints hasta MANT-02; front de Mantenimiento roto solo en QA hasta MANT-04 → no mergear a `main` antes. |
 | MANT-01 | T2 — Edición de km a `core/vehiculos` | ✅ Hecho (2026-10-05) | `develop` | `VehiculosService.editarKm`/`getHistorialKm` + `POST vehiculos/:id/km` y `GET vehiculos/:id/km-historial` en core (`?tenantId=` solo superadmin). Combustible delega sin cambiar contrato. `update` del CRUD/import/platform registra `VehiculoKmEdicion` solo si el km cambia. Test: `npm run test:vehiculos-km`. Antes de T2 se cerró un agujero cross-tenant en `/platform` (`PlatformTenantAccessGuard`). |
 | MANT-01 | T3 — `core/odometro` | ✅ Hecho (2026-10-05) | `develop` | `OdometroService` (+ versiones por lote `getUltimasLecturas`/`getKmPorDiaMuchos` para MANT-02-T5) y funciones puras en `odometro.util.ts`. Empate del mismo día: carga vs carga por hora real; fuentes distintas por `createdAt` (ediciones y OT van a las 00:00 UTC). Fallback `'vehiculo'` usa `Vehiculo.createdAt` como fecha. Test: `npm run test:odometro`. Verificado contra QA (Bressan, 18 vehículos en 7 queries). |
-| MANT-01 | T4 — `vencimiento.util.ts` | 🔲 Pendiente | | |
+| MANT-01 | T4 — `vencimiento.util.ts` | ✅ Hecho (2026-10-05) | `develop` | `calcularVencimiento` + `elegirReferencia` (puras). Test: `npm run test:vencimiento` (27 casos). **MANT-01 cerrado.** |
 | MANT-02 | T1 — Planes + plantillas | 🔲 Pendiente | | |
 | MANT-02 | T2 — Asignación plan ↔ vehículo | 🔲 Pendiente | | |
 | MANT-02 | T3 — Talleres | 🔲 Pendiente | | |
@@ -36,6 +36,11 @@
 ### Notas de implementación
 - **Tests:** el backend no usa Jest; los `*.spec.ts` son scripts `ts-node` + `node:assert` con un `test:x` en `package.json` (ej. `test:padron`). Los tests de T3/T4 siguen ese patrón. No hay script `lint`: "lint en verde" = `npm run build`.
 - **`prisma migrate dev` en QA volvió a funcionar (2026-10-05):** pedía reset por una fila vieja de `_prisma_migrations` (intento fallido y ya revertido de `20260831120000_intervencion_tipos_array`, otro checksum). Se borró esa fila con OK de Elias. Si vuelve a pasar algo parecido: **nunca resetear**; buscar filas con `finished_at IS NULL` y checksum distinto.
+
+- **Reglas de vencimiento definidas al implementar T4 (2026-10-05, decididas con Elias):**
+  - OT que cumple un plan pero no tiene km → el km de referencia es la última lectura del odómetro hasta la fecha de la OT (lo resuelve el service en MANT-02-T5 con `OdometroService.getLecturas(..., { hasta })`); sin lecturas, la parte por km queda sin datos.
+  - Si km y fecha dan el mismo estado, el motivo es el que ocurre primero; sin proyección por km (sin km/día) gana `'km'`.
+  - Sin `avisoKm`/`avisoDias` no hay estado "próximo" por esa dimensión. Proyección por km: `hoy + floor(kmRestantes / kmPorDia)` días.
 
 ## 0. Antes de empezar (obligatorio)
 1. Leer `vialto-backend/CLAUDE.md`, `vialto-frontend/CLAUDE.md`, `vialto-backend/docs/reglas-multitenant.md` y `vialto-backend/MIGRATIONS.md`.

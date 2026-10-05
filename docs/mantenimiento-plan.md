@@ -33,6 +33,33 @@
 
 ---
 
+## Para retomar (pausa del 2026-10-05)
+
+**Dónde quedó:** backend completo hasta MANT-03-T2, todo en `develop` (último commit del módulo: `588fd91`). En QA no hay datos de prueba de mantenimiento (se limpió todo). Hay 16 scripts `test:*` en verde y `npm run build` también.
+
+**Lo que existe hoy (backend):**
+- `core/odometro` (lectura de km unificada) y `core/vehiculos` (`POST vehiculos/:id/km`, `GET vehiculos/:id/km-historial`).
+- `modules/mantenimiento`: 26 rutas bajo `/api/mantenimiento` (planes + plantillas, asignaciones, talleres, órdenes de trabajo + adjuntos, vencimientos + resumen, historial por unidad) y los avisos diarios `mantenimiento.vencimientoProximo` / `mantenimiento.vencido`.
+
+**Próximo paso: MANT-03-T3** (bloque de mantenimiento en el "Resumen de alertas" del dashboard). Criterio acordado con Elias, el mismo de la opción C: Mantenimiento le *entrega* su bloque al dashboard (registro desde `onModuleInit`, como `registrarEvaluator`), en vez de que `dashboard` importe Mantenimiento. Mirar `DashboardService` → `alertas` y el helper `sumarBloqueAlerta`.
+
+**Después:** MANT-04 (frontend, reemplaza `MantenimientoTenantPage.tsx`, `IntervencionModal.tsx`, `MantenimientoAlertasSection.tsx`, `lib/mantenimientoAlertas.ts` y la métrica "Intervenciones (mes)" de `useTenantDashboardMetrics.ts`, que hoy pega a `/api/mantenimiento/intervenciones` y da 404 en QA) y MANT-05 (documentación + recorrido end-to-end).
+
+**Contratos de la API que el front va a necesitar** (ya implementados, ver Swagger en `/docs`):
+- Alta/edición de OT devuelve `{ ...orden, warning: string | null }`.
+- Adjuntos: primero `POST mantenimiento/ordenes/adjuntos` (multipart `file`) → `{ url }`, después la URL va en `adjuntos`.
+- Asignación masiva: `vehiculos: [{ vehiculoId, baseKm, baseFecha }]` para la tabla del onboarding.
+- `GET vehiculos/:id/planes` alimenta los checkboxes de "planes que cumple" del modal de OT.
+- Todas las rutas aceptan `?tenantId=` solo para superadmin (vista embebida).
+
+**Pendientes antes de llevar a `main` / producción:**
+1. **Nada de MANT-0x se mergea a `main` hasta cerrar MANT-04** (el front viejo de Mantenimiento queda roto sin la API vieja).
+2. Contar las filas de `intervenciones` en producción antes del merge: la migración `20261005130000_mantenimiento_ordenes_trabajo` borra la tabla sin conservar los datos.
+3. `develop` también lleva `20261005120000_combustible_error_log_origen` (no es de Mantenimiento) → se aplica en el mismo deploy.
+4. Decidir si el arreglo de seguridad de `/api/platform` (commit `9d93071`, `PlatformTenantAccessGuard`) se lleva a `main` antes, por cherry-pick (no arrastra migraciones). Antes, una pasada por el front de QA en las pantallas de empresa que usan `/api/platform` (Viajes, Stock, Facturación, Liquidaciones, Combustible) y en Usuarios de superadmin.
+5. A observar en QA: el aviso de km de las OT por "salto > 5.000 km" puede aparecer seguido en tenants sin Combustible (lecturas espaciadas). Si molesta, ajustarlo.
+6. Ver un mail real de mantenimiento: `POST /notificaciones/ejecutar?tenantId=` desde Swagger con superadmin (parte de MANT-05-T2).
+
 ### Notas de implementación
 - **Tests:** el backend no usa Jest; los `*.spec.ts` son scripts `ts-node` + `node:assert` con un `test:x` en `package.json` (ej. `test:padron`). Los tests de T3/T4 siguen ese patrón. No hay script `lint`: "lint en verde" = `npm run build`.
 - **`prisma migrate dev` en QA volvió a funcionar (2026-10-05):** pedía reset por una fila vieja de `_prisma_migrations` (intento fallido y ya revertido de `20260831120000_intervencion_tipos_array`, otro checksum). Se borró esa fila con OK de Elias. Si vuelve a pasar algo parecido: **nunca resetear**; buscar filas con `finished_at IS NULL` y checksum distinto.

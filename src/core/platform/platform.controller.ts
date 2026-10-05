@@ -603,8 +603,9 @@ export class PlatformController {
     @Param("id") id: string,
     @Query("tenantId") tenantId: string | undefined,
     @Body() dto: UpdateVehiculoDto,
+    @CurrentAuth() auth: AuthPayload,
   ) {
-    return this.service.updateVehiculo(tenantId, id, dto);
+    return this.service.updateVehiculo(tenantId, id, dto, auth.userId);
   }
 
   @Delete("vehiculos/:id")

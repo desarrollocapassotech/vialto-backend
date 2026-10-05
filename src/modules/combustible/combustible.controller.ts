@@ -19,7 +19,7 @@ import { CurrentAuth } from "../../core/auth/current-auth.decorator";
 import { CombustibleService } from "../../modules/combustible/combustible.service";
 import { CreateCargaDto } from "../../modules/combustible/dto/create-carga.dto";
 import { AsignarVehiculoDto } from "../../modules/combustible/dto/asignar-vehiculo.dto";
-import { EditarKmVehiculoDto } from "../../modules/combustible/dto/editar-km-vehiculo.dto";
+import { EditarKmVehiculoDto } from "../../core/vehiculos/dto/editar-km-vehiculo.dto";
 
 @ApiTags("Admin — Platform")
 @ApiBearerAuth("clerk-jwt")

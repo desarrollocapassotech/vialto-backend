@@ -9,6 +9,7 @@ import {
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { CloudinaryService } from "../../shared/storage/cloudinary.service";
 import { NotificacionesCronService } from "../notificaciones/notificaciones-cron.service";
+import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { KM_DELTA_PLAUSIBLE_MAX } from "../../shared/util/combustible-km.constants";
 import { evaluarLitrosImporteFase1 } from "../../shared/util/combustible-fase1.util";
 
@@ -135,6 +136,7 @@ export class CombustibleService {
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
     private readonly notificaciones: NotificacionesCronService,
+    private readonly vehiculos: VehiculosService,
   ) { }
 
   async uploadFoto(
@@ -932,33 +934,17 @@ export class CombustibleService {
   }
 
   /**
-   * Corrige el kilometraje de un vehículo desde el panel, dejando auditoría
-   * (`VehiculoKmEdicion`: quién, cuándo, km anterior → nuevo). La fecha de la
-   * corrección es siempre "hoy" (no se permite backdatear) — es lo que le da a esta
-   * corrección su lugar en la línea de tiempo que usa `getLimitesCronologicos`.
+   * Corrige el kilometraje de un vehículo desde el panel. La lógica vive en
+   * `VehiculosService.editarKm` (core, disponible sin el módulo Combustible); acá solo se
+   * delega para no cambiar el contrato de los endpoints de Combustible.
    */
-  async editarKmVehiculo(tenantId: string, vehiculoId: string, kmNuevo: number, userId: string) {
-    const vehiculo = await this.prisma.vehiculo.findFirst({ where: { id: vehiculoId, tenantId } });
-    if (!vehiculo) throw new NotFoundException("Vehículo no encontrado.");
-
-    const fecha = new Date();
-    fecha.setUTCHours(0, 0, 0, 0);
-
-    return this.prisma.$transaction(async (tx) => {
-      const edicion = await tx.vehiculoKmEdicion.create({
-        data: { tenantId, vehiculoId, kmAnterior: vehiculo.kmActual, kmNuevo, fecha, createdBy: userId },
-      });
-      await tx.vehiculo.update({ where: { id: vehiculoId }, data: { kmActual: kmNuevo } });
-      return edicion;
-    });
+  editarKmVehiculo(tenantId: string, vehiculoId: string, kmNuevo: number, userId: string) {
+    return this.vehiculos.editarKm(tenantId, vehiculoId, kmNuevo, userId);
   }
 
   /** Historial de correcciones manuales de km de un vehículo, más reciente primero. */
-  async getHistorialKmVehiculo(tenantId: string, vehiculoId: string) {
-    return this.prisma.vehiculoKmEdicion.findMany({
-      where: { tenantId, vehiculoId },
-      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
-    });
+  getHistorialKmVehiculo(tenantId: string, vehiculoId: string) {
+    return this.vehiculos.getHistorialKm(tenantId, vehiculoId);
   }
 
   async getUltimoKmPorPatente(

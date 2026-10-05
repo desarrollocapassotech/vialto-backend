@@ -13,6 +13,7 @@ import { AuthPayload } from '../auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
 import { VehiculosPaginatedQueryDto } from './dto/vehiculos-paginated-query.dto';
+import { EditarKmVehiculoDto } from './dto/editar-km-vehiculo.dto';
 
 @ApiTags('Core — Vehículos')
 @ApiBearerAuth('clerk-jwt')
@@ -20,6 +21,14 @@ import { VehiculosPaginatedQueryDto } from './dto/vehiculos-paginated-query.dto'
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard)
 export class VehiculosController {
   constructor(private readonly service: VehiculosService) {}
+
+  /** `?tenantId=` solo se honra para superadmin (vista embebida); el resto usa el token. */
+  private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
+    const tenantId =
+      auth.role === 'superadmin' && overrideTenantId ? overrideTenantId : auth.tenantId;
+    assertTenantId(tenantId);
+    return tenantId as string;
+  }
 
   @ApiOperation({ summary: 'Listar todos los vehículos' })
   @Get()
@@ -65,7 +74,32 @@ export class VehiculosController {
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.update(id, auth.tenantId, dto);
+    return this.service.update(id, auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({
+    summary: 'Corregir el kilometraje de un vehículo (queda auditado en la línea de tiempo de km)',
+  })
+  @Post(':id/km')
+  @Roles('admin', 'superadmin')
+  editarKm(
+    @Param('id') id: string,
+    @Body() dto: EditarKmVehiculoDto,
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.editarKm(this.resolveTenantId(auth, tenantId), id, dto.kmNuevo, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Historial de correcciones manuales de km de un vehículo' })
+  @Get(':id/km-historial')
+  @Roles('admin', 'member', 'superadmin')
+  getHistorialKm(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.getHistorialKm(this.resolveTenantId(auth, tenantId), id);
   }
 
   @ApiOperation({ summary: 'Eliminar vehículo' })

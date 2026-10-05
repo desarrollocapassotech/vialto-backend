@@ -11,7 +11,7 @@ import { RequireModule } from "../../shared/decorators/require-module.decorator"
 import { assertTenantId } from "../../shared/util/assert-tenant";
 import { CombustibleService } from "./combustible.service";
 import { AsignarVehiculoDto } from "./dto/asignar-vehiculo.dto";
-import { EditarKmVehiculoDto } from "./dto/editar-km-vehiculo.dto";
+import { EditarKmVehiculoDto } from "../../core/vehiculos/dto/editar-km-vehiculo.dto";
 
 @ApiTags("Módulo: Combustible")
 @ApiBearerAuth("clerk-jwt")

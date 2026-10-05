@@ -917,9 +917,10 @@ export class PlatformService {
     tenantId: string | undefined,
     id: string,
     dto: UpdateVehiculoDto,
+    userId: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    return this.vehiculosService.update(id, scopedTenantId, dto);
+    return this.vehiculosService.update(id, scopedTenantId, dto, userId);
   }
 
   async removeVehiculo(tenantId: string | undefined, id: string) {

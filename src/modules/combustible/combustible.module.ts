@@ -7,9 +7,10 @@ import { ChoferAuthGuard } from "../../core/chofer-auth/chofer-auth.guard";
 import { CombustibleCorreccionCronService } from "./combustible-correccion-cron.service";
 import { ChoferErrorLogInterceptor } from "./chofer-error-log.interceptor";
 import { NotificacionesModule } from "../notificaciones/notificaciones.module";
+import { VehiculosModule } from "../../core/vehiculos/vehiculos.module";
 
 @Module({
-  imports: [NotificacionesModule],
+  imports: [NotificacionesModule, VehiculosModule],
   // ChoferCombustibleController primero: sus rutas estáticas ganan sobre :id de CombustibleController
   controllers: [ChoferCombustibleController, CombustibleTenantController, CombustibleController],
   providers: [CombustibleService, ChoferAuthGuard, CombustibleCorreccionCronService, ChoferErrorLogInterceptor],

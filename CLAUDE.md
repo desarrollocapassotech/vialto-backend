@@ -811,6 +811,17 @@ model CargaCombustible {
 }
 ```
 
+#### Registro de errores de la app de choferes (oct 2026)
+
+`CombustibleSyncErrorLog` nació solo para la cola offline (la app reporta vía `POST combustible/chofer/errores-sincronizacion` una carga guardada en el celular que el backend rechazó al sincronizar). Ante reclamos de "la app no funciona" no había rastro de nada más: un rechazo con conexión era solo un toast en el celular. Ahora el backend registra por su cuenta **todo** error de la app, con una columna `origen` (migración `20261005120000_combustible_error_log_origen`):
+
+- `sincronizacion_offline` (default, lo que ya existía, reportado por la app) — **es el único origen que alimenta las Alertas del dashboard** (`buildSyncErrorAlertas`) y el default de `GET combustible/errores-sincronizacion`; el resto es diagnóstico, no alerta para el admin del tenant.
+- `carga` | `edicion_carga` | `eliminacion_carga` | `foto` | `consulta` — `ChoferErrorLogInterceptor` (`modules/combustible/`) sobre `ChoferCombustibleController`: cualquier excepción (validación del DTO, regla de negocio, multer, 500) se guarda con `payload = { ...body, http: { metodo, ruta, status, query, archivo? } }` y se re-lanza intacta. Excluye `errores-sincronizacion/*` y el alta con `localId` (reintento offline: ya lo reporta la app).
+- `login` — `ChoferAuthService`: PIN incorrecto, chofer sin PIN configurado o desactivado, contra cada chofer con ese DNI (uno por tenant). DNI inexistente → solo log de servidor (no hay tenant al que atribuirlo).
+- `sesion` — `ChoferAuthGuard`: token vencido (identidad confiable: se re-verifica la firma con `ignoreExpiration`) o chofer desactivado. Token con firma inválida → solo log de servidor: nunca confiar en el `tenantId` de un token no verificado.
+
+Helper único: `registrarErrorChofer()` en `core/chofer-auth/chofer-error-log.ts` (función plana con `PrismaService`, sin DI, para poder usarla desde el guard). Best-effort: nunca tira. `sanitizarBody` descarta `pin`/`password`/`token` — **nunca guardar el PIN**. Consultar: `GET combustible/errores-sincronizacion?origen=todos` (o un origen puntual), o SQL directo por `origen`.
+
 #### Asignación de vehículo a chofer, con historial (sep 2026)
 
 Pedido real de un tenant (Bressan/NyM): la app vieja permitía fijar qué vehículo maneja cada chofer; en el rediseño de `vialto-combustible` esto se había perdido — el "default" de patente al cargar combustible dependía únicamente de la última carga real del chofer (`CombustibleService.getUltimaCargaChofer`), sin ningún lugar del panel admin para verlo o cambiarlo, y sin historial de qué vehículo usó cada chofer y cuándo.

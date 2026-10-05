@@ -1111,12 +1111,17 @@ model CombustibleSyncErrorLog {
   chofer     Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
   vehiculoId String?
   vehiculo   Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  // sincronizacion_offline (reportado por la app, lo único que va a Alertas del dashboard) |
+  // carga | edicion_carga | eliminacion_carga | foto | consulta | login | sesion (registrados
+  // por el backend al rechazar un request de la app, para diagnóstico) — ver core/chofer-auth/chofer-error-log.ts
+  origen     String    @default("sincronizacion_offline")
   mensaje    String // mensaje de error devuelto por la validación (ej. "El kilometraje ingresado... es inconsistente...")
-  payload    Json // datos de la carga que se intentó sincronizar: patente, estacion, litros, precioPorLitro, importe, km, formaPago, fecha, localId (id en IndexedDB, para correlacionar reintentos)
+  payload    Json // sincronizacion_offline: datos de la carga (patente, estacion, litros, ..., localId en IndexedDB para correlacionar reintentos). Resto: { http, body sin PIN } del request rechazado
   createdAt  DateTime  @default(now())
   resueltoEn DateTime? // COMB-07-T5: se completa cuando el chofer logra resincronizar esta misma carga (correlacionada por payload.localId); null = sigue pendiente de revisión
 
   @@index([tenantId])
+  @@index([tenantId, origen, createdAt(sort: Desc)])
   @@index([tenantId, choferId])
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([tenantId, resueltoEn])

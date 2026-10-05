@@ -433,13 +433,15 @@ export class CombustibleService {
   }
 
   /**
-   * Errores de sincronización offline reportados por los choferes del
-   * tenant (COMB-07-T4), más recientes primero. Sin paginado por cursor:
-   * el volumen esperado es bajo y un límite fijo alcanza para revisión.
+   * Errores de la app de choferes del tenant, más recientes primero. Por defecto solo
+   * los de sincronización offline (COMB-07-T4); `origen` filtra por otro origen o
+   * `todos` (ver ORIGENES_ERROR_CHOFER). Sin paginado por cursor: un límite fijo
+   * alcanza para revisión.
    */
-  async getSyncErrors(auth: CombustibleAuth, choferId?: string) {
+  async getSyncErrors(auth: CombustibleAuth, choferId?: string, origen?: string) {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
     if (choferId) where["choferId"] = choferId;
+    if (origen !== "todos") where["origen"] = origen || "sincronizacion_offline";
 
     return this.prisma.combustibleSyncErrorLog.findMany({
       where,
@@ -1443,6 +1445,8 @@ export class CombustibleService {
     const logs = await this.prisma.combustibleSyncErrorLog.findMany({
       where: {
         tenantId,
+        // El resto de los orígenes (login, cargas online, fotos...) es diagnóstico, no alerta.
+        origen: "sincronizacion_offline",
         resueltoEn: null,
         ...(fromDate || toDate ? { createdAt: createdAtWhere } : {}),
       },

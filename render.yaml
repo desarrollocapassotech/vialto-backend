@@ -5,7 +5,7 @@ services:
     name: vialto-backend
     runtime: node
     region: ohio
-    plan: free
+    plan: starter
     buildCommand: NPM_CONFIG_PRODUCTION=false npm install && npm run build
     startCommand: npm run start:prod
     # Retry con backoff: Neon (plan free) suspende el compute tras inactividad.

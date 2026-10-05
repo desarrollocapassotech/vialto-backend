@@ -29,6 +29,21 @@ export class OdometroService {
     return ordenarLecturas(porVehiculo.get(vehiculoId) ?? []);
   }
 
+  /** Lecturas de varios vehículos (3 queries en total), cada lista en orden cronológico. */
+  async getLecturasMuchos(
+    tenantId: string,
+    vehiculoIds: string[],
+    rango: RangoLecturas = {},
+  ): Promise<Map<string, LecturaKm[]>> {
+    const ids = [...new Set(vehiculoIds)];
+    if (ids.length === 0) return new Map();
+    const fecha: FiltroFecha | undefined =
+      rango.desde || rango.hasta ? { gte: rango.desde, lte: rango.hasta } : undefined;
+    const porVehiculo = await this.lecturasPorVehiculo(tenantId, ids, fecha);
+    for (const [id, lecturas] of porVehiculo) porVehiculo.set(id, ordenarLecturas(lecturas));
+    return porVehiculo;
+  }
+
   /** Lectura más reciente; sin lecturas usa `Vehiculo.kmActual` (fuente `'vehiculo'`). */
   async getUltimaLectura(tenantId: string, vehiculoId: string): Promise<LecturaKm | null> {
     const m = await this.getUltimasLecturas(tenantId, [vehiculoId]);

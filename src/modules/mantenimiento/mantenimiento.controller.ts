@@ -8,6 +8,8 @@ import { OrdenesService } from './ordenes.service';
 import { CreateOrdenTrabajoDto } from './dto/create-orden-trabajo.dto';
 import { UpdateOrdenTrabajoDto } from './dto/update-orden-trabajo.dto';
 import { OrdenesQueryDto } from './dto/ordenes-query.dto';
+import { VencimientosService } from './vencimientos.service';
+import { VencimientosQueryDto } from './dto/vencimientos-query.dto';
 import { PlanesService } from './planes.service';
 import { CreatePlanMantenimientoDto } from './dto/create-plan-mantenimiento.dto';
 import { UpdatePlanMantenimientoDto } from './dto/update-plan-mantenimiento.dto';
@@ -43,6 +45,7 @@ export class MantenimientoController {
     private readonly asignaciones: AsignacionesService,
     private readonly talleres: TalleresService,
     private readonly ordenes: OrdenesService,
+    private readonly vencimientos: VencimientosService,
   ) {}
 
   private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
@@ -291,5 +294,30 @@ export class MantenimientoController {
   @Roles('admin', 'superadmin')
   removeOrden(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.ordenes.remove(this.resolveTenantId(auth, tenantId), id);
+  }
+
+  // ── Vencimientos ──────────────────────────────────────────────────────────
+
+  @ApiOperation({
+    summary: 'Semáforo de vencimientos: una fila por plan asignado a una unidad',
+    description:
+      'Orden: vencido → próximo → sin datos → ok; dentro de cada grupo por fecha estimada. Incluye la referencia del ciclo (última OT que cumple el plan o la base) y de dónde sale el km.',
+  })
+  @Get('vencimientos')
+  @Roles('admin', 'member', 'superadmin')
+  listVencimientos(@CurrentAuth() auth: AuthPayload, @Query() query: VencimientosQueryDto) {
+    return this.vencimientos.calcular(this.resolveTenantId(auth, query.tenantId), {
+      vehiculoId: query.vehiculoId,
+      estado: query.estado,
+      categoria: query.categoria,
+    });
+  }
+
+  @ApiOperation({ summary: 'Cantidad de vencimientos por estado (para el dashboard)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Get('vencimientos/resumen')
+  @Roles('admin', 'member', 'superadmin')
+  resumenVencimientos(@CurrentAuth() auth: AuthPayload, @Query('tenantId') tenantId?: string) {
+    return this.vencimientos.resumen(this.resolveTenantId(auth, tenantId));
   }
 }

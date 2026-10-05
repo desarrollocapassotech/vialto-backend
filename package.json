@@ -37,7 +37,8 @@
     "test:vehiculos-km": "ts-node src/core/vehiculos/vehiculos-km.spec.ts",
     "test:odometro": "ts-node src/core/odometro/odometro.spec.ts",
     "test:vencimiento": "ts-node src/modules/mantenimiento/vencimiento.util.spec.ts",
-    "test:mant-planes": "ts-node src/modules/mantenimiento/planes.spec.ts"
+    "test:mant-planes": "ts-node src/modules/mantenimiento/planes.spec.ts",
+    "test:mant-asignaciones": "ts-node src/modules/mantenimiento/asignaciones.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

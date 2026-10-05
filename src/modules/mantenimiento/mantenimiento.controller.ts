@@ -6,6 +6,9 @@ import { PlanesService } from './planes.service';
 import { CreatePlanMantenimientoDto } from './dto/create-plan-mantenimiento.dto';
 import { UpdatePlanMantenimientoDto } from './dto/update-plan-mantenimiento.dto';
 import { PlanesQueryDto } from './dto/planes-query.dto';
+import { AsignacionesService } from './asignaciones.service';
+import { AsignarVehiculosDto } from './dto/asignar-vehiculos.dto';
+import { UpdateVehiculoPlanDto } from './dto/update-vehiculo-plan.dto';
 import { ClerkAuthGuard, AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -25,7 +28,10 @@ import { assertTenantId } from '../../shared/util/assert-tenant';
 @UseGuards(ClerkAuthGuard, TenantGuard, RolesGuard, ModuleGuard)
 @RequireModule('mantenimiento')
 export class MantenimientoController {
-  constructor(private readonly planes: PlanesService) {}
+  constructor(
+    private readonly planes: PlanesService,
+    private readonly asignaciones: AsignacionesService,
+  ) {}
 
   private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
     const tenantId =
@@ -94,5 +100,61 @@ export class MantenimientoController {
   @Roles('admin', 'superadmin')
   removePlan(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.planes.remove(this.resolveTenantId(auth, tenantId), id);
+  }
+
+  // ── Asignación plan ↔ unidad ──────────────────────────────────────────────
+
+  @ApiOperation({
+    summary: 'Asignar un plan a varias unidades con su último service conocido',
+    description:
+      'Mandá `vehiculoIds` + `baseKm`/`baseFecha` (misma base para todas) o `vehiculos: [{ vehiculoId, baseKm, baseFecha }]` (base por unidad). Las ya asignadas activas se ignoran; las desactivadas se reactivan.',
+  })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Post('planes/:id/vehiculos')
+  @Roles('admin', 'superadmin')
+  asignarVehiculos(
+    @CurrentAuth() auth: AuthPayload,
+    @Param('id') planId: string,
+    @Body() dto: AsignarVehiculosDto,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.asignaciones.asignar(this.resolveTenantId(auth, tenantId), planId, dto);
+  }
+
+  @ApiOperation({ summary: 'Unidades asignadas a un plan (activas e inactivas)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Get('planes/:id/vehiculos')
+  @Roles('admin', 'member', 'superadmin')
+  listarVehiculosDePlan(@CurrentAuth() auth: AuthPayload, @Param('id') planId: string, @Query('tenantId') tenantId?: string) {
+    return this.asignaciones.listarPorPlan(this.resolveTenantId(auth, tenantId), planId);
+  }
+
+  @ApiOperation({ summary: 'Planes asignados a una unidad (activos e inactivos)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Get('vehiculos/:id/planes')
+  @Roles('admin', 'member', 'superadmin')
+  listarPlanesDeVehiculo(@CurrentAuth() auth: AuthPayload, @Param('id') vehiculoId: string, @Query('tenantId') tenantId?: string) {
+    return this.asignaciones.listarPorVehiculo(this.resolveTenantId(auth, tenantId), vehiculoId);
+  }
+
+  @ApiOperation({ summary: 'Editar el último service conocido o activar/desactivar una asignación' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Patch('vehiculos-planes/:id')
+  @Roles('admin', 'superadmin')
+  updateAsignacion(
+    @CurrentAuth() auth: AuthPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateVehiculoPlanDto,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.asignaciones.update(this.resolveTenantId(auth, tenantId), id, dto);
+  }
+
+  @ApiOperation({ summary: 'Borrar una asignación que ninguna OT cumplió (si alguna la cumplió, desactivarla)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Delete('vehiculos-planes/:id')
+  @Roles('admin', 'superadmin')
+  removeAsignacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.asignaciones.remove(this.resolveTenantId(auth, tenantId), id);
   }
 }

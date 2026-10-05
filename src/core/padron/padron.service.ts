@@ -111,7 +111,13 @@ export class PadronService {
 
     const dg = persona.datosGenerales;
     const errorConstancia = persona.errorConstancia;
-    const observaciones = toArray<string>(errorConstancia?.error).map(String);
+    let observaciones = toArray<string>(errorConstancia?.error).map(String);
+    observaciones = observaciones.map((obs) => {
+      if (obs.includes('no registra Apellido y/o Nombre informados')) {
+        return 'Faltan datos fiscales en AFIP (el registro está incompleto o sin impuestos activos).';
+      }
+      return obs;
+    });
 
     if (!dg) {
       // ARCA no emite la constancia (requerimientos pendientes, etc.) pero el CUIT existe.

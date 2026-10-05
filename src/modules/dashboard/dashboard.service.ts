@@ -78,6 +78,14 @@ export type OwnerDashboardResponse = {
       montoTotal: number;
     };
     /**
+     * Cargas que los choferes guardaron sin conexión y el backend rechazó al sincronizar,
+     * todavía sin resolver — mismo criterio que la pestaña Alertas de Combustible
+     * (`CombustibleService.buildSyncErrorAlertas`), para que el resumen y el detalle coincidan.
+     */
+    erroresChofer?: {
+      cantidad: number;
+    };
+    /**
      * Viajes del período con margen bajo o negativo (ver `viaje-ganancia-bruta.util`).
      * `montoTotal` solo suma el margen negativo en ARS — el detalle completo (incl. USD)
      * vive en GET /dashboard/financiero.
@@ -218,7 +226,7 @@ export class DashboardService {
 
     const out: OwnerDashboardResponse = { period: meta };
 
-    const [financieroResult, viajesResult, stockResult, cargasSospechosasResult, margenBajoResult] = await Promise.all([
+    const [financieroResult, viajesResult, stockResult, cargasSospechosasResult, margenBajoResult, erroresChoferResult] = await Promise.all([
       hasFacturacion
         ? Promise.all([
             this.sumFacturadoClienteSnapshot(tenantId),                                 // 0
@@ -260,6 +268,9 @@ export class DashboardService {
         ? this.buildCargasSospechosasAlerta(tenantId, resolved.start, resolved.end)
         : null,
       hasViajes ? this.buildMargenBajoAlerta(tenantId, resolved.start, resolved.end) : null,
+      hasCombustible
+        ? this.buildErroresChoferAlerta(tenantId, resolved.start, resolved.end)
+        : null,
     ]);
 
     if (financieroResult) {
@@ -316,60 +327,40 @@ export class DashboardService {
       out.alertas = hasAlertas ? alertas : null;
     }
 
-    if (cargasSospechosasResult && cargasSospechosasResult.cantidad > 0) {
-      const EMPTY_BLOQUE_FACTURAS = {
-        cantidad: 0,
-        montoTotal: 0,
-        montosPorMoneda: { ARS: 0, USD: 0 },
-        items: [] as Array<{ id: string; numero: string }>,
-      };
-      const EMPTY_BLOQUE_VIAJES = {
-        cantidad: 0,
-        montoTotal: 0,
-        montosPorMoneda: { ARS: 0, USD: 0 },
-        items: [] as Array<{
-          id: string;
-          numero: string;
-          clienteNombre: string;
-          fecha: string | null;
-          origen: string | null;
-          destino: string | null;
-        }>,
-      };
+    // Bloques de alertas de módulos sin facturación: se suman al resumen solo si tienen algo,
+    // creando el objeto con los bloques de facturas/viajes vacíos si todavía no existía.
+    type BloquesExtra = Pick<
+      NonNullable<OwnerDashboardResponse['alertas']>,
+      'cargasSospechosas' | 'margenBajo' | 'erroresChofer'
+    >;
+    const sumarBloqueAlerta = (bloque: BloquesExtra) => {
       out.alertas = {
-        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE_FACTURAS,
-        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE_VIAJES,
-        cargasSospechosas: cargasSospechosasResult,
-        margenBajo: out.alertas?.margenBajo,
-      };
-    }
-
-    if (margenBajoResult && margenBajoResult.cantidad > 0) {
-      const EMPTY_BLOQUE_FACTURAS = {
-        cantidad: 0,
-        montoTotal: 0,
-        montosPorMoneda: { ARS: 0, USD: 0 },
-        items: [] as Array<{ id: string; numero: string }>,
-      };
-      const EMPTY_BLOQUE_VIAJES = {
-        cantidad: 0,
-        montoTotal: 0,
-        montosPorMoneda: { ARS: 0, USD: 0 },
-        items: [] as Array<{
-          id: string;
-          numero: string;
-          clienteNombre: string;
-          fecha: string | null;
-          origen: string | null;
-          destino: string | null;
-        }>,
-      };
-      out.alertas = {
-        facturasVencidas: out.alertas?.facturasVencidas ?? EMPTY_BLOQUE_FACTURAS,
-        viajesSinFactura: out.alertas?.viajesSinFactura ?? EMPTY_BLOQUE_VIAJES,
+        facturasVencidas: out.alertas?.facturasVencidas ?? {
+          cantidad: 0,
+          montoTotal: 0,
+          montosPorMoneda: { ARS: 0, USD: 0 },
+          items: [],
+        },
+        viajesSinFactura: out.alertas?.viajesSinFactura ?? {
+          cantidad: 0,
+          montoTotal: 0,
+          montosPorMoneda: { ARS: 0, USD: 0 },
+          items: [],
+        },
         cargasSospechosas: out.alertas?.cargasSospechosas,
-        margenBajo: margenBajoResult,
+        margenBajo: out.alertas?.margenBajo,
+        erroresChofer: out.alertas?.erroresChofer,
+        ...bloque,
       };
+    };
+    if (cargasSospechosasResult && cargasSospechosasResult.cantidad > 0) {
+      sumarBloqueAlerta({ cargasSospechosas: cargasSospechosasResult });
+    }
+    if (margenBajoResult && margenBajoResult.cantidad > 0) {
+      sumarBloqueAlerta({ margenBajo: margenBajoResult });
+    }
+    if (erroresChoferResult && erroresChoferResult.cantidad > 0) {
+      sumarBloqueAlerta({ erroresChofer: erroresChoferResult });
     }
 
     if (viajesResult) {
@@ -835,6 +826,28 @@ export class DashboardService {
       cantidad: agg._count._all,
       montoTotal: roundMoney(agg._sum.importe ?? 0),
     };
+  }
+
+  /**
+   * Cargas de choferes rechazadas al sincronizar y todavía sin resolver, reportadas en el
+   * período — mismo filtro que `CombustibleService.buildSyncErrorAlertas` (origen
+   * `sincronizacion_offline`, `resueltoEn` null, por `createdAt`), así el resumen cuenta
+   * lo mismo que lista la pestaña Alertas de Combustible.
+   */
+  private async buildErroresChoferAlerta(
+    tenantId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ cantidad: number }> {
+    const cantidad = await this.prisma.combustibleSyncErrorLog.count({
+      where: {
+        tenantId,
+        origen: 'sincronizacion_offline',
+        resueltoEn: null,
+        createdAt: { gte: start, lte: end },
+      },
+    });
+    return { cantidad };
   }
 
   /**

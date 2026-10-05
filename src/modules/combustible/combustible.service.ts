@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { CloudinaryService } from "../../shared/storage/cloudinary.service";
+import { NotificacionesCronService } from "../notificaciones/notificaciones-cron.service";
 import { KM_DELTA_PLAUSIBLE_MAX } from "../../shared/util/combustible-km.constants";
 import { evaluarLitrosImporteFase1 } from "../../shared/util/combustible-fase1.util";
 
@@ -133,6 +134,7 @@ export class CombustibleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly notificaciones: NotificacionesCronService,
   ) { }
 
   async uploadFoto(
@@ -781,7 +783,7 @@ export class CombustibleService {
       })
       : null;
 
-    return this.prisma.combustibleSyncErrorLog.create({
+    const log = await this.prisma.combustibleSyncErrorLog.create({
       data: {
         tenantId,
         choferId,
@@ -789,7 +791,23 @@ export class CombustibleService {
         mensaje: dto.mensaje,
         payload: dto.payload as object,
       },
+      include: { chofer: { select: { nombre: true } } },
     });
+
+    // Aviso en la campana (+ email). Se deduplica por la carga del celular (localId): la app
+    // reintenta la misma carga varias veces y cada reintento fallido crea otro log, pero el
+    // admin necesita un solo aviso por carga trabada. Sin await: no demora la respuesta a la app.
+    const localId = typeof dto.payload["localId"] === "string" ? dto.payload["localId"] : null;
+    const fecha = typeof dto.payload["fecha"] === "string" ? dto.payload["fecha"].slice(0, 10).split("-").reverse().join("/") : null;
+    void this.notificaciones.notificarAhora(tenantId, "combustible.errorChofer", {
+      entidadId: localId ?? log.id,
+      titulo: `Carga de ${log.chofer?.nombre?.trim() ?? "un chofer"} no se pudo registrar`,
+      detalle: [patente, fecha ? `carga del ${fecha}` : null, "Tocá para ver qué pasó y cómo resolverlo"]
+        .filter(Boolean)
+        .join(" · "),
+    });
+
+    return log;
   }
 
   /** Prioriza la asignación activa del chofer (ver AsignacionVehiculo); si no tiene, cae a la patente de su última carga real. */

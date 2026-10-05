@@ -76,19 +76,36 @@ export class NotificacionesController {
   @ApiOperation({ summary: 'Feed de notificaciones para la campana de la navbar (últimos avisos enviados al tenant)' })
   @Get('feed')
   @Roles('admin', 'member', 'superadmin')
-  getFeed(@Query('limit') limit: string | undefined, @CurrentAuth() auth: AuthPayload) {
+  getFeed(
+    @Query('limit') limit: string | undefined,
+    @Query('tipo') tipo: string | undefined,
+    @Query('offset') offset: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
     assertTenantId(auth.tenantId);
     const parsed = limit ? Number(limit) : 20;
     const safeLimit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 100) : 20;
-    return this.feedService.getFeed(auth.tenantId, auth.userId, safeLimit);
+    const parsedOffset = offset ? Number(offset) : 0;
+    const safeOffset = Number.isFinite(parsedOffset) ? Math.max(Math.floor(parsedOffset), 0) : 0;
+    return this.feedService.getFeed(auth.tenantId, auth.userId, safeLimit, tipo || undefined, safeOffset);
   }
 
-  @ApiOperation({ summary: 'Marca avisos del feed como leídos para el usuario actual (todos los no leídos si no se pasan ids)' })
+  @ApiOperation({ summary: 'Feed agrupado por tipo de aviso (total, no leídos y los más recientes de cada tipo) — página de Notificaciones' })
+  @Get('feed/agrupado')
+  @Roles('admin', 'member', 'superadmin')
+  getFeedAgrupado(@Query('porTipo') porTipo: string | undefined, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    const parsed = porTipo ? Number(porTipo) : 10;
+    const safe = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 50) : 10;
+    return this.feedService.getFeedAgrupado(auth.tenantId, auth.userId, safe);
+  }
+
+  @ApiOperation({ summary: 'Marca avisos del feed como leídos para el usuario actual (por ids, por tipo, o todos los no leídos si no se pasa nada)' })
   @Post('feed/marcar-leidas')
   @Roles('admin', 'member', 'superadmin')
   async marcarLeidas(@Body() dto: MarcarLeidasDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
-    await this.feedService.marcarLeidas(auth.tenantId, auth.userId, dto.ids);
+    await this.feedService.marcarLeidas(auth.tenantId, auth.userId, dto.ids, dto.tipo);
     return { ok: true };
   }
 

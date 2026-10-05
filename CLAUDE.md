@@ -820,6 +820,8 @@ model CargaCombustible {
 - `login` — `ChoferAuthService`: PIN incorrecto, chofer sin PIN configurado o desactivado, contra cada chofer con ese DNI (uno por tenant). DNI inexistente → solo log de servidor (no hay tenant al que atribuirlo).
 - `sesion` — `ChoferAuthGuard`: token vencido (identidad confiable: se re-verifica la firma con `ignoreExpiration`) o chofer desactivado. Token con firma inválida → solo log de servidor: nunca confiar en el `tenantId` de un token no verificado.
 
+Para el admin, la alerta se explica en palabras simples en el frontend (`vialto-frontend/src/lib/combustibleErrorExplicacion.ts`, `explicarErrorChofer`: título corto + qué pasó + cómo quedó + qué hacer, reconociendo por regex los mensajes de este service y de chofer-auth). **Si se agrega o cambia el texto de un rechazo al chofer (`BadRequestException` en `combustible.service.ts`, mensajes de login), actualizar su regla ahí** — si no, cae a una explicación genérica que muestra el motivo crudo. Por eso `buildSyncErrorAlertas` expone también `origen`, `km`, `precioPorLitro` y `formaPago` del payload.
+
 Helper único: `registrarErrorChofer()` en `core/chofer-auth/chofer-error-log.ts` (función plana con `PrismaService`, sin DI, para poder usarla desde el guard). Best-effort: nunca tira. `sanitizarBody` descarta `pin`/`password`/`token` — **nunca guardar el PIN**. Consultar: `GET combustible/errores-sincronizacion?origen=todos` (o un origen puntual), o SQL directo por `origen`.
 
 #### Asignación de vehículo a chofer, con historial (sep 2026)

@@ -97,6 +97,8 @@ type Alerta = {
 /** COMB-07-T5: alerta de una carga que el chofer intentó sincronizar y el backend rechazó. */
 type SyncErrorAlerta = {
   id: string;
+  /** Ver ORIGENES_ERROR_CHOFER — hoy las alertas solo traen `sincronizacion_offline`. */
+  origen: string;
   mensaje: string;
   fechaCarga: string | null;
   reportadoEn: string;
@@ -104,6 +106,9 @@ type SyncErrorAlerta = {
   patente: string;
   litros: number | null;
   importe: number | null;
+  precioPorLitro: number | null;
+  km: number | null;
+  formaPago: string | null;
   estacion: string | null;
 };
 
@@ -1459,27 +1464,25 @@ export class CombustibleService {
 
     return logs.map((log) => {
       const payload = (log.payload ?? {}) as Record<string, unknown>;
-      const fechaCarga =
-        typeof payload["fecha"] === "string" ? payload["fecha"] : null;
-      const patentePayload =
-        typeof payload["patente"] === "string" ? payload["patente"] : null;
-      const litros =
-        typeof payload["litros"] === "number" ? payload["litros"] : null;
-      const importe =
-        typeof payload["importe"] === "number" ? payload["importe"] : null;
-      const estacion =
-        typeof payload["estacion"] === "string" ? payload["estacion"] : null;
+      const str = (k: string) =>
+        typeof payload[k] === "string" ? (payload[k] as string) : null;
+      const num = (k: string) =>
+        typeof payload[k] === "number" ? (payload[k] as number) : null;
 
       return {
         id: log.id,
+        origen: log.origen,
         mensaje: log.mensaje,
-        fechaCarga,
+        fechaCarga: str("fecha"),
         reportadoEn: log.createdAt.toISOString(),
         choferNombre: log.chofer?.nombre ?? "—",
-        patente: log.vehiculo?.patente ?? patentePayload ?? "—",
-        litros,
-        importe,
-        estacion,
+        patente: log.vehiculo?.patente ?? str("patente") ?? "—",
+        litros: num("litros"),
+        importe: num("importe"),
+        precioPorLitro: num("precioPorLitro"),
+        km: num("km"),
+        formaPago: str("formaPago"),
+        estacion: str("estacion"),
       };
     });
   }

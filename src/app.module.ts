@@ -28,6 +28,7 @@ import { PlatformModule } from './core/platform/platform.module';
 import { TenantFieldConfigModule } from './core/tenant-field-config/tenant-field-config.module';
 import { PaisesModule } from './core/paises/paises.module';
 import { PadronModule } from './core/padron/padron.module';
+import { OdometroModule } from './core/odometro/odometro.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 
 @Module({
@@ -60,6 +61,7 @@ import { NotificacionesModule } from './modules/notificaciones/notificaciones.mo
     TenantFieldConfigModule,
     PaisesModule,
     PadronModule,
+    OdometroModule,
     NotificacionesModule,
   ],
   controllers: [HealthController],

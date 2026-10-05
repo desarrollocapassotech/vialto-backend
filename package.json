@@ -34,7 +34,8 @@
     "test:importaciones": "ts-node src/modules/importaciones/engine/importaciones.spec.ts",
     "test:padron": "ts-node src/core/padron/padron.service.spec.ts",
     "test:platform-guard": "ts-node src/shared/guards/platform-tenant-access.guard.spec.ts",
-    "test:vehiculos-km": "ts-node src/core/vehiculos/vehiculos-km.spec.ts"
+    "test:vehiculos-km": "ts-node src/core/vehiculos/vehiculos-km.spec.ts",
+    "test:odometro": "ts-node src/core/odometro/odometro.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

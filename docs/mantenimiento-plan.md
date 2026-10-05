@@ -11,7 +11,7 @@
 |---|---|---|---|---|
 | MANT-01 | T1 — Reemplazar `Intervencion` por los modelos nuevos | ✅ Hecho (2026-10-05) | `develop` | Migración `20261005130000_mantenimiento_ordenes_trabajo` aplicada en QA (count previo en QA: 1 fila de prueba de LSF). Incluye `OrdenTrabajoSecuencia` y triggers de defensa multi-tenant. Módulo sin endpoints hasta MANT-02; front de Mantenimiento roto solo en QA hasta MANT-04 → no mergear a `main` antes. |
 | MANT-01 | T2 — Edición de km a `core/vehiculos` | ✅ Hecho (2026-10-05) | `develop` | `VehiculosService.editarKm`/`getHistorialKm` + `POST vehiculos/:id/km` y `GET vehiculos/:id/km-historial` en core (`?tenantId=` solo superadmin). Combustible delega sin cambiar contrato. `update` del CRUD/import/platform registra `VehiculoKmEdicion` solo si el km cambia. Test: `npm run test:vehiculos-km`. Antes de T2 se cerró un agujero cross-tenant en `/platform` (`PlatformTenantAccessGuard`). |
-| MANT-01 | T3 — `core/odometro` | 🔲 Pendiente | | |
+| MANT-01 | T3 — `core/odometro` | ✅ Hecho (2026-10-05) | `develop` | `OdometroService` (+ versiones por lote `getUltimasLecturas`/`getKmPorDiaMuchos` para MANT-02-T5) y funciones puras en `odometro.util.ts`. Empate del mismo día: carga vs carga por hora real; fuentes distintas por `createdAt` (ediciones y OT van a las 00:00 UTC). Fallback `'vehiculo'` usa `Vehiculo.createdAt` como fecha. Test: `npm run test:odometro`. Verificado contra QA (Bressan, 18 vehículos en 7 queries). |
 | MANT-01 | T4 — `vencimiento.util.ts` | 🔲 Pendiente | | |
 | MANT-02 | T1 — Planes + plantillas | 🔲 Pendiente | | |
 | MANT-02 | T2 — Asignación plan ↔ vehículo | 🔲 Pendiente | | |

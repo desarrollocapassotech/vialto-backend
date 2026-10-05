@@ -168,6 +168,18 @@ para soporte y administración. Es el **único** lugar donde no se filtra por un
 módulo común.** Si estás en un módulo de negocio y sentís que necesitás ver varias
 empresas a la vez, está mal.
 
+**Ojo — `PlatformController` (`/platform/...`) no es solo de superadmin** (oct 2026). Muchas
+pantallas de tenant (Viajes, Stock, Facturación, Liquidaciones, ARCA…) lo llaman con su
+**propio** `tenantId` en la query. Por eso el controller acepta roles de tenant y lo protege
+`PlatformTenantAccessGuard` (`shared/guards/`): superadmin pasa siempre; cualquier otro rol
+solo si todo `tenantId` del request (query, `:tenantId` o body) es el de su token. Antes de
+este guard, cualquier usuario logueado podía leer/escribir otra empresa pasando su
+`tenantId`. Reglas al tocar ese controller:
+- Toda ruta nueva queda cubierta por el guard de clase: no lo saques ni lo reemplaces por
+  guards por método.
+- Si la ruta solo la usa una pantalla de superadmin, marcala `@Roles('superadmin')` (hoy:
+  `users/:userId` + invite/role/delete y todo `field-config/*`).
+
 ---
 
 ## Trampas por módulo

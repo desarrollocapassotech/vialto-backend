@@ -30,6 +30,7 @@ import { memoryStorage } from "multer";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
+import { PlatformTenantAccessGuard } from "../../shared/guards/platform-tenant-access.guard";
 import { PlatformService } from "./platform.service";
 import { CreateClienteDto } from "../clientes/dto/create-cliente.dto";
 import { UpdateClienteDto } from "../clientes/dto/update-cliente.dto";
@@ -81,7 +82,7 @@ import { ToggleFieldConfigDto } from "../tenant-field-config/dto/toggle-field-co
 @ApiTags("Admin — Platform")
 @ApiBearerAuth("clerk-jwt")
 @Controller("platform")
-@UseGuards(ClerkAuthGuard, RolesGuard)
+@UseGuards(ClerkAuthGuard, RolesGuard, PlatformTenantAccessGuard)
 @Roles("superadmin", "org:admin", "admin", "org:member", "member")
 export class PlatformController {
   constructor(private readonly service: PlatformService) {}
@@ -545,6 +546,7 @@ export class PlatformController {
   }
 
   @Get("users/:userId")
+  @Roles("superadmin")
   userById(
     @Param("userId") userId: string,
     @Query("tenantId") tenantId?: string,
@@ -553,6 +555,7 @@ export class PlatformController {
   }
 
   @Post("users/invite")
+  @Roles("superadmin")
   inviteUser(
     @Query("tenantId") tenantId: string | undefined,
     @Body("name") name: string,
@@ -564,6 +567,7 @@ export class PlatformController {
   }
 
   @Patch("users/:userId/role")
+  @Roles("superadmin")
   updateUserRole(
     @Param("userId") userId: string,
     @Query("tenantId") tenantId: string | undefined,
@@ -573,6 +577,7 @@ export class PlatformController {
   }
 
   @Delete("users/:userId")
+  @Roles("superadmin")
   removeUser(
     @Param("userId") userId: string,
     @Query("tenantId") tenantId?: string,
@@ -1430,6 +1435,7 @@ export class PlatformController {
     summary: "Catálogo completo de módulos/formularios/campos configurables",
   })
   @Get("field-config/catalogo")
+  @Roles("superadmin")
   getFieldConfigCatalogo() {
     return this.service.getFieldConfigCatalogo();
   }
@@ -1439,6 +1445,7 @@ export class PlatformController {
     summary: "Obtiene el historial de cambios de campos para una empresa",
   })
   @Get("field-config/:tenantId/audit")
+  @Roles("superadmin")
   getAuditHistory(
     @Param("tenantId") tenantId: string,
     @Query("modulo") modulo?: string,
@@ -1452,6 +1459,7 @@ export class PlatformController {
       "Obtiene la configuración de campos de un formulario para un tenant",
   })
   @Get("field-config/:tenantId")
+  @Roles("superadmin")
   getFieldConfig(
     @Param("tenantId") tenantId: string,
     @Query() query: GetFieldConfigDto,
@@ -1467,6 +1475,7 @@ export class PlatformController {
     summary: "Actualiza la visibilidad de un campo para un tenant",
   })
   @Post("field-config/:tenantId/toggle")
+  @Roles("superadmin")
   toggleFieldConfig(
     @Param("tenantId") tenantId: string,
     @Body() dto: ToggleFieldConfigDto,

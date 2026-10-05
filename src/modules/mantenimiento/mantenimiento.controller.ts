@@ -10,6 +10,8 @@ import { UpdateOrdenTrabajoDto } from './dto/update-orden-trabajo.dto';
 import { OrdenesQueryDto } from './dto/ordenes-query.dto';
 import { VencimientosService } from './vencimientos.service';
 import { VencimientosQueryDto } from './dto/vencimientos-query.dto';
+import { HistorialService } from './historial.service';
+import { HistorialQueryDto } from './dto/historial-query.dto';
 import { PlanesService } from './planes.service';
 import { CreatePlanMantenimientoDto } from './dto/create-plan-mantenimiento.dto';
 import { UpdatePlanMantenimientoDto } from './dto/update-plan-mantenimiento.dto';
@@ -46,6 +48,7 @@ export class MantenimientoController {
     private readonly talleres: TalleresService,
     private readonly ordenes: OrdenesService,
     private readonly vencimientos: VencimientosService,
+    private readonly historialService: HistorialService,
   ) {}
 
   private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
@@ -150,6 +153,19 @@ export class MantenimientoController {
   @Roles('admin', 'member', 'superadmin')
   listarPlanesDeVehiculo(@CurrentAuth() auth: AuthPayload, @Param('id') vehiculoId: string, @Query('tenantId') tenantId?: string) {
     return this.asignaciones.listarPorVehiculo(this.resolveTenantId(auth, tenantId), vehiculoId);
+  }
+
+  @ApiOperation({
+    summary: 'Historial de una unidad: órdenes de trabajo y lecturas de km en una sola línea de tiempo',
+    description: 'Más reciente primero. Incluye OT anuladas (con su estado). Sin desde/hasta trae todo.',
+  })
+  @Get('vehiculos/:id/historial')
+  @Roles('admin', 'member', 'superadmin')
+  historialVehiculo(@CurrentAuth() auth: AuthPayload, @Param('id') vehiculoId: string, @Query() query: HistorialQueryDto) {
+    return this.historialService.historial(this.resolveTenantId(auth, query.tenantId), vehiculoId, {
+      desde: query.desde,
+      hasta: query.hasta,
+    });
   }
 
   @ApiOperation({ summary: 'Editar el último service conocido o activar/desactivar una asignación' })

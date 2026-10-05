@@ -39,7 +39,8 @@
     "test:vencimiento": "ts-node src/modules/mantenimiento/vencimiento.util.spec.ts",
     "test:mant-planes": "ts-node src/modules/mantenimiento/planes.spec.ts",
     "test:mant-asignaciones": "ts-node src/modules/mantenimiento/asignaciones.spec.ts",
-    "test:mant-talleres": "ts-node src/modules/mantenimiento/talleres.spec.ts"
+    "test:mant-talleres": "ts-node src/modules/mantenimiento/talleres.spec.ts",
+    "test:mant-ordenes": "ts-node src/modules/mantenimiento/ordenes.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

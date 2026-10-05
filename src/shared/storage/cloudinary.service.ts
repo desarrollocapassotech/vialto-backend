@@ -347,6 +347,69 @@ export class CloudinaryService {
     }
   }
 
+  /** Carpeta de los adjuntos de órdenes de trabajo de mantenimiento (factura, fotos). */
+  mantenimientoFolder(tenantId: string): string {
+    return `vialto/mantenimiento/${tenantId}`;
+  }
+
+  /** Adjunto de una orden de trabajo (PDF o imagen, hasta 10 MB). */
+  async uploadMantenimientoAdjunto(
+    tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ): Promise<string> {
+    if (!this.configured) {
+      throw new ServiceUnavailableException(
+        'El almacenamiento de archivos no está configurado. Contactá al administrador.',
+      );
+    }
+    if (buffer.length > MAX_REMITO_PDF_BYTES) {
+      throw new ServiceUnavailableException('El archivo no puede superar 10 MB.');
+    }
+
+    const isPdf = this.isPdfUpload(mimeType, originalName);
+    const baseName = String(originalName ?? 'adjunto')
+      .replace(/\.[^.]+$/i, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'adjunto';
+
+    const publicId = isPdf ? `${Date.now()}-${baseName}.pdf` : `${Date.now()}-${baseName}`;
+
+    try {
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: this.mantenimientoFolder(tenantId),
+            resource_type: isPdf ? 'raw' : 'image',
+            public_id: publicId,
+            access_mode: 'public',
+            type: 'upload',
+          },
+          (error, uploadResult) => {
+            if (error || !uploadResult) {
+              reject(error ?? new Error('Cloudinary no devolvió resultado'));
+              return;
+            }
+            resolve(uploadResult);
+          },
+        );
+        stream.end(buffer);
+      });
+
+      return result.secure_url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al subir el archivo';
+      this.logger.error(`Cloudinary mantenimiento upload failed: ${message}`);
+      throw new BadGatewayException(
+        message.includes('Invalid cloud_name')
+          ? 'Cloudinary mal configurado (cloud name inválido). Revisá las variables de entorno.'
+          : 'No se pudo subir el archivo. Intentá de nuevo más tarde.',
+      );
+    }
+  }
+
   /** URL de entrega firmada (1 h) para recursos en nuestro Cloudinary. */
   resolveDeliveryUrl(storedUrl: string): string {
     const parsed = this.parseCloudinaryStoredUrl(storedUrl);
@@ -405,5 +468,14 @@ export class CloudinaryService {
     if (!allowedPrefixes.some((prefix) => parsed.publicId.startsWith(prefix))) {
       throw new BadGatewayException('URL de remito no válida para esta empresa.');
     }
+  }
+
+  /**
+   * true solo si la URL es de nuestro Cloudinary y está en la carpeta de mantenimiento del
+   * tenant. A diferencia de `assertRemitoUrlForTenant`, una URL externa también es inválida.
+   */
+  esAdjuntoMantenimientoDelTenant(storedUrl: string, tenantId: string): boolean {
+    const parsed = this.parseCloudinaryStoredUrl(storedUrl.trim());
+    return Boolean(parsed?.publicId.startsWith(`${this.mantenimientoFolder(tenantId)}/`));
   }
 }

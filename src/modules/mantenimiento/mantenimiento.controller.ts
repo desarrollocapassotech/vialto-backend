@@ -1,7 +1,13 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { ApiTags, ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { OrdenesService } from './ordenes.service';
+import { CreateOrdenTrabajoDto } from './dto/create-orden-trabajo.dto';
+import { UpdateOrdenTrabajoDto } from './dto/update-orden-trabajo.dto';
+import { OrdenesQueryDto } from './dto/ordenes-query.dto';
 import { PlanesService } from './planes.service';
 import { CreatePlanMantenimientoDto } from './dto/create-plan-mantenimiento.dto';
 import { UpdatePlanMantenimientoDto } from './dto/update-plan-mantenimiento.dto';
@@ -36,6 +42,7 @@ export class MantenimientoController {
     private readonly planes: PlanesService,
     private readonly asignaciones: AsignacionesService,
     private readonly talleres: TalleresService,
+    private readonly ordenes: OrdenesService,
   ) {}
 
   private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
@@ -207,5 +214,82 @@ export class MantenimientoController {
   @Roles('admin', 'superadmin')
   removeTaller(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.talleres.remove(this.resolveTenantId(auth, tenantId), id);
+  }
+
+  // ── Órdenes de trabajo ────────────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Listar órdenes de trabajo (paginado, con filtros)' })
+  @Get('ordenes')
+  @Roles('admin', 'member', 'superadmin')
+  listOrdenes(@CurrentAuth() auth: AuthPayload, @Query() query: OrdenesQueryDto) {
+    return this.ordenes.findAllPaginated(this.resolveTenantId(auth, query.tenantId), query);
+  }
+
+  @ApiOperation({
+    summary: 'Subir un adjunto de OT (factura o foto) — devuelve la URL para mandar en `adjuntos`',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Post('ordenes/adjuntos')
+  @Roles('admin', 'superadmin')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }))
+  subirAdjuntoOrden(
+    @CurrentAuth() auth: AuthPayload,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.ordenes.subirAdjunto(this.resolveTenantId(auth, tenantId), file);
+  }
+
+  @ApiOperation({ summary: 'Obtener una orden de trabajo con ítems, taller y planes que cumple' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Get('ordenes/:id')
+  @Roles('admin', 'member', 'superadmin')
+  getOrden(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.ordenes.findOne(this.resolveTenantId(auth, tenantId), id);
+  }
+
+  @ApiOperation({
+    summary: 'Registrar una orden de trabajo (queda cerrada)',
+    description: 'Devuelve la orden y `warning` (texto o null) si el km no cierra con las lecturas vecinas del odómetro. No bloquea.',
+  })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Post('ordenes')
+  @Roles('admin', 'superadmin')
+  createOrden(@CurrentAuth() auth: AuthPayload, @Body() dto: CreateOrdenTrabajoDto, @Query('tenantId') tenantId?: string) {
+    return this.ordenes.create(this.resolveTenantId(auth, tenantId), auth.userId, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Editar una orden de trabajo (ítems y planes, si vienen, reemplazan la lista)',
+    description: 'Devuelve la orden y `warning` igual que el alta. Una orden anulada no se edita.',
+  })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Patch('ordenes/:id')
+  @Roles('admin', 'superadmin')
+  updateOrden(
+    @CurrentAuth() auth: AuthPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrdenTrabajoDto,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.ordenes.update(this.resolveTenantId(auth, tenantId), id, dto);
+  }
+
+  @ApiOperation({ summary: 'Anular una orden de trabajo (deja de contar para el km y los vencimientos)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Post('ordenes/:id/anular')
+  @Roles('admin', 'superadmin')
+  anularOrden(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.ordenes.anular(this.resolveTenantId(auth, tenantId), id);
+  }
+
+  @ApiOperation({ summary: 'Borrar una orden que no cumple planes (si cumple, anularla)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Delete('ordenes/:id')
+  @Roles('admin', 'superadmin')
+  removeOrden(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.ordenes.remove(this.resolveTenantId(auth, tenantId), id);
   }
 }

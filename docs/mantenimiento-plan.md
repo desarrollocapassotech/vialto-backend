@@ -15,7 +15,7 @@
 | MANT-01 | T4 — `vencimiento.util.ts` | ✅ Hecho (2026-10-05) | `develop` | `calcularVencimiento` + `elegirReferencia` (puras). Test: `npm run test:vencimiento` (27 casos). **MANT-01 cerrado.** |
 | MANT-02 | T1 — Planes + plantillas | ✅ Hecho (2026-10-05) | `develop` | `PlanesService` + rutas `mantenimiento/planes` (CRUD) y `planes/plantillas`. Plantillas **sin tipo de vehículo** y **sin aviso por defecto** donde la spec no lo trae (decisiones de Elias). Reglas: ≥1 intervalo, aviso < intervalo y con su intervalo, mecánico ≥1 tarea; nombre único por tenant sin distinguir mayúsculas; DELETE solo sin asignaciones (si no, desactivar). Test: `npm run test:mant-planes`. |
 | MANT-02 | T2 — Asignación plan ↔ vehículo | ✅ Hecho (2026-10-05) | `develop` | `AsignacionesService`. `POST planes/:id/vehiculos` acepta **base común** (`vehiculoIds`+`baseKm`/`baseFecha`) **o base por unidad** (`vehiculos: [...]`); las asignaciones desactivadas se **reactivan** (decisiones de Elias). Agregados: `GET planes/:id/vehiculos` y `GET vehiculos/:id/planes` (los necesita MANT-04). `baseFecha` a 00:00 UTC y no futura. DELETE solo si ninguna OT la cumplió. Test: `npm run test:mant-asignaciones`. |
-| MANT-02 | T3 — Talleres | 🔲 Pendiente | | |
+| MANT-02 | T3 — Talleres | ✅ Hecho (2026-10-05) | `develop` | `TalleresService` + CRUD `mantenimiento/talleres`. Nombre único por tenant sin distinguir mayúsculas; CUIT opcional, guardado solo con dígitos y con dígito verificador válido (sin consultar ARCA); `interno` no se expone. DELETE solo sin OT (si no, desactivar). Test: `npm run test:mant-talleres`. |
 | MANT-02 | T4 — Órdenes de trabajo | 🔲 Pendiente | | |
 | MANT-02 | T5 — Vencimientos | 🔲 Pendiente | | |
 | MANT-02 | T6 — Historial por vehículo | 🔲 Pendiente | | |

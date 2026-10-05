@@ -9,6 +9,10 @@ import { PlanesQueryDto } from './dto/planes-query.dto';
 import { AsignacionesService } from './asignaciones.service';
 import { AsignarVehiculosDto } from './dto/asignar-vehiculos.dto';
 import { UpdateVehiculoPlanDto } from './dto/update-vehiculo-plan.dto';
+import { TalleresService } from './talleres.service';
+import { CreateTallerDto } from './dto/create-taller.dto';
+import { UpdateTallerDto } from './dto/update-taller.dto';
+import { TalleresQueryDto } from './dto/talleres-query.dto';
 import { ClerkAuthGuard, AuthPayload } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -31,6 +35,7 @@ export class MantenimientoController {
   constructor(
     private readonly planes: PlanesService,
     private readonly asignaciones: AsignacionesService,
+    private readonly talleres: TalleresService,
   ) {}
 
   private resolveTenantId(auth: AuthPayload, overrideTenantId?: string): string {
@@ -156,5 +161,51 @@ export class MantenimientoController {
   @Roles('admin', 'superadmin')
   removeAsignacion(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
     return this.asignaciones.remove(this.resolveTenantId(auth, tenantId), id);
+  }
+
+  // ── Talleres ──────────────────────────────────────────────────────────────
+
+  @ApiOperation({ summary: 'Listar talleres (con cantidad de órdenes de trabajo)' })
+  @Get('talleres')
+  @Roles('admin', 'member', 'superadmin')
+  listTalleres(@CurrentAuth() auth: AuthPayload, @Query() query: TalleresQueryDto) {
+    return this.talleres.findAll(this.resolveTenantId(auth, query.tenantId), query);
+  }
+
+  @ApiOperation({ summary: 'Obtener un taller' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Get('talleres/:id')
+  @Roles('admin', 'member', 'superadmin')
+  getTaller(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.talleres.findOne(this.resolveTenantId(auth, tenantId), id);
+  }
+
+  @ApiOperation({ summary: 'Crear un taller (también la alta rápida del modal de OT)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Post('talleres')
+  @Roles('admin', 'superadmin')
+  createTaller(@CurrentAuth() auth: AuthPayload, @Body() dto: CreateTallerDto, @Query('tenantId') tenantId?: string) {
+    return this.talleres.create(this.resolveTenantId(auth, tenantId), dto);
+  }
+
+  @ApiOperation({ summary: 'Editar un taller (incluye activar/desactivar)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Patch('talleres/:id')
+  @Roles('admin', 'superadmin')
+  updateTaller(
+    @CurrentAuth() auth: AuthPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateTallerDto,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.talleres.update(this.resolveTenantId(auth, tenantId), id, dto);
+  }
+
+  @ApiOperation({ summary: 'Borrar un taller sin órdenes de trabajo (si tiene, desactivarlo)' })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Delete('talleres/:id')
+  @Roles('admin', 'superadmin')
+  removeTaller(@CurrentAuth() auth: AuthPayload, @Param('id') id: string, @Query('tenantId') tenantId?: string) {
+    return this.talleres.remove(this.resolveTenantId(auth, tenantId), id);
   }
 }

@@ -78,6 +78,30 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     frecuencia: 'inmediata',
     urlDestino: '/?combustibleTab=alertas',
   },
+  // Mantenimiento: los evaluators viven en modules/mantenimiento y se registran con
+  // NotificacionesCronService.registrarEvaluator (reusan el cálculo de vencimientos).
+  {
+    tipo: 'mantenimiento.vencimientoProximo',
+    modulo: 'mantenimiento',
+    label: 'Mantenimiento próximo a vencer',
+    descripcion:
+      'Avisa una vez por ciclo cuando un plan de mantenimiento de una unidad entra en el período de aviso (por km o por fecha).',
+    defaultActivo: true,
+    requiereModulo: 'mantenimiento',
+    frecuencia: 'diaria',
+    urlDestino: '/mantenimiento',
+  },
+  {
+    tipo: 'mantenimiento.vencido',
+    modulo: 'mantenimiento',
+    label: 'Mantenimiento vencido',
+    descripcion:
+      'Avisa una vez por ciclo cuando un plan de mantenimiento de una unidad venció (por km o por fecha).',
+    defaultActivo: true,
+    requiereModulo: 'mantenimiento',
+    frecuencia: 'diaria',
+    urlDestino: '/mantenimiento',
+  },
 ];
 
 export function getNotificacionesCatalogoPorModulos(

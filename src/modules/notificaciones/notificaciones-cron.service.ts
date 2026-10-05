@@ -43,6 +43,7 @@ const COLOR_MIST = '#f5f3f0';
 @Injectable()
 export class NotificacionesCronService {
   private readonly logger = new Logger(NotificacionesCronService.name);
+  /** Los 4 propios de este módulo + los que registran los módulos vendibles (ver `registrarEvaluator`). */
   private readonly evaluators: NotificacionEvaluator[];
 
   constructor(
@@ -56,6 +57,22 @@ export class NotificacionesCronService {
     cuentaCorrienteVencimiento: CuentaCorrienteVencimientoEvaluator,
   ) {
     this.evaluators = [facturaPorVencer, facturaVencida, cargaSospechosa, cuentaCorrienteVencimiento];
+  }
+
+  /**
+   * Punto de extensión para que un módulo vendible sume sus avisos sin que `notificaciones`
+   * dependa de él (ej. Mantenimiento registra los suyos en `onModuleInit`, reusando su propio
+   * cálculo). El `tipo` tiene que estar en `NOTIFICACIONES_CATALOG` y no puede repetirse: si
+   * no, falla el arranque — mejor eso que un aviso que nunca sale.
+   */
+  registrarEvaluator(evaluator: NotificacionEvaluator): void {
+    if (!NOTIFICACIONES_CATALOG.some((c) => c.tipo === evaluator.tipo)) {
+      throw new Error(`registrarEvaluator: el tipo "${evaluator.tipo}" no está en NOTIFICACIONES_CATALOG`);
+    }
+    if (this.evaluators.some((e) => e.tipo === evaluator.tipo)) {
+      throw new Error(`registrarEvaluator: ya hay un evaluator para "${evaluator.tipo}"`);
+    }
+    this.evaluators.push(evaluator);
   }
 
   /**

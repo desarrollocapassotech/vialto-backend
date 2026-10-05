@@ -36,7 +36,8 @@
     "test:platform-guard": "ts-node src/shared/guards/platform-tenant-access.guard.spec.ts",
     "test:vehiculos-km": "ts-node src/core/vehiculos/vehiculos-km.spec.ts",
     "test:odometro": "ts-node src/core/odometro/odometro.spec.ts",
-    "test:vencimiento": "ts-node src/modules/mantenimiento/vencimiento.util.spec.ts"
+    "test:vencimiento": "ts-node src/modules/mantenimiento/vencimiento.util.spec.ts",
+    "test:mant-planes": "ts-node src/modules/mantenimiento/planes.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

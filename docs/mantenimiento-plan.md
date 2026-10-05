@@ -9,7 +9,7 @@
 
 | Ticket | Tarea | Estado | Rama / PR | Notas |
 |---|---|---|---|---|
-| MANT-01 | T1 — Reemplazar `Intervencion` por los modelos nuevos | ✅ Hecho (2026-10-05) | `feat/mant-01-fundamentos-backend` | Migración `20261005130000_mantenimiento_ordenes_trabajo` aplicada en QA (count previo en QA: 1 fila de prueba de LSF). Incluye `OrdenTrabajoSecuencia` y triggers de defensa multi-tenant. Módulo sin endpoints hasta MANT-02; front de Mantenimiento roto solo en QA hasta MANT-04 → no mergear a `main` antes. |
+| MANT-01 | T1 — Reemplazar `Intervencion` por los modelos nuevos | ✅ Hecho (2026-10-05) | `develop` | Migración `20261005130000_mantenimiento_ordenes_trabajo` aplicada en QA (count previo en QA: 1 fila de prueba de LSF). Incluye `OrdenTrabajoSecuencia` y triggers de defensa multi-tenant. Módulo sin endpoints hasta MANT-02; front de Mantenimiento roto solo en QA hasta MANT-04 → no mergear a `main` antes. |
 | MANT-01 | T2 — Edición de km a `core/vehiculos` | 🔲 Pendiente | | |
 | MANT-01 | T3 — `core/odometro` | 🔲 Pendiente | | |
 | MANT-01 | T4 — `vencimiento.util.ts` | 🔲 Pendiente | | |
@@ -35,7 +35,7 @@
 
 ### Notas de implementación
 - **Tests:** el backend no usa Jest; los `*.spec.ts` son scripts `ts-node` + `node:assert` con un `test:x` en `package.json` (ej. `test:padron`). Los tests de T3/T4 siguen ese patrón. No hay script `lint`: "lint en verde" = `npm run build`.
-- **`prisma migrate dev` en QA pide reset** por una fila vieja de `_prisma_migrations` (intento fallido y ya revertido de `20260831120000_intervencion_tipos_array`, otro checksum). No es drift real. **No resetear.** La migración de T1 se generó con `prisma migrate diff --from-url $DATABASE_URL_UNPOOLED --to-schema-datamodel` y se aplicó con `prisma migrate deploy`. Arreglo definitivo (pendiente de OK): borrar esa fila revertida (`id 0622c503-…`).
+- **`prisma migrate dev` en QA volvió a funcionar (2026-10-05):** pedía reset por una fila vieja de `_prisma_migrations` (intento fallido y ya revertido de `20260831120000_intervencion_tipos_array`, otro checksum). Se borró esa fila con OK de Elias. Si vuelve a pasar algo parecido: **nunca resetear**; buscar filas con `finished_at IS NULL` y checksum distinto.
 
 ## 0. Antes de empezar (obligatorio)
 1. Leer `vialto-backend/CLAUDE.md`, `vialto-frontend/CLAUDE.md`, `vialto-backend/docs/reglas-multitenant.md` y `vialto-backend/MIGRATIONS.md`.
@@ -255,7 +255,7 @@ Seguir `vialto-frontend/CLAUDE.md` (VER + modal read-only → EDITAR, breadcrumb
 - T2: Recorrido end-to-end en QA con dos tenants: uno con Combustible y otro sin. Checklist: crear plantillas → asignar con base → ver el semáforo → registrar una OT desde una fila → el estado vuelve a `ok` → correr `POST /notificaciones/ejecutar?tenantId=` y verificar que el mail no se duplica en una segunda corrida.
 
 ## 6. Reglas de trabajo
-- Un ticket = una rama + un PR (usar `pull_request_template.md` de cada repo). Backend primero, frontend después.
+- **Se trabaja directo sobre `develop`** (decisión de Elias, 2026-10-05): sin ramas por ticket ni PR intermedios; commit por tarea y push a `develop`. Nada se mergea a `main` hasta cerrar MANT-04. Backend primero, frontend después.
 - Ante una duda de producto, preguntar. No inventar reglas de negocio.
 - No tocar Combustible salvo lo indicado en MANT-01-T2.
 - Al final de cada ticket: build, tests y lint en verde, y un resumen de qué cambió y qué se probó.

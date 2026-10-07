@@ -987,8 +987,13 @@ export class ImportacionesService {
     const ocultaPorModulo = await Promise.all(
       modulos.map((modulo) => this.columnaImportOculta(tenantId, modulo, tenantIdPropio2)),
     );
+    // Empresa que ocultó "Vehículos" en Viajes (Campos por empresa): la
+    // planilla no trae la hoja Vehículos. Se lee del mismo filtro que ya
+    // oculta la columna "Vehículo" de Viajes (vehiculoId ↔ vehiculosRows).
+    const vehiculosOcultos = ocultaPorModulo[modulos.indexOf("viajes")]("vehiculoId");
 
-    return modulos.map((modulo, i) => {
+    return modulos.flatMap((modulo, i) => {
+      if (modulo === "vehiculos" && vehiculosOcultos) return [];
       const template = templatePorModulo.get(modulo);
       const config = template
         ? (template.config as unknown as TemplateConfig)
@@ -1027,14 +1032,14 @@ export class ImportacionesService {
         return [col];
       });
 
-      return {
+      return [{
         modulo,
         sheet:
           (typeof config?.sheet === "string" ? config.sheet : undefined) ??
           SHEET_LABEL_DEFAULT[modulo] ??
           modulo,
         columnas,
-      };
+      }];
     });
   }
 

@@ -93,7 +93,6 @@ export class ValidatorService {
 
     // Validaciones de negocio cruzadas (post-parseo)
     const ctgRowsMap = new Map<string, { ctgRaw: string; rows: number[] }>();
-    const dbCtgMap = new Map<string, string>(); // ctgKey -> numeroViaje
     // Si el tenant tiene "ID Sistema" deshabilitado, "ID Propio 1" pasa a ser
     // el único identificador visible del viaje y se vuelve obligatorio en
     // todos lados donde se carga (alta, edición e import) — ver
@@ -125,29 +124,6 @@ export class ValidatorService {
             ctgRowsMap.set(key, { ctgRaw, rows: [] });
           }
           ctgRowsMap.get(key)!.rows.push(row._rowNum);
-        }
-      }
-
-      // 2. Consultar CTGs existentes en la BD para este tenant
-      const rawCtgs = Array.from(ctgRowsMap.values()).map((v) => v.ctgRaw);
-      if (rawCtgs.length > 0) {
-        const viajesExistentes = await this.prisma.viaje.findMany({
-          where: {
-            tenantId,
-            numeroIdentificacionPersonalizado: { in: rawCtgs, mode: "insensitive" },
-          },
-          select: {
-            numeroIdentificacionPersonalizado: true,
-            numero: true,
-          },
-        });
-        for (const v of viajesExistentes) {
-          if (v.numeroIdentificacionPersonalizado) {
-            dbCtgMap.set(
-              v.numeroIdentificacionPersonalizado.toLowerCase(),
-              v.numero,
-            );
-          }
         }
       }
     }
@@ -195,23 +171,18 @@ export class ValidatorService {
             const filasDuplicadas = intraInfo.rows.join(", ");
             rowErrors.push({
               fila: row._rowNum,
-              campo: "ID Personalizado (CTG)",
-              error: `El CTG '${ctgRaw}' está duplicado en el archivo de importación (filas ${filasDuplicadas}).`,
-              valor: ctgRaw,
-            });
-          } else if (dbCtgMap.has(key)) {
-            const numeroExistente = dbCtgMap.get(key);
-            rowErrors.push({
-              fila: row._rowNum,
-              campo: "ID Personalizado (CTG)",
-              error: `El CTG '${ctgRaw}' ya existe en el sistema (Viaje N° ${numeroExistente}).`,
+              campo: labelIdPropio1,
+              error: `${labelIdPropio1} '${ctgRaw}' está duplicado en el archivo de importación (filas ${filasDuplicadas}).`,
               valor: ctgRaw,
             });
           }
+          // Si el ID ya existe en el sistema NO es un error: la fila actualiza
+          // ese viaje (ViajesProcessor.resolverFilasExistentes matchea primero
+          // por este ID) y el preview la muestra como "Actualiza"/"Sin cambios".
         } else if (!idSistemaHabilitado) {
           rowErrors.push({
             fila: row._rowNum,
-            campo: "ID Personalizado (CTG)",
+            campo: labelIdPropio1,
             error: `${labelIdPropio1} es obligatorio: tu empresa tiene deshabilitado el ID Sistema, así que todo viaje necesita este identificador cargado.`,
             valor: null,
           });

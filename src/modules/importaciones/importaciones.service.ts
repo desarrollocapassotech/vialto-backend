@@ -1682,7 +1682,19 @@ export class ImportacionesService {
             : null,
       },
     ];
-    return pares.filter((p) => p.antes !== p.despues);
+    // Una celda vacía en el Excel no pisa el dato existente al guardar (el
+    // processor la pasa como `undefined`), así que no es un cambio — antes
+    // aparecía "Moneda: ARS → —" para columnas que el archivo no trae.
+    const vacio = (v: unknown) => v == null || String(v).trim() === "";
+    const normalizar = (v: unknown) => {
+      const n = typeof v === "number" ? v : Number(String(v).replace("%", "").trim());
+      return Number.isFinite(n) && String(v).trim() !== ""
+        ? String(n)
+        : String(v).trim().toLowerCase();
+    };
+    return pares.filter(
+      (p) => !vacio(p.despues) && (vacio(p.antes) || normalizar(p.antes) !== normalizar(p.despues)),
+    );
   }
 
   /**

@@ -1176,9 +1176,31 @@ Gemini como proveedor primario, **Groq como fallback automático** si Gemini fal
 - **Diff "antes/después" para el preview** (`ViajesProcessor.obtenerEstadoActual()` + `ImportacionesService.compararCamposViaje()`): para cada fila que va a actualizar un viaje existente, el preview trae el estado actual de BD (con nombres de cliente/transportista/chofer/patente ya resueltos) y arma `PreviewViaje.cambios: PreviewCambioCampo[]` (`{campo, antes, despues}`), solo con los campos que realmente cambian. `PreviewViaje.nuevo` distingue alta vs. actualización. El frontend lo consume en el modal "Ver cambios" — ver `vialto-frontend/CLAUDE.md`.
 - **Desglose nuevas vs. actualizadas** (`PreviewResult.entidadesNuevas`/`entidadesActualizadas`, vía `IImportProcessor.contarExistentes()`): antes el preview siempre decía "N a crear" aunque la mayoría de las filas fueran a actualizar un registro ya existente (el processor hace upsert por nombre/patente/clave compuesta) — ahora se distingue.
 
-#### `GET /importaciones/tenant-tiene-datos` — para el selector de módulos del wizard
+#### `POST /importaciones/detectar-hojas` — primer paso del wizard (oct 2026)
 
-`ImportacionesService.tenantTieneDatos(tenantId)` cuenta (`count()`, no trae filas) si el tenant ya tiene algún `Cliente`/`Transportista`/`Chofer`/`Vehiculo` cargado. El wizard del frontend lo usa para decidir si arranca directo con la secuencia completa (tenant nuevo, sin nada cargado) o si primero deja elegir qué módulos importar (tenant con datos existentes, para no forzar un recorrido completo). Endpoint liviano, sin relación con `preview`/`confirm`.
+El wizard ya no pide elegir módulos con checks. Arranca subiendo el Excel, y `ImportacionesService.detectarHojas(tenantId, buffer)` devuelve qué módulos trae y en qué hoja:
+
+```ts
+{
+  hojas: { modulo, hoja, filas, faltantes, detectadaPor: 'nombre' | 'encabezados' }[]; // en orden de importación
+  sinIdentificar: { hoja, filas, candidatos }[];
+}
+```
+
+1. **Por nombre**, en dos pasadas para no asignar mal una hoja tipo "Viajes clientes":
+   - primero, coincidencia exacta con la hoja de la plantilla del tenant (o la default de `SHEET_LABEL_DEFAULT`, ej. "Transportes");
+   - después, una hoja cuyo nombre contenga el módulo o su label.
+   Si la hoja no tiene las columnas obligatorias, vuelve igual con `faltantes` y el wizard la informa sin importarla.
+2. **Por encabezados**, para las hojas que quedaron sin asignar (ej. "Hoja1"). Se asigna al módulo que tiene todas sus columnas obligatorias y más columnas coincidentes. Si hay empate (una hoja con solo "Nombre" encaja en Clientes, Transportes y Choferes), vuelve en `sinIdentificar` con sus `candidatos` y elige el usuario. Con `candidatos: []` no se parece a ningún módulo.
+3. Las hojas sin filas de datos se ignoran.
+
+El criterio de encabezados es el mismo que `ParserService.parse` (sin distinguir mayúsculas, con los encabezados y alias de la **plantilla**), para que lo que se detecta como válido no falle después en el preview.
+
+**`hoja` en el preview**: `POST /importaciones/preview?modulo=&hoja=` lee la hoja indicada en vez de la de la plantilla (`PreviewImportDto.hoja`). El wizard manda la hoja detectada, así una hoja reconocida por encabezados se puede leer aunque se llame distinto.
+
+Pruebas: `npm run test:importaciones-detectar` (`detectar-hojas.spec.ts`, plantillas por defecto del catálogo, sin DB).
+
+`GET /importaciones/tenant-tiene-datos` y `POST /importaciones/pre-flight` ya no los usa el wizard (los reemplaza la detección). Siguen en el código; se pueden borrar si nadie más los consume.
 
 ---
 

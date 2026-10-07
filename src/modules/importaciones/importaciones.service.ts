@@ -28,6 +28,9 @@ import type {
   EntidadesFaltantesModelo,
   ColumnaEsperada,
   ColumnasEsperadasModulo,
+  DeteccionHoja,
+  DeteccionHojaSinIdentificar,
+  DeteccionHojasResult,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
 import { getCatalogoColumnas, getAltaFormularioDeModulo, construirConfigPorDefecto } from "./template-catalogo";
@@ -50,6 +53,11 @@ const CAMPOS_TRANSPORTISTA_VIAJE = new Set(["transportistaId", "transportistaEfe
 /** Tenant.tipoFlota = 'propia': la empresa no terceriza, sus viajes nunca llevan transportista. */
 function esSoloFlotaPropia(modulo: string, tipoFlota: string | null | undefined): boolean {
   return modulo === "viajes" && tipoFlota === "propia";
+}
+
+/** Minúsculas, sin acentos ni espacios de los bordes — para comparar nombres de hoja y encabezados. */
+function normalizarTexto(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
 
 @Injectable()
@@ -217,6 +225,145 @@ export class ImportacionesService {
     return { valid: errores.length === 0, errores };
   }
 
+  // ── Detección de hojas ─────────────────────────────────────────────────
+
+  /**
+   * Primer paso del wizard: qué módulos trae el Excel y en qué hoja.
+   *
+   * 1. Por nombre: la hoja de la plantilla del tenant (o la default, ej.
+   *    "Viajes"), o una hoja cuyo nombre contenga el módulo ("Transportes",
+   *    "vehiculos 2026"…).
+   * 2. Por encabezados, para las hojas que quedaron sin asignar (ej. "Hoja1"):
+   *    se asigna al módulo que tiene todas sus columnas obligatorias y más
+   *    columnas coincidentes. Empate → la hoja vuelve como `sinIdentificar`
+   *    con sus `candidatos`, para que elija el usuario.
+   *
+   * Hojas sin filas de datos se ignoran. Una hoja encontrada por nombre pero
+   * sin las columnas obligatorias vuelve igual, con `faltantes`.
+   */
+  async detectarHojas(
+    tenantId: string,
+    buffer: Buffer,
+    isSuperadmin: boolean,
+  ): Promise<DeteccionHojasResult> {
+    await this.assertImportacionesVisible(tenantId, isSuperadmin);
+    const hojas = this.parser.sampleWorkbook(buffer, Number.MAX_SAFE_INTEGER);
+
+    const modulos = Object.keys(SHEET_LABEL_DEFAULT);
+    const configs = new Map<string, TemplateConfig>();
+    for (const modulo of modulos) {
+      const { template } = await this.getActiveTemplate(tenantId, modulo);
+      configs.set(modulo, template.config as unknown as TemplateConfig);
+    }
+
+    const evaluar = (modulo: string, filas: unknown[][]) => {
+      const config = configs.get(modulo)!;
+      const headerIdx = Math.max(0, (config.headerRow ?? 1) - 1);
+      // Mismo criterio que `ParserService.parse`: sin distinguir mayúsculas,
+      // con los encabezados y alias de la plantilla.
+      const headers = ((filas[headerIdx] ?? []) as unknown[])
+        .map((h) => (h != null ? String(h).trim().toLowerCase() : ""))
+        .filter(Boolean);
+      const datos = filas
+        .slice(headerIdx + 1)
+        .filter((r) => (r as unknown[]).some((c) => c != null && String(c).trim() !== "")).length;
+      const presente = (col: ColumnConfig) =>
+        [col.excelHeader, ...(col.excelHeaderAliases ?? [])].some((h) =>
+          headers.includes(h.trim().toLowerCase()),
+        );
+      const faltantes = config.columns
+        .filter((c) => c.required && !presente(c))
+        .map((c) => c.excelHeader);
+      const coincidencias = config.columns.filter(presente).length;
+      return { datos, faltantes, coincidencias };
+    };
+
+    const asignadas = new Map<string, DeteccionHoja>(); // modulo → hoja
+    const hojasUsadas = new Set<string>();
+
+    // 1. Por nombre de hoja: primero coincidencias exactas (plantilla o
+    //    default) para todos los módulos, después parciales — así "Viajes
+    //    clientes" no se le asigna a Clientes antes de mirar Viajes.
+    const asignarPorNombre = (
+      coincide: (modulo: string, nombreHoja: string) => boolean,
+    ) => {
+      for (const modulo of modulos) {
+        if (asignadas.has(modulo)) continue;
+        const hoja = hojas.find(
+          (h) => !hojasUsadas.has(h.nombre) && coincide(modulo, normalizarTexto(h.nombre)),
+        );
+        if (!hoja) continue;
+        const ev = evaluar(modulo, hoja.filas);
+        if (ev.datos === 0) continue;
+        hojasUsadas.add(hoja.nombre);
+        asignadas.set(modulo, {
+          modulo,
+          hoja: hoja.nombre,
+          filas: ev.datos,
+          faltantes: ev.faltantes,
+          detectadaPor: "nombre",
+        });
+      }
+    };
+    asignarPorNombre((modulo, nombre) => {
+      const config = configs.get(modulo)!;
+      const objetivo =
+        typeof config.sheet === "number"
+          ? hojas[config.sheet]?.nombre
+          : config.sheet || SHEET_LABEL_DEFAULT[modulo];
+      return !!objetivo && nombre === normalizarTexto(objetivo);
+    });
+    asignarPorNombre((modulo, nombre) =>
+      [modulo, SHEET_LABEL_DEFAULT[modulo]]
+        .map(normalizarTexto)
+        .some((k) => nombre.includes(k)),
+    );
+
+    // 2. Por encabezados, para las hojas que quedaron libres.
+    const sinIdentificar: DeteccionHojaSinIdentificar[] = [];
+    for (const hoja of hojas) {
+      if (hojasUsadas.has(hoja.nombre)) continue;
+      const evaluaciones = modulos
+        .filter((m) => !asignadas.has(m))
+        .map((m) => ({ modulo: m, ...evaluar(m, hoja.filas) }))
+        .filter((e) => e.datos > 0);
+      if (evaluaciones.length === 0) continue; // hoja vacía
+      const candidatos = evaluaciones
+        .filter((e) => e.faltantes.length === 0 && e.coincidencias > 0)
+        .sort((a, b) => b.coincidencias - a.coincidencias);
+      const filas = Math.max(...evaluaciones.map((e) => e.datos));
+      const ganador =
+        candidatos.length === 1 ||
+        (candidatos.length > 1 && candidatos[0].coincidencias > candidatos[1].coincidencias)
+          ? candidatos[0]
+          : null;
+      if (ganador) {
+        hojasUsadas.add(hoja.nombre);
+        asignadas.set(ganador.modulo, {
+          modulo: ganador.modulo,
+          hoja: hoja.nombre,
+          filas: ganador.datos,
+          faltantes: [],
+          detectadaPor: "encabezados",
+        });
+      } else {
+        const empate = candidatos.filter(
+          (c) => c.coincidencias === candidatos[0]?.coincidencias,
+        );
+        sinIdentificar.push({
+          hoja: hoja.nombre,
+          filas,
+          candidatos: empate.map((c) => c.modulo),
+        });
+      }
+    }
+
+    return {
+      hojas: modulos.filter((m) => asignadas.has(m)).map((m) => asignadas.get(m)!),
+      sinIdentificar,
+    };
+  }
+
   // ── Preview ──────────────────────────────────────────────────────────────
 
   async preview(
@@ -225,13 +372,18 @@ export class ImportacionesService {
     buffer: Buffer,
     originalname: string,
     isSuperadmin: boolean,
+    hoja?: string,
   ): Promise<PreviewResult> {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const { template, columnasInyectadas } = await this.getActiveTemplate(
       tenantId,
       modulo,
     );
-    const config = template.config as unknown as TemplateConfig;
+    const configTemplate = template.config as unknown as TemplateConfig;
+    // La hoja detectada (`detectarHojas`) pisa la de la plantilla.
+    const config: TemplateConfig = hoja?.trim()
+      ? { ...configTemplate, sheet: hoja }
+      : configTemplate;
 
     const { rows: parsed, headers: headersExcel } = this.parser.parse(
       buffer,

@@ -104,6 +104,30 @@ export class ImportacionesController {
   }
 
   /**
+   * Primer paso del wizard: detecta qué módulos trae el Excel (por nombre de
+   * hoja y, si no, por encabezados) y en qué hoja está cada uno.
+   */
+  @ApiOperation({ summary: 'Detectar qué módulos trae el Excel' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @Post('detectar-hojas')
+  @Roles('admin', 'superadmin')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  detectarHojas(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('tenantId') queryTenantId: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    if (!file) throw new BadRequestException('Se requiere un archivo Excel');
+    const tenantId = this.resolveTenantId(auth, queryTenantId);
+    return this.service.detectarHojas(
+      tenantId,
+      file.buffer,
+      auth.role === 'superadmin',
+    );
+  }
+
+  /**
    * Sube un archivo Excel, lo valida y devuelve una previsualización.
    * No guarda nada en las tablas de negocio.
    */
@@ -126,6 +150,7 @@ export class ImportacionesController {
       file.buffer,
       file.originalname,
       auth.role === 'superadmin',
+      query.hoja,
     );
   }
 

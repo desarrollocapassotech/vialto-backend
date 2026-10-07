@@ -23,6 +23,8 @@
     "fix:combustible:dry": "ts-node scripts/fix-combustible-cargas-sospechosas.ts --dry-run",
     "backfill:factura-iva-tramos": "ts-node --transpile-only scripts/backfill-factura-iva-tramos.ts --apply",
     "backfill:factura-iva-tramos:dry": "ts-node --transpile-only scripts/backfill-factura-iva-tramos.ts",
+    "backfill:liquidacion-iva": "ts-node --transpile-only scripts/backfill-liquidacion-iva.ts --apply",
+    "backfill:liquidacion-iva:dry": "ts-node --transpile-only scripts/backfill-liquidacion-iva.ts",
     "backfill:notif-carga-sospechosa": "ts-node scripts/backfill-notificacion-carga-sospechosa.ts",
     "backfill:notif-carga-sospechosa:dry": "ts-node scripts/backfill-notificacion-carga-sospechosa.ts --dry-run",
     "backfill:cuenta-corriente": "ts-node scripts/backfill-cuenta-corriente.ts",

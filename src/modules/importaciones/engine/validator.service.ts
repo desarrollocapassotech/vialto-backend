@@ -19,6 +19,7 @@ export interface ValidationResult {
     clientes: string[];
     transportistas: string[];
     choferes: string[];
+    productos: string[];
   };
 }
 
@@ -304,6 +305,7 @@ export class ValidatorService {
         clientes: created["clientes"] ?? [],
         transportistas: created["transportistas"] ?? [],
         choferes: created["choferes"] ?? [],
+        productos: created["productos"] ?? [],
       },
     };
   }
@@ -337,6 +339,19 @@ export class ValidatorService {
     return [col.lookupField ?? "nombre"];
   }
 
+  /**
+   * Clave de comparación de un lookup: sin acentos, minúsculas y espacios
+   * colapsados — "Maíz", "MAIZ" y " maiz " son el mismo producto/cliente.
+   */
+  private claveLookup(valor: unknown): string {
+    return String(valor)
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
   /** Prueba un valor contra cada campo candidato (nombre, después CUIT, etc.) en orden. */
   private lookupOne(
     valor: string,
@@ -344,7 +359,7 @@ export class ValidatorService {
     fields: string[],
     caches: LookupCaches,
   ): string | null {
-    const lower = valor.toLowerCase();
+    const lower = this.claveLookup(valor);
     const digitsOnly = valor.replace(/[^\d]/g, "");
     for (const field of fields) {
       const cache = caches[`${model}:${field}`] ?? {};
@@ -370,6 +385,9 @@ export class ValidatorService {
     caches: LookupCaches,
     rowNum: number,
   ): { value?: ValidatedRow[string]; error?: RowError; warning?: boolean } {
+    if (col.valorFijo != null) {
+      return this.coerce(col.valorFijo, { ...col, valorFijo: undefined }, caches, rowNum);
+    }
     const isEmpty = raw == null || String(raw).trim() === "";
 
     if (isEmpty) {
@@ -668,7 +686,7 @@ export class ValidatorService {
         for (const r of records) {
           const v = (r as Record<string, unknown>)[field];
           if (v == null) continue;
-          const key = String(v).trim().toLowerCase();
+          const key = this.claveLookup(v);
           if (!key) continue;
           map[key] = (r as { id: string }).id;
 
@@ -686,12 +704,15 @@ export class ValidatorService {
         const colFields = this.lookupFieldsOf(col);
         const primaryField = colFields[0];
 
-        const valuesMap = new Map<string, string>(); // lowercase → original
+        // claveLookup → primer valor original visto: "Maíz" y "maiz" en el
+        // mismo archivo generan una sola entidad nueva.
+        const valuesMap = new Map<string, string>();
         for (const row of rows) {
           const v = row[col.field];
           if (v != null && String(v).trim()) {
-            const original = String(v).trim();
-            valuesMap.set(original.toLowerCase(), original);
+            const original = String(v).trim().replace(/\s+/g, " ");
+            const clave = this.claveLookup(original);
+            if (!valuesMap.has(clave)) valuesMap.set(clave, original);
           }
         }
 

@@ -50,6 +50,12 @@ export interface ColumnConfig {
    */
   defaultValue?: string;
   /**
+   * Valor que se usa SIEMPRE, ignorando lo que traiga el Excel (y aunque no
+   * traiga la columna). No se guarda en el template: lo inyecta
+   * `getActiveTemplate` según la config del tenant (ej. país fijo).
+   */
+  valorFijo?: string;
+  /**
    * Campo recomendado pero no bloqueante: si la celda viene vacía, la fila
    * se importa igual (no es un error), pero se junta en
    * `PreviewResult.advertenciasCamposFaltantes` y el usuario tiene que

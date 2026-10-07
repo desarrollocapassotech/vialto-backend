@@ -98,8 +98,26 @@ const CAMPOS_COMPROBANTE_NO_IMPORTABLES: ReadonlySet<string> = new Set([
 type TenantVisibilidadImport = {
   idPropio1Habilitado: boolean;
   idPropio2Habilitado: boolean;
+  idPropio2Label: string | null;
   tipoFlota: string;
+  /** Código de 2 letras del país fijo (`paisOrigenDestinoOculto` + país elegido), o null. */
+  paisFijoCodigo: string | null;
 } | null;
+
+/**
+ * Módulos con columna `pais` que se fija sola cuando el tenant tiene país fijo
+ * (mismo flag que oculta el selector de país en el alta manual de Cliente y
+ * Transportista, ver `useTenantPaisFijo` en el frontend).
+ */
+const MODULOS_CON_PAIS_FIJO = new Set(["clientes", "transportistas"]);
+
+function esPaisFijo(
+  modulo: string,
+  field: string,
+  tenant: TenantVisibilidadImport,
+): boolean {
+  return field === "pais" && MODULOS_CON_PAIS_FIJO.has(modulo) && !!tenant?.paisFijoCodigo;
+}
 
 /** Minúsculas, sin acentos ni espacios de los bordes — para comparar nombres de hoja y encabezados. */
 function normalizarTexto(s: string): string {
@@ -458,6 +476,8 @@ export class ImportacionesService {
             c.excelHeaderAliases?.some((a) => a.toLowerCase() === h.toLowerCase()),
         ),
     );
+    // El wizard ya no muestra este aviso (oct 2026, era ruido visual); se
+    // sigue devolviendo en el PreviewResult por compatibilidad.
     const columnasOpcionalesFaltantes = config.columns
       .filter(
         (c) =>
@@ -720,10 +740,18 @@ export class ImportacionesService {
       }
     }
 
+    // Cada entidad pendiente se crea una sola vez: el mismo placeholder se
+    // repite en todas las filas que la referencian (ej. 5 viajes de "Soja").
+    const creadasPorPlaceholder = new Map<string, string>();
     for (const fila of filasValidas) {
       for (const key of Object.keys(fila)) {
         const value = fila[key];
         if (typeof value === "string" && value.startsWith("__pending__")) {
+          const yaCreada = creadasPorPlaceholder.get(value);
+          if (yaCreada) {
+            fila[key] = yaCreada;
+            continue;
+          }
           const [, , model, nombre] = value.split("__");
           const id = await this.validator.createLookup(
             model,
@@ -738,6 +766,7 @@ export class ImportacionesService {
               `No se pudo crear "${nombre}" en "${model}". Revisá la configuración de la importación.`,
             );
           }
+          creadasPorPlaceholder.set(value, id);
           fila[key] = id;
         }
       }
@@ -891,15 +920,7 @@ export class ImportacionesService {
    * contraparte ahí (ej. `choferes`) no se filtran — se muestran todos.
    */
   async getCatalogoCampos(modulo: string, tenantId: string) {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { clerkOrgId: tenantId },
-      select: {
-        idPropio1Habilitado: true,
-        idPropio2Habilitado: true,
-        idPropio2Label: true,
-        tipoFlota: true,
-      },
-    });
+    const tenant = await this.tenantVisibilidadImport(tenantId);
     const estaOculta = await this.columnaImportOculta(tenantId, modulo, tenant);
     const columnas = getCatalogoColumnas(modulo).filter((c) => !estaOculta(c.field));
 
@@ -914,6 +935,34 @@ export class ImportacionesService {
     );
   }
 
+  /** Flags del tenant que deciden qué columnas de import aplican (ver columnaImportOculta). */
+  private async tenantVisibilidadImport(tenantId: string): Promise<TenantVisibilidadImport> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idPropio1Habilitado: true,
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        tipoFlota: true,
+        paisOrigenDestinoOculto: true,
+        paisOrigenDestinoFijoId: true,
+      },
+    });
+    if (!tenant) return null;
+    const { paisOrigenDestinoOculto, paisOrigenDestinoFijoId, ...resto } = tenant;
+    let paisFijoCodigo: string | null = null;
+    if (paisOrigenDestinoOculto && paisOrigenDestinoFijoId) {
+      const pais = await this.prisma.pais.findFirst({
+        where: { id: paisOrigenDestinoFijoId, tenantId },
+        select: { codigo: true },
+      });
+      const codigo = pais?.codigo?.trim().toUpperCase();
+      // Solo un código de 2 letras sirve como valor de Cliente/Transportista.pais.
+      paisFijoCodigo = codigo && /^[A-Z]{2}$/.test(codigo) ? codigo : null;
+    }
+    return { ...resto, paisFijoCodigo };
+  }
+
   /**
    * Decide qué columnas de import NO aplican a un tenant, para no ofrecerlas
    * ni en la pantalla de templates ni en la planilla descargable:
@@ -922,7 +971,9 @@ export class ImportacionesService {
    *   template-catalogo.ts para columnas que no matchean 1:1 con el formulario);
    * - "ID Propio 1"/"ID Propio 2" sin habilitar (flags propios del Tenant);
    * - columnas de transportista si la empresa es solo de flota propia, y
-   *   "Tipo de flota" si no es mixta (con un solo tipo no hay nada que elegir).
+   *   "Tipo de flota" si no es mixta (con un solo tipo no hay nada que elegir);
+   * - "País" de Clientes/Transportistas si la empresa tiene país fijo (se
+   *   completa solo, ver getActiveTemplate).
    */
   private async columnaImportOculta(
     tenantId: string,
@@ -942,6 +993,7 @@ export class ImportacionesService {
     const tipoFlota = tenant?.tipoFlota ?? "mixta";
     return (field) => {
       if (CAMPOS_COMPROBANTE_NO_IMPORTABLES.has(field)) return true;
+      if (esPaisFijo(modulo, field, tenant)) return true;
       if (modulo === "viajes") {
         if (field === "numeroIdentificacionPersonalizado" && !tenant?.idPropio1Habilitado)
           return true;
@@ -974,26 +1026,23 @@ export class ImportacionesService {
     // construirConfigPorDefecto no es tenant-aware — las columnas que no
     // aplican a la empresa (campos ocultos, ID Propio sin habilitar, tipo de
     // flota) se filtran acá, igual que en getCatalogoCampos.
-    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
-      where: { clerkOrgId: tenantId },
-      select: {
-        idPropio1Habilitado: true,
-        idPropio2Habilitado: true,
-        idPropio2Label: true,
-        tipoFlota: true,
-      },
-    });
+    const tenantIdPropio2 = await this.tenantVisibilidadImport(tenantId);
 
     const ocultaPorModulo = await Promise.all(
       modulos.map((modulo) => this.columnaImportOculta(tenantId, modulo, tenantIdPropio2)),
     );
-    // Empresa que ocultó "Vehículos" en Viajes (Campos por empresa): la
-    // planilla no trae la hoja Vehículos. Se lee del mismo filtro que ya
-    // oculta la columna "Vehículo" de Viajes (vehiculoId ↔ vehiculosRows).
-    const vehiculosOcultos = ocultaPorModulo[modulos.indexOf("viajes")]("vehiculoId");
+    // Empresa que apagó "Vehículos"/"Choferes" (Configuración por empresa →
+    // General, campos de Viajes): la planilla no trae esa hoja. Se lee del
+    // mismo filtro que ya oculta la columna de Viajes (vehiculoId ↔
+    // vehiculosRows, choferId ↔ choferId + choferExternoId).
+    const ocultaViajes = ocultaPorModulo[modulos.indexOf("viajes")];
+    const hojaOculta: Record<string, boolean> = {
+      vehiculos: ocultaViajes("vehiculoId"),
+      choferes: ocultaViajes("choferId"),
+    };
 
     return modulos.flatMap((modulo, i) => {
-      if (modulo === "vehiculos" && vehiculosOcultos) return [];
+      if (hojaOculta[modulo]) return [];
       const template = templatePorModulo.get(modulo);
       const config = template
         ? (template.config as unknown as TemplateConfig)
@@ -1014,14 +1063,16 @@ export class ImportacionesService {
           excelHeader: labelDinamico && !template ? labelDinamico : c.excelHeader,
           campoLabel: labelDinamico ?? enCatalogo?.campoLabel ?? c.field,
           tipo: c.type,
-          // Mismo criterio que getActiveTemplate (paso 3): sin transportista
-          // obligatorio para una empresa solo de flota propia.
+          // Mismo criterio que getActiveTemplate (pasos 3 y 4): sin
+          // transportista obligatorio para una empresa solo de flota propia, y
+          // el país fijo nunca es obligatorio (se completa solo).
           requerido:
             !!c.required &&
             !(
               esSoloFlotaPropia(modulo, tenantIdPropio2?.tipoFlota) &&
               CAMPOS_TRANSPORTISTA_VIAJE.has(c.field)
-            ),
+            ) &&
+            !esPaisFijo(modulo, c.field, tenantIdPropio2),
         };
         // Una columna obligatoria de la plantilla se deja aunque el campo esté
         // oculto para la empresa: sin ella el import del archivo fallaría.
@@ -1702,6 +1753,40 @@ export class ImportacionesService {
         (c) => !CAMPOS_COMPROBANTE_NO_IMPORTABLES.has(c.field),
       );
       for (const f of CAMPOS_COMPROBANTE_NO_IMPORTABLES) columnasInyectadas.delete(f);
+
+      // 6. Producto de Viajes: si no existe se crea solo (con el nombre del
+      // Excel), en vez de bloquear la fila. No aplica a empresas con Stock:
+      // ahí un producto exige peso y presentación (crearProductoSimple lo
+      // rechaza con un mensaje claro). Solo en memoria.
+      if (modulo === "viajes") {
+        const tenantModulos = await this.prisma.tenant.findUnique({
+          where: { clerkOrgId: tenantId },
+          select: { modules: true },
+        });
+        const tieneStock = (tenantModulos?.modules ?? []).some(
+          (m) => m.toLowerCase() === "stock",
+        );
+        if (!tieneStock) {
+          for (const col of configData.columns) {
+            if (col.field === "productoId") col.createIfNotFound = true;
+          }
+        }
+      }
+
+      // 5. País fijo (Clientes/Transportistas): se completa siempre con el país
+      // de la empresa, igual que en el alta manual — ignora lo que traiga el
+      // Excel y no exige la columna. Solo en memoria.
+      if (MODULOS_CON_PAIS_FIJO.has(modulo)) {
+        const tenant = await this.tenantVisibilidadImport(tenantId);
+        if (tenant?.paisFijoCodigo) {
+          for (const col of configData.columns) {
+            if (col.field !== "pais") continue;
+            col.valorFijo = tenant.paisFijoCodigo;
+            col.required = false;
+            col.warnIfEmpty = false;
+          }
+        }
+      }
     }
 
     return { template, columnasInyectadas };

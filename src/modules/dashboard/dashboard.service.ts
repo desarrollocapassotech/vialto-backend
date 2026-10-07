@@ -21,6 +21,7 @@ import {
   UMBRAL_MARGEN_BAJO_PCT,
 } from '../viajes/viaje-ganancia-bruta.util';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+import { FACTURACION_ESTADOS_PENDIENTES } from '../viajes/viaje-estados';
 import { TenantFieldConfigService } from '../../core/tenant-field-config/tenant-field-config.service';
 
 export type MetricCompare = {
@@ -255,7 +256,7 @@ export class DashboardService {
             this.sumMontoSinFacturar(tenantId),
             this.countViajesEnVentana(
               tenantId,
-              { etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
+              { etapa: 'finalizado', facturacionEstado: { in: [...FACTURACION_ESTADOS_PENDIENTES] } },
               resolved.start,
               resolved.end,
             ),
@@ -601,7 +602,7 @@ export class DashboardService {
         AND v."monedaMonto" = ${moneda}
         AND (
           (
-            v."etapa" = 'finalizado' AND v."facturacionEstado" = 'sin_facturar'
+            v."etapa" = 'finalizado' AND v."facturacionEstado" IN ('sin_facturar', 'borrador')
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) >= ${from}::date
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) < ${toEx}::date
           )
@@ -737,7 +738,7 @@ export class DashboardService {
       where: {
         tenantId,
         etapa: 'finalizado',
-        facturacionEstado: 'sin_facturar',
+        facturacionEstado: { in: [...FACTURACION_ESTADOS_PENDIENTES] },
       },
       select: {
         id: true,
@@ -1025,7 +1026,7 @@ export class DashboardService {
         WHERE v."tenantId" = ${tenantId}
         AND (
           (
-            v."etapa" = 'finalizado' AND v."facturacionEstado" = 'sin_facturar'
+            v."etapa" = 'finalizado' AND v."facturacionEstado" IN ('sin_facturar', 'borrador')
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) >= ${from}::date
             AND DATE(timezone(${tz}, COALESCE(v."fechaCarga", v."fechaFinalizado"))) < ${toEx}::date
           )
@@ -1059,7 +1060,7 @@ export class DashboardService {
         tenantId,
         OR: [
           { etapa: { in: ['pendiente', 'en_curso'] } },
-          { etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
+          { etapa: 'finalizado', facturacionEstado: { in: [...FACTURACION_ESTADOS_PENDIENTES] } },
         ],
       },
       _sum: { monto: true },

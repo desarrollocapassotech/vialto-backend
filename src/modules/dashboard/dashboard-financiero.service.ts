@@ -7,6 +7,7 @@ import {
 } from '../viajes/viaje-ganancia-bruta.util';
 import { cobroOptsDeFactura, importeOperativoFactura } from '../../shared/util/factura-estado-lectura';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+import { FACTURACION_ESTADOS_PENDIENTES } from '../viajes/viaje-estados';
 import { TenantFieldConfigService } from '../../core/tenant-field-config/tenant-field-config.service';
 
 export type Money = { ARS: number; USD: number };
@@ -540,7 +541,9 @@ export class DashboardFinancieroService {
     }
 
     const sinFacturarViajes = viajes.filter(
-      (v) => v.etapa === 'finalizado' && v.facturacionEstado === 'sin_facturar',
+      (v) =>
+        v.etapa === 'finalizado' &&
+        (FACTURACION_ESTADOS_PENDIENTES as readonly string[]).includes(v.facturacionEstado),
     );
     const clienteIds = [...new Set(sinFacturarViajes.map((v) => v.clienteId))];
     const clientes = clienteIds.length
@@ -809,7 +812,11 @@ export class DashboardFinancieroService {
       .slice(0, 20);
 
     const pendientesEmitir = await this.prisma.viaje.findMany({
-      where: { tenantId, etapa: 'finalizado', facturacionEstado: 'sin_facturar' },
+      where: {
+        tenantId,
+        etapa: 'finalizado',
+        facturacionEstado: { in: [...FACTURACION_ESTADOS_PENDIENTES] },
+      },
       select: { id: true, numero: true, numeroIdentificacionPersonalizado: true, monto: true, monedaMonto: true, clienteId: true },
     });
     const clienteIdsPendientes = [...new Set(pendientesEmitir.map((v) => v.clienteId))];

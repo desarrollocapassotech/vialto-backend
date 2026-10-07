@@ -9,11 +9,13 @@ type Tx = Prisma.TransactionClient;
  * ninguno seteado en operación normal, pero si quedó algo de datos de prueba o el
  * módulo se desactivó después, no debe filtrarse ningún estado de AFIP) — el indicador
  * queda simple (sin_facturar/facturado/cobrado). Tenant con ARCA: `arcaEstado === null`
- * significa que la factura todavía no se emitió (sigue "sin facturar" hasta el primer
- * intento de emisión).
+ * significa que la factura todavía no se emitió → `borrador` hasta el primer intento
+ * de emisión. Excepción: si tiene `numero` cargado es un comprobante MANUAL (ej. cargado
+ * antes de que el tenant activara ARCA) → cuenta como facturado. Con ARCA el número no
+ * se carga a mano: lo asigna AFIP al autorizar (y para entonces `arcaEstado` ya no es null).
  */
 export function mapFacturacionEstado(
-  factura: { arcaEstado: string | null } | null,
+  factura: { arcaEstado: string | null; numero?: string | null } | null,
   cobrado: boolean,
   tieneArca: boolean,
 ): ViajeFacturacionEstado {
@@ -22,7 +24,7 @@ export function mapFacturacionEstado(
     if (factura.arcaEstado === 'pendiente_cae') return 'esperando_afip';
     if (factura.arcaEstado === 'error') return 'error_afip';
     if (factura.arcaEstado === 'anulado') return 'anulado';
-    if (factura.arcaEstado == null) return 'sin_facturar';
+    if (factura.arcaEstado == null && !factura.numero?.trim()) return 'borrador';
   }
   return cobrado ? 'cobrado' : 'facturado';
 }
@@ -42,7 +44,8 @@ export function mapLiquidacionEstado(
   if (estado == null) return 'sin_liquidar';
   if (estado === 'anulado') return 'anulado';
   if (!tieneArca) return 'liquidado';
-  if (estado === 'borrador' || estado === 'pendiente_cae') return 'esperando_afip';
+  if (estado === 'borrador') return 'borrador';
+  if (estado === 'pendiente_cae') return 'esperando_afip';
   // pendiente_anulacion (método manual, ver Tenant.liquidacionAnulacionMetodo): la
   // liquidación sigue vigente hasta que se confirma la anulación — mismo indicador que
   // 'autorizado', el viaje NO queda disponible para re-liquidar todavía.
@@ -70,14 +73,14 @@ export async function syncFacturacionEstadoViaje(
       etapa: true,
       facturacionEstado: true,
       facturaId: true,
-      factura: { select: { arcaEstado: true } },
+      factura: { select: { arcaEstado: true, numero: true } },
       tenant: { select: { modules: true } },
       clientesViaje: {
         select: {
           id: true,
           facturaId: true,
           facturacionEstado: true,
-          factura: { select: { arcaEstado: true } },
+          factura: { select: { arcaEstado: true, numero: true } },
         },
       },
     },

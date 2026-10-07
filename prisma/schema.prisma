@@ -465,7 +465,7 @@ model ViajeCliente {
   monedaMonto       String                 @default("ARS") // ARS | USD
   facturaId         String?
   factura           Factura?               @relation(fields: [facturaId], references: [id], onDelete: SetNull)
-  facturacionEstado String                 @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturacionEstado String                 @default("sin_facturar") // sin_facturar | borrador | esperando_afip | facturado | cobrado | error_afip | anulado
   facturaTramos     FacturaTramo[]
   createdAt         DateTime               @default(now())
 
@@ -534,11 +534,11 @@ model Viaje {
   /**
    * Estado de facturación al cliente, sincronizado automáticamente — no editable a mano.
    */
-  facturacionEstado                 String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturacionEstado                 String          @default("sin_facturar") // sin_facturar | borrador | esperando_afip | facturado | cobrado | error_afip | anulado
   /**
    * Estado de liquidación al transportista externo (null si no aplica: sin transportista externo o tenant sin integracion-arca).
    */
-  liquidacionEstado                 String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
+  liquidacionEstado                 String? // sin_liquidar | borrador | esperando_afip | liquidado | error_afip | anulado
   clienteId                         String
   cliente                           Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   transportistaId                   String?

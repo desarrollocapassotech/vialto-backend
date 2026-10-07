@@ -359,10 +359,10 @@ export class FacturacionService {
   /**
    * Condición Prisma de "tramo disponible para vincular una factura nueva", evaluada contra el
    * FK crudo (`facturaId`) en vez de `facturacionEstado`. `facturacionEstado` (`mapFacturacionEstado`
-   * en `viaje-estado-financiero.ts`) muestra "sin_facturar" a propósito mientras una factura ARCA
-   * sigue en borrador (`arcaEstado == null`, todavía no se intentó emitir) — eso es correcto para
-   * mostrar el badge y para no bloquear la edición de campos fiscales del viaje (ver
-   * `CAMPOS_FISCALES_VIAJE`), pero usarlo acá para decidir si se puede vincular OTRA factura
+   * en `viaje-estado-financiero.ts`) queda en "borrador" mientras una factura ARCA no se intentó
+   * emitir (`arcaEstado == null`), y "borrador" está en `FACTURACION_ESTADOS_DISPONIBLES` para no
+   * bloquear la edición de campos fiscales del viaje (ver `CAMPOS_FISCALES_VIAJE`) — pero usar ese
+   * estado acá para decidir si se puede vincular OTRA factura
    * dejaría un agujero real: dos facturas borrador (o una sin ARCA y otra con) podrían apuntar al
    * mismo viaje mientras ninguna llegó a emitirse. Un viaje/tramo está genuinamente disponible
    * solo si no tiene ninguna factura vigente enlazada (`facturaId` null) o si la que tiene fue
@@ -828,13 +828,15 @@ export class FacturacionService {
 
     const tieneArca = await this.tieneArca(tenantId);
 
-    // El número de comprobante es opcional: para tenants con integracion-arca
-    // lo asigna AFIP al emitir (cbteTipo/ptoVenta/cbteNro); para tenants sin
-    // ARCA es un comprobante externo que puede cargarse después.
+    // Tenants con ARCA: el número NO se carga a mano — lo asigna AFIP al emitir
+    // (cbteTipo/ptoVenta/cbteNro → `numero`), así que se ignora lo que venga.
+    // Además, un número cargado en una factura sin emitir la haría contar como
+    // comprobante manual ("facturado") en `mapFacturacionEstado`.
+    // Tenants sin ARCA: comprobante externo, opcional (puede cargarse después).
     // Normalizamos acá (no solo confiar en el frontend) para que un string
     // vacío/solo-espacios nunca llegue a guardarse como numero="" — eso
     // rompería la unicidad real (NULL sí admite múltiples filas, "" no).
-    const numero = dto.numero?.trim() || null;
+    const numero = tieneArca ? null : dto.numero?.trim() || null;
     if (numero) {
       // Validación previa para atrapar el 99% de los casos antes de abrir transacción
       await this.assertNumeroFacturaUnico(tenantId, numero);
@@ -935,8 +937,12 @@ export class FacturacionService {
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 
-    if (dto.numero) {
-      await this.assertNumeroFacturaUnico(tenantId, dto.numero, id);
+    const tieneArca = await this.tieneArca(tenantId);
+    // Tenants con ARCA: el número lo asigna AFIP al emitir, nunca se edita a mano
+    // (mismo criterio que `createFactura`).
+    const numeroDto = tieneArca ? undefined : dto.numero;
+    if (numeroDto) {
+      await this.assertNumeroFacturaUnico(tenantId, numeroDto, id);
     }
 
     let monedaNueva: string | undefined;
@@ -951,7 +957,6 @@ export class FacturacionService {
       monedaNueva = this.assertMonedaUnica(viajesNuevos);
     }
 
-    const tieneArca = await this.tieneArca(tenantId);
     return this.prisma.$transaction(async (tx) => {
       const facturarPorTramo =
         dto.facturarPorTramo !== undefined
@@ -962,8 +967,8 @@ export class FacturacionService {
       await tx.factura.update({
         where: { id },
         data: {
-          ...(dto.numero !== undefined
-            ? { numero: dto.numero.trim() || null }
+          ...(numeroDto !== undefined
+            ? { numero: numeroDto.trim() || null }
             : {}),
           ...(dto.tipo !== undefined ? { tipo: dto.tipo } : {}),
           ...(dto.clienteId !== undefined

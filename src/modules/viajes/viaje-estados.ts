@@ -59,8 +59,14 @@ export function normalizarEtapaViaje(etapa: string): string {
 }
 
 /** Facturación al cliente — derivado y sincronizado, nunca editable a mano. */
+/**
+ * `borrador` (solo tenants con ARCA): el viaje ya tiene una factura vinculada que
+ * todavía no se emitió. Antes se mostraba como `sin_facturar`, lo que invitaba a
+ * "Facturar" de nuevo; ahora la UI lleva a ese borrador en vez de crear otro.
+ */
 export const VIAJE_FACTURACION_ESTADOS = [
   'sin_facturar',
+  'borrador',
   'esperando_afip',
   'facturado',
   'cobrado',
@@ -70,15 +76,36 @@ export const VIAJE_FACTURACION_ESTADOS = [
 
 export type ViajeFacturacionEstado = (typeof VIAJE_FACTURACION_ESTADOS)[number];
 
-/** Facturación estados que cuentan como "viaje disponible para vincular a una factura nueva". */
+/**
+ * Estados de facturación que NO bloquean editar los campos fiscales del viaje (ni
+ * agregar gastos, ni cambiar sus clientes). `borrador` entra porque el comprobante
+ * todavía no se mandó a AFIP — mismo comportamiento que cuando se mostraba como
+ * `sin_facturar`. Ojo: vincular el viaje a una factura NUEVA es otra regla
+ * (`facturaId` nulo o factura anulada, ver `facturaDisponibleWhere`).
+ */
 export const FACTURACION_ESTADOS_DISPONIBLES: readonly ViajeFacturacionEstado[] = [
   'sin_facturar',
+  'borrador',
   'anulado',
 ];
 
-/** Liquidación al transportista — mismo patrón que facturación; `null` si no aplica. */
+/**
+ * Estados que cuentan como "pendiente de facturar" en conteos y filtros (dashboard,
+ * resumen de Viajes): un borrador sin emitir sigue pendiente.
+ */
+export const FACTURACION_ESTADOS_PENDIENTES: readonly ViajeFacturacionEstado[] = [
+  'sin_facturar',
+  'borrador',
+];
+
+/**
+ * Liquidación al transportista — mismo patrón que facturación; `null` si no aplica.
+ * `borrador` (solo tenants con ARCA): liquidación cargada que todavía no se emitió
+ * (antes caía en `esperando_afip`, que daba a entender que ya se había mandado a AFIP).
+ */
 export const VIAJE_LIQUIDACION_ESTADOS = [
   'sin_liquidar',
+  'borrador',
   'esperando_afip',
   'liquidado',
   'error_afip',

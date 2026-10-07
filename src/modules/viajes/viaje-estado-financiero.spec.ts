@@ -25,8 +25,14 @@ test('tenant sin ARCA: factura manual (arcaEstado null) cuenta como facturada de
   assert.equal(mapFacturacionEstado({ arcaEstado: null }, true, false), 'cobrado');
 });
 
-test('tenant con ARCA: factura creada pero todavía no emitida sigue sin_facturar', () => {
-  assert.equal(mapFacturacionEstado({ arcaEstado: null }, false, true), 'sin_facturar');
+test('tenant con ARCA: factura creada pero todavía no emitida queda en borrador', () => {
+  assert.equal(mapFacturacionEstado({ arcaEstado: null }, false, true), 'borrador');
+  assert.equal(mapFacturacionEstado({ arcaEstado: null, numero: '  ' }, false, true), 'borrador');
+});
+
+test('tenant con ARCA: factura sin emitir pero con número manual (ej. previa a activar ARCA) cuenta como facturada', () => {
+  assert.equal(mapFacturacionEstado({ arcaEstado: null, numero: '0001-00000045' }, false, true), 'facturado');
+  assert.equal(mapFacturacionEstado({ arcaEstado: null, numero: 'A-1327' }, true, true), 'cobrado');
 });
 
 test('tenant con ARCA: estados intermedios de emisión', () => {
@@ -51,7 +57,7 @@ test('tenant sin ARCA: ignora arcaEstado colgado de datos de prueba o módulo de
 
 test('liquidación con ARCA: mapeo de estados AFIP', () => {
   assert.equal(mapLiquidacionEstado(null, true), 'sin_liquidar');
-  assert.equal(mapLiquidacionEstado('borrador', true), 'esperando_afip');
+  assert.equal(mapLiquidacionEstado('borrador', true), 'borrador');
   assert.equal(mapLiquidacionEstado('pendiente_cae', true), 'esperando_afip');
   assert.equal(mapLiquidacionEstado('autorizado', true), 'liquidado');
   assert.equal(mapLiquidacionEstado('error', true), 'error_afip');

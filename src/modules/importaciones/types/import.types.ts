@@ -267,3 +267,29 @@ export interface ColumnasEsperadasModulo {
   sheet: string;
   columnas: ColumnaEsperada[];
 }
+
+/** Una hoja del Excel asignada a un módulo por `detectarHojas`. */
+export interface DeteccionHoja {
+  modulo: string;
+  /** Nombre real de la hoja en el archivo — se pasa como `hoja` al preview. */
+  hoja: string;
+  /** Filas con datos (sin contar encabezados ni filas vacías). */
+  filas: number;
+  /** Encabezados obligatorios que no están (solo puede pasar si se detectó por nombre). */
+  faltantes: string[];
+  detectadaPor: "nombre" | "encabezados";
+}
+
+/** Hoja con datos que no se pudo asignar sola a un módulo. */
+export interface DeteccionHojaSinIdentificar {
+  hoja: string;
+  filas: number;
+  /** Módulos que encajan igual de bien (empate). Vacío = no se parece a ninguno. */
+  candidatos: string[];
+}
+
+export interface DeteccionHojasResult {
+  /** En orden de importación (clientes → … → viajes). */
+  hojas: DeteccionHoja[];
+  sinIdentificar: DeteccionHojaSinIdentificar[];
+}

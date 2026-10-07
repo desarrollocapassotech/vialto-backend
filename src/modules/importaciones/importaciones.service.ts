@@ -78,6 +78,22 @@ const CAMPOS_TRANSPORTISTA_POR_MODULO: Record<string, ReadonlySet<string>> = {
   vehiculos: new Set(["transportistaId"]),
 };
 
+/**
+ * Columnas de comprobantes (factura al cliente / factura del transportista):
+ * por ahora (oct 2026) no se importan — no se ofrecen en la pantalla de
+ * templates ni en la planilla, y se sacan de la plantilla activa aunque el
+ * template guardado las tenga mapeadas (si el Excel las trae, se ignoran).
+ * Para reactivarlas alcanza con vaciar este Set.
+ */
+const CAMPOS_COMPROBANTE_NO_IMPORTABLES: ReadonlySet<string> = new Set([
+  "nroFactura",
+  "fechaEmisionFactura",
+  "fechaVencimientoFactura",
+  "nroFacturaTransporte",
+  "fechaEmisionFacturaTransp",
+  "fechaVencimientoFacturaTransp",
+]);
+
 /** Lo que hace falta del Tenant para decidir qué columnas de import ocultar. */
 type TenantVisibilidadImport = {
   idPropio1Habilitado: boolean;
@@ -925,6 +941,7 @@ export class ImportacionesService {
 
     const tipoFlota = tenant?.tipoFlota ?? "mixta";
     return (field) => {
+      if (CAMPOS_COMPROBANTE_NO_IMPORTABLES.has(field)) return true;
       if (modulo === "viajes") {
         if (field === "numeroIdentificacionPersonalizado" && !tenant?.idPropio1Habilitado)
           return true;
@@ -1672,6 +1689,14 @@ export class ImportacionesService {
           if (CAMPOS_TRANSPORTISTA_VIAJE.has(col.field)) col.required = false;
         }
       }
+
+      // 4. Columnas de comprobantes: por ahora no se importan (ver
+      // CAMPOS_COMPROBANTE_NO_IMPORTABLES). Solo en memoria — el template
+      // guardado no se toca, así se pueden reactivar sin reconfigurar nada.
+      configData.columns = configData.columns.filter(
+        (c) => !CAMPOS_COMPROBANTE_NO_IMPORTABLES.has(c.field),
+      );
+      for (const f of CAMPOS_COMPROBANTE_NO_IMPORTABLES) columnasInyectadas.delete(f);
     }
 
     return { template, columnasInyectadas };

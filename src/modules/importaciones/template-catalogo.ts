@@ -63,6 +63,13 @@ type ModuloDef = {
   prismaModel: string;
   altaFormulario?: { modulo: string; formulario: string };
   /**
+   * Columnas cuyo nombre no coincide 1:1 con el campo de `FIELD_CATALOG` que
+   * decide su visibilidad (ej. `vehiculoId` ↔ `vehiculosRows`). La columna se
+   * oculta si TODOS los campos listados están ocultos para el tenant. Las
+   * columnas que no figuran acá usan su propio nombre.
+   */
+  visibilidadDesde?: Record<string, string[]>;
+  /**
    * Nombre de hoja sugerido cuando todavía no hay `ImportTemplate` propio del
    * tenant (ver `construirConfigPorDefecto`). El wizard de carga masiva sube
    * un único Excel con una hoja por módulo (Clientes/Transportes/Choferes/
@@ -123,6 +130,10 @@ const MODULOS: Record<string, ModuloDef> = {
   clientes: {
     prismaModel: "Cliente",
     altaFormulario: { modulo: "clientes", formulario: "alta_cliente" },
+    visibilidadDesde: {
+      condicionIva: ["condicionIvaTributaria"],
+      condicionTributaria: ["condicionIvaTributaria"],
+    },
     sheetDefault: "Clientes",
     ordenPreferido: [
       "nombre",
@@ -155,6 +166,10 @@ const MODULOS: Record<string, ModuloDef> = {
   transportistas: {
     prismaModel: "Transportista",
     altaFormulario: { modulo: "transportistas", formulario: "alta_transportista" },
+    visibilidadDesde: {
+      condicionIva: ["condicionIvaTributaria"],
+      condicionTributaria: ["condicionIvaTributaria"],
+    },
     sheetDefault: "Transportes",
     ordenPreferido: [
       "nombre",
@@ -197,6 +212,7 @@ const MODULOS: Record<string, ModuloDef> = {
   },
   choferes: {
     prismaModel: "Chofer",
+    altaFormulario: { modulo: "choferes", formulario: "alta_chofer" },
     sheetDefault: "Choferes",
     ordenPreferido: [
       "nombre",
@@ -212,6 +228,9 @@ const MODULOS: Record<string, ModuloDef> = {
       nombre: { systemRequired: true, campoLabel: "Nombre" },
       dni: { campoLabel: "DNI" },
       cuit: { campoLabel: "CUIT" },
+      // Fija el label/encabezado histórico: sin esto tomaría "N.° licencia"
+      // del formulario de alta y cambiaría el encabezado esperado del Excel.
+      licencia: { campoLabel: "Licencia" },
       licenciaVence: {
         campoLabel: "Vto. licencia",
         defaultExcelHeader: "Vto. Licencia",
@@ -259,6 +278,18 @@ const MODULOS: Record<string, ModuloDef> = {
   viajes: {
     prismaModel: "Viaje",
     altaFormulario: { modulo: "viajes", formulario: "alta_viaje" },
+    visibilidadDesde: {
+      destino: ["destinosRows"],
+      choferId: ["choferId", "choferExternoId"],
+      vehiculoId: ["vehiculosRows"],
+      productoId: ["productoItems"],
+      cantidadProducto: ["productoItems"],
+      cantidadFactura: ["desgloseMontos"],
+      precioUnitarioFactura: ["desgloseMontos"],
+      cantidadTransportista: ["desgloseMontos"],
+      precioUnitarioTransportista: ["desgloseMontos"],
+      monedaGananciaBrutaManual: ["gananciaBrutaManual"],
+    },
     sheetDefault: "Viajes",
     ordenPreferido: [
       "numeroIdentificacionPersonalizado",
@@ -526,13 +557,18 @@ export function getCatalogoColumnas(modulo: string): CatalogoColumn[] {
 /**
  * Formulario de alta (catálogo de `tenant-field-config`) que decide, para un
  * módulo de importación, qué campos están visibles para un tenant puntual.
- * `undefined` = el módulo no tiene contraparte en `FIELD_CATALOG` (ej.
- * `choferes`) — en ese caso no hay nada que filtrar.
+ * `undefined` = el módulo no tiene contraparte en `FIELD_CATALOG` — en ese
+ * caso no hay nada que filtrar.
  */
 export function getAltaFormularioDeModulo(
   modulo: string,
 ): { modulo: string; formulario: string } | undefined {
   return MODULOS[modulo]?.altaFormulario;
+}
+
+/** Campos de `FIELD_CATALOG` que deciden la visibilidad de una columna de import. */
+export function getCamposVisibilidadDeColumna(modulo: string, field: string): string[] {
+  return MODULOS[modulo]?.visibilidadDesde?.[field] ?? [field];
 }
 
 /** Snapshot lazy del catálogo (misma fuente que `getCatalogoColumnas`). */

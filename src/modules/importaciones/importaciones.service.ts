@@ -33,7 +33,12 @@ import type {
   DeteccionHojasResult,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
-import { getCatalogoColumnas, getAltaFormularioDeModulo, construirConfigPorDefecto } from "./template-catalogo";
+import {
+  getCatalogoColumnas,
+  getAltaFormularioDeModulo,
+  getCamposVisibilidadDeColumna,
+  construirConfigPorDefecto,
+} from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
@@ -54,6 +59,31 @@ const CAMPOS_TRANSPORTISTA_VIAJE = new Set(["transportistaId", "transportistaEfe
 function esSoloFlotaPropia(modulo: string, tipoFlota: string | null | undefined): boolean {
   return modulo === "viajes" && tipoFlota === "propia";
 }
+
+/**
+ * Columnas que solo tienen sentido si la empresa trabaja con transportistas
+ * externos (en el alta manual de Viajes, el pago al transportista solo se
+ * manda en modo "externo").
+ */
+const CAMPOS_TRANSPORTISTA_POR_MODULO: Record<string, ReadonlySet<string>> = {
+  viajes: new Set([
+    ...CAMPOS_TRANSPORTISTA_VIAJE,
+    "precioTransportistaExterno",
+    "monedaPrecioTransportistaExterno",
+    "cantidadTransportista",
+    "precioUnitarioTransportista",
+    "precioTransportistaIvaIncluidoPct",
+  ]),
+  choferes: new Set(["transportistaId"]),
+  vehiculos: new Set(["transportistaId"]),
+};
+
+/** Lo que hace falta del Tenant para decidir qué columnas de import ocultar. */
+type TenantVisibilidadImport = {
+  idPropio1Habilitado: boolean;
+  idPropio2Habilitado: boolean;
+  tipoFlota: string;
+} | null;
 
 /** Minúsculas, sin acentos ni espacios de los bordes — para comparar nombres de hoja y encabezados. */
 function normalizarTexto(s: string): string {
@@ -845,54 +875,67 @@ export class ImportacionesService {
    * contraparte ahí (ej. `choferes`) no se filtran — se muestran todos.
    */
   async getCatalogoCampos(modulo: string, tenantId: string) {
-    let columnas = getCatalogoColumnas(modulo);
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idPropio1Habilitado: true,
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        tipoFlota: true,
+      },
+    });
+    const estaOculta = await this.columnaImportOculta(tenantId, modulo, tenant);
+    const columnas = getCatalogoColumnas(modulo).filter((c) => !estaOculta(c.field));
 
-    // "ID Propio 2" no tiene contraparte en TenantFieldConfig/FIELD_CATALOG (es
-    // un boolean propio del Tenant, no visibilidad de un campo existente) —
-    // se filtra acá puntualmente para que un tenant sin la feature habilitada
-    // no vea la columna en la pantalla de configuración de templates de import.
-    // El label tampoco es estático: se resuelve contra Tenant.idPropio2Label
-    // (ej. "CPE" para NyM) en vez del nombre genérico "ID Propio 2" del catálogo.
-    if (modulo === "viajes") {
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { clerkOrgId: tenantId },
-        select: {
-          idPropio1Habilitado: true,
-          idPropio2Habilitado: true,
-          idPropio2Label: true,
-        },
-      });
-      // "ID Propio 1" (numeroIdentificacionPersonalizado) no tenía toggle
-      // hasta ahora — mismo criterio de filtro puntual que "ID Propio 2"
-      // (Sistema queda afuera: ya está en PRISMA_IMPORT_EXCLUDE, nunca fue
-      // importable).
-      if (!tenant?.idPropio1Habilitado) {
-        columnas = columnas.filter(
-          (c) => c.field !== "numeroIdentificacionPersonalizado",
-        );
-      }
-      if (!tenant?.idPropio2Habilitado) {
-        columnas = columnas.filter((c) => c.field !== "idPropio2");
-      } else {
-        const label = tenant.idPropio2Label?.trim() || "ID Propio 2";
-        columnas = columnas.map((c) =>
-          c.field === "idPropio2"
-            ? { ...c, campoLabel: label, defaultExcelHeader: label }
-            : c,
-        );
-      }
+    // El label de "ID Propio 2" no es estático: se resuelve contra
+    // Tenant.idPropio2Label (ej. "CPE" para NyM).
+    if (modulo !== "viajes" || !tenant?.idPropio2Habilitado) return columnas;
+    const label = tenant.idPropio2Label?.trim() || "ID Propio 2";
+    return columnas.map((c) =>
+      c.field === "idPropio2"
+        ? { ...c, campoLabel: label, defaultExcelHeader: label }
+        : c,
+    );
+  }
+
+  /**
+   * Decide qué columnas de import NO aplican a un tenant, para no ofrecerlas
+   * ni en la pantalla de templates ni en la planilla descargable:
+   * - campos ocultos en "Campos por empresa" (`tenant-field-config`, visibilidad
+   *   compartida entre alta/edición/detalle — ver `visibilidadDesde` en
+   *   template-catalogo.ts para columnas que no matchean 1:1 con el formulario);
+   * - "ID Propio 1"/"ID Propio 2" sin habilitar (flags propios del Tenant);
+   * - columnas de transportista si la empresa es solo de flota propia, y
+   *   "Tipo de flota" si no es mixta (con un solo tipo no hay nada que elegir).
+   */
+  private async columnaImportOculta(
+    tenantId: string,
+    modulo: string,
+    tenant: TenantVisibilidadImport,
+  ): Promise<(field: string) => boolean> {
+    const altaFormulario = getAltaFormularioDeModulo(modulo);
+    const ocultosForm = new Set<string>();
+    if (altaFormulario) {
+      const config = await this.tenantFieldConfig.getConfigEfectivaModuloUnificado(
+        tenantId,
+        altaFormulario.modulo,
+      );
+      for (const c of config) if (!c.visible) ocultosForm.add(c.campo);
     }
 
-    const altaFormulario = getAltaFormularioDeModulo(modulo);
-    if (!altaFormulario) return columnas;
-
-    const config = await this.tenantFieldConfig.getConfigEfectiva(
-      tenantId,
-      altaFormulario.modulo,
-      altaFormulario.formulario,
-    );
-    const ocultos = new Set(config.filter((c) => !c.visible).map((c) => c.campo));
-    return columnas.filter((c) => !ocultos.has(c.field));
+    const tipoFlota = tenant?.tipoFlota ?? "mixta";
+    return (field) => {
+      if (modulo === "viajes") {
+        if (field === "numeroIdentificacionPersonalizado" && !tenant?.idPropio1Habilitado)
+          return true;
+        if (field === "idPropio2" && !tenant?.idPropio2Habilitado) return true;
+        if (field === "tipoFlota" && tipoFlota !== "mixta") return true;
+      }
+      if (tipoFlota === "propia" && CAMPOS_TRANSPORTISTA_POR_MODULO[modulo]?.has(field))
+        return true;
+      const campos = getCamposVisibilidadDeColumna(modulo, field);
+      return campos.every((c) => ocultosForm.has(c));
+    };
   }
 
   /**
@@ -911,9 +954,9 @@ export class ImportacionesService {
     });
     const templatePorModulo = new Map(templates.map((t) => [t.modulo, t]));
 
-    // "ID Propio 1"/"ID Propio 2" no tienen template propio guardado en la
-    // mayoría de los tenants (construirConfigPorDefecto no es tenant-aware) —
-    // se resuelve acá su habilitación/label igual que en getCatalogoCampos.
+    // construirConfigPorDefecto no es tenant-aware — las columnas que no
+    // aplican a la empresa (campos ocultos, ID Propio sin habilitar, tipo de
+    // flota) se filtran acá, igual que en getCatalogoCampos.
     const tenantIdPropio2 = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: tenantId },
       select: {
@@ -924,26 +967,19 @@ export class ImportacionesService {
       },
     });
 
-    return modulos.map((modulo) => {
+    const ocultaPorModulo = await Promise.all(
+      modulos.map((modulo) => this.columnaImportOculta(tenantId, modulo, tenantIdPropio2)),
+    );
+
+    return modulos.map((modulo, i) => {
       const template = templatePorModulo.get(modulo);
       const config = template
         ? (template.config as unknown as TemplateConfig)
         : construirConfigPorDefecto(modulo);
       const catalogo = getCatalogoColumnas(modulo);
+      const estaOculta = ocultaPorModulo[i];
 
-      const columnasCrudas = (config?.columns ?? []).filter((c) => {
-        if (modulo !== "viajes") return true;
-        if (c.field === "idPropio2" && !tenantIdPropio2?.idPropio2Habilitado)
-          return false;
-        if (
-          c.field === "numeroIdentificacionPersonalizado" &&
-          !tenantIdPropio2?.idPropio1Habilitado
-        )
-          return false;
-        return true;
-      });
-
-      const columnas: ColumnaEsperada[] = columnasCrudas.map((c) => {
+      const columnas: ColumnaEsperada[] = (config?.columns ?? []).flatMap((c) => {
         const enCatalogo = catalogo.find((cat) => cat.field === c.field);
         const esIdPropio2 = modulo === "viajes" && c.field === "idPropio2";
         const labelDinamico = esIdPropio2
@@ -965,10 +1001,13 @@ export class ImportacionesService {
               CAMPOS_TRANSPORTISTA_VIAJE.has(c.field)
             ),
         };
+        // Una columna obligatoria de la plantilla se deja aunque el campo esté
+        // oculto para la empresa: sin ella el import del archivo fallaría.
+        if (!col.requerido && estaOculta(c.field)) return [];
         if (c.warnIfEmpty) col.recomendado = true;
         if (c.allowedValues) col.allowedValues = c.allowedValues;
         if (c.lookupModel) col.lookupModel = c.lookupModel;
-        return col;
+        return [col];
       });
 
       return {

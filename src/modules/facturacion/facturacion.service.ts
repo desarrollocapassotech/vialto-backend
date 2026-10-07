@@ -1178,6 +1178,14 @@ export class FacturacionService {
     if (!factura) throw new NotFoundException("Factura no encontrada");
     const tieneArca = await this.tieneArca(tenantId);
 
+    // Una factura con error de AFIP no es un comprobante válido: hay que reintentar
+    // la emisión antes de poder cobrarla.
+    if (tieneArca && factura.arcaEstado === "error") {
+      throw new BadRequestException(
+        "No se puede marcar como cobrada una factura con error de AFIP. Reintentá la emisión primero.",
+      );
+    }
+
     const importeOperativo = importeOperativoFactura(
       factura.importe,
       factura.viajes,

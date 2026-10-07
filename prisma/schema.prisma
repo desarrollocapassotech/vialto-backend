@@ -98,6 +98,13 @@ model Tenant {
    * "transportistaExterno" que vivían en la config de campos de Choferes.
    */
   tipoFlota                      String   @default("mixta")
+  /**
+   * true (default) = el tenant ve el dashboard en la pantalla de inicio. false = no hay
+   * dashboard: "/" redirige al primer módulo contratado (orden del menú lateral, ver
+   * `lib/tenantHome.ts` del frontend). Se configura solo desde superadmin
+   * ("Configuración por empresa" → General).
+   */
+  dashboardHabilitado            Boolean  @default(true)
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]

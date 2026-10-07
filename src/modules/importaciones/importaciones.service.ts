@@ -557,6 +557,12 @@ export class ImportacionesService {
       result.advertenciasViajesFusionados = fusionados;
     } else if (processorModulo?.filasNuevas) {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
+      const sinCambios = await this.filasSinCambios(
+        modulo,
+        valid.filter((v) => !nuevas.has(v._rowNum)),
+        config.columns,
+        tenantId,
+      );
       const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
       // `raw[c.field]` viene de ParserService.parse(), que para columnas de
       // fecha ya convierte la celda a un objeto Date real (ver
@@ -581,11 +587,85 @@ export class ImportacionesService {
             label: c.excelHeader,
             valor: valorLegible(raw![c.field]),
           }));
-        return { fila: v._rowNum, esNuevo: nuevas.has(v._rowNum), campos };
+        return {
+          fila: v._rowNum,
+          esNuevo: nuevas.has(v._rowNum),
+          sinCambios: sinCambios.has(v._rowNum),
+          campos,
+        };
       });
     }
 
     return result;
+  }
+
+  /**
+   * Filas que "actualizan" un registro existente pero no cambiarían nada
+   * (Clientes/Transportes/Choferes por nombre, Vehículos por patente). Mismo
+   * criterio que el processor al guardar: una celda vacía no pisa el dato
+   * existente, así que solo se comparan las celdas con valor. Ante cualquier
+   * duda (patente compuesta, entidad a crear, campo que no es del modelo) la
+   * fila NO se marca: mejor un "Actualiza" de más que esconder un cambio.
+   */
+  private async filasSinCambios(
+    modulo: string,
+    rows: ValidatedRow[],
+    columns: ColumnConfig[],
+    tenantId: string,
+  ): Promise<Set<number>> {
+    const sinCambios = new Set<number>();
+    if (rows.length === 0) return sinCambios;
+
+    const porModulo: Record<string, { clave: "nombre" | "patente"; buscar: () => Promise<Record<string, unknown>[]> }> = {
+      clientes: { clave: "nombre", buscar: () => this.prisma.cliente.findMany({ where: { tenantId } }) },
+      transportistas: { clave: "nombre", buscar: () => this.prisma.transportista.findMany({ where: { tenantId } }) },
+      choferes: { clave: "nombre", buscar: () => this.prisma.chofer.findMany({ where: { tenantId } }) },
+      vehiculos: { clave: "patente", buscar: () => this.prisma.vehiculo.findMany({ where: { tenantId } }) },
+    };
+    const def = porModulo[modulo];
+    if (!def) return sinCambios;
+
+    const normClave = (v: unknown) =>
+      def.clave === "patente"
+        ? String(v ?? "").trim().toUpperCase()
+        : String(v ?? "").trim().toLowerCase();
+    const existentes = new Map<string, Record<string, unknown>>();
+    for (const r of await def.buscar()) existentes.set(normClave(r[def.clave]), r);
+
+    const SOLO_DIGITOS = new Set(["idFiscal", "cuit", "dni"]);
+    const iguales = (campo: string, nuevo: unknown, actual: unknown): boolean => {
+      if (actual instanceof Date || nuevo instanceof Date) {
+        const fecha = (x: unknown) =>
+          x == null ? "" : new Date(x as string | Date).toISOString().slice(0, 10);
+        return fecha(nuevo) === fecha(actual);
+      }
+      if (typeof actual === "boolean") return Boolean(Number(nuevo)) === actual;
+      if (typeof actual === "number") return Number(nuevo) === actual;
+      const texto = (x: unknown) => String(x ?? "").trim();
+      if (SOLO_DIGITOS.has(campo)) {
+        return texto(nuevo).replace(/\D/g, "") === texto(actual).replace(/\D/g, "");
+      }
+      return texto(nuevo).toLowerCase() === texto(actual).toLowerCase();
+    };
+
+    for (const row of rows) {
+      const claveFila = row[def.clave];
+      // Patente compuesta (tractor/semirremolque) = dos vehículos: no se evalúa.
+      if (def.clave === "patente" && String(claveFila ?? "").includes("/")) continue;
+      const actual = existentes.get(normClave(claveFila));
+      if (!actual) continue;
+
+      const cambia = columns.some((col) => {
+        if (col.field === def.clave) return false;
+        const nuevo = row[col.field];
+        if (nuevo == null || String(nuevo).trim() === "") return false;
+        if (typeof nuevo === "string" && nuevo.startsWith("__pending__")) return true;
+        if (!(col.field in actual)) return false; // columna que no es del modelo
+        return !iguales(col.field, nuevo, actual[col.field]);
+      });
+      if (!cambia) sinCambios.add(row._rowNum);
+    }
+    return sinCambios;
   }
 
   // ── Confirm ───────────────────────────────────────────────────────────────

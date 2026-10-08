@@ -50,6 +50,12 @@ export interface ColumnConfig {
    */
   defaultValue?: string;
   /**
+   * Valor que se usa SIEMPRE, ignorando lo que traiga el Excel (y aunque no
+   * traiga la columna). No se guarda en el template: lo inyecta
+   * `getActiveTemplate` según la config del tenant (ej. país fijo).
+   */
+  valorFijo?: string;
+  /**
    * Campo recomendado pero no bloqueante: si la celda viene vacía, la fila
    * se importa igual (no es un error), pero se junta en
    * `PreviewResult.advertenciasCamposFaltantes` y el usuario tiene que
@@ -140,6 +146,8 @@ export interface PreviewFilaEntidad {
   fila: number;
   /** true = alta nueva, false = actualiza un registro ya existente (ver `IImportProcessor.filasNuevas`). */
   esNuevo: boolean;
+  /** Solo si `esNuevo` es false: la fila no cambia nada del registro existente (ver `filasSinCambios`). */
+  sinCambios?: boolean;
   campos: PreviewFilaCampo[];
 }
 
@@ -266,4 +274,30 @@ export interface ColumnasEsperadasModulo {
   /** Hoja sugerida del Excel para este módulo (nombre por defecto — el template del tenant puede tener otro). */
   sheet: string;
   columnas: ColumnaEsperada[];
+}
+
+/** Una hoja del Excel asignada a un módulo por `detectarHojas`. */
+export interface DeteccionHoja {
+  modulo: string;
+  /** Nombre real de la hoja en el archivo — se pasa como `hoja` al preview. */
+  hoja: string;
+  /** Filas con datos (sin contar encabezados ni filas vacías). */
+  filas: number;
+  /** Encabezados obligatorios que no están (solo puede pasar si se detectó por nombre). */
+  faltantes: string[];
+  detectadaPor: "nombre" | "encabezados";
+}
+
+/** Hoja con datos que no se pudo asignar sola a un módulo. */
+export interface DeteccionHojaSinIdentificar {
+  hoja: string;
+  filas: number;
+  /** Módulos que encajan igual de bien (empate). Vacío = no se parece a ninguno. */
+  candidatos: string[];
+}
+
+export interface DeteccionHojasResult {
+  /** En orden de importación (clientes → … → viajes). */
+  hojas: DeteccionHoja[];
+  sinIdentificar: DeteccionHojaSinIdentificar[];
 }

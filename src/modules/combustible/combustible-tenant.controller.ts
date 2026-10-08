@@ -11,7 +11,7 @@ import { RequireModule } from "../../shared/decorators/require-module.decorator"
 import { assertTenantId } from "../../shared/util/assert-tenant";
 import { CombustibleService } from "./combustible.service";
 import { AsignarVehiculoDto } from "./dto/asignar-vehiculo.dto";
-import { EditarKmVehiculoDto } from "./dto/editar-km-vehiculo.dto";
+import { EditarKmVehiculoDto } from "../../core/vehiculos/dto/editar-km-vehiculo.dto";
 
 @ApiTags("Módulo: Combustible")
 @ApiBearerAuth("clerk-jwt")
@@ -35,16 +35,17 @@ export class CombustibleTenantController {
 
   @ApiOperation({
     summary:
-      "Errores de sincronización offline reportados por choferes (COMB-07-T4)",
+      "Errores de la app de choferes (default: sincronización offline, COMB-07-T4; ?origen=login|carga|foto|...|todos)",
   })
   @Get("errores-sincronizacion")
   @Roles("admin", "member", "superadmin")
   getSyncErrors(
     @CurrentAuth() auth: AuthPayload,
     @Query("choferId") choferId?: string,
+    @Query("origen") origen?: string,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.getSyncErrors(auth, choferId);
+    return this.service.getSyncErrors(auth, choferId, origen);
   }
 
   @ApiOperation({

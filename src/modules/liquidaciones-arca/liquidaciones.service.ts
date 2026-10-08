@@ -2090,19 +2090,11 @@ export class LiquidacionesService {
         fechaCbte = resolveFechaCbteEmision(ambiente, facturaRaw.fechaEmision, null);
       }
 
-      if (!esHomologacion) {
-        if (facturaExt.cbteNro != null) {
-          this.validarCorrelatividad(facturaExt.cbteNro, cbteNro, 'Factura');
-        } else {
-          const localCbteNro = parseNumeroFactura(facturaRaw.numero);
-          if (isNaN(localCbteNro)) {
-            throw new ArcaException(
-              ARCA_ERROR_CODES.GENERICO,
-              `El número de factura local "${facturaRaw.numero}" no es válido. Debe finalizar con el número correlativo del comprobante a autorizar (ej. "0001-00000045").`,
-            );
-          }
-          this.validarCorrelatividad(localCbteNro, cbteNro, 'Factura');
-        }
+      // El número de una factura ARCA no se carga a mano: es el próximo correlativo que
+      // informa AFIP (`cbteNro`), y se guarda en `numero` al autorizar. Solo se valida
+      // correlatividad contra un `cbteNro` ya reservado por un intento anterior.
+      if (!esHomologacion && facturaExt.cbteNro != null) {
+        this.validarCorrelatividad(facturaExt.cbteNro, cbteNro, 'Factura');
       }
 
       const cabeceraBase = {
@@ -2153,15 +2145,22 @@ export class LiquidacionesService {
         ivaPctDefault,
       );
 
+      // `numero` es único por tenant: si (caso borde) ya hay otra factura con ese mismo
+      // número cargado a mano, no se pisa — fallar acá dejaría un CAE ya otorgado sin
+      // registrar. La factura igual queda identificada por ptoVenta/cbteNro.
+      const numeroAfipCandidato = formatNumeroComprobante(ptoVenta, cbteNro);
+      const numeroOcupado = await this.db.factura.findFirst({
+        where: { tenantId, numero: numeroAfipCandidato, id: { not: facturaId } },
+        select: { id: true },
+      });
+      const numeroAfip = numeroOcupado ? null : numeroAfipCandidato;
+
       await (this.prisma as PrismaAny).factura.update({
         where: { id: facturaId },
         data: {
           cbteNro,
-          // Sin número local cargado (en homologación no se exige), la grilla
-          // mostraba "—": se completa con el número que asignó AFIP.
-          ...(facturaRaw.numero?.trim()
-            ? {}
-            : { numero: formatNumeroComprobante(ptoVenta, cbteNro) }),
+          // El número visible de la factura es siempre el que asignó AFIP.
+          ...(numeroAfip ? { numero: numeroAfip } : {}),
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
           arcaEstado: 'autorizado',
@@ -2174,8 +2173,7 @@ export class LiquidacionesService {
 
       // El cargo de cuenta corriente se creó con la factura, antes de tener
       // número: se le completa ahora el comprobante que asignó AFIP.
-      if (!facturaRaw.numero?.trim()) {
-        const numeroAfip = formatNumeroComprobante(ptoVenta, cbteNro);
+      if (numeroAfip) {
         await this.db.movimientoCuentaCorriente.updateMany({
           where: { tenantId, facturaId, tipo: 'cargo' },
           data: {

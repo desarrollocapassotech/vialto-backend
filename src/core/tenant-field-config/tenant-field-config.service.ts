@@ -27,6 +27,9 @@ const VIAJES_CONFIG_COMPARTIDA = "viajes_compartidos";
  * a propósito: sus 3 formularios (alta_ingreso/alta_egreso/division_bultos) son
  * operaciones distintas, no etapas de un mismo registro — compartir su config
  * mezclaría configuraciones de pantallas que no tienen nada que ver entre sí.
+ * `liquidaciones` (alta/edición) se sumó en oct 2026: lo que ya estuviera
+ * guardado por formulario se sigue leyendo vía `getLegacySharedVisible`
+ * (gana alta), así que no hizo falta migrar datos.
  */
 const MODULOS_CAMPOS_COMPARTIDOS = new Set([
   "viajes",
@@ -34,6 +37,7 @@ const MODULOS_CAMPOS_COMPARTIDOS = new Set([
   "transportistas",
   "vehiculos",
   "choferes",
+  "liquidaciones",
 ]);
 
 @Injectable()

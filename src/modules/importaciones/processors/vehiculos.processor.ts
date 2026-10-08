@@ -43,7 +43,7 @@ export class VehiculosProcessor implements IImportProcessor {
   async insert(
     row: ValidatedRow,
     tenantId: string,
-    _createdBy: string,
+    createdBy: string,
   ): Promise<InsertResult> {
     const partes = this.partesPatente(row);
     const tipoFila = String(row.tipo ?? "").trim();
@@ -65,6 +65,7 @@ export class VehiculosProcessor implements IImportProcessor {
           partes[i],
           tipo,
           campos,
+          createdBy,
         );
         // Si cualquiera de los dos es alta nueva, la fila cuenta como
         // "creado" en el resumen — es una aproximación razonable para una
@@ -77,7 +78,7 @@ export class VehiculosProcessor implements IImportProcessor {
     if (!tipoFila) {
       throw new Error("El tipo de vehículo es obligatorio.");
     }
-    return this.upsertVehiculo(tenantId, partes[0], tipoFila, campos);
+    return this.upsertVehiculo(tenantId, partes[0], tipoFila, campos, createdBy);
   }
 
   private async upsertVehiculo(
@@ -85,6 +86,7 @@ export class VehiculosProcessor implements IImportProcessor {
     patente: string | undefined,
     tipo: string,
     campos: Record<string, unknown>,
+    createdBy: string,
   ): Promise<InsertResult> {
     const dto = { patente, tipo, ...campos };
 
@@ -94,7 +96,7 @@ export class VehiculosProcessor implements IImportProcessor {
         select: { id: true },
       });
       if (existing) {
-        await this.vehiculosService.update(existing.id, tenantId, dto);
+        await this.vehiculosService.update(existing.id, tenantId, dto, createdBy);
         return { id: existing.id, creado: false };
       }
     }

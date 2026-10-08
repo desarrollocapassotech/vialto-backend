@@ -8,6 +8,8 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { CloudinaryService } from "../../shared/storage/cloudinary.service";
+import { NotificacionesCronService } from "../notificaciones/notificaciones-cron.service";
+import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { KM_DELTA_PLAUSIBLE_MAX } from "../../shared/util/combustible-km.constants";
 import { evaluarLitrosImporteFase1 } from "../../shared/util/combustible-fase1.util";
 
@@ -97,6 +99,8 @@ type Alerta = {
 /** COMB-07-T5: alerta de una carga que el chofer intentó sincronizar y el backend rechazó. */
 type SyncErrorAlerta = {
   id: string;
+  /** Ver ORIGENES_ERROR_CHOFER — hoy las alertas solo traen `sincronizacion_offline`. */
+  origen: string;
   mensaje: string;
   fechaCarga: string | null;
   reportadoEn: string;
@@ -104,6 +108,9 @@ type SyncErrorAlerta = {
   patente: string;
   litros: number | null;
   importe: number | null;
+  precioPorLitro: number | null;
+  km: number | null;
+  formaPago: string | null;
   estacion: string | null;
 };
 
@@ -128,6 +135,8 @@ export class CombustibleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly notificaciones: NotificacionesCronService,
+    private readonly vehiculos: VehiculosService,
   ) { }
 
   async uploadFoto(
@@ -433,13 +442,15 @@ export class CombustibleService {
   }
 
   /**
-   * Errores de sincronización offline reportados por los choferes del
-   * tenant (COMB-07-T4), más recientes primero. Sin paginado por cursor:
-   * el volumen esperado es bajo y un límite fijo alcanza para revisión.
+   * Errores de la app de choferes del tenant, más recientes primero. Por defecto solo
+   * los de sincronización offline (COMB-07-T4); `origen` filtra por otro origen o
+   * `todos` (ver ORIGENES_ERROR_CHOFER). Sin paginado por cursor: un límite fijo
+   * alcanza para revisión.
    */
-  async getSyncErrors(auth: CombustibleAuth, choferId?: string) {
+  async getSyncErrors(auth: CombustibleAuth, choferId?: string, origen?: string) {
     const where: Record<string, unknown> = { tenantId: auth.tenantId };
     if (choferId) where["choferId"] = choferId;
+    if (origen !== "todos") where["origen"] = origen || "sincronizacion_offline";
 
     return this.prisma.combustibleSyncErrorLog.findMany({
       where,
@@ -774,7 +785,7 @@ export class CombustibleService {
       })
       : null;
 
-    return this.prisma.combustibleSyncErrorLog.create({
+    const log = await this.prisma.combustibleSyncErrorLog.create({
       data: {
         tenantId,
         choferId,
@@ -782,7 +793,23 @@ export class CombustibleService {
         mensaje: dto.mensaje,
         payload: dto.payload as object,
       },
+      include: { chofer: { select: { nombre: true } } },
     });
+
+    // Aviso en la campana (+ email). Se deduplica por la carga del celular (localId): la app
+    // reintenta la misma carga varias veces y cada reintento fallido crea otro log, pero el
+    // admin necesita un solo aviso por carga trabada. Sin await: no demora la respuesta a la app.
+    const localId = typeof dto.payload["localId"] === "string" ? dto.payload["localId"] : null;
+    const fecha = typeof dto.payload["fecha"] === "string" ? dto.payload["fecha"].slice(0, 10).split("-").reverse().join("/") : null;
+    void this.notificaciones.notificarAhora(tenantId, "combustible.errorChofer", {
+      entidadId: localId ?? log.id,
+      titulo: `Carga de ${log.chofer?.nombre?.trim() ?? "un chofer"} no se pudo registrar`,
+      detalle: [patente, fecha ? `carga del ${fecha}` : null, "Tocá para ver qué pasó y cómo resolverlo"]
+        .filter(Boolean)
+        .join(" · "),
+    });
+
+    return log;
   }
 
   /** Prioriza la asignación activa del chofer (ver AsignacionVehiculo); si no tiene, cae a la patente de su última carga real. */
@@ -907,33 +934,17 @@ export class CombustibleService {
   }
 
   /**
-   * Corrige el kilometraje de un vehículo desde el panel, dejando auditoría
-   * (`VehiculoKmEdicion`: quién, cuándo, km anterior → nuevo). La fecha de la
-   * corrección es siempre "hoy" (no se permite backdatear) — es lo que le da a esta
-   * corrección su lugar en la línea de tiempo que usa `getLimitesCronologicos`.
+   * Corrige el kilometraje de un vehículo desde el panel. La lógica vive en
+   * `VehiculosService.editarKm` (core, disponible sin el módulo Combustible); acá solo se
+   * delega para no cambiar el contrato de los endpoints de Combustible.
    */
-  async editarKmVehiculo(tenantId: string, vehiculoId: string, kmNuevo: number, userId: string) {
-    const vehiculo = await this.prisma.vehiculo.findFirst({ where: { id: vehiculoId, tenantId } });
-    if (!vehiculo) throw new NotFoundException("Vehículo no encontrado.");
-
-    const fecha = new Date();
-    fecha.setUTCHours(0, 0, 0, 0);
-
-    return this.prisma.$transaction(async (tx) => {
-      const edicion = await tx.vehiculoKmEdicion.create({
-        data: { tenantId, vehiculoId, kmAnterior: vehiculo.kmActual, kmNuevo, fecha, createdBy: userId },
-      });
-      await tx.vehiculo.update({ where: { id: vehiculoId }, data: { kmActual: kmNuevo } });
-      return edicion;
-    });
+  editarKmVehiculo(tenantId: string, vehiculoId: string, kmNuevo: number, userId: string) {
+    return this.vehiculos.editarKm(tenantId, vehiculoId, kmNuevo, userId);
   }
 
   /** Historial de correcciones manuales de km de un vehículo, más reciente primero. */
-  async getHistorialKmVehiculo(tenantId: string, vehiculoId: string) {
-    return this.prisma.vehiculoKmEdicion.findMany({
-      where: { tenantId, vehiculoId },
-      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
-    });
+  getHistorialKmVehiculo(tenantId: string, vehiculoId: string) {
+    return this.vehiculos.getHistorialKm(tenantId, vehiculoId);
   }
 
   async getUltimoKmPorPatente(
@@ -1443,6 +1454,8 @@ export class CombustibleService {
     const logs = await this.prisma.combustibleSyncErrorLog.findMany({
       where: {
         tenantId,
+        // El resto de los orígenes (login, cargas online, fotos...) es diagnóstico, no alerta.
+        origen: "sincronizacion_offline",
         resueltoEn: null,
         ...(fromDate || toDate ? { createdAt: createdAtWhere } : {}),
       },
@@ -1455,27 +1468,25 @@ export class CombustibleService {
 
     return logs.map((log) => {
       const payload = (log.payload ?? {}) as Record<string, unknown>;
-      const fechaCarga =
-        typeof payload["fecha"] === "string" ? payload["fecha"] : null;
-      const patentePayload =
-        typeof payload["patente"] === "string" ? payload["patente"] : null;
-      const litros =
-        typeof payload["litros"] === "number" ? payload["litros"] : null;
-      const importe =
-        typeof payload["importe"] === "number" ? payload["importe"] : null;
-      const estacion =
-        typeof payload["estacion"] === "string" ? payload["estacion"] : null;
+      const str = (k: string) =>
+        typeof payload[k] === "string" ? (payload[k] as string) : null;
+      const num = (k: string) =>
+        typeof payload[k] === "number" ? (payload[k] as number) : null;
 
       return {
         id: log.id,
+        origen: log.origen,
         mensaje: log.mensaje,
-        fechaCarga,
+        fechaCarga: str("fecha"),
         reportadoEn: log.createdAt.toISOString(),
         choferNombre: log.chofer?.nombre ?? "—",
-        patente: log.vehiculo?.patente ?? patentePayload ?? "—",
-        litros,
-        importe,
-        estacion,
+        patente: log.vehiculo?.patente ?? str("patente") ?? "—",
+        litros: num("litros"),
+        importe: num("importe"),
+        precioPorLitro: num("precioPorLitro"),
+        km: num("km"),
+        formaPago: str("formaPago"),
+        estacion: str("estacion"),
       };
     });
   }

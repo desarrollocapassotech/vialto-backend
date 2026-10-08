@@ -10,14 +10,17 @@ import {
   ChoferAuthRequest,
 } from '../../core/chofer-auth/chofer-auth.guard';
 import { CombustibleService } from './combustible.service';
+import { ChoferErrorLogInterceptor } from './chofer-error-log.interceptor';
 
 /**
  * Endpoints del módulo combustible accesibles por choferes de la app vialto-combustible.
- * Usan el JWT propio del backend (ChoferAuthGuard), no Clerk.
+ * Usan el JWT propio del backend (ChoferAuthGuard), no Clerk. Todo error queda
+ * registrado en CombustibleSyncErrorLog (ver ChoferErrorLogInterceptor).
  */
 @ApiTags('Auth — App Combustible (chofer)')
 @Controller('combustible/chofer')
 @UseGuards(ChoferAuthGuard)
+@UseInterceptors(ChoferErrorLogInterceptor)
 export class ChoferCombustibleController {
   constructor(private readonly service: CombustibleService) {}
 

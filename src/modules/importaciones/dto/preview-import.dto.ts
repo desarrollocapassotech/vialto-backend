@@ -9,4 +9,13 @@ export class PreviewImportDto {
   @IsString()
   @IsOptional()
   tenantId?: string;
+
+  /**
+   * Hoja del Excel a leer, tal como la devolvió `POST detectar-hojas`. Pisa la
+   * hoja configurada en la plantilla (la detección pudo reconocerla por sus
+   * encabezados aunque se llame distinto, ej. "Hoja1").
+   */
+  @IsString()
+  @IsOptional()
+  hoja?: string;
 }

@@ -1,4 +1,4 @@
-export type NotificacionFrecuencia = 'diaria' | 'semanal';
+export type NotificacionFrecuencia = 'diaria' | 'semanal' | 'inmediata';
 
 export type NotificacionCatalogoItem = {
   /** Slug único y estable — se persiste en `NotificacionConfig.tipo` y `NotificacionEnvio.tipo`. No renombrar sin migrar datos. */
@@ -16,6 +16,8 @@ export type NotificacionCatalogoItem = {
    * (8 AM), `semanal` la procesa un cron específico de ese dominio en vez del diario (ej.
    * `combustible.cargaSospechosa` se dispara desde `CombustibleCorreccionCronService.cronSemanal`,
    * junto con la corrección de datos, para que el email refleje el resultado de esa corrida).
+   * `inmediata` no tiene evaluator ni cron: la dispara el propio flujo de negocio en el
+   * momento, vía `NotificacionesCronService.notificarAhora` (ej. `combustible.errorChofer`).
    */
   frecuencia: NotificacionFrecuencia;
   /** Ruta relativa (con query params) a la que apunta el botón del email — default: home. */
@@ -29,6 +31,16 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     label: 'Factura de cliente por vencer',
     descripcion:
       'Avisa cuando una factura de cliente vence en los próximos días y todavía no fue cobrada.',
+    defaultActivo: true,
+    requiereModulo: 'facturacion',
+    frecuencia: 'diaria',
+  },
+  {
+    tipo: 'facturacion.facturaVencida',
+    modulo: 'facturacion',
+    label: 'Factura de cliente vencida',
+    descripcion:
+      'Avisa una vez, al día siguiente de vencer, cuando una factura de cliente venció y todavía no fue cobrada.',
     defaultActivo: true,
     requiereModulo: 'facturacion',
     frecuencia: 'diaria',
@@ -54,6 +66,41 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     requiereModulo: 'combustible',
     frecuencia: 'semanal',
     urlDestino: '/?combustibleTab=alertas',
+  },
+  {
+    tipo: 'combustible.errorChofer',
+    modulo: 'combustible',
+    label: 'Cargas de choferes que no se pudieron registrar',
+    descripcion:
+      'Avisa en el momento cuando la carga que un chofer guardó en el celular sin conexión es rechazada al sincronizar (km inconsistente, patente inexistente, etc.) y queda trabada hasta que se corrija.',
+    defaultActivo: true,
+    requiereModulo: 'combustible',
+    frecuencia: 'inmediata',
+    urlDestino: '/?combustibleTab=alertas',
+  },
+  // Mantenimiento: los evaluators viven en modules/mantenimiento y se registran con
+  // NotificacionesCronService.registrarEvaluator (reusan el cálculo de vencimientos).
+  {
+    tipo: 'mantenimiento.vencimientoProximo',
+    modulo: 'mantenimiento',
+    label: 'Mantenimiento próximo a vencer',
+    descripcion:
+      'Avisa una vez por ciclo cuando un plan de mantenimiento de una unidad entra en el período de aviso (por km o por fecha).',
+    defaultActivo: true,
+    requiereModulo: 'mantenimiento',
+    frecuencia: 'diaria',
+    urlDestino: '/mantenimiento',
+  },
+  {
+    tipo: 'mantenimiento.vencido',
+    modulo: 'mantenimiento',
+    label: 'Mantenimiento vencido',
+    descripcion:
+      'Avisa una vez por ciclo cuando un plan de mantenimiento de una unidad venció (por km o por fecha).',
+    defaultActivo: true,
+    requiereModulo: 'mantenimiento',
+    frecuencia: 'diaria',
+    urlDestino: '/mantenimiento',
   },
 ];
 

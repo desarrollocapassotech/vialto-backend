@@ -98,6 +98,20 @@ model Tenant {
    * "transportistaExterno" que vivían en la config de campos de Choferes.
    */
   tipoFlota                      String   @default("mixta")
+  /**
+   * true (default) = el tenant ve el dashboard en la pantalla de inicio. false = no hay
+   * dashboard: "/" redirige al primer módulo contratado (orden del menú lateral, ver
+   * `lib/tenantHome.ts` del frontend). Se configura solo desde superadmin
+   * ("Configuración por empresa" → General).
+   */
+  dashboardHabilitado            Boolean  @default(true)
+  /**
+   * true (default) = origen/destino de Viajes se eligen de un buscador de ciudades
+   * (catálogo externo, obliga a elegir de la lista) y el import valida las ciudades del
+   * Excel contra ese catálogo. false = texto libre, sin sugerencias ni validación. Se
+   * configura solo desde superadmin ("Configuración por empresa" → General).
+   */
+  recomendacionCiudadesHabilitada Boolean @default(true)
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]
@@ -124,7 +138,11 @@ model Tenant {
   combustibleSyncErrorLogs   CombustibleSyncErrorLog[]
   asignacionesVehiculo       AsignacionVehiculo[]
   vehiculoKmEdiciones        VehiculoKmEdicion[]
-  intervenciones             Intervencion[]
+  planesMantenimiento        PlanMantenimiento[]
+  vehiculosPlanes            VehiculoPlan[]
+  talleres                   Taller[]
+  ordenesTrabajo             OrdenTrabajo[]
+  ordenTrabajoSecuencia      OrdenTrabajoSecuencia?
   importTemplates            ImportTemplate[]
   importLogs                 ImportLog[]
   importSessions             ImportSession[]
@@ -162,6 +180,11 @@ model Cliente {
    * Días de plazo para calcular el vencimiento de los cargos de cuenta corriente. Si es null, se usa el default del tenant.
    */
   condicionPagoDias   Int?
+  /**
+   * Validación contra el padrón de ARCA (core/padron): huella "cuit|condicionIva|domicilio" de los datos que se validaron. Si alguno cambia, deja de coincidir y se vuelve a consultar.
+   */
+  arcaValidadoHuella  String?
+  arcaValidadoAt      DateTime?
   createdAt           DateTime @default(now())
 
   viajes           Viaje[]
@@ -196,6 +219,11 @@ model Transportista {
    * Días de plazo para calcular el vencimiento de los cargos de cuenta corriente (cuentas por pagar). Si es null, se usa el default del tenant.
    */
   condicionPagoDias       Int?
+  /**
+   * Validación contra el padrón de ARCA (core/padron): huella "cuit|condicionIva|domicilio" de los datos que se validaron. Si alguno cambia, deja de coincidir y se vuelve a consultar.
+   */
+  arcaValidadoHuella      String?
+  arcaValidadoAt          DateTime?
   createdAt               DateTime  @default(now())
 
   choferes       Chofer[]
@@ -306,7 +334,8 @@ model Vehiculo {
   vehiculosViaje           ViajeVehiculo[]
   cargasCombustible        CargaCombustible[]
   combustibleSyncErrorLogs CombustibleSyncErrorLog[]
-  intervenciones           Intervencion[]
+  vehiculosPlanes          VehiculoPlan[]
+  ordenesTrabajo           OrdenTrabajo[]
   asignacionesVehiculo     AsignacionVehiculo[]
   kmEdiciones              VehiculoKmEdicion[]
 
@@ -453,7 +482,7 @@ model ViajeCliente {
   monedaMonto       String                 @default("ARS") // ARS | USD
   facturaId         String?
   factura           Factura?               @relation(fields: [facturaId], references: [id], onDelete: SetNull)
-  facturacionEstado String                 @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturacionEstado String                 @default("sin_facturar") // sin_facturar | borrador | esperando_afip | facturado | cobrado | error_afip | anulado
   facturaTramos     FacturaTramo[]
   createdAt         DateTime               @default(now())
 
@@ -522,11 +551,11 @@ model Viaje {
   /**
    * Estado de facturación al cliente, sincronizado automáticamente — no editable a mano.
    */
-  facturacionEstado                 String          @default("sin_facturar") // sin_facturar | esperando_afip | facturado | cobrado | error_afip | anulado
+  facturacionEstado                 String          @default("sin_facturar") // sin_facturar | borrador | esperando_afip | facturado | cobrado | error_afip | anulado
   /**
    * Estado de liquidación al transportista externo (null si no aplica: sin transportista externo o tenant sin integracion-arca).
    */
-  liquidacionEstado                 String? // sin_liquidar | esperando_afip | liquidado | error_afip | anulado
+  liquidacionEstado                 String? // sin_liquidar | borrador | esperando_afip | liquidado | error_afip | anulado
   clienteId                         String
   cliente                           Cliente         @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   transportistaId                   String?
@@ -1111,12 +1140,17 @@ model CombustibleSyncErrorLog {
   chofer     Chofer?   @relation(fields: [choferId], references: [id], onDelete: SetNull)
   vehiculoId String?
   vehiculo   Vehiculo? @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+  // sincronizacion_offline (reportado por la app, lo único que va a Alertas del dashboard) |
+  // carga | edicion_carga | eliminacion_carga | foto | consulta | login | sesion (registrados
+  // por el backend al rechazar un request de la app, para diagnóstico) — ver core/chofer-auth/chofer-error-log.ts
+  origen     String    @default("sincronizacion_offline")
   mensaje    String // mensaje de error devuelto por la validación (ej. "El kilometraje ingresado... es inconsistente...")
-  payload    Json // datos de la carga que se intentó sincronizar: patente, estacion, litros, precioPorLitro, importe, km, formaPago, fecha, localId (id en IndexedDB, para correlacionar reintentos)
+  payload    Json // sincronizacion_offline: datos de la carga (patente, estacion, litros, ..., localId en IndexedDB para correlacionar reintentos). Resto: { http, body sin PIN } del request rechazado
   createdAt  DateTime  @default(now())
   resueltoEn DateTime? // COMB-07-T5: se completa cuando el chofer logra resincronizar esta misma carga (correlacionada por payload.localId); null = sigue pendiente de revisión
 
   @@index([tenantId])
+  @@index([tenantId, origen, createdAt(sort: Desc)])
   @@index([tenantId, choferId])
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([tenantId, resueltoEn])
@@ -1124,28 +1158,145 @@ model CombustibleSyncErrorLog {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Módulo: mantenimiento (PostgreSQL; checklist diario en Firestore según doc)
+// Módulo: mantenimiento — planes, órdenes de trabajo y vencimientos de flota
+// (ver docs/mantenimiento-plan.md). El km no tiene tabla propia: lo arma
+// core/odometro a partir de cargas, ediciones manuales y órdenes de trabajo.
 // ═══════════════════════════════════════════════════════════════════════════
 
-model Intervencion {
-  id           String    @id @default(cuid())
-  tenantId     String
-  tenant       Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  vehiculoId   String
-  vehiculo     Vehiculo  @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
-  tipos        String[] // catálogo por sistema del vehículo (mínimo 1) — ver src/modules/mantenimiento/tipos-intervencion.const.ts
-  descripcion  String?
-  km           Int?
-  proximoKm    Int?
-  proximaFecha DateTime?
-  fecha        DateTime
-  createdAt    DateTime  @default(now())
-  createdBy    String
+/**
+ * Plan de mantenimiento preventivo o documental (ej. "Service 20.000 km", "VTV").
+ * Regla (validada en el service): al menos uno de intervaloKm / intervaloDias.
+ */
+model PlanMantenimiento {
+  id             String         @id @default(cuid())
+  tenantId       String
+  tenant         Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre         String
+  categoria      String // mecanico | documental
+  tipoVehiculo   String? // tractor | semirremolque | camion | utilitario | otro | null = cualquiera
+  intervaloKm    Int?
+  intervaloDias  Int?
+  intervaloHoras Int? // previsto, sin UI
+  avisoKm        Int? // anticipación del aviso
+  avisoDias      Int?
+  tareas         String[] // catálogo en src/modules/mantenimiento/tareas-mantenimiento.const.ts; vacío permitido en documentales
+  activo         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  createdBy      String
+  vehiculos      VehiculoPlan[]
 
   @@index([tenantId])
+  @@map("planes_mantenimiento")
+}
+
+/**
+ * Asignación de un plan a una unidad + punto de partida (último service conocido antes de usar Vialto).
+ */
+model VehiculoPlan {
+  id         String             @id @default(cuid())
+  tenantId   String
+  tenant     Tenant             @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  vehiculoId String
+  vehiculo   Vehiculo           @relation(fields: [vehiculoId], references: [id], onDelete: Cascade)
+  planId     String
+  plan       PlanMantenimiento  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  baseKm     Int?
+  baseFecha  DateTime?
+  activo     Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  ordenes    OrdenTrabajoPlan[]
+
+  @@unique([tenantId, vehiculoId, planId])
   @@index([tenantId, vehiculoId])
-  @@index([tenantId, fecha])
-  @@map("intervenciones")
+  @@map("vehiculos_planes")
+}
+
+model Taller {
+  id       String         @id @default(cuid())
+  tenantId String
+  tenant   Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre   String
+  cuit     String?
+  telefono String?
+  interno  Boolean        @default(false) // previsto, sin UI
+  activo   Boolean        @default(true)
+  ordenes  OrdenTrabajo[]
+
+  @@unique([tenantId, nombre])
+  @@map("talleres")
+}
+
+model OrdenTrabajo {
+  id          String             @id @default(cuid())
+  tenantId    String
+  tenant      Tenant             @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  numero      Int // secuencia por tenant (OrdenTrabajoSecuencia)
+  vehiculoId  String
+  vehiculo    Vehiculo           @relation(fields: [vehiculoId], references: [id], onDelete: Restrict)
+  tipo        String // preventivo | correctivo
+  origen      String             @default("manual") // manual | plan | reporte_chofer (futuro)
+  estado      String             @default("cerrada") // abierta | en_curso | cerrada | anulada — MVP solo cerrada/anulada
+  tallerId    String?
+  taller      Taller?            @relation(fields: [tallerId], references: [id], onDelete: SetNull)
+  fecha       DateTime // fecha del trabajo (sin hora, UTC)
+  km          Int?
+  horas       Float? // previsto, sin UI
+  tareas      String[]
+  descripcion String?
+  costoTotal  Float              @default(0) // = suma de items, se recalcula en el service
+  adjuntos    String[] // URLs Cloudinary (factura, fotos)
+  createdAt   DateTime           @default(now())
+  createdBy   String
+  items       OrdenTrabajoItem[]
+  planes      OrdenTrabajoPlan[]
+
+  @@unique([tenantId, numero])
+  @@index([tenantId, vehiculoId, fecha])
+  @@index([tenantId, estado])
+  @@map("ordenes_trabajo")
+}
+
+model OrdenTrabajoItem {
+  id            String       @id @default(cuid())
+  tenantId      String
+  ordenId       String
+  orden         OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  tipo          String       @default("general") // general | mano_obra | repuesto | servicio_externo
+  descripcion   String
+  cantidad      Float        @default(1)
+  costoUnitario Float
+  subtotal      Float
+  productoId    String? // previsto (Stock, Fase 2), sin UI
+
+  @@index([tenantId, ordenId])
+  @@map("ordenes_trabajo_items")
+}
+
+/**
+ * Qué planes "cumple" una OT (una OT puede cumplir varios).
+ */
+model OrdenTrabajoPlan {
+  ordenId        String
+  orden          OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  vehiculoPlanId String
+  vehiculoPlan   VehiculoPlan @relation(fields: [vehiculoPlanId], references: [id], onDelete: Cascade)
+  tenantId       String
+
+  @@id([ordenId, vehiculoPlanId])
+  @@index([tenantId, vehiculoPlanId])
+  @@map("ordenes_trabajo_planes")
+}
+
+/**
+ * Contador por tenant para OrdenTrabajo.numero (mismo patrón que ProductoSecuencia).
+ */
+model OrdenTrabajoSecuencia {
+  id        String @id @default(cuid())
+  tenantId  String @unique
+  tenant    Tenant @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  lastValue Int    @default(0)
+
+  @@map("orden_trabajo_secuencias")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

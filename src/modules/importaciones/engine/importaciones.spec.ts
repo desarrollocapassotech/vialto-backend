@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Pruebas del motor de importaciones (Parser y Validator).
  * Ejecutar: npm run test:importaciones
  */
@@ -116,5 +116,49 @@ const templateBase: TemplateConfig = {
     assert.deepEqual(res.errors.map((e) => [e.fila, e.campo]), [[3, "CUIT"], [4, "CUIT"]]);
     assert.match(res.errors[0].error, /dígito verificador/);
     assert.match(res.errors[1].error, /11 dígitos/);
+  });
+
+  await test("Validator: país fijo — se completa solo aunque falte la columna o traiga otro país", async () => {
+    const columns: TemplateConfig["columns"] = [
+      { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+      { field: "pais", excelHeader: "País", type: "string", valorFijo: "AR" },
+    ];
+    const rows = [
+      { _rowNum: 2, nombre: "Sin columna país" },
+      { _rowNum: 3, nombre: "Con otro país", pais: "Uruguay" },
+    ] as any[];
+    const res = await validator.validate(rows, columns, "tenant-1", "clientes");
+    assert.equal(res.errors.length, 0);
+    assert.deepEqual(res.valid.map((r) => r.pais), ["AR", "AR"]);
+  });
+
+  const columnaProducto: TemplateConfig["columns"] = [
+    { field: "productoId", excelHeader: "Producto", type: "lookup", lookupModel: "productos", lookupFields: ["nombre", "codigo"], createIfNotFound: true },
+  ];
+  const validatorProductos = new ValidatorService(
+    { producto: { findMany: async () => [{ id: "p-soja", nombre: "Soja", codigo: "P-001" }] } } as any,
+    {} as any,
+  );
+
+  await test("Validator: producto existente se encuentra sin importar acentos ni mayúsculas", async () => {
+    const rows = [
+      { _rowNum: 2, productoId: "SOJA" },
+      { _rowNum: 3, productoId: "  sója " },
+    ] as any[];
+    const res = await validatorProductos.validate(rows, columnaProducto, "tenant-1", "", true);
+    assert.equal(res.errors.length, 0);
+    assert.deepEqual(res.valid.map((r) => r.productoId), ["p-soja", "p-soja"]);
+  });
+
+  await test("Validator: producto inexistente se crea una sola vez aunque varíe acento/mayúsculas", async () => {
+    const rows = [
+      { _rowNum: 2, productoId: "Maíz" },
+      { _rowNum: 3, productoId: "MAIZ" },
+      { _rowNum: 4, productoId: "maiz" },
+    ] as any[];
+    const res = await validatorProductos.validate(rows, columnaProducto, "tenant-1", "", true);
+    assert.equal(res.errors.length, 0);
+    assert.deepEqual(res.created.productos, ["Maíz"]);
+    assert.equal(new Set(res.valid.map((r) => r.productoId)).size, 1);
   });
 })();

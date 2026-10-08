@@ -45,6 +45,7 @@ import {
   esEtapaFinal,
   normalizarEtapaViaje,
   FACTURACION_ESTADOS_DISPONIBLES,
+  FACTURACION_ESTADOS_PENDIENTES,
   LIQUIDACION_ESTADOS_DISPONIBLES,
   type ViajeEtapa,
 } from "./viaje-estados";
@@ -1110,7 +1111,7 @@ export class ViajesService {
         where: {
           tenantId,
           etapa: "finalizado",
-          facturacionEstado: "sin_facturar",
+          facturacionEstado: { in: [...FACTURACION_ESTADOS_PENDIENTES] },
         },
       }),
       this.prisma.viaje.count({

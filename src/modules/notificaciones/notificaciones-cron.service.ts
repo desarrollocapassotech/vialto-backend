@@ -4,8 +4,14 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { UsersService } from '../../core/users/users.service';
 import { ResendEmailService } from '../../shared/email/resend-email.service';
 import { NotificacionesConfigService } from './notificaciones-config.service';
-import { getNotificacionesCatalogoPorModulos, type NotificacionFrecuencia } from './notificaciones-catalog';
+import {
+  getNotificacionesCatalogoPorModulos,
+  NOTIFICACIONES_CATALOG,
+  type NotificacionCatalogoItem,
+  type NotificacionFrecuencia,
+} from './notificaciones-catalog';
 import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evaluator';
+import { FacturaVencidaEvaluator } from './evaluators/factura-vencida.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
 import { CuentaCorrienteVencimientoEvaluator } from './evaluators/cuenta-corriente-vencimiento.evaluator';
 import type { NotificacionEvaluator, NotificacionItem } from './evaluators/notificacion-evaluator.interface';
@@ -37,6 +43,7 @@ const COLOR_MIST = '#f5f3f0';
 @Injectable()
 export class NotificacionesCronService {
   private readonly logger = new Logger(NotificacionesCronService.name);
+  /** Los 4 propios de este módulo + los que registran los módulos vendibles (ver `registrarEvaluator`). */
   private readonly evaluators: NotificacionEvaluator[];
 
   constructor(
@@ -45,10 +52,27 @@ export class NotificacionesCronService {
     private readonly emailService: ResendEmailService,
     private readonly usersService: UsersService,
     facturaPorVencer: FacturaPorVencerEvaluator,
+    facturaVencida: FacturaVencidaEvaluator,
     cargaSospechosa: CargaSospechosaEvaluator,
     cuentaCorrienteVencimiento: CuentaCorrienteVencimientoEvaluator,
   ) {
-    this.evaluators = [facturaPorVencer, cargaSospechosa, cuentaCorrienteVencimiento];
+    this.evaluators = [facturaPorVencer, facturaVencida, cargaSospechosa, cuentaCorrienteVencimiento];
+  }
+
+  /**
+   * Punto de extensión para que un módulo vendible sume sus avisos sin que `notificaciones`
+   * dependa de él (ej. Mantenimiento registra los suyos en `onModuleInit`, reusando su propio
+   * cálculo). El `tipo` tiene que estar en `NOTIFICACIONES_CATALOG` y no puede repetirse: si
+   * no, falla el arranque — mejor eso que un aviso que nunca sale.
+   */
+  registrarEvaluator(evaluator: NotificacionEvaluator): void {
+    if (!NOTIFICACIONES_CATALOG.some((c) => c.tipo === evaluator.tipo)) {
+      throw new Error(`registrarEvaluator: el tipo "${evaluator.tipo}" no está en NOTIFICACIONES_CATALOG`);
+    }
+    if (this.evaluators.some((e) => e.tipo === evaluator.tipo)) {
+      throw new Error(`registrarEvaluator: ya hay un evaluator para "${evaluator.tipo}"`);
+    }
+    this.evaluators.push(evaluator);
   }
 
   /**
@@ -92,54 +116,85 @@ export class NotificacionesCronService {
       if (!activo) continue;
 
       const candidatas = await evaluator.evaluar(tenantId);
-      if (candidatas.length === 0) continue;
+      await this.enviarYRegistrar(tenantId, item, candidatas);
+    }
+  }
 
-      const yaNotificadas = await this.prisma.notificacionEnvio.findMany({
-        where: {
-          tenantId,
-          tipo: item.tipo,
-          entidadId: { in: candidatas.map((c) => c.entidadId) },
-        },
-        select: { entidadId: true },
+  /**
+   * Avisa en el momento (sin esperar a ningún cron) — para tipos `frecuencia: 'inmediata'`
+   * que dispara el propio flujo de negocio, ej. `combustible.errorChofer` al registrar el
+   * error. Respeta lo mismo que el cron: módulo contratado, toggle del tenant y dedup por
+   * `entidadId`. Best-effort: nunca tira, para no romper el flujo que lo llama.
+   */
+  async notificarAhora(tenantId: string, tipo: string, aviso: NotificacionItem): Promise<void> {
+    try {
+      const item = NOTIFICACIONES_CATALOG.find((c) => c.tipo === tipo);
+      if (!item) throw new Error(`tipo de notificación desconocido: ${tipo}`);
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { clerkOrgId: tenantId },
+        select: { modules: true },
       });
-      const yaNotificadasSet = new Set(yaNotificadas.map((n) => n.entidadId));
-      const nuevas = candidatas.filter((c) => !yaNotificadasSet.has(c.entidadId));
-      if (nuevas.length === 0) continue;
+      if (!tenant?.modules.includes(item.requiereModulo)) return;
+      if (!(await this.configService.isActivo(tenantId, tipo))) return;
+      await this.enviarYRegistrar(tenantId, item, [aviso]);
+    } catch (err) {
+      this.logger.error(`[${tenantId}] ${tipo}: no se pudo notificar en el momento: ${err}`);
+    }
+  }
 
-      const destinatarios = await this.resolverDestinatarios(tenantId, item.tipo);
-      if (destinatarios.length === 0) {
-        this.logger.warn(`[${tenantId}] ${item.tipo}: sin destinatarios (sin admins/usuarios elegidos con email en Clerk) — no se envía.`);
-        continue;
-      }
+  /** Filtra lo ya avisado (dedup por entidadId), manda un email agrupado y lo registra en la campana. */
+  private async enviarYRegistrar(
+    tenantId: string,
+    item: NotificacionCatalogoItem,
+    candidatas: NotificacionItem[],
+  ): Promise<void> {
+    if (candidatas.length === 0) return;
 
-      const enviado = await this.emailService.send({
-        to: destinatarios,
-        subject: `Vialto - ${item.label}${nuevas.length > 1 ? ` (${nuevas.length})` : ''}`,
-        html: this.buildHtml(item.label, nuevas, `${APP_URL}${item.urlDestino ?? ''}`),
-      });
+    const yaNotificadas = await this.prisma.notificacionEnvio.findMany({
+      where: {
+        tenantId,
+        tipo: item.tipo,
+        entidadId: { in: candidatas.map((c) => c.entidadId) },
+      },
+      select: { entidadId: true },
+    });
+    const yaNotificadasSet = new Set(yaNotificadas.map((n) => n.entidadId));
+    const nuevas = candidatas.filter((c) => !yaNotificadasSet.has(c.entidadId));
+    if (nuevas.length === 0) return;
 
-      if (!enviado) {
-        this.logger.warn(
-          `[${tenantId}] ${item.tipo}: el email no se pudo enviar, pero la notificación se registrará internamente en la campana.`,
-        );
-      }
+    const destinatarios = await this.resolverDestinatarios(tenantId, item.tipo);
+    if (destinatarios.length === 0) {
+      this.logger.warn(`[${tenantId}] ${item.tipo}: sin destinatarios (sin admins/usuarios elegidos con email en Clerk) — no se envía.`);
+      return;
+    }
 
-      await this.prisma.notificacionEnvio.createMany({
-        data: nuevas.map((c) => ({
-          tenantId,
-          tipo: item.tipo,
-          entidadId: c.entidadId,
-          titulo: c.titulo,
-          detalle: c.detalle,
-          destinatarios,
-        })),
-        skipDuplicates: true,
-      });
+    const enviado = await this.emailService.send({
+      to: destinatarios,
+      subject: `Vialto - ${item.label}${nuevas.length > 1 ? ` (${nuevas.length})` : ''}`,
+      html: this.buildHtml(item.label, nuevas, `${APP_URL}${item.urlDestino ?? ''}`),
+    });
 
-      this.logger.log(
-        `[${tenantId}] ${item.tipo}: enviado a ${destinatarios.length} destinatario(s), ${nuevas.length} ítem(s).`,
+    if (!enviado) {
+      this.logger.warn(
+        `[${tenantId}] ${item.tipo}: el email no se pudo enviar, pero la notificación se registrará internamente en la campana.`,
       );
     }
+
+    await this.prisma.notificacionEnvio.createMany({
+      data: nuevas.map((c) => ({
+        tenantId,
+        tipo: item.tipo,
+        entidadId: c.entidadId,
+        titulo: c.titulo,
+        detalle: c.detalle,
+        destinatarios,
+      })),
+      skipDuplicates: true,
+    });
+
+    this.logger.log(
+      `[${tenantId}] ${item.tipo}: enviado a ${destinatarios.length} destinatario(s), ${nuevas.length} ítem(s).`,
+    );
   }
 
   /**

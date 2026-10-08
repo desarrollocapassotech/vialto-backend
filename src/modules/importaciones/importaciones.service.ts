@@ -28,9 +28,17 @@ import type {
   EntidadesFaltantesModelo,
   ColumnaEsperada,
   ColumnasEsperadasModulo,
+  DeteccionHoja,
+  DeteccionHojaSinIdentificar,
+  DeteccionHojasResult,
 } from "./types/import.types";
 import type { CreateTemplateDto } from "./dto/create-template.dto";
-import { getCatalogoColumnas, getAltaFormularioDeModulo, construirConfigPorDefecto } from "./template-catalogo";
+import {
+  getCatalogoColumnas,
+  getAltaFormularioDeModulo,
+  getCamposVisibilidadDeColumna,
+  construirConfigPorDefecto,
+} from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
@@ -50,6 +58,70 @@ const CAMPOS_TRANSPORTISTA_VIAJE = new Set(["transportistaId", "transportistaEfe
 /** Tenant.tipoFlota = 'propia': la empresa no terceriza, sus viajes nunca llevan transportista. */
 function esSoloFlotaPropia(modulo: string, tipoFlota: string | null | undefined): boolean {
   return modulo === "viajes" && tipoFlota === "propia";
+}
+
+/**
+ * Columnas que solo tienen sentido si la empresa trabaja con transportistas
+ * externos (en el alta manual de Viajes, el pago al transportista solo se
+ * manda en modo "externo").
+ */
+const CAMPOS_TRANSPORTISTA_POR_MODULO: Record<string, ReadonlySet<string>> = {
+  viajes: new Set([
+    ...CAMPOS_TRANSPORTISTA_VIAJE,
+    "precioTransportistaExterno",
+    "monedaPrecioTransportistaExterno",
+    "cantidadTransportista",
+    "precioUnitarioTransportista",
+    "precioTransportistaIvaIncluidoPct",
+  ]),
+  choferes: new Set(["transportistaId"]),
+  vehiculos: new Set(["transportistaId"]),
+};
+
+/**
+ * Columnas de comprobantes (factura al cliente / factura del transportista):
+ * por ahora (oct 2026) no se importan — no se ofrecen en la pantalla de
+ * templates ni en la planilla, y se sacan de la plantilla activa aunque el
+ * template guardado las tenga mapeadas (si el Excel las trae, se ignoran).
+ * Para reactivarlas alcanza con vaciar este Set.
+ */
+const CAMPOS_COMPROBANTE_NO_IMPORTABLES: ReadonlySet<string> = new Set([
+  "nroFactura",
+  "fechaEmisionFactura",
+  "fechaVencimientoFactura",
+  "nroFacturaTransporte",
+  "fechaEmisionFacturaTransp",
+  "fechaVencimientoFacturaTransp",
+]);
+
+/** Lo que hace falta del Tenant para decidir qué columnas de import ocultar. */
+type TenantVisibilidadImport = {
+  idPropio1Habilitado: boolean;
+  idPropio2Habilitado: boolean;
+  idPropio2Label: string | null;
+  tipoFlota: string;
+  /** Código de 2 letras del país fijo (`paisOrigenDestinoOculto` + país elegido), o null. */
+  paisFijoCodigo: string | null;
+} | null;
+
+/**
+ * Módulos con columna `pais` que se fija sola cuando el tenant tiene país fijo
+ * (mismo flag que oculta el selector de país en el alta manual de Cliente y
+ * Transportista, ver `useTenantPaisFijo` en el frontend).
+ */
+const MODULOS_CON_PAIS_FIJO = new Set(["clientes", "transportistas"]);
+
+function esPaisFijo(
+  modulo: string,
+  field: string,
+  tenant: TenantVisibilidadImport,
+): boolean {
+  return field === "pais" && MODULOS_CON_PAIS_FIJO.has(modulo) && !!tenant?.paisFijoCodigo;
+}
+
+/** Minúsculas, sin acentos ni espacios de los bordes — para comparar nombres de hoja y encabezados. */
+function normalizarTexto(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
 
 @Injectable()
@@ -217,6 +289,145 @@ export class ImportacionesService {
     return { valid: errores.length === 0, errores };
   }
 
+  // ── Detección de hojas ─────────────────────────────────────────────────
+
+  /**
+   * Primer paso del wizard: qué módulos trae el Excel y en qué hoja.
+   *
+   * 1. Por nombre: la hoja de la plantilla del tenant (o la default, ej.
+   *    "Viajes"), o una hoja cuyo nombre contenga el módulo ("Transportes",
+   *    "vehiculos 2026"…).
+   * 2. Por encabezados, para las hojas que quedaron sin asignar (ej. "Hoja1"):
+   *    se asigna al módulo que tiene todas sus columnas obligatorias y más
+   *    columnas coincidentes. Empate → la hoja vuelve como `sinIdentificar`
+   *    con sus `candidatos`, para que elija el usuario.
+   *
+   * Hojas sin filas de datos se ignoran. Una hoja encontrada por nombre pero
+   * sin las columnas obligatorias vuelve igual, con `faltantes`.
+   */
+  async detectarHojas(
+    tenantId: string,
+    buffer: Buffer,
+    isSuperadmin: boolean,
+  ): Promise<DeteccionHojasResult> {
+    await this.assertImportacionesVisible(tenantId, isSuperadmin);
+    const hojas = this.parser.sampleWorkbook(buffer, Number.MAX_SAFE_INTEGER);
+
+    const modulos = Object.keys(SHEET_LABEL_DEFAULT);
+    const configs = new Map<string, TemplateConfig>();
+    for (const modulo of modulos) {
+      const { template } = await this.getActiveTemplate(tenantId, modulo);
+      configs.set(modulo, template.config as unknown as TemplateConfig);
+    }
+
+    const evaluar = (modulo: string, filas: unknown[][]) => {
+      const config = configs.get(modulo)!;
+      const headerIdx = Math.max(0, (config.headerRow ?? 1) - 1);
+      // Mismo criterio que `ParserService.parse`: sin distinguir mayúsculas,
+      // con los encabezados y alias de la plantilla.
+      const headers = ((filas[headerIdx] ?? []) as unknown[])
+        .map((h) => (h != null ? String(h).trim().toLowerCase() : ""))
+        .filter(Boolean);
+      const datos = filas
+        .slice(headerIdx + 1)
+        .filter((r) => (r as unknown[]).some((c) => c != null && String(c).trim() !== "")).length;
+      const presente = (col: ColumnConfig) =>
+        [col.excelHeader, ...(col.excelHeaderAliases ?? [])].some((h) =>
+          headers.includes(h.trim().toLowerCase()),
+        );
+      const faltantes = config.columns
+        .filter((c) => c.required && !presente(c))
+        .map((c) => c.excelHeader);
+      const coincidencias = config.columns.filter(presente).length;
+      return { datos, faltantes, coincidencias };
+    };
+
+    const asignadas = new Map<string, DeteccionHoja>(); // modulo → hoja
+    const hojasUsadas = new Set<string>();
+
+    // 1. Por nombre de hoja: primero coincidencias exactas (plantilla o
+    //    default) para todos los módulos, después parciales — así "Viajes
+    //    clientes" no se le asigna a Clientes antes de mirar Viajes.
+    const asignarPorNombre = (
+      coincide: (modulo: string, nombreHoja: string) => boolean,
+    ) => {
+      for (const modulo of modulos) {
+        if (asignadas.has(modulo)) continue;
+        const hoja = hojas.find(
+          (h) => !hojasUsadas.has(h.nombre) && coincide(modulo, normalizarTexto(h.nombre)),
+        );
+        if (!hoja) continue;
+        const ev = evaluar(modulo, hoja.filas);
+        if (ev.datos === 0) continue;
+        hojasUsadas.add(hoja.nombre);
+        asignadas.set(modulo, {
+          modulo,
+          hoja: hoja.nombre,
+          filas: ev.datos,
+          faltantes: ev.faltantes,
+          detectadaPor: "nombre",
+        });
+      }
+    };
+    asignarPorNombre((modulo, nombre) => {
+      const config = configs.get(modulo)!;
+      const objetivo =
+        typeof config.sheet === "number"
+          ? hojas[config.sheet]?.nombre
+          : config.sheet || SHEET_LABEL_DEFAULT[modulo];
+      return !!objetivo && nombre === normalizarTexto(objetivo);
+    });
+    asignarPorNombre((modulo, nombre) =>
+      [modulo, SHEET_LABEL_DEFAULT[modulo]]
+        .map(normalizarTexto)
+        .some((k) => nombre.includes(k)),
+    );
+
+    // 2. Por encabezados, para las hojas que quedaron libres.
+    const sinIdentificar: DeteccionHojaSinIdentificar[] = [];
+    for (const hoja of hojas) {
+      if (hojasUsadas.has(hoja.nombre)) continue;
+      const evaluaciones = modulos
+        .filter((m) => !asignadas.has(m))
+        .map((m) => ({ modulo: m, ...evaluar(m, hoja.filas) }))
+        .filter((e) => e.datos > 0);
+      if (evaluaciones.length === 0) continue; // hoja vacía
+      const candidatos = evaluaciones
+        .filter((e) => e.faltantes.length === 0 && e.coincidencias > 0)
+        .sort((a, b) => b.coincidencias - a.coincidencias);
+      const filas = Math.max(...evaluaciones.map((e) => e.datos));
+      const ganador =
+        candidatos.length === 1 ||
+        (candidatos.length > 1 && candidatos[0].coincidencias > candidatos[1].coincidencias)
+          ? candidatos[0]
+          : null;
+      if (ganador) {
+        hojasUsadas.add(hoja.nombre);
+        asignadas.set(ganador.modulo, {
+          modulo: ganador.modulo,
+          hoja: hoja.nombre,
+          filas: ganador.datos,
+          faltantes: [],
+          detectadaPor: "encabezados",
+        });
+      } else {
+        const empate = candidatos.filter(
+          (c) => c.coincidencias === candidatos[0]?.coincidencias,
+        );
+        sinIdentificar.push({
+          hoja: hoja.nombre,
+          filas,
+          candidatos: empate.map((c) => c.modulo),
+        });
+      }
+    }
+
+    return {
+      hojas: modulos.filter((m) => asignadas.has(m)).map((m) => asignadas.get(m)!),
+      sinIdentificar,
+    };
+  }
+
   // ── Preview ──────────────────────────────────────────────────────────────
 
   async preview(
@@ -225,13 +436,18 @@ export class ImportacionesService {
     buffer: Buffer,
     originalname: string,
     isSuperadmin: boolean,
+    hoja?: string,
   ): Promise<PreviewResult> {
     await this.assertImportacionesVisible(tenantId, isSuperadmin);
     const { template, columnasInyectadas } = await this.getActiveTemplate(
       tenantId,
       modulo,
     );
-    const config = template.config as unknown as TemplateConfig;
+    const configTemplate = template.config as unknown as TemplateConfig;
+    // La hoja detectada (`detectarHojas`) pisa la de la plantilla.
+    const config: TemplateConfig = hoja?.trim()
+      ? { ...configTemplate, sheet: hoja }
+      : configTemplate;
 
     const { rows: parsed, headers: headersExcel } = this.parser.parse(
       buffer,
@@ -260,6 +476,8 @@ export class ImportacionesService {
             c.excelHeaderAliases?.some((a) => a.toLowerCase() === h.toLowerCase()),
         ),
     );
+    // El wizard ya no muestra este aviso (oct 2026, era ruido visual); se
+    // sigue devolviendo en el PreviewResult por compatibilidad.
     const columnasOpcionalesFaltantes = config.columns
       .filter(
         (c) =>
@@ -339,6 +557,12 @@ export class ImportacionesService {
       result.advertenciasViajesFusionados = fusionados;
     } else if (processorModulo?.filasNuevas) {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
+      const sinCambios = await this.filasSinCambios(
+        modulo,
+        valid.filter((v) => !nuevas.has(v._rowNum)),
+        config.columns,
+        tenantId,
+      );
       const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
       // `raw[c.field]` viene de ParserService.parse(), que para columnas de
       // fecha ya convierte la celda a un objeto Date real (ver
@@ -363,11 +587,85 @@ export class ImportacionesService {
             label: c.excelHeader,
             valor: valorLegible(raw![c.field]),
           }));
-        return { fila: v._rowNum, esNuevo: nuevas.has(v._rowNum), campos };
+        return {
+          fila: v._rowNum,
+          esNuevo: nuevas.has(v._rowNum),
+          sinCambios: sinCambios.has(v._rowNum),
+          campos,
+        };
       });
     }
 
     return result;
+  }
+
+  /**
+   * Filas que "actualizan" un registro existente pero no cambiarían nada
+   * (Clientes/Transportes/Choferes por nombre, Vehículos por patente). Mismo
+   * criterio que el processor al guardar: una celda vacía no pisa el dato
+   * existente, así que solo se comparan las celdas con valor. Ante cualquier
+   * duda (patente compuesta, entidad a crear, campo que no es del modelo) la
+   * fila NO se marca: mejor un "Actualiza" de más que esconder un cambio.
+   */
+  private async filasSinCambios(
+    modulo: string,
+    rows: ValidatedRow[],
+    columns: ColumnConfig[],
+    tenantId: string,
+  ): Promise<Set<number>> {
+    const sinCambios = new Set<number>();
+    if (rows.length === 0) return sinCambios;
+
+    const porModulo: Record<string, { clave: "nombre" | "patente"; buscar: () => Promise<Record<string, unknown>[]> }> = {
+      clientes: { clave: "nombre", buscar: () => this.prisma.cliente.findMany({ where: { tenantId } }) },
+      transportistas: { clave: "nombre", buscar: () => this.prisma.transportista.findMany({ where: { tenantId } }) },
+      choferes: { clave: "nombre", buscar: () => this.prisma.chofer.findMany({ where: { tenantId } }) },
+      vehiculos: { clave: "patente", buscar: () => this.prisma.vehiculo.findMany({ where: { tenantId } }) },
+    };
+    const def = porModulo[modulo];
+    if (!def) return sinCambios;
+
+    const normClave = (v: unknown) =>
+      def.clave === "patente"
+        ? String(v ?? "").trim().toUpperCase()
+        : String(v ?? "").trim().toLowerCase();
+    const existentes = new Map<string, Record<string, unknown>>();
+    for (const r of await def.buscar()) existentes.set(normClave(r[def.clave]), r);
+
+    const SOLO_DIGITOS = new Set(["idFiscal", "cuit", "dni"]);
+    const iguales = (campo: string, nuevo: unknown, actual: unknown): boolean => {
+      if (actual instanceof Date || nuevo instanceof Date) {
+        const fecha = (x: unknown) =>
+          x == null ? "" : new Date(x as string | Date).toISOString().slice(0, 10);
+        return fecha(nuevo) === fecha(actual);
+      }
+      if (typeof actual === "boolean") return Boolean(Number(nuevo)) === actual;
+      if (typeof actual === "number") return Number(nuevo) === actual;
+      const texto = (x: unknown) => String(x ?? "").trim();
+      if (SOLO_DIGITOS.has(campo)) {
+        return texto(nuevo).replace(/\D/g, "") === texto(actual).replace(/\D/g, "");
+      }
+      return texto(nuevo).toLowerCase() === texto(actual).toLowerCase();
+    };
+
+    for (const row of rows) {
+      const claveFila = row[def.clave];
+      // Patente compuesta (tractor/semirremolque) = dos vehículos: no se evalúa.
+      if (def.clave === "patente" && String(claveFila ?? "").includes("/")) continue;
+      const actual = existentes.get(normClave(claveFila));
+      if (!actual) continue;
+
+      const cambia = columns.some((col) => {
+        if (col.field === def.clave) return false;
+        const nuevo = row[col.field];
+        if (nuevo == null || String(nuevo).trim() === "") return false;
+        if (typeof nuevo === "string" && nuevo.startsWith("__pending__")) return true;
+        if (!(col.field in actual)) return false; // columna que no es del modelo
+        return !iguales(col.field, nuevo, actual[col.field]);
+      });
+      if (!cambia) sinCambios.add(row._rowNum);
+    }
+    return sinCambios;
   }
 
   // ── Confirm ───────────────────────────────────────────────────────────────
@@ -522,10 +820,18 @@ export class ImportacionesService {
       }
     }
 
+    // Cada entidad pendiente se crea una sola vez: el mismo placeholder se
+    // repite en todas las filas que la referencian (ej. 5 viajes de "Soja").
+    const creadasPorPlaceholder = new Map<string, string>();
     for (const fila of filasValidas) {
       for (const key of Object.keys(fila)) {
         const value = fila[key];
         if (typeof value === "string" && value.startsWith("__pending__")) {
+          const yaCreada = creadasPorPlaceholder.get(value);
+          if (yaCreada) {
+            fila[key] = yaCreada;
+            continue;
+          }
           const [, , model, nombre] = value.split("__");
           const id = await this.validator.createLookup(
             model,
@@ -540,6 +846,7 @@ export class ImportacionesService {
               `No se pudo crear "${nombre}" en "${model}". Revisá la configuración de la importación.`,
             );
           }
+          creadasPorPlaceholder.set(value, id);
           fila[key] = id;
         }
       }
@@ -693,54 +1000,91 @@ export class ImportacionesService {
    * contraparte ahí (ej. `choferes`) no se filtran — se muestran todos.
    */
   async getCatalogoCampos(modulo: string, tenantId: string) {
-    let columnas = getCatalogoColumnas(modulo);
+    const tenant = await this.tenantVisibilidadImport(tenantId);
+    const estaOculta = await this.columnaImportOculta(tenantId, modulo, tenant);
+    const columnas = getCatalogoColumnas(modulo).filter((c) => !estaOculta(c.field));
 
-    // "ID Propio 2" no tiene contraparte en TenantFieldConfig/FIELD_CATALOG (es
-    // un boolean propio del Tenant, no visibilidad de un campo existente) —
-    // se filtra acá puntualmente para que un tenant sin la feature habilitada
-    // no vea la columna en la pantalla de configuración de templates de import.
-    // El label tampoco es estático: se resuelve contra Tenant.idPropio2Label
-    // (ej. "CPE" para NyM) en vez del nombre genérico "ID Propio 2" del catálogo.
-    if (modulo === "viajes") {
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { clerkOrgId: tenantId },
-        select: {
-          idPropio1Habilitado: true,
-          idPropio2Habilitado: true,
-          idPropio2Label: true,
-        },
+    // El label de "ID Propio 2" no es estático: se resuelve contra
+    // Tenant.idPropio2Label (ej. "CPE" para NyM).
+    if (modulo !== "viajes" || !tenant?.idPropio2Habilitado) return columnas;
+    const label = tenant.idPropio2Label?.trim() || "ID Propio 2";
+    return columnas.map((c) =>
+      c.field === "idPropio2"
+        ? { ...c, campoLabel: label, defaultExcelHeader: label }
+        : c,
+    );
+  }
+
+  /** Flags del tenant que deciden qué columnas de import aplican (ver columnaImportOculta). */
+  private async tenantVisibilidadImport(tenantId: string): Promise<TenantVisibilidadImport> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: {
+        idPropio1Habilitado: true,
+        idPropio2Habilitado: true,
+        idPropio2Label: true,
+        tipoFlota: true,
+        paisOrigenDestinoOculto: true,
+        paisOrigenDestinoFijoId: true,
+      },
+    });
+    if (!tenant) return null;
+    const { paisOrigenDestinoOculto, paisOrigenDestinoFijoId, ...resto } = tenant;
+    let paisFijoCodigo: string | null = null;
+    if (paisOrigenDestinoOculto && paisOrigenDestinoFijoId) {
+      const pais = await this.prisma.pais.findFirst({
+        where: { id: paisOrigenDestinoFijoId, tenantId },
+        select: { codigo: true },
       });
-      // "ID Propio 1" (numeroIdentificacionPersonalizado) no tenía toggle
-      // hasta ahora — mismo criterio de filtro puntual que "ID Propio 2"
-      // (Sistema queda afuera: ya está en PRISMA_IMPORT_EXCLUDE, nunca fue
-      // importable).
-      if (!tenant?.idPropio1Habilitado) {
-        columnas = columnas.filter(
-          (c) => c.field !== "numeroIdentificacionPersonalizado",
-        );
-      }
-      if (!tenant?.idPropio2Habilitado) {
-        columnas = columnas.filter((c) => c.field !== "idPropio2");
-      } else {
-        const label = tenant.idPropio2Label?.trim() || "ID Propio 2";
-        columnas = columnas.map((c) =>
-          c.field === "idPropio2"
-            ? { ...c, campoLabel: label, defaultExcelHeader: label }
-            : c,
-        );
-      }
+      const codigo = pais?.codigo?.trim().toUpperCase();
+      // Solo un código de 2 letras sirve como valor de Cliente/Transportista.pais.
+      paisFijoCodigo = codigo && /^[A-Z]{2}$/.test(codigo) ? codigo : null;
+    }
+    return { ...resto, paisFijoCodigo };
+  }
+
+  /**
+   * Decide qué columnas de import NO aplican a un tenant, para no ofrecerlas
+   * ni en la pantalla de templates ni en la planilla descargable:
+   * - campos ocultos en "Campos por empresa" (`tenant-field-config`, visibilidad
+   *   compartida entre alta/edición/detalle — ver `visibilidadDesde` en
+   *   template-catalogo.ts para columnas que no matchean 1:1 con el formulario);
+   * - "ID Propio 1"/"ID Propio 2" sin habilitar (flags propios del Tenant);
+   * - columnas de transportista si la empresa es solo de flota propia, y
+   *   "Tipo de flota" si no es mixta (con un solo tipo no hay nada que elegir);
+   * - "País" de Clientes/Transportistas si la empresa tiene país fijo (se
+   *   completa solo, ver getActiveTemplate).
+   */
+  private async columnaImportOculta(
+    tenantId: string,
+    modulo: string,
+    tenant: TenantVisibilidadImport,
+  ): Promise<(field: string) => boolean> {
+    const altaFormulario = getAltaFormularioDeModulo(modulo);
+    const ocultosForm = new Set<string>();
+    if (altaFormulario) {
+      const config = await this.tenantFieldConfig.getConfigEfectivaModuloUnificado(
+        tenantId,
+        altaFormulario.modulo,
+      );
+      for (const c of config) if (!c.visible) ocultosForm.add(c.campo);
     }
 
-    const altaFormulario = getAltaFormularioDeModulo(modulo);
-    if (!altaFormulario) return columnas;
-
-    const config = await this.tenantFieldConfig.getConfigEfectiva(
-      tenantId,
-      altaFormulario.modulo,
-      altaFormulario.formulario,
-    );
-    const ocultos = new Set(config.filter((c) => !c.visible).map((c) => c.campo));
-    return columnas.filter((c) => !ocultos.has(c.field));
+    const tipoFlota = tenant?.tipoFlota ?? "mixta";
+    return (field) => {
+      if (CAMPOS_COMPROBANTE_NO_IMPORTABLES.has(field)) return true;
+      if (esPaisFijo(modulo, field, tenant)) return true;
+      if (modulo === "viajes") {
+        if (field === "numeroIdentificacionPersonalizado" && !tenant?.idPropio1Habilitado)
+          return true;
+        if (field === "idPropio2" && !tenant?.idPropio2Habilitado) return true;
+        if (field === "tipoFlota" && tipoFlota !== "mixta") return true;
+      }
+      if (tipoFlota === "propia" && CAMPOS_TRANSPORTISTA_POR_MODULO[modulo]?.has(field))
+        return true;
+      const campos = getCamposVisibilidadDeColumna(modulo, field);
+      return campos.every((c) => ocultosForm.has(c));
+    };
   }
 
   /**
@@ -759,39 +1103,34 @@ export class ImportacionesService {
     });
     const templatePorModulo = new Map(templates.map((t) => [t.modulo, t]));
 
-    // "ID Propio 1"/"ID Propio 2" no tienen template propio guardado en la
-    // mayoría de los tenants (construirConfigPorDefecto no es tenant-aware) —
-    // se resuelve acá su habilitación/label igual que en getCatalogoCampos.
-    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
-      where: { clerkOrgId: tenantId },
-      select: {
-        idPropio1Habilitado: true,
-        idPropio2Habilitado: true,
-        idPropio2Label: true,
-        tipoFlota: true,
-      },
-    });
+    // construirConfigPorDefecto no es tenant-aware — las columnas que no
+    // aplican a la empresa (campos ocultos, ID Propio sin habilitar, tipo de
+    // flota) se filtran acá, igual que en getCatalogoCampos.
+    const tenantIdPropio2 = await this.tenantVisibilidadImport(tenantId);
 
-    return modulos.map((modulo) => {
+    const ocultaPorModulo = await Promise.all(
+      modulos.map((modulo) => this.columnaImportOculta(tenantId, modulo, tenantIdPropio2)),
+    );
+    // Empresa que apagó "Vehículos"/"Choferes" (Configuración por empresa →
+    // General, campos de Viajes): la planilla no trae esa hoja. Se lee del
+    // mismo filtro que ya oculta la columna de Viajes (vehiculoId ↔
+    // vehiculosRows, choferId ↔ choferId + choferExternoId).
+    const ocultaViajes = ocultaPorModulo[modulos.indexOf("viajes")];
+    const hojaOculta: Record<string, boolean> = {
+      vehiculos: ocultaViajes("vehiculoId"),
+      choferes: ocultaViajes("choferId"),
+    };
+
+    return modulos.flatMap((modulo, i) => {
+      if (hojaOculta[modulo]) return [];
       const template = templatePorModulo.get(modulo);
       const config = template
         ? (template.config as unknown as TemplateConfig)
         : construirConfigPorDefecto(modulo);
       const catalogo = getCatalogoColumnas(modulo);
+      const estaOculta = ocultaPorModulo[i];
 
-      const columnasCrudas = (config?.columns ?? []).filter((c) => {
-        if (modulo !== "viajes") return true;
-        if (c.field === "idPropio2" && !tenantIdPropio2?.idPropio2Habilitado)
-          return false;
-        if (
-          c.field === "numeroIdentificacionPersonalizado" &&
-          !tenantIdPropio2?.idPropio1Habilitado
-        )
-          return false;
-        return true;
-      });
-
-      const columnas: ColumnaEsperada[] = columnasCrudas.map((c) => {
+      const columnas: ColumnaEsperada[] = (config?.columns ?? []).flatMap((c) => {
         const enCatalogo = catalogo.find((cat) => cat.field === c.field);
         const esIdPropio2 = modulo === "viajes" && c.field === "idPropio2";
         const labelDinamico = esIdPropio2
@@ -804,29 +1143,34 @@ export class ImportacionesService {
           excelHeader: labelDinamico && !template ? labelDinamico : c.excelHeader,
           campoLabel: labelDinamico ?? enCatalogo?.campoLabel ?? c.field,
           tipo: c.type,
-          // Mismo criterio que getActiveTemplate (paso 3): sin transportista
-          // obligatorio para una empresa solo de flota propia.
+          // Mismo criterio que getActiveTemplate (pasos 3 y 4): sin
+          // transportista obligatorio para una empresa solo de flota propia, y
+          // el país fijo nunca es obligatorio (se completa solo).
           requerido:
             !!c.required &&
             !(
               esSoloFlotaPropia(modulo, tenantIdPropio2?.tipoFlota) &&
               CAMPOS_TRANSPORTISTA_VIAJE.has(c.field)
-            ),
+            ) &&
+            !esPaisFijo(modulo, c.field, tenantIdPropio2),
         };
+        // Una columna obligatoria de la plantilla se deja aunque el campo esté
+        // oculto para la empresa: sin ella el import del archivo fallaría.
+        if (!col.requerido && estaOculta(c.field)) return [];
         if (c.warnIfEmpty) col.recomendado = true;
         if (c.allowedValues) col.allowedValues = c.allowedValues;
         if (c.lookupModel) col.lookupModel = c.lookupModel;
-        return col;
+        return [col];
       });
 
-      return {
+      return [{
         modulo,
         sheet:
           (typeof config?.sheet === "string" ? config.sheet : undefined) ??
           SHEET_LABEL_DEFAULT[modulo] ??
           modulo,
         columnas,
-      };
+      }];
     });
   }
 
@@ -1338,7 +1682,19 @@ export class ImportacionesService {
             : null,
       },
     ];
-    return pares.filter((p) => p.antes !== p.despues);
+    // Una celda vacía en el Excel no pisa el dato existente al guardar (el
+    // processor la pasa como `undefined`), así que no es un cambio — antes
+    // aparecía "Moneda: ARS → —" para columnas que el archivo no trae.
+    const vacio = (v: unknown) => v == null || String(v).trim() === "";
+    const normalizar = (v: unknown) => {
+      const n = typeof v === "number" ? v : Number(String(v).replace("%", "").trim());
+      return Number.isFinite(n) && String(v).trim() !== ""
+        ? String(n)
+        : String(v).trim().toLowerCase();
+    };
+    return pares.filter(
+      (p) => !vacio(p.despues) && (vacio(p.antes) || normalizar(p.antes) !== normalizar(p.despues)),
+    );
   }
 
   /**
@@ -1479,6 +1835,48 @@ export class ImportacionesService {
       if (esSoloFlotaPropia(modulo, tenantIdentificadores?.tipoFlota)) {
         for (const col of configData.columns) {
           if (CAMPOS_TRANSPORTISTA_VIAJE.has(col.field)) col.required = false;
+        }
+      }
+
+      // 4. Columnas de comprobantes: por ahora no se importan (ver
+      // CAMPOS_COMPROBANTE_NO_IMPORTABLES). Solo en memoria — el template
+      // guardado no se toca, así se pueden reactivar sin reconfigurar nada.
+      configData.columns = configData.columns.filter(
+        (c) => !CAMPOS_COMPROBANTE_NO_IMPORTABLES.has(c.field),
+      );
+      for (const f of CAMPOS_COMPROBANTE_NO_IMPORTABLES) columnasInyectadas.delete(f);
+
+      // 6. Producto de Viajes: si no existe se crea solo (con el nombre del
+      // Excel), en vez de bloquear la fila. No aplica a empresas con Stock:
+      // ahí un producto exige peso y presentación (crearProductoSimple lo
+      // rechaza con un mensaje claro). Solo en memoria.
+      if (modulo === "viajes") {
+        const tenantModulos = await this.prisma.tenant.findUnique({
+          where: { clerkOrgId: tenantId },
+          select: { modules: true },
+        });
+        const tieneStock = (tenantModulos?.modules ?? []).some(
+          (m) => m.toLowerCase() === "stock",
+        );
+        if (!tieneStock) {
+          for (const col of configData.columns) {
+            if (col.field === "productoId") col.createIfNotFound = true;
+          }
+        }
+      }
+
+      // 5. País fijo (Clientes/Transportistas): se completa siempre con el país
+      // de la empresa, igual que en el alta manual — ignora lo que traiga el
+      // Excel y no exige la columna. Solo en memoria.
+      if (MODULOS_CON_PAIS_FIJO.has(modulo)) {
+        const tenant = await this.tenantVisibilidadImport(tenantId);
+        if (tenant?.paisFijoCodigo) {
+          for (const col of configData.columns) {
+            if (col.field !== "pais") continue;
+            col.valorFijo = tenant.paisFijoCodigo;
+            col.required = false;
+            col.warnIfEmpty = false;
+          }
         }
       }
     }

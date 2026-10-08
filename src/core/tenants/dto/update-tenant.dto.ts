@@ -42,4 +42,10 @@ export class UpdateTenantDto {
 
   /** Con qué flota trabaja la empresa (ver Tenant.tipoFlota en schema.prisma). */
   @IsOptional() @IsIn(['mixta', 'propia', 'externa']) tipoFlota?: string;
+
+  /** false = el tenant no ve el dashboard; su inicio pasa a ser el primer módulo contratado. */
+  @IsOptional() @IsBoolean() dashboardHabilitado?: boolean;
+
+  /** false = origen/destino de Viajes en texto libre, sin buscador de ciudades ni validación en el import. */
+  @IsOptional() @IsBoolean() recomendacionCiudadesHabilitada?: boolean;
 }

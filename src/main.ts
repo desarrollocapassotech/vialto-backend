@@ -129,7 +129,7 @@ async function bootstrap() {
     .addTag('Módulo: Stock', 'Productos y movimientos de stock · Fase 2 — activo')
     // Próximamente
     .addTag('[Próximamente] Combustible', 'Control de cargas de combustible por vehículo · Fase 4 — no activo')
-    .addTag('[Próximamente] Mantenimiento', 'Intervenciones y alertas de flota · Fase 4 — no activo')
+    .addTag('Mantenimiento', 'Planes, órdenes de trabajo y vencimientos de flota')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document, {

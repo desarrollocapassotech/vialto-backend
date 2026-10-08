@@ -145,39 +145,70 @@ export class VehiculosService {
     });
   }
 
-  async update(id: string, tenantId: string, dto: UpdateVehiculoDto) {
-    await this.findOne(id, tenantId);
+  /** Medianoche UTC de hoy: la fecha de toda corrección manual de km (no se permite backdatear). */
+  private static hoyUtc(): Date {
+    const fecha = new Date();
+    fecha.setUTCHours(0, 0, 0, 0);
+    return fecha;
+  }
+
+  /**
+   * Deja la corrección en `VehiculoKmEdicion` (quién, cuándo, km anterior → nuevo). Esa fila
+   * es lo que pone la corrección en la línea de tiempo de km que leen Combustible
+   * (`getLimitesCronologicos`) y el odómetro de Mantenimiento.
+   */
+  private registrarEdicionKm(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    vehiculoId: string,
+    kmAnterior: number,
+    kmNuevo: number,
+    userId: string,
+  ) {
+    return tx.vehiculoKmEdicion.create({
+      data: { tenantId, vehiculoId, kmAnterior, kmNuevo, fecha: VehiculosService.hoyUtc(), createdBy: userId },
+    });
+  }
+
+  /**
+   * Corrige el kilometraje de un vehículo, con auditoría. Vive en core (no en Combustible)
+   * para que esté disponible aunque el tenant no tenga ese módulo; los endpoints de
+   * Combustible delegan acá. Crea la edición aunque el km no cambie (comportamiento histórico).
+   */
+  async editarKm(tenantId: string, vehiculoId: string, kmNuevo: number, userId: string) {
+    const vehiculo = await this.findOne(vehiculoId, tenantId);
+    return this.prisma.$transaction(async (tx) => {
+      const edicion = await this.registrarEdicionKm(tx, tenantId, vehiculoId, vehiculo.kmActual, kmNuevo, userId);
+      await tx.vehiculo.updateMany({ where: { id: vehiculoId, tenantId }, data: { kmActual: kmNuevo } });
+      return edicion;
+    });
+  }
+
+  /** Historial de correcciones manuales de km de un vehículo, más reciente primero. */
+  getHistorialKm(tenantId: string, vehiculoId: string) {
+    return this.prisma.vehiculoKmEdicion.findMany({
+      where: { tenantId, vehiculoId },
+      orderBy: [{ fecha: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  /**
+   * Si `dto.kmActual` cambia el km, se registra como corrección manual (misma transacción).
+   * Si viene igual o no viene, no se registra nada — así una reimportación del mismo Excel
+   * no ensucia la línea de tiempo.
+   */
+  async update(id: string, tenantId: string, dto: UpdateVehiculoDto, userId: string) {
+    const actual = await this.findOne(id, tenantId);
     if (dto.transportistaId !== undefined) {
       await this.assertTransportista(tenantId, dto.transportistaId ?? undefined);
     }
+    const cambiaKm = dto.kmActual !== undefined && dto.kmActual !== actual.kmActual;
     try {
-      return await this.prisma.vehiculo.update({
-        where: { id },
-        data: {
-          patente: dto.patente ? dto.patente.toUpperCase() : undefined,
-          // Si se carga una patente real, deja de estar pendiente.
-          patentePendiente: dto.patente ? false : undefined,
-          tipo: dto.tipo,
-          marca: dto.marca,
-          modelo: dto.modelo,
-          anio: dto.anio,
-          kmActual: dto.kmActual,
-          nroChasis:
-            dto.nroChasis !== undefined ? (dto.nroChasis?.trim() || null) : undefined,
-          poliza: dto.poliza !== undefined ? (dto.poliza?.trim() || null) : undefined,
-          vencimientoPoliza:
-            dto.vencimientoPoliza !== undefined
-              ? dto.vencimientoPoliza
-                ? new Date(dto.vencimientoPoliza)
-                : null
-              : undefined,
-          tara: dto.tara !== undefined ? dto.tara : undefined,
-          precinto:
-            dto.precinto !== undefined ? (dto.precinto?.trim() || null) : undefined,
-          transportistaId:
-            dto.transportistaId === undefined ? undefined : dto.transportistaId,
-          activo: dto.activo,
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        if (cambiaKm) {
+          await this.registrarEdicionKm(tx, tenantId, id, actual.kmActual, dto.kmActual as number, userId);
+        }
+        return this.updateCampos(tx, id, tenantId, dto);
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -185,6 +216,44 @@ export class VehiculosService {
       }
       throw e;
     }
+  }
+
+  private async updateCampos(
+    tx: Prisma.TransactionClient,
+    id: string,
+    tenantId: string,
+    dto: UpdateVehiculoDto,
+  ) {
+    const { count } = await tx.vehiculo.updateMany({
+      where: { id, tenantId },
+      data: {
+        patente: dto.patente ? dto.patente.toUpperCase() : undefined,
+        // Si se carga una patente real, deja de estar pendiente.
+        patentePendiente: dto.patente ? false : undefined,
+        tipo: dto.tipo,
+        marca: dto.marca,
+        modelo: dto.modelo,
+        anio: dto.anio,
+        kmActual: dto.kmActual,
+        nroChasis:
+          dto.nroChasis !== undefined ? (dto.nroChasis?.trim() || null) : undefined,
+        poliza: dto.poliza !== undefined ? (dto.poliza?.trim() || null) : undefined,
+        vencimientoPoliza:
+          dto.vencimientoPoliza !== undefined
+            ? dto.vencimientoPoliza
+              ? new Date(dto.vencimientoPoliza)
+              : null
+            : undefined,
+        tara: dto.tara !== undefined ? dto.tara : undefined,
+        precinto:
+          dto.precinto !== undefined ? (dto.precinto?.trim() || null) : undefined,
+        transportistaId:
+          dto.transportistaId === undefined ? undefined : dto.transportistaId,
+        activo: dto.activo,
+      },
+    });
+    if (count === 0) throw new NotFoundException('Vehículo no encontrado');
+    return tx.vehiculo.findFirstOrThrow({ where: { id, tenantId } });
   }
 
   async remove(id: string, tenantId: string) {

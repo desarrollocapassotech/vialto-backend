@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
+import { FACTURACION_ESTADOS_DISPONIBLES } from "./viaje-estados";
 
 export type ViajeClienteDestinoItem = { etiqueta: string };
 export type ViajeClienteProductoItem = {
@@ -165,7 +166,10 @@ export async function reemplazarClientesDelViaje(
     select: { clienteId: true, facturacionEstado: true },
   });
   const bloqueados = actuales.filter(
-    (r) => !["sin_facturar", "anulado"].includes(r.facturacionEstado),
+    (r) =>
+      !(FACTURACION_ESTADOS_DISPONIBLES as readonly string[]).includes(
+        r.facturacionEstado,
+      ),
   );
   if (bloqueados.length > 0) {
     throw new ConflictException(

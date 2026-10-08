@@ -1572,6 +1572,7 @@ export class ImportacionesService {
           nuevo,
           cambiosSobrescritura,
           cambios,
+          bloqueadoPor: actual?.bloqueo ?? null,
         });
 
         if (dataUltimo.nroFactura) {
@@ -1603,6 +1604,7 @@ export class ImportacionesService {
           ...data.nuevoValor,
           nuevo: !actual,
           cambios,
+          bloqueadoPor: actual?.bloqueo ?? null,
         });
 
         if (data.nroFactura) {

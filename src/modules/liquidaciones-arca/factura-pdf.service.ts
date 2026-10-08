@@ -15,7 +15,7 @@ import {
 } from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
-import { headerCantidad, normalizeUnidadCantidad } from './cantidad-unidad.util';
+import { normalizeUnidadCantidad } from './cantidad-unidad.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -94,7 +94,8 @@ function matchViajeItem(
  * Arma el texto de la columna "Detalle": "FLETE S/[LABEL ID PROPIO 1]: [CTG] – [LABEL
  * ID PROPIO 2] [VALOR] – ORIGEN: [ORIGEN] DESTINO: [DESTINO] - PRODUCTO: [PRODUCTO]".
  * El label del primer segmento es `Tenant.labelIdentificacionPersonalizadaViajes`
- * ("ID propio" por defecto; ej. "CTG" para NyM) — siempre se muestra (no depende de
+ * ("ID propio" por defecto; ej. "CTG" para NyM) si el viaje tiene ID propio cargado, o
+ * "VIAJE" + número interno si no — siempre se muestra (no depende de
  * ningún módulo), a diferencia del segmento de ID Propio 2 (label = `idPropio2Label`)
  * y el de PRODUCTO, que son opcionales. Puramente a nivel de dibujo del PDF (no se
  * persiste, no es texto fiscal: ArcaComprobanteItem es solo presentación/auditoría,
@@ -112,7 +113,11 @@ function buildDetalleFlete(
   if (!viaje) return item.descripcion;
 
   const ctg = numeroVisibleViaje(viaje);
-  const labelCtg = tenantPdfConfig?.labelIdentificacionPersonalizadaViajes?.trim() || 'ID propio';
+  // El nombre del ID propio solo va si el viaje lo tiene cargado; si no, `ctg` es el
+  // número interno (#123) y rotularlo "CTG" sería incorrecto.
+  const labelCtg = viaje.numeroIdentificacionPersonalizado?.trim()
+    ? tenantPdfConfig?.labelIdentificacionPersonalizadaViajes?.trim() || 'ID propio'
+    : 'VIAJE';
   const idPropio2Valor = viaje.idPropio2?.trim();
   const usaIdPropio2 = Boolean(tenantPdfConfig?.idPropio2Habilitado && idPropio2Valor);
   const label = tenantPdfConfig?.idPropio2Label?.trim() || 'ID Propio 2';
@@ -782,7 +787,8 @@ export class FacturaPdfService {
     const cellPadY = 4;
     const cellPadX = 2;
 
-    const tHeaders = ['Detalle', headerCantidad(tenantPdfConfig?.unidadCantidadViajes), 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+    // "Cantidad" genérico: la unidad (TN/UD) va solo en las líneas de viaje.
+    const tHeaders = ['Detalle', 'Cantidad', 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
     doc.rect(M, y, tableW, headerRowH).fill('#e8e8e8').stroke('#aaa');
     tHeaders.forEach((h, i) => {
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
@@ -795,12 +801,15 @@ export class FacturaPdfService {
 
     for (const item of comprobante.items) {
       const detalleDraw = buildDetalleFlete(item, factura.viajes, tenantPdfConfig);
+      const esLineaViaje = matchViajeItem(item, factura.viajes) != null;
       const cells = [
         { v: detalleDraw.toUpperCase(), align: 'left' as const },
         {
           v:
             item.cantidad != null
-              ? `${fmtNum(item.cantidad)} ${normalizeUnidadCantidad(tenantPdfConfig?.unidadCantidadViajes)}`
+              ? esLineaViaje
+                ? `${fmtNum(item.cantidad)} ${normalizeUnidadCantidad(tenantPdfConfig?.unidadCantidadViajes)}`
+                : fmtNum(item.cantidad)
               : '1,00',
           align: 'right' as const,
         },

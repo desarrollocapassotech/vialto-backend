@@ -1,4 +1,44 @@
 import { BadRequestException } from '@nestjs/common';
+import { cuitDigitoVerificadorValido } from './cuit';
+
+const LABEL_ID_FISCAL: Record<string, string> = {
+  AR: 'CUIT',
+  UY: 'RUT',
+  PY: 'RUC',
+  CL: 'RUT',
+  BR: 'CNPJ / CPF',
+};
+
+const PAIS_POR_NOMBRE: Record<string, string> = {
+  ARGENTINA: 'AR',
+  URUGUAY: 'UY',
+  PARAGUAY: 'PY',
+  CHILE: 'CL',
+  BRASIL: 'BR',
+  BRAZIL: 'BR',
+};
+
+/**
+ * Cómo se llama el ID fiscal en cada país (CUIT, RUT, RUC…), para mensajes al usuario.
+ * Acepta el código ("AR") o el nombre ("Argentina", sin importar tildes/mayúsculas).
+ * Sin país reconocido, si `idFiscal` es un CUIT argentino válido (11 dígitos + dígito
+ * verificador) devuelve "CUIT"; si no, "ID Fiscal". Mismo criterio que `idFiscalPorPais` del front.
+ */
+export function labelIdFiscalPorPais(
+  pais: string | null | undefined,
+  idFiscal?: string | null,
+): string {
+  const v = (pais ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toUpperCase();
+  const codigo = PAIS_POR_NOMBRE[v] ?? v;
+  const label = LABEL_ID_FISCAL[codigo];
+  if (label) return label;
+  if (idFiscal && cuitDigitoVerificadorValido(idFiscal)) return LABEL_ID_FISCAL.AR;
+  return 'ID Fiscal';
+}
 
 export function validarIdFiscal(
   pais: string | null | undefined,

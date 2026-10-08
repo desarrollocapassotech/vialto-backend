@@ -24,6 +24,7 @@ import type {
   PreviewCambioCampo,
   PreviewFactura,
   PreviewEntidad,
+  PreviewFilaCambio,
   RowError,
   EntidadesFaltantesModelo,
   ColumnaEsperada,
@@ -557,7 +558,7 @@ export class ImportacionesService {
       result.advertenciasViajesFusionados = fusionados;
     } else if (processorModulo?.filasNuevas) {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
-      const sinCambios = await this.filasSinCambios(
+      const { sinCambios, cambios } = await this.cambiosFilasExistentes(
         modulo,
         valid.filter((v) => !nuevas.has(v._rowNum)),
         config.columns,
@@ -591,6 +592,7 @@ export class ImportacionesService {
           fila: v._rowNum,
           esNuevo: nuevas.has(v._rowNum),
           sinCambios: sinCambios.has(v._rowNum),
+          cambios: cambios.get(v._rowNum),
           campos,
         };
       });
@@ -600,21 +602,23 @@ export class ImportacionesService {
   }
 
   /**
-   * Filas que "actualizan" un registro existente pero no cambiarían nada
-   * (Clientes/Transportes/Choferes por nombre, Vehículos por patente). Mismo
-   * criterio que el processor al guardar: una celda vacía no pisa el dato
+   * Para las filas que "actualizan" un registro existente (Clientes/Transportes/
+   * Choferes por nombre, Vehículos por patente): qué campos cambiarían, con el
+   * valor actual y el nuevo (`cambios`), y cuáles no cambian nada (`sinCambios`).
+   * Mismo criterio que el processor al guardar: una celda vacía no pisa el dato
    * existente, así que solo se comparan las celdas con valor. Ante cualquier
-   * duda (patente compuesta, entidad a crear, campo que no es del modelo) la
-   * fila NO se marca: mejor un "Actualiza" de más que esconder un cambio.
+   * duda (patente compuesta, campo que no es del modelo) la fila NO se marca como
+   * sin cambios: mejor un "Actualiza" de más que esconder un cambio.
    */
-  private async filasSinCambios(
+  private async cambiosFilasExistentes(
     modulo: string,
     rows: ValidatedRow[],
     columns: ColumnConfig[],
     tenantId: string,
-  ): Promise<Set<number>> {
+  ): Promise<{ sinCambios: Set<number>; cambios: Map<number, PreviewFilaCambio[]> }> {
     const sinCambios = new Set<number>();
-    if (rows.length === 0) return sinCambios;
+    const cambios = new Map<number, PreviewFilaCambio[]>();
+    if (rows.length === 0) return { sinCambios, cambios };
 
     const porModulo: Record<string, { clave: "nombre" | "patente"; buscar: () => Promise<Record<string, unknown>[]> }> = {
       clientes: { clave: "nombre", buscar: () => this.prisma.cliente.findMany({ where: { tenantId } }) },
@@ -623,7 +627,7 @@ export class ImportacionesService {
       vehiculos: { clave: "patente", buscar: () => this.prisma.vehiculo.findMany({ where: { tenantId } }) },
     };
     const def = porModulo[modulo];
-    if (!def) return sinCambios;
+    if (!def) return { sinCambios, cambios };
 
     const normClave = (v: unknown) =>
       def.clave === "patente"
@@ -655,17 +659,37 @@ export class ImportacionesService {
       const actual = existentes.get(normClave(claveFila));
       if (!actual) continue;
 
-      const cambia = columns.some((col) => {
-        if (col.field === def.clave) return false;
+      const legible = (x: unknown): string | null =>
+        x == null || String(x).trim() === ""
+          ? null
+          : x instanceof Date
+            ? x.toLocaleDateString("es-AR")
+            : String(x).trim();
+      const cambiosFila: PreviewFilaCambio[] = [];
+      let cambiaSinDetalle = false;
+      for (const col of columns) {
+        if (col.field === def.clave) continue;
         const nuevo = row[col.field];
-        if (nuevo == null || String(nuevo).trim() === "") return false;
-        if (typeof nuevo === "string" && nuevo.startsWith("__pending__")) return true;
-        if (!(col.field in actual)) return false; // columna que no es del modelo
-        return !iguales(col.field, nuevo, actual[col.field]);
-      });
-      if (!cambia) sinCambios.add(row._rowNum);
+        if (nuevo == null || String(nuevo).trim() === "") continue;
+        if (typeof nuevo === "string" && nuevo.startsWith("__pending__")) {
+          // Entidad relacionada que se va a crear (ej. transporte nuevo): cambia,
+          // pero no hay un "antes" comparable para mostrar.
+          cambiaSinDetalle = true;
+          continue;
+        }
+        if (!(col.field in actual)) continue; // columna que no es del modelo
+        if (iguales(col.field, nuevo, actual[col.field])) continue;
+        cambiosFila.push({
+          campo: col.field,
+          label: col.excelHeader,
+          antes: legible(actual[col.field]),
+          despues: legible(nuevo),
+        });
+      }
+      if (cambiosFila.length > 0) cambios.set(row._rowNum, cambiosFila);
+      else if (!cambiaSinDetalle) sinCambios.add(row._rowNum);
     }
-    return sinCambios;
+    return { sinCambios, cambios };
   }
 
   // ── Confirm ───────────────────────────────────────────────────────────────

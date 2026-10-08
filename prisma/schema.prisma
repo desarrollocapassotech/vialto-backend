@@ -180,6 +180,11 @@ model Cliente {
    * Días de plazo para calcular el vencimiento de los cargos de cuenta corriente. Si es null, se usa el default del tenant.
    */
   condicionPagoDias   Int?
+  /**
+   * Validación contra el padrón de ARCA (core/padron): huella "cuit|condicionIva|domicilio" de los datos que se validaron. Si alguno cambia, deja de coincidir y se vuelve a consultar.
+   */
+  arcaValidadoHuella  String?
+  arcaValidadoAt      DateTime?
   createdAt           DateTime @default(now())
 
   viajes           Viaje[]
@@ -214,6 +219,11 @@ model Transportista {
    * Días de plazo para calcular el vencimiento de los cargos de cuenta corriente (cuentas por pagar). Si es null, se usa el default del tenant.
    */
   condicionPagoDias       Int?
+  /**
+   * Validación contra el padrón de ARCA (core/padron): huella "cuit|condicionIva|domicilio" de los datos que se validaron. Si alguno cambia, deja de coincidir y se vuelve a consultar.
+   */
+  arcaValidadoHuella      String?
+  arcaValidadoAt          DateTime?
   createdAt               DateTime  @default(now())
 
   choferes       Chofer[]

@@ -36,6 +36,7 @@
     "test:importaciones": "ts-node src/modules/importaciones/engine/importaciones.spec.ts",
     "test:importaciones-detectar": "ts-node src/modules/importaciones/detectar-hojas.spec.ts",
     "test:padron": "ts-node src/core/padron/padron.service.spec.ts",
+    "test:padron-validacion": "ts-node src/core/padron/padron-validacion.service.spec.ts",
     "test:platform-guard": "ts-node src/shared/guards/platform-tenant-access.guard.spec.ts",
     "test:vehiculos-km": "ts-node src/core/vehiculos/vehiculos-km.spec.ts",
     "test:odometro": "ts-node src/core/odometro/odometro.spec.ts",

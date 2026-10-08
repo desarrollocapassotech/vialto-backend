@@ -105,6 +105,13 @@ model Tenant {
    * ("Configuración por empresa" → General).
    */
   dashboardHabilitado            Boolean  @default(true)
+  /**
+   * true (default) = origen/destino de Viajes se eligen de un buscador de ciudades
+   * (catálogo externo, obliga a elegir de la lista) y el import valida las ciudades del
+   * Excel contra ese catálogo. false = texto libre, sin sugerencias ni validación. Se
+   * configura solo desde superadmin ("Configuración por empresa" → General).
+   */
+  recomendacionCiudadesHabilitada Boolean @default(true)
   createdAt                      DateTime @default(now())
 
   clientes                   Cliente[]

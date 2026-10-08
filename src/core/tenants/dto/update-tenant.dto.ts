@@ -45,4 +45,7 @@ export class UpdateTenantDto {
 
   /** false = el tenant no ve el dashboard; su inicio pasa a ser el primer módulo contratado. */
   @IsOptional() @IsBoolean() dashboardHabilitado?: boolean;
+
+  /** false = origen/destino de Viajes en texto libre, sin buscador de ciudades ni validación en el import. */
+  @IsOptional() @IsBoolean() recomendacionCiudadesHabilitada?: boolean;
 }

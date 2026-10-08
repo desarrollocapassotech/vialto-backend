@@ -194,6 +194,12 @@ export interface PreviewViaje {
   cambiosSobrescritura?: PreviewCambioCampo[];
   /** Solo si `nuevo` es false: campos que cambian respecto al valor actual. */
   cambios?: PreviewCambioCampo[];
+  /**
+   * El viaje existente ya está facturado y/o liquidado ("facturado", "liquidado",
+   * "facturado y liquidado"): no se puede reimportar. Al guardar, la fila daría error
+   * (ver `motivoBloqueoReimportViaje`); el front la excluye sola. null = se puede.
+   */
+  bloqueadoPor?: string | null;
 }
 
 export interface PreviewFactura {

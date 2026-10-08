@@ -13,6 +13,28 @@ import type { IImportProcessor, InsertResult } from "./import-processor.interfac
 import type { ValidatedRow } from "../types/import.types";
 import { scalarDataFromRow } from "../prisma-import-fields";
 
+/**
+ * Un viaje con factura o liquidación vigente no se puede reimportar (sus datos fiscales
+ * quedan protegidos, mismo criterio que la edición manual). Devuelve el motivo para
+ * mostrar ("facturado", "liquidado", "facturado y liquidado") o null si se puede.
+ * Lo usan el preview (para marcar la fila como bloqueada) y `update` (que corta igual).
+ */
+export function motivoBloqueoReimportViaje(
+  facturacionEstado: string,
+  liquidacionEstado: string | null,
+): string | null {
+  const porFactura = !(FACTURACION_ESTADOS_DISPONIBLES as readonly string[]).includes(
+    facturacionEstado,
+  );
+  const porLiquidacion =
+    liquidacionEstado != null &&
+    !(LIQUIDACION_ESTADOS_DISPONIBLES as readonly string[]).includes(liquidacionEstado);
+  if (porFactura && porLiquidacion) return "facturado y liquidado";
+  if (porFactura) return "facturado";
+  if (porLiquidacion) return "liquidado";
+  return null;
+}
+
 @Injectable()
 export class ViajesProcessor implements IImportProcessor {
   constructor(private readonly prisma: PrismaService) {}
@@ -275,21 +297,11 @@ export class ViajesProcessor implements IImportProcessor {
       where: { id: viajeId },
       select: { facturacionEstado: true, liquidacionEstado: true },
     });
-    const bloqueadoPorFactura = !(
-      FACTURACION_ESTADOS_DISPONIBLES as readonly string[]
-    ).includes(current.facturacionEstado);
-    const bloqueadoPorLiquidacion =
-      current.liquidacionEstado != null &&
-      !(LIQUIDACION_ESTADOS_DISPONIBLES as readonly string[]).includes(
-        current.liquidacionEstado,
-      );
-    if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {
-      const motivo =
-        bloqueadoPorFactura && bloqueadoPorLiquidacion
-          ? "facturado y liquidado"
-          : bloqueadoPorFactura
-            ? "facturado"
-            : "liquidado";
+    const motivo = motivoBloqueoReimportViaje(
+      current.facturacionEstado,
+      current.liquidacionEstado,
+    );
+    if (motivo) {
       throw new Error(
         `No se puede reimportar este viaje: ya está ${motivo}. Los datos fiscales quedan protegidos una vez facturado o liquidado — editalo manualmente desde la ficha del viaje si hace falta.`,
       );
@@ -1017,6 +1029,8 @@ export class ViajesProcessor implements IImportProcessor {
         precioTransportistaExterno: true,
         monedaPrecioTransportistaExterno: true,
         precioTransportistaIvaIncluidoPct: true,
+        facturacionEstado: true,
+        liquidacionEstado: true,
       },
     });
 
@@ -1044,6 +1058,7 @@ export class ViajesProcessor implements IImportProcessor {
             precioTransportistaExterno: v.precioTransportistaExterno,
             monedaPrecioTransportistaExterno: v.monedaPrecioTransportistaExterno,
             precioTransportistaIvaIncluidoPct: v.precioTransportistaIvaIncluidoPct,
+            bloqueo: motivoBloqueoReimportViaje(v.facturacionEstado, v.liquidacionEstado),
           },
         ];
       }),
@@ -1076,4 +1091,6 @@ export interface ViajeActual {
   precioTransportistaExterno: number | null;
   monedaPrecioTransportistaExterno: string | null;
   precioTransportistaIvaIncluidoPct: number | null;
+  /** Motivo por el que no se puede reimportar ("facturado", "liquidado"…), o null. */
+  bloqueo: string | null;
 }

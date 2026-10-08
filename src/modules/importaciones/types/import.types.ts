@@ -146,9 +146,20 @@ export interface PreviewFilaEntidad {
   fila: number;
   /** true = alta nueva, false = actualiza un registro ya existente (ver `IImportProcessor.filasNuevas`). */
   esNuevo: boolean;
-  /** Solo si `esNuevo` es false: la fila no cambia nada del registro existente (ver `filasSinCambios`). */
+  /** Solo si `esNuevo` es false: la fila no cambia nada del registro existente (ver `cambiosFilasExistentes`). */
   sinCambios?: boolean;
+  /** Solo si actualiza un registro existente: qué campos cambian (valor actual → valor del Excel). */
+  cambios?: PreviewFilaCambio[];
   campos: PreviewFilaCampo[];
+}
+
+/** Un campo que cambia al actualizar un registro existente desde el Excel. */
+export interface PreviewFilaCambio {
+  campo: string;
+  /** Encabezado de la columna en el Excel. */
+  label: string;
+  antes: string | null;
+  despues: string | null;
 }
 
 export interface PreviewCambioCampo {

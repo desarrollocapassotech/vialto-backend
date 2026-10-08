@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
-import { validarIdFiscal } from '../../../shared/util/validar-id-fiscal';
+import { labelIdFiscalPorPais, validarIdFiscal } from '../../../shared/util/validar-id-fiscal';
 import type { IImportProcessor, InsertResult } from './import-processor.interface';
 import type { CampoUnicoConflicto, ValidatedRow } from '../types/import.types';
 import { scalarDataFromRow } from '../prisma-import-fields';
@@ -114,7 +114,7 @@ export class ClientesProcessor implements IImportProcessor {
     ];
     const existentes = await this.prisma.cliente.findMany({
       where: { tenantId, idFiscal: { in: idFiscales } },
-      select: { id: true, nombre: true, idFiscal: true },
+      select: { id: true, nombre: true, idFiscal: true, pais: true },
     });
     const porIdFiscal = new Map(
       existentes.map((e) => [e.idFiscal as string, e]),
@@ -129,7 +129,11 @@ export class ClientesProcessor implements IImportProcessor {
       if (match.nombre.trim().toLowerCase() === nombreFila) continue;
       conflictos.push({
         fila: row._rowNum,
-        campoLabel: 'ID Fiscal',
+        // CUIT / RUT / RUC… según el país de la fila (o el del cliente existente).
+        campoLabel: labelIdFiscalPorPais(
+          (typeof row.pais === 'string' && row.pais.trim()) || match.pais,
+          idFiscal,
+        ),
         valor: idFiscal,
         entidadExistenteId: match.id,
         entidadExistenteNombre: match.nombre,

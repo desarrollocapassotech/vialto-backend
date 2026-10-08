@@ -17,7 +17,7 @@ import {
   shouldShowHomologacionWatermark,
 } from "./pdf-homologacion-watermark";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
-import { headerCantidad } from "./cantidad-unidad.util";
+import { normalizeUnidadCantidad } from "./cantidad-unidad.util";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -836,7 +836,7 @@ export class LiquidacionPdfService {
     let tHeaders: string[];
     let aligns: string[];
 
-    const cantidadHeader = headerCantidad(tenantIdPropio2?.unidadCantidadViajes);
+    const cantidadHeader = "Cantidad";
     // Si los viajes usan ID propio, el encabezado lleva el nombre que le dio la empresa
     // (ej. "CTG") en vez del genérico "ID de Viaje".
     const labelIdPropio =
@@ -939,8 +939,12 @@ export class LiquidacionPdfService {
 
           const descText = descParts.join("\n").toUpperCase();
 
+          // La unidad va en cada línea de viaje (el header dice "Cantidad" porque también
+          // abarca comisión y gastos, que no son toneladas).
           const qty =
-            lViaje.tnDestino != null ? fmtNum(lViaje.tnDestino) : "1,00";
+            lViaje.tnDestino != null
+              ? `${fmtNum(lViaje.tnDestino)} ${normalizeUnidadCantidad(tenantIdPropio2?.unidadCantidadViajes)}`
+              : "1,00";
           const precio = lViaje.tarifaTransportista ?? lViaje.subtotal ?? 0;
           const base = lViaje.subtotal ?? 0;
           const subtotalCiva = base * (1 + item.ivaPct / 100);

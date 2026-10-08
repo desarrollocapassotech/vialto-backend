@@ -15,7 +15,7 @@ import {
 } from './pdf-homologacion-watermark';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
-import { headerCantidad, normalizeUnidadCantidad } from './cantidad-unidad.util';
+import { normalizeUnidadCantidad } from './cantidad-unidad.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -787,7 +787,8 @@ export class FacturaPdfService {
     const cellPadY = 4;
     const cellPadX = 2;
 
-    const tHeaders = ['Detalle', headerCantidad(tenantPdfConfig?.unidadCantidadViajes), 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+    // "Cantidad" genérico: la unidad (TN/UD) va solo en las líneas de viaje.
+    const tHeaders = ['Detalle', 'Cantidad', 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
     doc.rect(M, y, tableW, headerRowH).fill('#e8e8e8').stroke('#aaa');
     tHeaders.forEach((h, i) => {
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
@@ -800,12 +801,15 @@ export class FacturaPdfService {
 
     for (const item of comprobante.items) {
       const detalleDraw = buildDetalleFlete(item, factura.viajes, tenantPdfConfig);
+      const esLineaViaje = matchViajeItem(item, factura.viajes) != null;
       const cells = [
         { v: detalleDraw.toUpperCase(), align: 'left' as const },
         {
           v:
             item.cantidad != null
-              ? `${fmtNum(item.cantidad)} ${normalizeUnidadCantidad(tenantPdfConfig?.unidadCantidadViajes)}`
+              ? esLineaViaje
+                ? `${fmtNum(item.cantidad)} ${normalizeUnidadCantidad(tenantPdfConfig?.unidadCantidadViajes)}`
+                : fmtNum(item.cantidad)
               : '1,00',
           align: 'right' as const,
         },

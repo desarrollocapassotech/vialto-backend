@@ -26,6 +26,8 @@ type TenantPdfConfig = {
   idPropio2Habilitado: boolean;
   idPropio2Label: string | null;
   unidadCantidadViajes: string;
+  idPropio1Habilitado: boolean;
+  labelIdentificacionPersonalizadaViajes: string | null;
 } | null;
 
 type PdfCbteAsoc = { tipo: number; ptoVenta: number; nro: number };
@@ -290,6 +292,8 @@ export class LiquidacionPdfService {
         idPropio2Habilitado: true,
         idPropio2Label: true,
         unidadCantidadViajes: true,
+        idPropio1Habilitado: true,
+        labelIdentificacionPersonalizadaViajes: true,
       },
     });
 
@@ -833,6 +837,14 @@ export class LiquidacionPdfService {
     let aligns: string[];
 
     const cantidadHeader = headerCantidad(tenantIdPropio2?.unidadCantidadViajes);
+    // Si los viajes usan ID propio, el encabezado lleva el nombre que le dio la empresa
+    // (ej. "CTG") en vez del genérico "ID de Viaje".
+    const labelIdPropio =
+      tenantIdPropio2?.labelIdentificacionPersonalizadaViajes?.trim() || "ID propio";
+    const usaIdPropio =
+      (tenantIdPropio2?.idPropio1Habilitado ?? true) &&
+      (liq.viajes ?? []).some((lv) => lv.viaje.numeroIdentificacionPersonalizado?.trim());
+    const labelIdViaje = usaIdPropio ? labelIdPropio : "ID de Viaje";
     if (isSingleTrip) {
       colWidths = [100, 157.28, 40, 65, 65, 42, 70];
       tHeaders = [
@@ -848,7 +860,7 @@ export class LiquidacionPdfService {
     } else {
       colWidths = [60, 70, 127.28, 40, 60, 60, 42, 80];
       tHeaders = [
-        "ID de Viaje",
+        labelIdViaje,
         "Producto",
         "Descripción",
         cantidadHeader,
@@ -911,7 +923,10 @@ export class LiquidacionPdfService {
           const prodText = "SERVICIOS LOGISTICOS";
 
           const descParts = [];
-          if (isSingleTrip) descParts.push(`ID: ${idViajeText}`);
+          if (isSingleTrip) {
+            const prefijo = usaIdPropio && v.numeroIdentificacionPersonalizado?.trim() ? labelIdPropio : "ID";
+            descParts.push(`${prefijo}: ${idViajeText}`);
+          }
           if (tenantIdPropio2?.idPropio2Habilitado && v.idPropio2?.trim()) {
             const label = tenantIdPropio2.idPropio2Label?.trim() || "ID Propio 2";
             descParts.push(`${label}: ${v.idPropio2.trim()}`);

@@ -17,6 +17,30 @@ const MAX_CONSULTAS_DIARIAS_POR_TENANT = 100;
 const toArray = <T>(v: T | T[] | null | undefined): T[] =>
   v == null ? [] : Array.isArray(v) ? v : [v];
 
+const ENTIDADES_HTML: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+};
+
+/**
+ * ARCA devuelve algunos textos con entidades HTML (ej. "PE&#209;A" en vez de "PEÑA").
+ * Decodifica numéricas (&#209; / &#xD1;) y las nombradas comunes.
+ */
+function decodificarEntidades<T extends string | null | undefined>(texto: T): T {
+  if (typeof texto !== 'string' || !texto.includes('&')) return texto;
+  return texto.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, ent: string) => {
+    if (ent[0] === '#') {
+      const code = ent[1] === 'x' || ent[1] === 'X' ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    }
+    return ENTIDADES_HTML[ent.toLowerCase()] ?? match;
+  }) as T;
+}
+
 /** Mismo criterio que normalizePem de liquidaciones-arca: tolera "\n" literales y CRLF. */
 function normalizePem(pem: string): string {
   return pem.replace(/\\r/g, '').replace(/\\n/g, '\n').replace(/\r/g, '').trim() + '\n';
@@ -111,7 +135,9 @@ export class PadronService {
 
     const dg = persona.datosGenerales;
     const errorConstancia = persona.errorConstancia;
-    let observaciones = toArray<string>(errorConstancia?.error).map(String);
+    let observaciones = toArray<string>(errorConstancia?.error).map((e) =>
+      decodificarEntidades(String(e)),
+    );
     observaciones = observaciones.map((obs) => {
       if (obs.includes('no registra Apellido y/o Nombre informados')) {
         return 'Faltan datos fiscales en AFIP (el registro está incompleto o sin impuestos activos).';
@@ -125,7 +151,7 @@ export class PadronService {
       return {
         cuit,
         estado: 'con_observaciones',
-        nombre: nombre || null,
+        nombre: decodificarEntidades(nombre) || null,
         domicilio: null,
         condicionIva: null,
         observaciones,
@@ -141,8 +167,8 @@ export class PadronService {
     return {
       cuit,
       estado: String(dg.estadoClave).toUpperCase() === 'ACTIVO' ? 'activo' : 'inactivo',
-      nombre: nombre || null,
-      domicilio: domicilio || null,
+      nombre: decodificarEntidades(nombre) || null,
+      domicilio: decodificarEntidades(domicilio) || null,
       condicionIva: this.inferirCondicionIva(persona),
       observaciones,
     };

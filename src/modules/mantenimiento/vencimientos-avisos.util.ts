@@ -5,7 +5,7 @@ const FUENTE_KM: Record<string, string> = {
   carga: 'carga de combustible',
   edicion: 'corrección manual',
   orden_trabajo: 'orden de trabajo',
-  vehiculo: 'km de la unidad',
+  vehiculo: 'km del vehículo',
 };
 
 const fmtKm = (km: number) => km.toLocaleString('es-AR');
@@ -16,7 +16,7 @@ const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno
 function kmActual(f: FilaVencimiento): string {
   if (!f.odometro) return '';
   // El respaldo `vehiculo` no tiene fecha de lectura real (es la del alta de la unidad): no se muestra.
-  if (f.odometro.fuente === 'vehiculo') return ` Km actual: ${fmtKm(f.odometro.km)} (cargado en la unidad).`;
+  if (f.odometro.fuente === 'vehiculo') return ` Km actual: ${fmtKm(f.odometro.km)} (cargado en el vehículo).`;
   const fuente = FUENTE_KM[f.odometro.fuente] ?? f.odometro.fuente;
   return ` Km actual: ${fmtKm(f.odometro.km)} (${fuente} del ${fmtFecha(f.odometro.fecha)}).`;
 }

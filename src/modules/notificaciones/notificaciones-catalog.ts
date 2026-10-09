@@ -85,7 +85,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     modulo: 'mantenimiento',
     label: 'Mantenimiento próximo a vencer',
     descripcion:
-      'Avisa una vez por ciclo cuando un plan de mantenimiento de una unidad entra en el período de aviso (por km o por fecha).',
+      'Avisa una vez por ciclo cuando un plan de mantenimiento de un vehículo entra en el período de aviso (por km o por fecha).',
     defaultActivo: true,
     requiereModulo: 'mantenimiento',
     frecuencia: 'diaria',
@@ -96,7 +96,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     modulo: 'mantenimiento',
     label: 'Mantenimiento vencido',
     descripcion:
-      'Avisa una vez por ciclo cuando un plan de mantenimiento de una unidad venció (por km o por fecha).',
+      'Avisa una vez por ciclo cuando un plan de mantenimiento de un vehículo venció (por km o por fecha).',
     defaultActivo: true,
     requiereModulo: 'mantenimiento',
     frecuencia: 'diaria',

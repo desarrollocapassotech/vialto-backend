@@ -170,6 +170,15 @@ export class LiquidacionesController {
     return this.conceptosService.update(auth.tenantId, id, dto);
   }
 
+  @ApiOperation({ summary: "Eliminar concepto de liquidación" })
+  @Delete("conceptos-liquidacion/:id")
+  @RequireModule("emision-liquido-producto-arca", "liquidaciones")
+  @Roles("admin", "superadmin")
+  deleteConcepto(@CurrentAuth() auth: AuthPayload, @Param("id") id: string) {
+    assertTenantId(auth.tenantId);
+    return this.conceptosService.remove(auth.tenantId, id);
+  }
+
   @ApiOperation({ summary: "Obtener liquidación por ID" })
   @Get("liquidaciones/:id")
   @RequireModule("liquidaciones", "emision-liquido-producto-arca")

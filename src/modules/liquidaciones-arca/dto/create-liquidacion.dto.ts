@@ -22,6 +22,32 @@ export class LiquidacionConceptoLineaDto {
   @Min(0.01)
   monto: number;
 
+  /** Informativo: `monto` ya viene calculado (unitario × cantidad). */
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0)
+  cantidad?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0)
+  montoUnitario?: number;
+
+  /** favor = suma, contra = resta. Si falta, se usa el del concepto del catálogo. */
+  @IsOptional()
+  @IsIn(['favor', 'contra'])
+  signo?: 'favor' | 'contra';
+
+  /** IVA (%) de la línea. Si falta, se usa el del concepto del catálogo. */
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0)
+  @Max(100)
+  ivaPct?: number;
+
   @IsOptional()
   @IsString()
   @IsIn(['GENERAL', 'VIAJE_PUNTUAL', 'TODOS_LOS_VIAJES'])

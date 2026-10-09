@@ -1,0 +1,2 @@
+ALTER TABLE "conceptos_liquidacion" ADD COLUMN IF NOT EXISTS "cantidad" DOUBLE PRECISION NOT NULL DEFAULT 1;
+ALTER TABLE "conceptos_liquidacion" ADD COLUMN IF NOT EXISTS "cantidadIgualViajes" BOOLEAN NOT NULL DEFAULT false;

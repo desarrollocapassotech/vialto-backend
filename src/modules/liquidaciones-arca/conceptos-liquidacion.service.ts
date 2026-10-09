@@ -40,6 +40,8 @@ export class ConceptosLiquidacionService {
         signo: dto.signo,
         ivaPct: dto.ivaPct,
         monto: dto.monto ?? null,
+        cantidad: dto.cantidad ?? 1,
+        cantidadIgualViajes: dto.cantidadIgualViajes ?? false,
         bloqueado: dto.bloqueado ?? false,
         activo: true,
         updatedAt: new Date(),
@@ -63,9 +65,26 @@ export class ConceptosLiquidacionService {
     if (dto.ivaPct !== undefined) data.ivaPct = dto.ivaPct;
     if (dto.activo !== undefined) data.activo = dto.activo;
     if (dto.monto !== undefined) data.monto = dto.monto;
+    if (dto.cantidad !== undefined) data.cantidad = dto.cantidad ?? 1;
+    if (dto.cantidadIgualViajes !== undefined) {
+      data.cantidadIgualViajes = dto.cantidadIgualViajes;
+    }
     if (dto.bloqueado !== undefined) data.bloqueado = dto.bloqueado;
 
     return this.db.conceptoLiquidacion.update({ where: { id }, data });
+  }
+
+  /**
+   * Borra el concepto del catálogo. Las liquidaciones que ya lo usan no se tocan:
+   * sus líneas guardan nombre/signo/IVA/monto como snapshot y la FK queda en null
+   * (`onDelete: SetNull`).
+   */
+  async remove(tenantId: string, id: string) {
+    const { count } = await this.db.conceptoLiquidacion.deleteMany({
+      where: { id, tenantId },
+    });
+    if (count === 0) throw new NotFoundException('Concepto no encontrado');
+    return { ok: true };
   }
 
   async findActivoOrThrow(tenantId: string, id: string) {

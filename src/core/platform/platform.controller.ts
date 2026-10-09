@@ -1190,6 +1190,15 @@ export class PlatformController {
     return this.service.updateArcaConcepto(tenantId, id, dto);
   }
 
+  @ApiOperation({ summary: "Eliminar concepto de liquidación del tenant (superadmin)" })
+  @Delete("arca/conceptos-liquidacion/:id")
+  deleteArcaConcepto(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("id") id: string,
+  ) {
+    return this.service.deleteArcaConcepto(tenantId, id);
+  }
+
   @ApiOperation({
     summary: "Listar liquidaciones CVLP de un tenant (superadmin)",
   })

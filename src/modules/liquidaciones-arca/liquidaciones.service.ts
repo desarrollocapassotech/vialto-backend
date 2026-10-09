@@ -127,9 +127,11 @@ export class LiquidacionesService {
       out.push({
         conceptoLiquidacionId: c.id,
         nombreSnapshot: c.nombre,
-        signo: c.signo,
-        ivaPct: c.ivaPct,
+        signo: dto.signo ?? c.signo,
+        ivaPct: dto.ivaPct ?? c.ivaPct,
         monto: round2(dto.monto),
+        cantidad: dto.cantidad != null && dto.cantidad > 0 ? dto.cantidad : 1,
+        montoUnitario: dto.montoUnitario != null ? round2(dto.montoUnitario) : null,
         orden: orden++,
         modoAplicacion: dto.modoAplicacion ?? 'GENERAL',
         viajeId: dto.viajeId ?? null,
@@ -144,6 +146,8 @@ export class LiquidacionesService {
       signo: string;
       ivaPct: number;
       monto: number;
+      cantidad?: number | null;
+      montoUnitario?: number | null;
       orden?: number;
       modoAplicacion?: string;
       viajeId?: string | null;
@@ -154,6 +158,8 @@ export class LiquidacionesService {
       signo: r.signo as 'favor' | 'contra',
       ivaPct: r.ivaPct,
       monto: r.monto,
+      cantidad: r.cantidad ?? 1,
+      montoUnitario: r.montoUnitario ?? null,
       orden: r.orden,
       modoAplicacion: r.modoAplicacion,
       viajeId: r.viajeId,
@@ -395,6 +401,8 @@ export class LiquidacionesService {
             signo: l.signo,
             ivaPct: l.ivaPct,
             monto: l.monto,
+            cantidad: l.cantidad ?? 1,
+            montoUnitario: l.montoUnitario ?? null,
             orden: l.orden ?? 0,
             modoAplicacion: l.modoAplicacion ?? 'GENERAL',
             viajeId: l.viajeId ?? null,
@@ -663,6 +671,8 @@ export class LiquidacionesService {
               signo: l.signo,
               ivaPct: l.ivaPct,
               monto: l.monto,
+              cantidad: l.cantidad ?? 1,
+              montoUnitario: l.montoUnitario ?? null,
               orden: l.orden ?? 0,
               modoAplicacion: l.modoAplicacion ?? 'GENERAL',
               viajeId: l.viajeId ?? null,

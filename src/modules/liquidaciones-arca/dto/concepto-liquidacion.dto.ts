@@ -20,6 +20,15 @@ export class CreateConceptoLiquidacionDto {
   monto?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cantidad?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  cantidadIgualViajes?: boolean;
+
+  @IsOptional()
   @IsBoolean()
   bloqueado?: boolean;
 }
@@ -48,6 +57,15 @@ export class UpdateConceptoLiquidacionDto {
   @IsOptional()
   @IsNumber()
   monto?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cantidad?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  cantidadIgualViajes?: boolean;
 
   @IsOptional()
   @IsBoolean()

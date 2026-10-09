@@ -735,6 +735,23 @@ export class FacturacionService {
     };
   }
 
+  /** Conteos de los filtros rápidos de cobro (mismo criterio que `cobro` del paginado). */
+  async resumenCobro(tenantId: string) {
+    const tieneArca = await this.tieneArca(tenantId);
+    const rows = await this.prisma.factura.findMany({
+      where: this.buildFacturasWhere(tenantId, {}),
+      include: this.FACTURA_INCLUDE,
+    });
+    const shaped = await this.shapeManyConNombre(rows, tieneArca);
+    let sinCobrar = 0;
+    let vencidas = 0;
+    for (const f of shaped) {
+      if (!f.cobrado && f.estado !== "anulado") sinCobrar += 1;
+      if (f.vencida) vencidas += 1;
+    }
+    return { sinCobrar, vencidas };
+  }
+
   async findFactura(id: string, tenantId: string) {
     const row = await this.prisma.factura.findFirst({
       where: { id, tenantId },

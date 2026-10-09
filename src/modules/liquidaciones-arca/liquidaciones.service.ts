@@ -39,6 +39,7 @@ import {
   formatNumeroComprobante,
   parseNumeroFactura,
   resolveFechaCbteEmision,
+  resolveFechaCbteFactura,
   resolveReceptorAfip,
 } from './arca.util';
 import { buildComprobanteCvlp, mapCvlpToArcaRequest } from './arca-cvlp.util';
@@ -1472,7 +1473,7 @@ export class LiquidacionesService {
         const elegido = await this.elegirPtoVentaHomologacion(
           config,
           cbteTipoNc,
-          new Date(),
+          null,
           tenantId,
           facturaId,
         );
@@ -1708,11 +1709,17 @@ export class LiquidacionesService {
    * Se prueba primero el PV configurado y, si está bloqueado, los siguientes.
    * Bug real (QA, oct 2026): PV 1 / Factura A tenía el último comprobante con
    * fecha +9 días y toda emisión de prueba fallaba con 10016.
+   *
+   * Con `fechaEmision` (emisión de factura) se respeta la fecha que eligió el usuario:
+   * se busca un PV cuyo último comprobante no sea posterior a esa fecha, en vez de
+   * correr la fecha (bug real oct 2026: la factura salía con otra fecha, hasta +2 días,
+   * y el PDF/detalle mostraban esa y no la elegida). Sin `fechaEmision` (NC de
+   * anulación) la fecha se resuelve sola, como antes.
    */
   private async elegirPtoVentaHomologacion(
     config: { apiKey: string; cuitEmisor: string; ptoVentaFactura: number },
     cbteTipo: number,
-    fechaEmision: Date,
+    fechaEmision: Date | null,
     tenantId: string,
     facturaId: string,
   ): Promise<{ ptoVenta: number; ultimoCbte: number; fechaCbte: string }> {
@@ -1720,6 +1727,11 @@ export class LiquidacionesService {
       config.ptoVentaFactura,
       ...PTOS_VENTA_HOMOLOGACION.filter((pv) => pv !== config.ptoVentaFactura),
     ];
+    if (fechaEmision) {
+      // Valida la ventana de AFIP antes de consultar puntos de venta.
+      resolveFechaCbteFactura(fechaEmision);
+    }
+    let errorFecha: unknown = null;
     for (const ptoVenta of candidatos) {
       const { CbteNro: ultimoCbte } = await this.arcaClient.getUltimoComprobante(
         config.apiKey,
@@ -1746,7 +1758,22 @@ export class LiquidacionesService {
               null,
             )
           : null;
-      const fechaCbte = resolveFechaCbteEmision('homologacion', fechaEmision, ultimoFecha);
+      if (fechaEmision) {
+        try {
+          const fechaCbte = resolveFechaCbteFactura(fechaEmision, ultimoFecha);
+          if (ptoVenta !== config.ptoVentaFactura) {
+            this.logger.warn(
+              `[homologación] PV ${config.ptoVentaFactura} tipo ${cbteTipo} no admite la fecha ${fechaCbte}; se emite en PV ${ptoVenta}.`,
+            );
+          }
+          return { ptoVenta, ultimoCbte, fechaCbte };
+        } catch (e) {
+          // Este PV tiene un comprobante posterior a la fecha elegida: probar el siguiente.
+          errorFecha = errorFecha ?? e;
+          continue;
+        }
+      }
+      const fechaCbte = resolveFechaCbteEmision('homologacion', new Date(), ultimoFecha);
       if (fechaCbteDentroDeVentanaAfip(fechaCbte)) {
         if (ptoVenta !== config.ptoVentaFactura) {
           this.logger.warn(
@@ -1756,6 +1783,9 @@ export class LiquidacionesService {
         return { ptoVenta, ultimoCbte, fechaCbte };
       }
     }
+    // Ningún PV de prueba admite la fecha elegida: se informa con el mensaje del PV
+    // configurado (dice desde qué fecha se puede emitir).
+    if (errorFecha) throw errorFecha;
     throw new ArcaException(
       ARCA_ERROR_CODES.GENERICO,
       'No hay un punto de venta de prueba disponible en este momento: el CUIT de homologación compartido de AFIP tiene comprobantes con fecha futura. Intentá de nuevo más tarde.',
@@ -2036,6 +2066,9 @@ export class LiquidacionesService {
         'No se puede emitir una factura con monto $0. Revisá los viajes y sus importes.',
       );
     }
+    // Fail-fast: fecha de emisión fuera de la ventana de AFIP, antes de marcar la factura
+    // como pendiente (el chequeo contra el último comprobante del PV va más abajo).
+    resolveFechaCbteFactura(facturaRaw.fechaEmision);
 
     // Marcar como pendiente antes de llamar a AFIP SDK
     await (this.prisma as PrismaAny).factura.update({
@@ -2099,7 +2132,22 @@ export class LiquidacionesService {
           config.keyPem,
         );
         cbteNro = ultimoCbte + 1;
-        fechaCbte = resolveFechaCbteEmision(ambiente, facturaRaw.fechaEmision, null);
+        // Se informa la fecha elegida tal cual (antes, una fecha futura se cambiaba en
+        // silencio por "hoy" y el PDF/detalle quedaban con otra fecha que la de ARCA).
+        const ultimoFecha =
+          ultimoCbte > 0
+            ? await this.arcaClient.getFechaComprobanteAutorizado(
+                config.apiKey,
+                config.cuitEmisor,
+                ambiente,
+                ptoVenta,
+                cbteTipoFinal,
+                ultimoCbte,
+                config.certPem,
+                config.keyPem,
+              )
+            : null;
+        fechaCbte = resolveFechaCbteFactura(facturaRaw.fechaEmision, ultimoFecha);
       }
 
       // El número de una factura ARCA no se carga a mano: es el próximo correlativo que

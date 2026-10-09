@@ -254,6 +254,63 @@ export function resolveFechaCbteEmision(
 }
 
 /**
+ * Rango de CbteFch que AFIP admite para Concepto 1 (productos — el que mandan las
+ * facturas): hasta 5 días antes y 5 días después de hoy (hora Argentina).
+ */
+export const FACTURA_FECHA_DIAS_ATRAS = 5;
+export const FACTURA_FECHA_DIAS_ADELANTE = 5;
+
+/** Suma días a una fecha yyyymmdd (aritmética de calendario, sin huso horario). */
+function sumarDiasYmd(ymd: string, dias: number): string {
+  const d = new Date(
+    Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8))),
+  );
+  d.setUTCDate(d.getUTCDate() + dias);
+  return formatFechaCbteUtc(d);
+}
+
+function ymdLegible(ymd: string): string {
+  return `${ymd.slice(6, 8)}/${ymd.slice(4, 6)}/${ymd.slice(0, 4)}`;
+}
+
+/**
+ * Fecha de emisión de una factura tal como la eligió el usuario, en yyyymmdd.
+ * `Factura.fechaEmision` es una fecha sin hora guardada a medianoche UTC
+ * (`new Date("2026-10-09")`), así que se lee en UTC — leerla en hora local la corre un día.
+ */
+export function fechaEmisionFacturaYmd(fechaEmision: Date): string {
+  return formatFechaCbteUtc(fechaEmision);
+}
+
+/**
+ * Valida la fecha elegida para emitir una factura y la devuelve tal cual: se informa a
+ * AFIP exactamente esa fecha (nunca se corre a "hoy" ni a otra). Rechaza con un mensaje
+ * claro si cae fuera de la ventana de AFIP o es anterior al último comprobante del punto
+ * de venta (AFIP exige fechas no decrecientes por PV).
+ */
+export function resolveFechaCbteFactura(
+  fechaEmision: Date,
+  ultimoCbteFechaYmd?: string | null,
+  hoyYmd: string = formatFechaCbteArgentina(new Date()),
+): string {
+  const fecha = fechaEmisionFacturaYmd(fechaEmision);
+  const desde = sumarDiasYmd(hoyYmd, -FACTURA_FECHA_DIAS_ATRAS);
+  const hasta = sumarDiasYmd(hoyYmd, FACTURA_FECHA_DIAS_ADELANTE);
+  if (fecha < desde || fecha > hasta) {
+    throw new BadRequestException(
+      `La fecha de emisión ${ymdLegible(fecha)} está fuera del rango que admite ARCA: tiene que estar entre el ${ymdLegible(desde)} y el ${ymdLegible(hasta)}.`,
+    );
+  }
+  const min = ultimoCbteFechaYmd?.replace(/\D/g, '').slice(0, 8);
+  if (min && /^\d{8}$/.test(min) && fecha < min) {
+    throw new BadRequestException(
+      `La fecha de emisión ${ymdLegible(fecha)} es anterior a la del último comprobante emitido en este punto de venta (${ymdLegible(min)}). ARCA no admite fechas anteriores: elegí el ${ymdLegible(min)} o una fecha posterior.`,
+    );
+  }
+  return fecha;
+}
+
+/**
  * Homologación: evita 10016 por desfase UTC vs AR o fecha anterior al último comprobante.
  * No valida la ventana de AFIP a propósito: si el PV quedó bloqueado (último
  * comprobante con fecha futura fuera de ventana), devuelve esa fecha igual y es

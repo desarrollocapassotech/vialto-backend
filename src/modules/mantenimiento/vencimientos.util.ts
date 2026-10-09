@@ -19,6 +19,8 @@ export interface AsignacionVencimiento {
     intervaloDias: number | null;
     avisoKm: number | null;
     avisoDias: number | null;
+    /** Tareas del plan: el front las precarga en "Registrar service". */
+    tareas: string[];
   };
   baseKm: number | null;
   baseFecha: Date | null;

@@ -33,8 +33,8 @@ const d = (s: string) => new Date(s.length === 10 ? `${s}T00:00:00.000Z` : s);
 const HOY = d('2026-10-05');
 const lec = (km: number, fecha: string, fuente = 'carga'): LecturaKm => ({ km, fecha: d(fecha), fuente, fuenteId: `${fuente}-${km}`, createdAt: d(fecha) });
 
-const service20k = { id: 'p1', nombre: 'Service', categoria: 'mecanico', intervaloKm: 20_000, intervaloDias: null, avisoKm: 2_000, avisoDias: null };
-const vtv = { id: 'p2', nombre: 'VTV', categoria: 'documental', intervaloKm: null, intervaloDias: 365, avisoKm: null, avisoDias: 30 };
+const service20k = { id: 'p1', nombre: 'Service', categoria: 'mecanico', intervaloKm: 20_000, intervaloDias: null, avisoKm: 2_000, avisoDias: null, tareas: ['cambio_aceite_motor'] };
+const vtv = { id: 'p2', nombre: 'VTV', categoria: 'documental', intervaloKm: null, intervaloDias: 365, avisoKm: null, avisoDias: 30, tareas: [] as string[] };
 const asig = (o: Partial<AsignacionVencimiento> = {}): AsignacionVencimiento => ({
   vehiculoPlanId: 'vp1', vehiculo: { id: 'v1', patente: 'AAA', tipo: 'tractor' }, plan: service20k, baseKm: null, baseFecha: null, ...o,
 });

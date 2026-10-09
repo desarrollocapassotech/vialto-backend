@@ -25,7 +25,7 @@ const fila = (o: Partial<FilaVencimiento>): FilaVencimiento =>
   ({
     vehiculoPlanId: 'vp1',
     vehiculo: { id: 'v1', patente: 'AD271ZN', tipo: 'tractor' },
-    plan: { id: 'p1', nombre: 'Service 20.000', categoria: 'mecanico', intervaloKm: 20_000, intervaloDias: null, avisoKm: 2_000, avisoDias: null },
+    plan: { id: 'p1', nombre: 'Service 20.000', categoria: 'mecanico', intervaloKm: 20_000, intervaloDias: null, avisoKm: 2_000, avisoDias: null, tareas: [] },
     referencia: { tipo: 'base', id: 'base', ordenNumero: null, km: 100_000, fecha: null },
     odometro: { km: 118_500, fecha: d('2026-10-01'), fuente: 'carga', fuenteId: 'c1' },
     kmPorDia: 100,

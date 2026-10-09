@@ -20,6 +20,11 @@ export type NotificacionCatalogoItem = {
    * momento, vía `NotificacionesCronService.notificarAhora` (ej. `combustible.errorChofer`).
    */
   frecuencia: NotificacionFrecuencia;
+  /**
+   * Solo para `semanal`: true = lo dispara el cron de su propio módulo (sincronizado con otra
+   * tarea, ej. la corrección de combustible) y no `NotificacionesCronService.cronSemanal`.
+   */
+  cronPropio?: boolean;
   /** Ruta relativa (con query params) a la que apunta el botón del email — default: home. */
   urlDestino?: string;
 };
@@ -65,6 +70,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     defaultActivo: true,
     requiereModulo: 'combustible',
     frecuencia: 'semanal',
+    cronPropio: true,
     urlDestino: '/?combustibleTab=alertas',
   },
   {
@@ -77,6 +83,17 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     requiereModulo: 'combustible',
     frecuencia: 'inmediata',
     urlDestino: '/?combustibleTab=alertas',
+  },
+  {
+    tipo: 'liquidaciones.pendienteAnulacion',
+    modulo: 'liquidaciones',
+    label: 'Liquidaciones pendientes de anular',
+    descripcion:
+      'Recordatorio semanal (lunes) de las liquidaciones marcadas como pendientes de anulación que todavía no se confirmaron como anuladas. Se repite cada semana mientras sigan pendientes.',
+    defaultActivo: true,
+    requiereModulo: 'emision-liquido-producto-arca',
+    frecuencia: 'semanal',
+    urlDestino: '/liquidaciones?estado=pendiente_anulacion',
   },
   // Mantenimiento: los evaluators viven en modules/mantenimiento y se registran con
   // NotificacionesCronService.registrarEvaluator (reusan el cálculo de vencimientos).

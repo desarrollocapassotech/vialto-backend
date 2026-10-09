@@ -102,7 +102,7 @@ const fila = (o: Partial<FilaVencimiento>): FilaVencimiento =>
     const users = { listByTenant: async () => [{ userId: 'u1', role: 'org:admin', email: 'admin@vialto.uno' }] };
     const dummy = { tipo: 'x', evaluar: async () => [] };
     const cron = new NotificacionesCronService(
-      prisma as never, config as never, email as never, users as never, dummy as never, dummy as never, dummy as never, dummy as never,
+      prisma as never, config as never, email as never, users as never, dummy as never, dummy as never, dummy as never, dummy as never, dummy as never,
     );
     return { cron, envios };
   }

@@ -91,4 +91,10 @@ export class FacturasPaginatedQueryDto {
     | 'error_afip'
     | 'anulado'
     | 'vencida';
+
+  /** Filtro rápido por eje de cobro, combinable con `estado`. */
+  @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
+  @IsIn(['sin_cobrar', 'vencida'])
+  cobro?: 'sin_cobrar' | 'vencida';
 }

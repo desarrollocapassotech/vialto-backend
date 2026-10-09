@@ -25,7 +25,7 @@ const fila = (o: Partial<FilaVencimiento>): FilaVencimiento =>
   ({
     vehiculoPlanId: 'vp1',
     vehiculo: { id: 'v1', patente: 'AD271ZN', tipo: 'tractor' },
-    plan: { id: 'p1', nombre: 'Service 20.000', categoria: 'mecanico', intervaloKm: 20_000, intervaloDias: null, avisoKm: 2_000, avisoDias: null },
+    plan: { id: 'p1', nombre: 'Service 20.000', categoria: 'mecanico', intervaloKm: 20_000, intervaloDias: null, avisoKm: 2_000, avisoDias: null, tareas: [] },
     referencia: { tipo: 'base', id: 'base', ordenNumero: null, km: 100_000, fecha: null },
     odometro: { km: 118_500, fecha: d('2026-10-01'), fuente: 'carga', fuenteId: 'c1' },
     kmPorDia: 100,
@@ -59,12 +59,12 @@ const fila = (o: Partial<FilaVencimiento>): FilaVencimiento =>
     assert.equal(a.detalle, 'Pasado por 1.000 km (tocaba a los 120.000 km). Km actual: 121.000 (corrección manual del 02/10/2026).');
   });
 
-  await test('km de respaldo de la unidad: sin fecha de lectura', () => {
+  await test('km de respaldo del vehículo: sin fecha de lectura', () => {
     const [a] = armarAvisosVencimiento(
       [fila({ estado: 'vencido', kmRestantes: -50, proximoKm: 1_000, odometro: { km: 1_050, fecha: d('2026-05-21'), fuente: 'vehiculo', fuenteId: 'v1' } })],
       'vencido',
     );
-    assert.equal(a.detalle, 'Pasado por 50 km (tocaba a los 1.000 km). Km actual: 1.050 (cargado en la unidad).');
+    assert.equal(a.detalle, 'Pasado por 50 km (tocaba a los 1.000 km). Km actual: 1.050 (cargado en el vehículo).');
   });
 
   await test('próximo y vencido por fecha', () => {

@@ -7,12 +7,14 @@ import { TalleresService } from './talleres.service';
 import { OrdenesService } from './ordenes.service';
 import { HistorialService } from './historial.service';
 import { VencidoEvaluator, VencimientoProximoEvaluator } from './notificaciones/vencimientos.evaluators';
+import { VencimientosAlertaProveedor } from './dashboard/vencimientos-alerta.proveedor';
 import { OdometroModule } from '../../core/odometro/odometro.module';
-// Módulo transversal: Mantenimiento registra sus avisos ahí (nunca al revés).
+// Módulos transversales: Mantenimiento registra ahí sus avisos y su bloque de alertas (nunca al revés).
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
+import { DashboardModule } from '../dashboard/dashboard.module';
 
 @Module({
-  imports: [OdometroModule, NotificacionesModule],
+  imports: [OdometroModule, NotificacionesModule, DashboardModule],
   controllers: [MantenimientoController],
   providers: [
     VencimientosService,
@@ -23,6 +25,7 @@ import { NotificacionesModule } from '../notificaciones/notificaciones.module';
     HistorialService,
     VencimientoProximoEvaluator,
     VencidoEvaluator,
+    VencimientosAlertaProveedor,
   ],
 })
 export class MantenimientoModule {}

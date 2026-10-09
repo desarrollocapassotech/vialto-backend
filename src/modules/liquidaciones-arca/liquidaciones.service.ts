@@ -749,6 +749,12 @@ export class LiquidacionesService {
         'No se pueden emitir liquidaciones en USD por ARCA.',
       );
     }
+    // Fail-fast: ARCA no admite un comprobante por $0 (el borrador sí se puede guardar).
+    if (!(liquidacion.bruto > 0)) {
+      throw new BadRequestException(
+        'No se puede emitir una liquidación con monto $0. Revisá los viajes y sus importes.',
+      );
+    }
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
     // Punto de venta editable por operación; si no se envía, se usa el de ArcaConfig.
@@ -2024,6 +2030,12 @@ export class LiquidacionesService {
     const importeNeto = round2(
       conceptos.reduce((s, c) => s + c.importe, 0),
     );
+    // ARCA no admite un comprobante por $0 (ni negativo).
+    if (!(importeNeto > 0)) {
+      throw new BadRequestException(
+        'No se puede emitir una factura con monto $0. Revisá los viajes y sus importes.',
+      );
+    }
 
     // Marcar como pendiente antes de llamar a AFIP SDK
     await (this.prisma as PrismaAny).factura.update({

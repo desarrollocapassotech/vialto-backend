@@ -47,7 +47,8 @@
     "test:mant-ordenes": "ts-node src/modules/mantenimiento/ordenes.spec.ts",
     "test:mant-vencimientos": "ts-node src/modules/mantenimiento/vencimientos.spec.ts",
     "test:mant-historial": "ts-node src/modules/mantenimiento/historial.spec.ts",
-    "test:mant-avisos": "ts-node src/modules/mantenimiento/vencimientos-avisos.spec.ts"
+    "test:mant-avisos": "ts-node src/modules/mantenimiento/vencimientos-avisos.spec.ts",
+    "test:dashboard-alertas": "ts-node src/modules/dashboard/dashboard-alertas.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

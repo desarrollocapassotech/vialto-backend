@@ -53,6 +53,7 @@ export class VencimientosService {
           select: {
             id: true, nombre: true, categoria: true,
             intervaloKm: true, intervaloDias: true, avisoKm: true, avisoDias: true,
+            tareas: true,
           },
         },
       },

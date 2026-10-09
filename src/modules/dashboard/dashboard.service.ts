@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
+import { DashboardAlertasRegistry, type ClaveBloqueAlerta } from './dashboard-alertas.registry';
 import {
   resolveDashboardPeriod,
   type DashboardPeriodKind,
@@ -95,6 +96,16 @@ export type OwnerDashboardResponse = {
       cantidad: number;
       montoTotal: number;
     };
+    /**
+     * Planes de mantenimiento vencidos + próximos a vencer (snapshot, no depende del período).
+     * Lo aporta el módulo Mantenimiento vía `DashboardAlertasRegistry` (mismo cálculo que el
+     * semáforo y los mails); los "sin datos" no cuentan.
+     */
+    mantenimiento?: {
+      cantidad: number;
+      vencidos: number;
+      proximos: number;
+    };
   } | null;
   viajes?: {
     enCurso: MetricCompare;
@@ -183,10 +194,35 @@ function buildMetric(
 
 @Injectable()
 export class DashboardService {
+  private readonly logger = new Logger(DashboardService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantFieldConfig: TenantFieldConfigService,
+    private readonly alertasRegistry: DashboardAlertasRegistry,
   ) {}
+
+  /**
+   * Bloques del "Resumen de alertas" que aportan módulos vendibles (ver `DashboardAlertasRegistry`).
+   * Solo los del tenant; un proveedor que falla se omite (se loguea) para no tirar el dashboard.
+   */
+  private async bloquesRegistrados(
+    tenantId: string,
+    mod: Set<string>,
+  ): Promise<Array<{ clave: ClaveBloqueAlerta; bloque: { cantidad: number } & Record<string, unknown> }>> {
+    const aplicables = this.alertasRegistry.proveedores().filter((p) => mod.has(p.requiereModulo.toLowerCase()));
+    const resultados = await Promise.all(
+      aplicables.map(async (p) => {
+        try {
+          return { clave: p.clave, bloque: await p.obtener(tenantId) };
+        } catch (err) {
+          this.logger.error(`[${tenantId}] bloque de alertas "${p.clave}" falló: ${err}`);
+          return null;
+        }
+      }),
+    );
+    return resultados.filter((r): r is NonNullable<typeof r> => r !== null);
+  }
 
   /** Ver comentario equivalente en viajes.service.ts — misma señal canónica. */
   private ivaTransportistaHabilitado(tenantId: string): Promise<boolean> {
@@ -227,7 +263,7 @@ export class DashboardService {
 
     const out: OwnerDashboardResponse = { period: meta };
 
-    const [financieroResult, viajesResult, stockResult, cargasSospechosasResult, margenBajoResult, erroresChoferResult] = await Promise.all([
+    const [financieroResult, viajesResult, stockResult, cargasSospechosasResult, margenBajoResult, erroresChoferResult, bloquesRegistrados] = await Promise.all([
       hasFacturacion
         ? Promise.all([
             this.sumFacturadoClienteSnapshot(tenantId),                                 // 0
@@ -272,6 +308,7 @@ export class DashboardService {
       hasCombustible
         ? this.buildErroresChoferAlerta(tenantId, resolved.start, resolved.end)
         : null,
+      this.bloquesRegistrados(tenantId, mod),
     ]);
 
     if (financieroResult) {
@@ -332,7 +369,7 @@ export class DashboardService {
     // creando el objeto con los bloques de facturas/viajes vacíos si todavía no existía.
     type BloquesExtra = Pick<
       NonNullable<OwnerDashboardResponse['alertas']>,
-      'cargasSospechosas' | 'margenBajo' | 'erroresChofer'
+      'cargasSospechosas' | 'margenBajo' | 'erroresChofer' | ClaveBloqueAlerta
     >;
     const sumarBloqueAlerta = (bloque: BloquesExtra) => {
       out.alertas = {
@@ -351,6 +388,7 @@ export class DashboardService {
         cargasSospechosas: out.alertas?.cargasSospechosas,
         margenBajo: out.alertas?.margenBajo,
         erroresChofer: out.alertas?.erroresChofer,
+        mantenimiento: out.alertas?.mantenimiento,
         ...bloque,
       };
     };
@@ -362,6 +400,9 @@ export class DashboardService {
     }
     if (erroresChoferResult && erroresChoferResult.cantidad > 0) {
       sumarBloqueAlerta({ erroresChofer: erroresChoferResult });
+    }
+    for (const { clave, bloque } of bloquesRegistrados) {
+      if (bloque.cantidad > 0) sumarBloqueAlerta({ [clave]: bloque } as BloquesExtra);
     }
 
     if (viajesResult) {

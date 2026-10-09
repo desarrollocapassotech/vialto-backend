@@ -69,6 +69,24 @@ function serviceCon(respuesta: () => Promise<unknown>) {
     });
   });
 
+  await test('entidades HTML de ARCA → se decodifican (PE&#209;A → PEÑA)', async () => {
+    const { service } = serviceCon(async () => ({
+      datosGenerales: {
+        apellido: 'PE&#209;A',
+        nombre: 'JOS&#xC9;',
+        estadoClave: 'ACTIVO',
+        domicilioFiscal: {
+          direccion: 'CASTULO PE&#209;A 35',
+          localidad: 'JESUS MARIA',
+          descripcionProvincia: 'CORDOBA',
+        },
+      },
+    }));
+    const r = await service.consultar(CUIT_NYM, 't1');
+    assert.equal(r.nombre, 'PEÑA JOSÉ');
+    assert.equal(r.domicilio, 'CASTULO PEÑA 35, JESUS MARIA, CORDOBA');
+  });
+
   await test('persona humana monotributista inactiva → apellido + nombre, monotributo', async () => {
     const { service } = serviceCon(async () => ({
       datosGenerales: { apellido: 'PEREZ', nombre: 'JUAN', estadoClave: 'INACTIVO' },

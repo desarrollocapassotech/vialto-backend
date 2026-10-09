@@ -50,6 +50,14 @@ export class FacturacionController {
     return this.service.findAllPaginated(auth.tenantId, query);
   }
 
+  @ApiOperation({ summary: 'Conteos para los filtros rápidos (sin cobrar / vencidas)' })
+  @Get('facturas/resumen-cobro')
+  @Roles('admin', 'member', 'superadmin')
+  resumenCobro(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.resumenCobro(auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Obtener factura por ID' })
   @Get('facturas/:id')
   @Roles('admin', 'member', 'superadmin')

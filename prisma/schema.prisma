@@ -1581,7 +1581,12 @@ model ConceptoLiquidacion {
   signo     String
   ivaPct    Float    @default(21)
   activo    Boolean  @default(true)
+  /// Monto base unitario. Al cargarlo en una liquidación: monto × cantidad.
   monto     Float?
+  /// Cantidad por defecto. Se ignora si cantidadIgualViajes.
+  cantidad  Float    @default(1)
+  /// true = la cantidad es siempre la cantidad de viajes de la liquidación.
+  cantidadIgualViajes Boolean @default(false)
   bloqueado Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1607,7 +1612,12 @@ model LiquidacionConceptoLinea {
   signo                 String
   ivaPct                Float
   /// Monto absoluto (> 0). El signo determina si suma o resta.
+  /// = montoUnitario × cantidad, salvo TODOS_LOS_VIAJES (= unitario, se multiplica por viajes).
   monto                 Float
+  /// Cantidad cargada en la línea. En TODOS_LOS_VIAJES queda en 1: la cantidad es la de viajes.
+  cantidad              Float                @default(1)
+  /// Monto unitario cargado. null = líneas previas a la cantidad (unitario = monto).
+  montoUnitario         Float?
   orden                 Int                  @default(0)
   modoAplicacion        String               @default("GENERAL") // "GENERAL", "VIAJE_PUNTUAL", "TODOS_LOS_VIAJES"
   viajeId               String?

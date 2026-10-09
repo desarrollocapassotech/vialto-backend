@@ -445,13 +445,21 @@ export class LiquidacionPdfService {
             signo: string;
             ivaPct: number;
             monto: number;
+            cantidad?: number | null;
+            montoUnitario?: number | null;
             orden?: number;
+            modoAplicacion?: string;
+            viajeId?: string | null;
           }) => ({
             nombreSnapshot: r.nombreSnapshot,
             signo: r.signo as "favor" | "contra",
             ivaPct: r.ivaPct,
             monto: r.monto,
+            cantidad: r.cantidad ?? 1,
+            montoUnitario: r.montoUnitario ?? null,
             orden: r.orden,
+            modoAplicacion: r.modoAplicacion,
+            viajeId: r.viajeId,
           }),
         ),
       });
@@ -1106,8 +1114,8 @@ export class LiquidacionPdfService {
             prod: prodText,
             desc: descText,
             tripId: tripIdText,
-            qty: 1,
-            precio: item.importeBase,
+            qty: item.cantidad ?? 1,
+            precio: item.precioUnitario ?? item.importeBase,
             base: item.importeBase,
             ivaPct: item.ivaPct,
             subtotal: item.subtotal,

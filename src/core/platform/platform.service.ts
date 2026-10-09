@@ -1366,6 +1366,11 @@ export class PlatformService {
     return this.conceptosLiquidacionService.update(id, conceptoId, dto);
   }
 
+  deleteArcaConcepto(tenantId: string | undefined, conceptoId: string) {
+    const id = this.requiredTenantId(tenantId);
+    return this.conceptosLiquidacionService.remove(id, conceptoId);
+  }
+
   listLiquidaciones(tenantId: string | undefined, estado?: string) {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionesService.findAll(id, estado);

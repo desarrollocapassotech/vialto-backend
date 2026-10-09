@@ -695,7 +695,7 @@ export class FacturacionService {
     const tieneArca = await this.tieneArca(tenantId);
     const include = this.FACTURA_INCLUDE;
 
-    if (query.estado) {
+    if (query.estado || query.cobro) {
       const rows = await this.prisma.factura.findMany({
         where,
         orderBy: this.FACTURAS_ORDER_BY,
@@ -703,6 +703,10 @@ export class FacturacionService {
       });
       const shaped = await this.shapeManyConNombre(rows, tieneArca);
       const filtered = shaped.filter((f) => {
+        // Sin cobrar: con saldo pendiente y vigente (una anulada ya no se cobra).
+        if (query.cobro === "sin_cobrar" && (f.cobrado || f.estado === "anulado")) return false;
+        if (query.cobro === "vencida" && !f.vencida) return false;
+        if (!query.estado) return true;
         if (query.estado === "cobrado") return f.cobrado;
         if (query.estado === "vencida") return f.vencida;
         return f.estado === query.estado;
@@ -729,6 +733,23 @@ export class FacturacionService {
       items: await this.shapeManyConNombre(rows, tieneArca),
       meta: this.paginatedMeta(page, pageSize, total),
     };
+  }
+
+  /** Conteos de los filtros rápidos de cobro (mismo criterio que `cobro` del paginado). */
+  async resumenCobro(tenantId: string) {
+    const tieneArca = await this.tieneArca(tenantId);
+    const rows = await this.prisma.factura.findMany({
+      where: this.buildFacturasWhere(tenantId, {}),
+      include: this.FACTURA_INCLUDE,
+    });
+    const shaped = await this.shapeManyConNombre(rows, tieneArca);
+    let sinCobrar = 0;
+    let vencidas = 0;
+    for (const f of shaped) {
+      if (!f.cobrado && f.estado !== "anulado") sinCobrar += 1;
+      if (f.vencida) vencidas += 1;
+    }
+    return { sinCobrar, vencidas };
   }
 
   async findFactura(id: string, tenantId: string) {

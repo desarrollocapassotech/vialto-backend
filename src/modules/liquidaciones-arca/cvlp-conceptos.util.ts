@@ -8,6 +8,9 @@ export type ConceptoLineaInput = {
   signo: ConceptoSigno;
   ivaPct: number;
   monto: number;
+  /** Solo informativo (se persiste); los cálculos usan `monto`. */
+  cantidad?: number;
+  montoUnitario?: number | null;
   orden?: number;
   modoAplicacion?: string;
   viajeId?: string | null;
@@ -95,10 +98,19 @@ export function buildCvlpConceptosList(args: {
         const viaje = args.viajes.find((v) => v.id === l.viajeId);
         if (viaje) desc = `${l.nombreSnapshot} (Viaje #${viaje.numero})`;
       }
+      // Cantidad × unitario solo para el PDF; el importe sigue siendo `monto`.
+      const cantidad = l.cantidad && l.cantidad > 0 ? l.cantidad : 1;
+      const tieneCantidad = cantidad !== 1 && l.montoUnitario != null;
       conceptos.push({
         descripcion: desc,
         importe: signedImporte(l.signo, l.monto),
         ivaPct: l.ivaPct,
+        ...(tieneCantidad
+          ? {
+              cantidad,
+              precioUnitario: signedImporte(l.signo, l.montoUnitario as number),
+            }
+          : {}),
       });
     }
   }

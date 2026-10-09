@@ -22,8 +22,8 @@
 | MANT-03 | T1 — Tipos en el catálogo de notificaciones | ✅ Hecho (2026-10-05) | `develop` | `mantenimiento.vencimientoProximo` y `mantenimiento.vencido` (diarios, requiereModulo mantenimiento, activos por defecto, botón a `/mantenimiento`). |
 | MANT-03 | T2 — Evaluators | ✅ Hecho (2026-10-05) | `develop` | **Opción C (decisión de Elias):** `NotificacionesCronService.registrarEvaluator` + evaluators en `modules/mantenimiento/notificaciones/` que reusan `VencimientosService.calcular`. `entidadId = vehiculoPlanId:idReferencia`. Excepción a la regla 5 documentada en CLAUDE.md. Probado en QA: 3 avisos, dedup en la 2ª corrida, sin repetir tras OT/anulación. Test: `npm run test:mant-avisos`. |
 | MANT-03 | T3 — Bloque en "Resumen de alertas" | ✅ Hecho (2026-10-09) | `develop` | `DashboardAlertasRegistry` (dashboard) + `VencimientosAlertaProveedor` (mantenimiento), mismo criterio de la opción C. `alertas.mantenimiento = { cantidad, vencidos, proximos }`: **vencidos + próximos, sin datos no cuenta** (decisión de Elias); snapshot, no depende del período. Probado en QA (CapassoTech): el resto del resumen no cambia. Test: `npm run test:dashboard-alertas`. **MANT-03 cerrado.** |
-| MANT-04 | T1 — Pestaña Vencimientos | 🔲 Pendiente | | |
-| MANT-04 | T2 — Pestaña Órdenes de trabajo | 🔲 Pendiente | | |
+| MANT-04 | T1 — Pestaña Vencimientos | 🟡 Implementado (2026-10-09), falta revisión en pantalla | `develop` (front `03888a9`) | Hecho junto con T2 (decisión de Elias). Contadores clickeables, filtros estado/unidad/categoría, faltan km/días, fecha estimada, origen del km, último service, "Registrar service" precarga la OT. Back: las filas traen `plan.tareas` (`6674660`). |
+| MANT-04 | T2 — Pestaña Órdenes de trabajo | 🟡 Implementado (2026-10-09), falta revisión en pantalla | `develop` (front `03888a9`) | Listado paginado con filtros (fecha, unidad, tipo, taller), ver/editar/anular/eliminar; modal con taller (alta rápida), planes que cumple, tareas, líneas de costo, adjuntos y aviso de km. Datos de prueba en QA (CapassoTech, `createdBy = qa-test-mant04`, taller "QA Taller Norte"): borrar al cerrar la revisión. |
 | MANT-04 | T3 — Pestaña Planes + asignación | 🔲 Pendiente | | |
 | MANT-04 | T4 — Historial del vehículo + "Actualizar km" | 🔲 Pendiente | | |
 | MANT-04 | T5 — Upsell Combustible | 🔲 Pendiente | | |
@@ -41,7 +41,7 @@
 - `core/odometro` (lectura de km unificada) y `core/vehiculos` (`POST vehiculos/:id/km`, `GET vehiculos/:id/km-historial`).
 - `modules/mantenimiento`: 26 rutas bajo `/api/mantenimiento` (planes + plantillas, asignaciones, talleres, órdenes de trabajo + adjuntos, vencimientos + resumen, historial por unidad) y los avisos diarios `mantenimiento.vencimientoProximo` / `mantenimiento.vencido`.
 
-**Próximo paso: MANT-04 (frontend).** El backend ya expone todo; el resumen del dashboard trae `alertas.mantenimiento` y el front todavía no lo muestra (va en MANT-04-T6, junto con sumarlo en la condición de `TenantHomePage.tsx` que decide si hay alertas).
+**Próximo paso:** Elias revisa en QA la pantalla nueva (MANT-04-T1/T2). Con su OK: borrar los datos de prueba `qa-test-mant04` y seguir con MANT-04-T3 (pestaña Planes + asignación). El resumen del dashboard ya trae `alertas.mantenimiento` y el front todavía no lo muestra (va en MANT-04-T6, junto con sumarlo en la condición de `TenantHomePage.tsx` y reemplazar la métrica vieja de `useTenantDashboardMetrics.ts`).
 
 **MANT-04 (frontend)** reemplaza `MantenimientoTenantPage.tsx`, `IntervencionModal.tsx`, `MantenimientoAlertasSection.tsx`, `lib/mantenimientoAlertas.ts` y la métrica "Intervenciones (mes)" de `useTenantDashboardMetrics.ts`, que hoy pega a `/api/mantenimiento/intervenciones` y da 404 en QA. Después, MANT-05 (documentación + recorrido end-to-end).
 

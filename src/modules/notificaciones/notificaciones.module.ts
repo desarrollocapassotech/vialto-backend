@@ -7,6 +7,7 @@ import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evalu
 import { FacturaVencidaEvaluator } from './evaluators/factura-vencida.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
 import { CuentaCorrienteVencimientoEvaluator } from './evaluators/cuenta-corriente-vencimiento.evaluator';
+import { LiquidacionPendienteAnulacionEvaluator } from './evaluators/liquidacion-pendiente-anulacion.evaluator';
 import { EmailModule } from '../../shared/email/email.module';
 import { UsersModule } from '../../core/users/users.module';
 
@@ -21,6 +22,7 @@ import { UsersModule } from '../../core/users/users.module';
     FacturaVencidaEvaluator,
     CargaSospechosaEvaluator,
     CuentaCorrienteVencimientoEvaluator,
+    LiquidacionPendienteAnulacionEvaluator,
   ],
   exports: [NotificacionesConfigService, NotificacionesCronService],
 })

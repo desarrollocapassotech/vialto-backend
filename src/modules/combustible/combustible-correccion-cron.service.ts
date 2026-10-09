@@ -79,7 +79,9 @@ export class CombustibleCorreccionCronService {
     });
     for (const t of tenants) {
       try {
-        await this.notificacionesCron.procesarTenant(t.clerkOrgId, t.modules, "semanal");
+        await this.notificacionesCron.procesarTenant(t.clerkOrgId, t.modules, "semanal", [
+          "combustible.cargaSospechosa",
+        ]);
       } catch (error) {
         this.logger.error(
           `Error notificando cargas sospechosas del tenant ${t.clerkOrgId}`,

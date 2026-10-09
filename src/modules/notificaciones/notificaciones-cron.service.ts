@@ -14,6 +14,7 @@ import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evalu
 import { FacturaVencidaEvaluator } from './evaluators/factura-vencida.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
 import { CuentaCorrienteVencimientoEvaluator } from './evaluators/cuenta-corriente-vencimiento.evaluator';
+import { LiquidacionPendienteAnulacionEvaluator } from './evaluators/liquidacion-pendiente-anulacion.evaluator';
 import type { NotificacionEvaluator, NotificacionItem } from './evaluators/notificacion-evaluator.interface';
 
 function escapeHtml(s: string): string {
@@ -43,7 +44,7 @@ const COLOR_MIST = '#f5f3f0';
 @Injectable()
 export class NotificacionesCronService {
   private readonly logger = new Logger(NotificacionesCronService.name);
-  /** Los 4 propios de este módulo + los que registran los módulos vendibles (ver `registrarEvaluator`). */
+  /** Los propios de este módulo + los que registran los módulos vendibles (ver `registrarEvaluator`). */
   private readonly evaluators: NotificacionEvaluator[];
 
   constructor(
@@ -55,8 +56,15 @@ export class NotificacionesCronService {
     facturaVencida: FacturaVencidaEvaluator,
     cargaSospechosa: CargaSospechosaEvaluator,
     cuentaCorrienteVencimiento: CuentaCorrienteVencimientoEvaluator,
+    liquidacionPendienteAnulacion: LiquidacionPendienteAnulacionEvaluator,
   ) {
-    this.evaluators = [facturaPorVencer, facturaVencida, cargaSospechosa, cuentaCorrienteVencimiento];
+    this.evaluators = [
+      facturaPorVencer,
+      facturaVencida,
+      cargaSospechosa,
+      cuentaCorrienteVencimiento,
+      liquidacionPendienteAnulacion,
+    ];
   }
 
   /**
@@ -77,9 +85,7 @@ export class NotificacionesCronService {
 
   /**
    * 8:00 hora Argentina — para que el admin lo tenga en la bandeja de entrada al arrancar
-   * el día. Solo procesa tipos `frecuencia: 'diaria'` — los `'semanal'` (ej.
-   * `combustible.cargaSospechosa`) los dispara el cron específico de ese dominio (ver
-   * `CombustibleCorreccionCronService.cronSemanal`), no este.
+   * el día. Solo procesa tipos `frecuencia: 'diaria'` — los `'semanal'` van por `cronSemanal`.
    */
   @Cron('0 8 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
   async cronDiario(): Promise<void> {
@@ -97,16 +103,43 @@ export class NotificacionesCronService {
   }
 
   /**
+   * Lunes 8:00 hora Argentina — tipos `frecuencia: 'semanal'` sin `cronPropio` (ej.
+   * `liquidaciones.pendienteAnulacion`). Los que tienen `cronPropio` los dispara el cron de su
+   * módulo (`combustible.cargaSospechosa` → `CombustibleCorreccionCronService.cronSemanal`).
+   */
+  @Cron('0 8 * * 1', { timeZone: 'America/Argentina/Buenos_Aires' })
+  async cronSemanal(): Promise<void> {
+    this.logger.log('Ejecutando cron semanal de notificaciones...');
+    const tipos = NOTIFICACIONES_CATALOG.filter(
+      (c) => c.frecuencia === 'semanal' && !c.cronPropio,
+    ).map((c) => c.tipo);
+    const tenants = await this.prisma.tenant.findMany({
+      select: { clerkOrgId: true, modules: true },
+    });
+    for (const t of tenants) {
+      try {
+        await this.procesarTenant(t.clerkOrgId, t.modules, 'semanal', tipos);
+      } catch (err) {
+        this.logger.error(`Error procesando notificaciones semanales del tenant ${t.clerkOrgId}: ${err}`);
+      }
+    }
+  }
+
+  /**
    * Evalúa y envía las notificaciones de un tenant puntual — usado por el cron diario, por
    * el cron semanal de un módulo puntual (con `frecuencia` filtrando a ese tipo) y por el
    * trigger manual de superadmin (sin `frecuencia`, procesa todo el catálogo aplicable).
+   * `tipos` acota a esos tipos (el cron de un módulo procesa solo los suyos).
    */
   async procesarTenant(
     tenantId: string,
     modules: string[],
     frecuencia?: NotificacionFrecuencia,
+    tipos?: string[],
   ): Promise<void> {
-    const catalogo = getNotificacionesCatalogoPorModulos(modules, frecuencia);
+    const catalogo = getNotificacionesCatalogoPorModulos(modules, frecuencia).filter(
+      (item) => !tipos || tipos.includes(item.tipo),
+    );
 
     for (const item of catalogo) {
       const evaluator = this.evaluators.find((e) => e.tipo === item.tipo);

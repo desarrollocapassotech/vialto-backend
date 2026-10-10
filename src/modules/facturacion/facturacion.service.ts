@@ -1218,6 +1218,18 @@ export class FacturacionService {
       include: this.FACTURA_INCLUDE,
     });
     if (!factura) throw new NotFoundException("Factura no encontrada");
+
+    // Switch por empresa (superadmin): Tenant.marcarCobradaHabilitada.
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { marcarCobradaHabilitada: true },
+    });
+    if (!tenant?.marcarCobradaHabilitada) {
+      throw new BadRequestException(
+        "La acción \"Marcar como cobrada\" no está habilitada para esta empresa.",
+      );
+    }
+
     const tieneArca = await this.tieneArca(tenantId);
 
     // Una factura con error de AFIP no es un comprobante válido: hay que reintentar

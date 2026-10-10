@@ -48,4 +48,7 @@ export class UpdateTenantDto {
 
   /** false = origen/destino de Viajes en texto libre, sin buscador de ciudades ni validación en el import. */
   @IsOptional() @IsBoolean() recomendacionCiudadesHabilitada?: boolean;
+
+  /** true = habilita "Marcar como cobrada" en Facturas (default false: oculta y el endpoint la rechaza). */
+  @IsOptional() @IsBoolean() marcarCobradaHabilitada?: boolean;
 }

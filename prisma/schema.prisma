@@ -112,7 +112,13 @@ model Tenant {
    * configura solo desde superadmin ("Configuración por empresa" → General).
    */
   recomendacionCiudadesHabilitada Boolean @default(true)
-  createdAt                      DateTime @default(now())
+  /**
+   * true = en Facturas está la acción "Marcar como cobrada" (registra un pago por el
+   * saldo pendiente). false (default) = la acción se oculta y el endpoint la rechaza. Se
+   * configura solo desde superadmin ("Configuración por empresa" → General).
+   */
+  marcarCobradaHabilitada        Boolean  @default(false)
+  createdAt                     DateTime @default(now())
 
   clientes                   Cliente[]
   transportistas             Transportista[]

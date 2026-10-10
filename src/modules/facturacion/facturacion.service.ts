@@ -22,7 +22,11 @@ import {
   roundMoney2,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
-import { conceptoCargoFactura } from "./cargo-factura.util";
+import {
+  conceptoCargoFactura,
+  estadoCargoFactura,
+  importeCargoFactura,
+} from "./cargo-factura.util";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
 import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
 
@@ -778,6 +782,7 @@ export class FacturacionService {
       clienteId: string | null;
       numero: string | null;
       importe: number;
+      ivaMonto?: number | null;
       moneda: string;
       fechaEmision: Date;
       fechaVencimiento: Date | null;
@@ -785,6 +790,7 @@ export class FacturacionService {
   ) {
     if (!factura.clienteId) return;
     const concepto = conceptoCargoFactura(factura.numero);
+    const importe = importeCargoFactura(factura);
     await tx.movimientoCuentaCorriente.upsert({
       where: { tenantId_facturaId: { tenantId: factura.tenantId, facturaId: factura.id } },
       update: {
@@ -793,7 +799,7 @@ export class FacturacionService {
         tipo: "cargo",
         origen: "factura",
         concepto,
-        importe: factura.importe,
+        importe,
         moneda: factura.moneda,
         fecha: factura.fechaEmision,
         fechaVencimiento: factura.fechaVencimiento,
@@ -808,7 +814,7 @@ export class FacturacionService {
         tipo: "cargo",
         origen: "factura",
         concepto,
-        importe: factura.importe,
+        importe,
         moneda: factura.moneda,
         fecha: factura.fechaEmision,
         fechaVencimiento: factura.fechaVencimiento,
@@ -1125,6 +1131,21 @@ export class FacturacionService {
       });
       if (updated.clienteId) {
         await this.upsertCargoFactura(tx, updated);
+        // El upsert deja el cargo en "pendiente": sin esto, editar una factura ya
+        // cobrada la volvía a mostrar como deuda en Cuenta Corriente.
+        const { cobrado } = computeEstadoFacturaLectura({
+          viajes: updated.viajes,
+          fechaVencimiento: updated.fechaVencimiento,
+          importeGuardado: updated.importe,
+          pagos: updated.pagos,
+          arcaEstado: updated.arcaEstado,
+          tieneArca,
+          facturarPorTramo: updated.facturarPorTramo,
+          tramos: updated.tramos,
+          ivaPctCabecera: updated.ivaPct,
+          ivaMontoGuardado: updated.ivaMonto,
+        });
+        await this.actualizarEstadoCargoFactura(tx, tenantId, updated, cobrado);
       } else {
         await this.revertirCargoFacturaSiCorresponde(tx, tenantId, id);
       }
@@ -1370,19 +1391,26 @@ export class FacturacionService {
     // (RequireModule lo oculta de la API), así que el día que contrate el módulo ve
     // el estado real sin ninguna migración — el saldo pagado siempre se recalculó
     // en vivo desde acá, nunca dependió de que existiera Cuenta Corriente.
-    const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
-    await client.movimientoCuentaCorriente.updateMany({
-      where: { tenantId, facturaId, tipo: 'cargo' },
-      data: {
-        estadoDisponibilidad: this.estadoDisponibilidadCcDesde(totalPagado, factura.importe),
-      },
-    });
+    await this.actualizarEstadoCargoFactura(client, tenantId, factura, cobrado);
   }
 
-  private estadoDisponibilidadCcDesde(pagado: number, importe: number): string {
-    const EPS = 1e-6;
-    if (pagado <= EPS) return 'pendiente';
-    if (pagado + EPS >= importe) return 'cancelado';
-    return 'parcial';
+  /**
+   * Alinea el cargo de CC con el cobro que muestra Facturas (`computeEstadoFacturaLectura`):
+   * cuenta también la factura cobrada por sus viajes sin `Pago` registrado (datos
+   * históricos) y el IVA de las facturas por tramo. No toca un cargo ya anulado.
+   */
+  private async actualizarEstadoCargoFactura(
+    client: PrismaService | Prisma.TransactionClient,
+    tenantId: string,
+    factura: { id: string; pagos: { importe: number }[] },
+    cobrado: boolean,
+  ): Promise<void> {
+    const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
+    await client.movimientoCuentaCorriente.updateMany({
+      where: { tenantId, facturaId: factura.id, tipo: 'cargo', estadoDisponibilidad: { not: 'anulado' } },
+      data: {
+        estadoDisponibilidad: estadoCargoFactura(cobrado, totalPagado),
+      },
+    });
   }
 }

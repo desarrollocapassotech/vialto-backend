@@ -28,17 +28,30 @@ export type LiquidacionContratoGrupo = {
   viajes: LiquidacionContratoViajeInput[];
   toneladas: number;
   subtotal: number;
-  adelanto: number;
+  adelanto?: number;
+};
+
+export type LiquidacionContratoConceptoLinea = {
+  nombreSnapshot: string;
+  signo: string;
+  monto: number;
+  cantidad?: number;
+  montoUnitario?: number | null;
+  modoAplicacion?: string;
 };
 
 export type LiquidacionContratoTotales = {
   grupos: LiquidacionContratoGrupo[];
   mismoPrecio: boolean;
   toneladas: number;
+  bruto: number;
+  comision: number;
+  comisionPct: number;
+  conceptosLineas: LiquidacionContratoConceptoLinea[];
   subtotal: number;
   ivaPct: number;
   iva: number;
-  adelanto: number;
+  adelanto?: number;
   totalFlete: number;
   moneda: string;
   cantViajes: number;
@@ -108,9 +121,26 @@ export function adelantoDesdePagos(pagos: unknown, moneda: string): number {
 
 export function buildLiquidacionContratoTotales(args: {
   viajes: LiquidacionContratoViajeInput[];
-  ivaPct: number;
+  ivaPct?: number;
+  liq?: {
+    bruto?: number | null;
+    comision?: number | null;
+    comisionPct?: number | null;
+    ivaPct?: number | null;
+    gastosAdminIva?: number | null;
+    liquido?: number | null;
+    moneda?: string | null;
+    cantViajes?: number | null;
+    conceptosLineas?: Array<{
+      nombreSnapshot: string;
+      signo: string;
+      monto: number;
+      cantidad?: number;
+      montoUnitario?: number | null;
+      modoAplicacion?: string;
+    }> | null;
+  };
 }): LiquidacionContratoTotales {
-  const ivaPct = Number.isFinite(args.ivaPct) ? args.ivaPct : 0;
   const map = new Map<string, LiquidacionContratoGrupo>();
   for (const v of args.viajes) {
     const key = precioKey(v.precioPorTn);
@@ -132,20 +162,104 @@ export function buildLiquidacionContratoTotales(args: {
     if (b.precioPorTn == null) return -1;
     return a.precioPorTn - b.precioPorTn;
   });
-  const subtotal = round2(grupos.reduce((s, g) => s + g.subtotal, 0));
-  const adelanto = round2(grupos.reduce((s, g) => s + g.adelanto, 0));
+
   const toneladas = round2(grupos.reduce((s, g) => s + g.toneladas, 0));
-  const iva = ivaPct > 0 ? round2((subtotal * ivaPct) / 100) : 0;
+  const adelanto = round2(grupos.reduce((s, g) => s + (g.adelanto ?? 0), 0));
+  const subtotalViajes = round2(grupos.reduce((s, g) => s + g.subtotal, 0));
+
+  if (args.liq) {
+    const cantViajes = args.liq.cantViajes ?? args.viajes.length;
+    const bruto =
+      args.liq.bruto != null ? round2(args.liq.bruto) : subtotalViajes;
+    const comision =
+      args.liq.comision != null ? round2(args.liq.comision) : 0;
+    const comisionPct =
+      args.liq.comisionPct != null ? Number(args.liq.comisionPct) : 0;
+    const ivaPct =
+      args.liq.ivaPct != null && Number.isFinite(args.liq.ivaPct)
+        ? Number(args.liq.ivaPct)
+        : Number.isFinite(args.ivaPct ?? 0)
+          ? Number(args.ivaPct ?? 0)
+          : 0;
+
+    const conceptosLineas: LiquidacionContratoConceptoLinea[] = (
+      args.liq.conceptosLineas ?? []
+    ).map((c) => ({
+      nombreSnapshot: c.nombreSnapshot,
+      signo: c.signo,
+      monto: round2(n(c.monto)),
+      cantidad: c.cantidad,
+      montoUnitario: c.montoUnitario,
+      modoAplicacion: c.modoAplicacion,
+    }));
+
+    const conceptosNetoSum = round2(
+      conceptosLineas.reduce((acc, c) => {
+        const factor =
+          c.modoAplicacion === 'TODOS_LOS_VIAJES'
+            ? Math.max(cantViajes, 1)
+            : 1;
+        const importe = round2(c.monto * factor);
+        return acc + (c.signo === 'favor' ? importe : -importe);
+      }, 0),
+    );
+
+    const iva =
+      args.liq.gastosAdminIva != null
+        ? round2(args.liq.gastosAdminIva)
+        : ivaPct > 0
+          ? round2(((bruto - comision + conceptosNetoSum) * ivaPct) / 100)
+          : 0;
+
+    const totalFlete =
+      args.liq.liquido != null
+        ? round2(args.liq.liquido)
+        : round2(bruto - comision + conceptosNetoSum + iva);
+
+    // Subtotal (Neto gravado): derivado de totalFlete - iva para garantizar consistencia matemática exacta
+    const subtotal =
+      args.liq.liquido != null && args.liq.gastosAdminIva != null
+        ? round2(totalFlete - iva)
+        : round2(bruto - comision + conceptosNetoSum);
+
+    const moneda = args.liq.moneda || args.viajes[0]?.moneda || 'ARS';
+
+    return {
+      grupos,
+      mismoPrecio: grupos.length === 1,
+      toneladas,
+      bruto,
+      comision,
+      comisionPct,
+      conceptosLineas,
+      subtotal,
+      ivaPct,
+      iva,
+      adelanto,
+      totalFlete,
+      moneda,
+      cantViajes,
+    };
+  }
+
+  // Fallback si no se envía `liq`
+  const ivaPct = Number.isFinite(args.ivaPct) ? (args.ivaPct as number) : 0;
+  const iva = ivaPct > 0 ? round2((subtotalViajes * ivaPct) / 100) : 0;
   const moneda = args.viajes[0]?.moneda ?? 'ARS';
+
   return {
     grupos,
-    mismoPrecio: grupos.length <= 1,
+    mismoPrecio: grupos.length === 1,
     toneladas,
-    subtotal,
+    bruto: subtotalViajes,
+    comision: 0,
+    comisionPct: 0,
+    conceptosLineas: [],
+    subtotal: subtotalViajes,
     ivaPct,
     iva,
     adelanto,
-    totalFlete: round2(subtotal + iva - adelanto),
+    totalFlete: round2(subtotalViajes + iva - adelanto),
     moneda,
     cantViajes: args.viajes.length,
   };

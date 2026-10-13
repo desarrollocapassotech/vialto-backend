@@ -182,4 +182,87 @@ test('resolverDocsViajeContrato retorna null en todos los campos si no hay datos
   assert.equal(vacio.remito, null);
 });
 
+test('buildLiquidacionContratoTotales descuenta comision de la base gravada e IVA sobre neto', () => {
+  const t = buildLiquidacionContratoTotales({
+    ivaPct: 21,
+    viajes: [
+      {
+        ...base,
+        toneladas: 10,
+        precioPorTn: 100,
+        subtotal: 1000,
+        adelanto: 100,
+      },
+    ],
+    comision: 50,
+    comisionPct: 5,
+  });
+  // subtotal = 1000, comision = 50 -> netoGravado = 950
+  assert.equal(t.subtotal, 1000);
+  assert.equal(t.comision, 50);
+  assert.equal(t.comisionPct, 5);
+  assert.equal(t.netoGravado, 950);
+  // IVA 21% sobre 950 = 199.50
+  assert.equal(t.iva, 199.5);
+  // Total a pagar = 950 + 199.50 - 100 (adelanto) = 1049.50
+  assert.equal(t.totalAPagar, 1049.5);
+});
+
+test('buildLiquidacionContratoTotales no descuenta ni aplica comision cuando es 0 o nula', () => {
+  const t = buildLiquidacionContratoTotales({
+    ivaPct: 21,
+    viajes: [
+      {
+        ...base,
+        toneladas: 10,
+        precioPorTn: 100,
+        subtotal: 1000,
+        adelanto: 100,
+      },
+    ],
+    comision: 0,
+    comisionPct: 0,
+  });
+  assert.equal(t.comision, 0);
+  assert.equal(t.comisionPct, 0);
+  assert.equal(t.netoGravado, 1000);
+  assert.equal(t.iva, 210);
+  assert.equal(t.totalAPagar, 1110);
+});
+
+test('buildLiquidacionContratoTotales con conceptos y datos persistidos coincide con detalle de liquidacion', () => {
+  const t = buildLiquidacionContratoTotales({
+    ivaPct: 21,
+    viajes: [
+      {
+        ...base,
+        toneladas: 33.06,
+        precioPorTn: 60000,
+        subtotal: 1983600,
+        adelanto: 0,
+      },
+    ],
+    comision: 158688,
+    comisionPct: 8,
+    conceptosLineas: [
+      {
+        nombreSnapshot: 'Gastos administrativos',
+        signo: 'contra',
+        monto: 3500,
+        ivaPct: 21,
+      },
+    ],
+    ivaPersistido: 382496.52,
+    liquidoPersistido: 2203908.52,
+  });
+  assert.equal(t.subtotal, 1983600);
+  assert.equal(t.comision, 158688);
+  assert.equal(t.conceptos.length, 1);
+  assert.equal(t.conceptos[0].label, 'Gastos administrativos (IVA 21%)');
+  assert.equal(t.conceptos[0].monto, 3500);
+  assert.equal(t.netoGravado, 1821412);
+  assert.equal(t.iva, 382496.52);
+  assert.equal(t.totalAPagar, 2203908.52);
+});
+
 console.log('liquidacion-contrato.util.spec.ts OK');

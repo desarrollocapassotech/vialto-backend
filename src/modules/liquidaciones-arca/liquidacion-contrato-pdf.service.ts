@@ -7,6 +7,7 @@ import {
   adelantoDesdePagos,
   buildLiquidacionContratoTotales,
   crtMicRemitoDesdeDocumento,
+  encabezadoContratoProveedor,
   fmtContratoDate,
   mercaderiaDesdeProductos,
   type LiquidacionContratoTotales,
@@ -199,6 +200,7 @@ export class LiquidacionContratoPdfService {
       periodoDesde: Date;
       periodoHasta: Date;
       cantViajes: number;
+      proveedorContrato?: string | null;
       transportista: {
         nombre: string;
         idFiscal: string | null;
@@ -236,6 +238,7 @@ export class LiquidacionContratoPdfService {
       periodoDesde: Date;
       periodoHasta: Date;
       cantViajes: number;
+      proveedorContrato?: string | null;
       transportista: {
         nombre: string;
         idFiscal: string | null;
@@ -263,21 +266,25 @@ export class LiquidacionContratoPdfService {
       .text(emisorNombre.toUpperCase(), M, y, { width: CW, align: 'right' });
     y += 42;
 
+    const { titulo, subtitulo } = encabezadoContratoProveedor(liq.proveedorContrato);
     doc
       .font('Helvetica-Bold')
-      .fontSize(14)
+      .fontSize(subtitulo ? 14 : 13)
       .fillColor(CHARCOAL)
-      .text('LIQUIDACIÓN DE FLETE', M, y, { width: CW, align: 'center' });
-    y += 18;
-    doc
-      .font('Helvetica')
-      .fontSize(8)
-      .fillColor(STEEL)
-      .text('Contrato / liquidación a proveedor', M, y, {
-        width: CW,
-        align: 'center',
-      });
-    y += 16;
+      .text(titulo, M, y, { width: CW, align: 'center' });
+    y += subtitulo ? 18 : 24;
+
+    if (subtitulo) {
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .fillColor(STEEL)
+        .text(subtitulo, M, y, {
+          width: CW,
+          align: 'center',
+        });
+      y += 16;
+    }
     doc
       .moveTo(M, y)
       .lineTo(M + CW, y)

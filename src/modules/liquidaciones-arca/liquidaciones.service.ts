@@ -374,6 +374,7 @@ export class LiquidacionesService {
           cbteTipo: getCbteTipoCvlp(transportista.condicionIva),
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
+          proveedorContrato: dto.proveedorContrato?.trim() || null,
           createdBy: userId,
           updatedAt: new Date(),
           viajes: {
@@ -482,6 +483,9 @@ export class LiquidacionesService {
     }
     if (dto.comprobanteUrl !== undefined) {
       data.comprobanteUrl = dto.comprobanteUrl || null;
+    }
+    if (dto.proveedorContrato !== undefined) {
+      data.proveedorContrato = dto.proveedorContrato?.trim() || null;
     }
 
     // ── Reemplazo del conjunto de viajes (solo borrador) ────────────────────

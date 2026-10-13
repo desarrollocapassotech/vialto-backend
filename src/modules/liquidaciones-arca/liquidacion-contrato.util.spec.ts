@@ -2,8 +2,21 @@
  * Agrupación de flete para el PDF contrato proveedor.
  * Ejecutar: npx ts-node --transpile-only src/modules/liquidaciones-arca/liquidacion-contrato.util.spec.ts
  */
-import * as assert from 'node:assert/strict';
-import { buildLiquidacionContratoTotales } from './liquidacion-contrato.util';
+const assert = {
+  equal: (actual: unknown, expected: unknown, message?: string) => {
+    if (actual !== expected) {
+      throw new Error(
+        message ||
+          `Aserción fallida: esperado ${JSON.stringify(expected)}, pero se obtuvo ${JSON.stringify(actual)}`,
+      );
+    }
+  },
+};
+
+import {
+  buildLiquidacionContratoTotales,
+  encabezadoContratoProveedor,
+} from './liquidacion-contrato.util';
 
 function test(name: string, fn: () => void) {
   try {
@@ -84,6 +97,36 @@ test('varios viajes con distinto precio: subtotal por grupo + consolidado', () =
   assert.equal(t.iva, 294);
   assert.equal(t.adelanto, 100);
   assert.equal(t.totalFlete, 1594);
+});
+
+test('encabezado sin proveedor configurado devuelve título y subtítulo estándar', () => {
+  const sinConfig = encabezadoContratoProveedor(null);
+  assert.equal(sinConfig.titulo, 'LIQUIDACIÓN DE FLETE');
+  assert.equal(sinConfig.subtitulo, 'Contrato / liquidación a proveedor');
+
+  const vacio = encabezadoContratoProveedor('');
+  assert.equal(vacio.titulo, 'LIQUIDACIÓN DE FLETE');
+  assert.equal(vacio.subtitulo, 'Contrato / liquidación a proveedor');
+});
+
+test('encabezado con proveedor configurado genera el título dinámico en mayúsculas sin subtítulo', () => {
+  const arg = encabezadoContratoProveedor('LSF CARGAS SAS (ARGENTINA)');
+  assert.equal(arg.titulo, 'CONTRATO PROVEEDOR POR LSF CARGAS SAS (ARGENTINA)');
+  assert.equal(arg.subtitulo, null);
+
+  const uy = encabezadoContratoProveedor('lsf cargas & comex sas (uruguay)');
+  assert.equal(uy.titulo, 'CONTRATO PROVEEDOR POR LSF CARGAS & COMEX SAS (URUGUAY)');
+  assert.equal(uy.subtitulo, null);
+});
+
+test('encabezado con espacios en blanco realiza trim adecuadamente', () => {
+  const espaciado = encabezadoContratoProveedor('   LSF Cargas SAS   ');
+  assert.equal(espaciado.titulo, 'CONTRATO PROVEEDOR POR LSF CARGAS SAS');
+  assert.equal(espaciado.subtitulo, null);
+
+  const soloEspacios = encabezadoContratoProveedor('   ');
+  assert.equal(soloEspacios.titulo, 'LIQUIDACIÓN DE FLETE');
+  assert.equal(soloEspacios.subtitulo, 'Contrato / liquidación a proveedor');
 });
 
 console.log('liquidacion-contrato.util.spec.ts OK');

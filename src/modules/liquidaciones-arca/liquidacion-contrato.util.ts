@@ -73,6 +73,27 @@ export function mercaderiaDesdeProductos(
   return det || null;
 }
 
+/**
+ * Determina el título y subtítulo del contrato comercial para el PDF según
+ * el proveedor / entidad configurada o el título por defecto.
+ */
+export function encabezadoContratoProveedor(proveedorContrato?: string | null): {
+  titulo: string;
+  subtitulo: string | null;
+} {
+  const p = proveedorContrato?.trim();
+  if (p) {
+    return {
+      titulo: `CONTRATO PROVEEDOR POR ${p.toUpperCase()}`,
+      subtitulo: null,
+    };
+  }
+  return {
+    titulo: 'LIQUIDACIÓN DE FLETE',
+    subtitulo: 'Contrato / liquidación a proveedor',
+  };
+}
+
 export function crtMicRemitoDesdeDocumento(documentoAduanero: unknown): {
   crt: string | null;
   mic: string | null;

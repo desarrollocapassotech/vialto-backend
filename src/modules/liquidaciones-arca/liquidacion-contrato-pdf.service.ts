@@ -6,10 +6,10 @@ import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import {
   adelantoDesdePagos,
   buildLiquidacionContratoTotales,
-  crtMicRemitoDesdeDocumento,
   encabezadoContratoProveedor,
   fmtContratoDate,
   mercaderiaDesdeProductos,
+  resolverDocsViajeContrato,
   type LiquidacionContratoTotales,
   type LiquidacionContratoViajeInput,
 } from './liquidacion-contrato.util';
@@ -104,28 +104,18 @@ export class LiquidacionContratoPdfService {
     });
     if (!liq) throw new NotFoundException('Liquidación no encontrada');
 
-    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
+    const tenantConfig = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: tenantId },
       select: {
-        idPropio2Habilitado: true,
-        idPropio2Label: true,
         unidadCantidadViajes: true,
       },
     });
-    const unidad = normalizeUnidadCantidad(tenantIdPropio2?.unidadCantidadViajes);
+    const unidad = normalizeUnidadCantidad(tenantConfig?.unidadCantidadViajes);
 
     const viajes: LiquidacionContratoViajeInput[] = liq.viajes.map((lv) => {
       const v = lv.viaje;
-      const idPropio2ValorRaw = v.idPropio2?.trim();
-      const idPropio2Habilitado = Boolean(
-        tenantIdPropio2?.idPropio2Habilitado && idPropio2ValorRaw,
-      );
-      const idPropio2Label = idPropio2Habilitado
-        ? tenantIdPropio2?.idPropio2Label?.trim() || 'ID Propio 2'
-        : null;
-      const idPropio2Valor = idPropio2Habilitado ? idPropio2ValorRaw : null;
       const moneda = (v.monedaPrecioTransportistaExterno || 'ARS').toUpperCase();
-      const docs = crtMicRemitoDesdeDocumento(v.documentoAduanero);
+      const docs = resolverDocsViajeContrato(v);
       const toneladas = lv.tnDestino ?? v.cantidadTransportista ?? null;
       const precioPorTn =
         lv.tarifaTransportista ?? v.precioUnitarioTransportista ?? null;
@@ -138,8 +128,6 @@ export class LiquidacionContratoPdfService {
       return {
         numero: numeroVisibleViaje(v),
         numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado,
-        idPropio2Label,
-        idPropio2Valor,
         origen: v.origen,
         destino: v.destino,
         fechaCarga: v.fechaCarga,
@@ -443,16 +431,12 @@ export class LiquidacionContratoPdfService {
       ].join('  ·  ');
       doc.font('Helvetica-Bold').fontSize(8).fillColor(CHARCOAL).text(line, M, y, { width: CW });
       y += 12;
-      const idPropio2Segmento =
-        v.idPropio2Label && v.idPropio2Valor
-          ? `  ·  ${v.idPropio2Label}: ${v.idPropio2Valor}`
-          : '';
       doc
         .font('Helvetica')
         .fontSize(7.5)
         .fillColor(STEEL)
         .text(
-          `Chofer: ${dash(v.choferNombre)}  ·  Mercadería: ${dash(v.mercaderia)}  ·  ${unidad}: ${fmtNum(v.toneladas)}${idPropio2Segmento}`,
+          `Chofer: ${dash(v.choferNombre)}  ·  Mercadería: ${dash(v.mercaderia)}  ·  ${unidad}: ${fmtNum(v.toneladas)}`,
           M,
           y,
           { width: CW },

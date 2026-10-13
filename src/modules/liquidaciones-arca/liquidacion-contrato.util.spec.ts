@@ -16,6 +16,7 @@ const assert = {
 import {
   buildLiquidacionContratoTotales,
   encabezadoContratoProveedor,
+  resolverDocsViajeContrato,
 } from './liquidacion-contrato.util';
 
 function test(name: string, fn: () => void) {
@@ -127,6 +128,58 @@ test('encabezado con espacios en blanco realiza trim adecuadamente', () => {
   const soloEspacios = encabezadoContratoProveedor('   ');
   assert.equal(soloEspacios.titulo, 'LIQUIDACIÓN DE FLETE');
   assert.equal(soloEspacios.subtitulo, 'Contrato / liquidación a proveedor');
+});
+
+test('resolverDocsViajeContrato prioriza MIC desde ID 1 y Remito desde ID 2', () => {
+  const docs = resolverDocsViajeContrato({
+    numeroIdentificacionPersonalizado: 'MIC-9921',
+    idPropio2: 'REM-1004',
+    documentoAduanero: {
+      crtNumero: 'CRT-555',
+      micNumero: 'MIC-NOMINA-VIEJA',
+      remito: 'REM-VIEJO',
+    },
+  });
+  assert.equal(docs.crt, 'CRT-555');
+  assert.equal(docs.mic, 'MIC-9921');
+  assert.equal(docs.remito, 'REM-1004');
+});
+
+test('resolverDocsViajeContrato aplica trim en IDs personalizados', () => {
+  const docs = resolverDocsViajeContrato({
+    numeroIdentificacionPersonalizado: '   MIC-ESPACIADO   ',
+    idPropio2: '   REM-ESPACIADO   ',
+  });
+  assert.equal(docs.mic, 'MIC-ESPACIADO');
+  assert.equal(docs.remito, 'REM-ESPACIADO');
+  assert.equal(docs.crt, null);
+});
+
+test('resolverDocsViajeContrato fallback a documento aduanero si IDs personalizados están vacíos', () => {
+  const docs = resolverDocsViajeContrato({
+    numeroIdentificacionPersonalizado: '   ',
+    idPropio2: null,
+    documentoAduanero: {
+      crtNumero: 'CRT-777',
+      micNumero: 'MIC-FALLBACK',
+      remitoNumero: 'REM-FALLBACK',
+    },
+  });
+  assert.equal(docs.crt, 'CRT-777');
+  assert.equal(docs.mic, 'MIC-FALLBACK');
+  assert.equal(docs.remito, 'REM-FALLBACK');
+});
+
+test('resolverDocsViajeContrato retorna null en todos los campos si no hay datos', () => {
+  const docs = resolverDocsViajeContrato(null);
+  assert.equal(docs.crt, null);
+  assert.equal(docs.mic, null);
+  assert.equal(docs.remito, null);
+
+  const vacio = resolverDocsViajeContrato({});
+  assert.equal(vacio.crt, null);
+  assert.equal(vacio.mic, null);
+  assert.equal(vacio.remito, null);
 });
 
 console.log('liquidacion-contrato.util.spec.ts OK');

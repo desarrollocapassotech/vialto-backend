@@ -113,6 +113,39 @@ export function crtMicRemitoDesdeDocumento(documentoAduanero: unknown): {
   };
 }
 
+/**
+ * Resuelve los identificadores documentales (CRT, MIC y Remito) para el contrato comercial PDF:
+ * - MIC: Se mapea con prioridad desde ID Personalizado 1 (numeroIdentificacionPersonalizado). Fallback a nóminas si no está definido.
+ * - Remito: Se mapea con prioridad desde ID Personalizado 2 (idPropio2). Fallback a nóminas si no está definido.
+ * - CRT: Se extrae del documento aduanero / nómina (o null si no está cargado).
+ */
+export function resolverDocsViajeContrato(viaje?: {
+  documentoAduanero?: unknown;
+  numeroIdentificacionPersonalizado?: string | null;
+  idPropio2?: string | null;
+} | null): {
+  crt: string | null;
+  mic: string | null;
+  remito: string | null;
+} {
+  const docs = crtMicRemitoDesdeDocumento(viaje?.documentoAduanero);
+  const idPersonalizado1 =
+    typeof viaje?.numeroIdentificacionPersonalizado === 'string' &&
+    viaje.numeroIdentificacionPersonalizado.trim()
+      ? viaje.numeroIdentificacionPersonalizado.trim()
+      : null;
+  const idPersonalizado2 =
+    typeof viaje?.idPropio2 === 'string' && viaje.idPropio2.trim()
+      ? viaje.idPropio2.trim()
+      : null;
+
+  return {
+    crt: docs.crt,
+    mic: idPersonalizado1 || docs.mic,
+    remito: idPersonalizado2 || docs.remito,
+  };
+}
+
 export function adelantoDesdePagos(pagos: unknown, moneda: string): number {
   if (!Array.isArray(pagos)) return 0;
   const mon = (moneda || 'ARS').toUpperCase();

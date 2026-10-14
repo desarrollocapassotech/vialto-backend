@@ -232,6 +232,15 @@ export class TenantsService {
             ? new Date(dto.billingRenewsAt)
             : null,
     };
+    if (dto.opcionesProveedorLiquidacion !== undefined) {
+      data.opcionesProveedorLiquidacion = Array.from(
+        new Set(
+          dto.opcionesProveedorLiquidacion
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0),
+        ),
+      );
+    }
     this.assertIdentificadoresValidos(current, dto, data);
     return this.prisma.tenant.update({
       where: { clerkOrgId },

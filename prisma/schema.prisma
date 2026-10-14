@@ -118,6 +118,12 @@ model Tenant {
    * configura solo desde superadmin ("Configuración por empresa" → General).
    */
   marcarCobradaHabilitada        Boolean  @default(false)
+  /**
+   * Opciones de proveedores / entidades configuradas para el encabezado del contrato comercial PDF
+   * (ej: ["EMPRESA LOGÍSTICA S.A. (ARGENTINA)", "EMPRESA LOGÍSTICA S.A. (URUGUAY)"]).
+   * Se configura desde superadmin ("Configuración por empresa" → General).
+   */
+  opcionesProveedorLiquidacion   String[] @default([])
   createdAt                     DateTime @default(now())
 
   clientes                   Cliente[]
@@ -1558,6 +1564,12 @@ model Liquidacion {
 
   // Idempotencia: hash del payload enviado a AFIP SDK (evita duplicar en reintento)
   payloadHash String?
+
+  /**
+   * Proveedor / entidad seleccionada al emitir/guardar la liquidación para el contrato comercial PDF
+   * (ej: "EMPRESA LOGÍSTICA S.A. (ARGENTINA)"). null = usa el título estándar "LIQUIDACIÓN DE FLETE".
+   */
+  proveedorContrato String?
 
   createdAt DateTime @default(now())
   createdBy String

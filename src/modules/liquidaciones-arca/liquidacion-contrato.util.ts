@@ -31,15 +31,26 @@ export type LiquidacionContratoGrupo = {
   adelanto: number;
 };
 
+export type LiquidacionContratoConcepto = {
+  label: string;
+  monto: number;
+  signo: 'favor' | 'contra' | string;
+};
+
 export type LiquidacionContratoTotales = {
   grupos: LiquidacionContratoGrupo[];
   mismoPrecio: boolean;
   toneladas: number;
   subtotal: number;
+  comision: number;
+  comisionPct: number;
+  conceptos: LiquidacionContratoConcepto[];
+  netoGravado: number;
   ivaPct: number;
   iva: number;
   adelanto: number;
   totalFlete: number;
+  totalAPagar: number;
   moneda: string;
   cantViajes: number;
 };
@@ -73,6 +84,27 @@ export function mercaderiaDesdeProductos(
   return det || null;
 }
 
+/**
+ * Determina el título y subtítulo del contrato comercial para el PDF según
+ * el proveedor / entidad configurada o el título por defecto.
+ */
+export function encabezadoContratoProveedor(proveedorContrato?: string | null): {
+  titulo: string;
+  subtitulo: string | null;
+} {
+  const p = proveedorContrato?.trim();
+  if (p) {
+    return {
+      titulo: `CONTRATO PROVEEDOR POR ${p.toUpperCase()}`,
+      subtitulo: null,
+    };
+  }
+  return {
+    titulo: 'LIQUIDACIÓN DE FLETE',
+    subtitulo: 'Contrato / liquidación a proveedor',
+  };
+}
+
 export function crtMicRemitoDesdeDocumento(documentoAduanero: unknown): {
   crt: string | null;
   mic: string | null;
@@ -89,6 +121,39 @@ export function crtMicRemitoDesdeDocumento(documentoAduanero: unknown): {
     crt: stored?.crtNumero?.trim() || str(raw.crt) || str(raw.crtNumero),
     mic: stored?.micNumero?.trim() || str(raw.mic) || str(raw.micNumero),
     remito: str(raw.remito) || str(raw.remitoNumero) || str(raw.nroRemito),
+  };
+}
+
+/**
+ * Resuelve los identificadores documentales (CRT, MIC y Remito) para el contrato comercial PDF:
+ * - MIC: Se mapea con prioridad desde ID Personalizado 1 (numeroIdentificacionPersonalizado). Fallback a nóminas si no está definido.
+ * - Remito: Se mapea con prioridad desde ID Personalizado 2 (idPropio2). Fallback a nóminas si no está definido.
+ * - CRT: Se extrae del documento aduanero / nómina (o null si no está cargado).
+ */
+export function resolverDocsViajeContrato(viaje?: {
+  documentoAduanero?: unknown;
+  numeroIdentificacionPersonalizado?: string | null;
+  idPropio2?: string | null;
+} | null): {
+  crt: string | null;
+  mic: string | null;
+  remito: string | null;
+} {
+  const docs = crtMicRemitoDesdeDocumento(viaje?.documentoAduanero);
+  const idPersonalizado1 =
+    typeof viaje?.numeroIdentificacionPersonalizado === 'string' &&
+    viaje.numeroIdentificacionPersonalizado.trim()
+      ? viaje.numeroIdentificacionPersonalizado.trim()
+      : null;
+  const idPersonalizado2 =
+    typeof viaje?.idPropio2 === 'string' && viaje.idPropio2.trim()
+      ? viaje.idPropio2.trim()
+      : null;
+
+  return {
+    crt: docs.crt,
+    mic: idPersonalizado1 || docs.mic,
+    remito: idPersonalizado2 || docs.remito,
   };
 }
 
@@ -109,6 +174,19 @@ export function adelantoDesdePagos(pagos: unknown, moneda: string): number {
 export function buildLiquidacionContratoTotales(args: {
   viajes: LiquidacionContratoViajeInput[];
   ivaPct: number;
+  comision?: number | null;
+  comisionPct?: number | null;
+  conceptosLineas?: Array<{
+    nombreSnapshot?: string | null;
+    nombre?: string | null;
+    signo?: string | null;
+    monto?: number | null;
+    ivaPct?: number | null;
+    cantidad?: number | null;
+    montoUnitario?: number | null;
+  }> | null;
+  ivaPersistido?: number | null;
+  liquidoPersistido?: number | null;
 }): LiquidacionContratoTotales {
   const ivaPct = Number.isFinite(args.ivaPct) ? args.ivaPct : 0;
   const map = new Map<string, LiquidacionContratoGrupo>();
@@ -135,17 +213,70 @@ export function buildLiquidacionContratoTotales(args: {
   const subtotal = round2(grupos.reduce((s, g) => s + g.subtotal, 0));
   const adelanto = round2(grupos.reduce((s, g) => s + g.adelanto, 0));
   const toneladas = round2(grupos.reduce((s, g) => s + g.toneladas, 0));
-  const iva = ivaPct > 0 ? round2((subtotal * ivaPct) / 100) : 0;
+
+  const comisionPct =
+    typeof args.comisionPct === 'number' && Number.isFinite(args.comisionPct) && args.comisionPct > 0
+      ? round2(args.comisionPct)
+      : 0;
+
+  let comision = 0;
+  if (typeof args.comision === 'number' && Number.isFinite(args.comision) && args.comision > 0) {
+    comision = round2(args.comision);
+  } else if (comisionPct > 0) {
+    comision = round2((subtotal * comisionPct) / 100);
+  }
+
+  const conceptos: LiquidacionContratoConcepto[] = [];
+  let conceptosNetoSum = 0;
+  for (const l of args.conceptosLineas ?? []) {
+    const monto = Math.abs(Number(l?.monto) || 0);
+    if (!monto) continue;
+    const nombre = l.nombreSnapshot?.trim() || l.nombre?.trim() || 'Concepto';
+    const signo = String(l.signo || '').toLowerCase() === 'favor' ? 'favor' : 'contra';
+    const linePct = l.ivaPct != null && Number.isFinite(Number(l.ivaPct)) ? Number(l.ivaPct) : null;
+    const cantidad = Number(l.cantidad) || 1;
+    const detalle = [
+      cantidad !== 1 && l.montoUnitario != null
+        ? `${cantidad.toLocaleString('es-AR')} × ${l.montoUnitario}`
+        : null,
+      linePct != null ? `IVA ${linePct}%` : null,
+    ].filter(Boolean);
+    const label = `${nombre}${detalle.length ? ` (${detalle.join(', ')})` : ''}`;
+    conceptos.push({ label, monto, signo });
+    conceptosNetoSum = round2(conceptosNetoSum + (signo === 'favor' ? monto : -monto));
+  }
+
+  const netoGravado = round2(subtotal - comision + conceptosNetoSum);
+
+  const iva =
+    typeof args.ivaPersistido === 'number' && Number.isFinite(args.ivaPersistido)
+      ? round2(args.ivaPersistido)
+      : ivaPct > 0
+        ? round2((netoGravado * ivaPct) / 100)
+        : 0;
+
+  const totalAPagar =
+    typeof args.liquidoPersistido === 'number' && Number.isFinite(args.liquidoPersistido)
+      ? round2(args.liquidoPersistido - adelanto)
+      : round2(netoGravado + iva - adelanto);
+
+  const totalFlete = round2(subtotal + (ivaPct > 0 ? round2((subtotal * ivaPct) / 100) : 0) - adelanto);
   const moneda = args.viajes[0]?.moneda ?? 'ARS';
+
   return {
     grupos,
     mismoPrecio: grupos.length <= 1,
     toneladas,
     subtotal,
+    comision,
+    comisionPct,
+    conceptos,
+    netoGravado,
     ivaPct,
     iva,
     adelanto,
-    totalFlete: round2(subtotal + iva - adelanto),
+    totalFlete,
+    totalAPagar,
     moneda,
     cantViajes: args.viajes.length,
   };

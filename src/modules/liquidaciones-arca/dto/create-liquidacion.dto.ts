@@ -115,4 +115,10 @@ export class CreateLiquidacionDto {
   @IsOptional()
   @IsString()
   moneda?: string;
+
+  /** Opción de proveedor seleccionada para el título del contrato comercial PDF */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  proveedorContrato?: string;
 }

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { LiquidacionesService } from "../liquidaciones-arca/liquidaciones.service";
 import { FacturacionService } from "../facturacion/facturacion.service";
+import { ymdAr } from "../../shared/util/fecha-ar.util";
 
 interface ViajeParaAgrupar {
   id: string;
@@ -99,12 +100,12 @@ export class ImportacionesPostViajesService {
 
   private periodoDesdeHasta(fechas: (Date | null)[]): { desde: string; hasta: string } {
     const validas = fechas.filter((f): f is Date => f != null);
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = ymdAr();
     if (validas.length === 0) return { desde: hoy, hasta: hoy };
     const ts = validas.map((f) => f.getTime());
     return {
-      desde: new Date(Math.min(...ts)).toISOString().slice(0, 10),
-      hasta: new Date(Math.max(...ts)).toISOString().slice(0, 10),
+      desde: ymdAr(new Date(Math.min(...ts))),
+      hasta: ymdAr(new Date(Math.max(...ts))),
     };
   }
 
@@ -335,7 +336,7 @@ export class ImportacionesPostViajesService {
       }
     }
 
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = ymdAr();
     const creadas = [];
     for (const { clienteId, moneda, viajes: grupo } of porGrupo.values()) {
       const key = `${clienteId}|${moneda}`;

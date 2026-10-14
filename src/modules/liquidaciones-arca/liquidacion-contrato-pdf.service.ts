@@ -70,6 +70,9 @@ export class LiquidacionContratoPdfService {
           },
         },
         tenant: { select: { name: true } },
+        conceptosLineas: {
+          orderBy: { orden: 'asc' },
+        },
         viajes: {
           include: {
             viaje: {
@@ -148,6 +151,11 @@ export class LiquidacionContratoPdfService {
     const totales = buildLiquidacionContratoTotales({
       viajes,
       ivaPct: liq.ivaPct ?? 21,
+      comision: liq.comision,
+      comisionPct: liq.comisionPct,
+      conceptosLineas: liq.conceptosLineas,
+      ivaPersistido: liq.gastosAdminIva,
+      liquidoPersistido: liq.liquido,
     });
 
     let emisorNombre = liq.tenant?.name?.trim() || 'Liquidación';
@@ -311,17 +319,26 @@ export class LiquidacionContratoPdfService {
     y = this.drawViajesPorPrecio(doc, y, totales, unidad);
     y = this.ensure(doc, y, 90);
     y = this.section(doc, y, 'Total consolidado');
-    this.moneyRows(
-      doc,
-      y,
-      [
-        ['Subtotal', fmtMoney(totales.subtotal, totales.moneda)],
-        [`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)],
-        ['Adelanto', fmtMoney(totales.adelanto, totales.moneda)],
-        ['Total flete', fmtMoney(totales.totalFlete, totales.moneda)],
-      ],
-      true,
-    );
+    const consolidadoRows: [string, string, boolean?][] = [
+      ['Subtotal', fmtMoney(totales.subtotal, totales.moneda)],
+    ];
+    if (totales.comision > 0) {
+      consolidadoRows.push([
+        totales.comisionPct > 0 ? `Comisión (${this.pctLabel(totales.comisionPct)})` : 'Comisión',
+        `- ${fmtMoney(totales.comision, totales.moneda)}`,
+      ]);
+    }
+    for (const c of totales.conceptos) {
+      const valorStr = c.signo === 'contra' ? `- ${fmtMoney(c.monto, totales.moneda)}` : `+ ${fmtMoney(c.monto, totales.moneda)}`;
+      consolidadoRows.push([c.label, valorStr]);
+    }
+    if (totales.comision > 0 || totales.conceptos.length > 0) {
+      consolidadoRows.push(['Neto gravado', fmtMoney(totales.netoGravado, totales.moneda)]);
+    }
+    consolidadoRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)]);
+    consolidadoRows.push(['Adelanto', fmtMoney(totales.adelanto, totales.moneda)]);
+    consolidadoRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, totales.moneda), true]);
+    this.moneyRows(doc, y, consolidadoRows);
   }
 
   private drawViajeUnico(
@@ -353,14 +370,28 @@ export class LiquidacionContratoPdfService {
       ['Destino', dash(v.destino)],
     ]);
     y = this.section(doc, y, 'Detalle de flete');
-    y = this.moneyRows(doc, y, [
+    const viajeUnicoRows: [string, string, boolean?][] = [
       [`Valor acordado x ${unidad}`, v.precioPorTn != null ? fmtMoney(v.precioPorTn, v.moneda) : '—'],
       ['Subtotal', fmtMoney(v.subtotal, v.moneda)],
-      [`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)],
-      ['Adelanto', fmtMoney(v.adelanto, v.moneda)],
-      ['Total flete', fmtMoney(totales.totalFlete, totales.moneda)],
-      ['Moneda', v.moneda],
-    ], true);
+    ];
+    if (totales.comision > 0) {
+      viajeUnicoRows.push([
+        totales.comisionPct > 0 ? `Comisión (${this.pctLabel(totales.comisionPct)})` : 'Comisión',
+        `- ${fmtMoney(totales.comision, v.moneda)}`,
+      ]);
+    }
+    for (const c of totales.conceptos) {
+      const valorStr = c.signo === 'contra' ? `- ${fmtMoney(c.monto, v.moneda)}` : `+ ${fmtMoney(c.monto, v.moneda)}`;
+      viajeUnicoRows.push([c.label, valorStr]);
+    }
+    if (totales.comision > 0 || totales.conceptos.length > 0) {
+      viajeUnicoRows.push(['Neto gravado', fmtMoney(totales.netoGravado, v.moneda)]);
+    }
+    viajeUnicoRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, v.moneda)]);
+    viajeUnicoRows.push(['Adelanto', fmtMoney(v.adelanto, v.moneda)]);
+    viajeUnicoRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, v.moneda), true]);
+    viajeUnicoRows.push(['Moneda', v.moneda, false]);
+    y = this.moneyRows(doc, y, viajeUnicoRows);
     return y;
   }
 
@@ -381,18 +412,32 @@ export class LiquidacionContratoPdfService {
       ['Destino', destinos],
     ]);
     y = this.section(doc, y, 'Detalle de flete');
-    y = this.moneyRows(doc, y, [
+    const mismoPrecioRows: [string, string, boolean?][] = [
       [
         `Valor acordado x ${unidad}`,
         g.precioPorTn != null ? fmtMoney(g.precioPorTn, totales.moneda) : '—',
       ],
       [capitalizar(unidadCantidadPlural(unidad)), fmtNum(g.toneladas)],
       ['Subtotal', fmtMoney(g.subtotal, totales.moneda)],
-      [`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)],
-      ['Adelanto', fmtMoney(g.adelanto, totales.moneda)],
-      ['Total flete', fmtMoney(totales.totalFlete, totales.moneda)],
-      ['Moneda', totales.moneda],
-    ], true);
+    ];
+    if (totales.comision > 0) {
+      mismoPrecioRows.push([
+        totales.comisionPct > 0 ? `Comisión (${this.pctLabel(totales.comisionPct)})` : 'Comisión',
+        `- ${fmtMoney(totales.comision, totales.moneda)}`,
+      ]);
+    }
+    for (const c of totales.conceptos) {
+      const valorStr = c.signo === 'contra' ? `- ${fmtMoney(c.monto, totales.moneda)}` : `+ ${fmtMoney(c.monto, totales.moneda)}`;
+      mismoPrecioRows.push([c.label, valorStr]);
+    }
+    if (totales.comision > 0 || totales.conceptos.length > 0) {
+      mismoPrecioRows.push(['Neto gravado', fmtMoney(totales.netoGravado, totales.moneda)]);
+    }
+    mismoPrecioRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)]);
+    mismoPrecioRows.push(['Adelanto', fmtMoney(g.adelanto, totales.moneda)]);
+    mismoPrecioRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, totales.moneda), true]);
+    mismoPrecioRows.push(['Moneda', totales.moneda, false]);
+    y = this.moneyRows(doc, y, mismoPrecioRows);
     return y;
   }
 
@@ -493,12 +538,16 @@ export class LiquidacionContratoPdfService {
   private moneyRows(
     doc: PDFKit.PDFDocument,
     y: number,
-    rows: [string, string][],
+    rows: [string, string, boolean?][],
     lastBold = false,
   ): number {
     for (let i = 0; i < rows.length; i++) {
       y = this.ensure(doc, y, 16);
-      const bold = lastBold && i === rows.length - 1;
+      const isExplicitBold = rows[i][2];
+      const bold =
+        isExplicitBold !== undefined
+          ? isExplicitBold
+          : lastBold && i === rows.length - 1;
       doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).fillColor(CHARCOAL);
       doc.text(rows[i][0], M, y, { width: CW - 140 });
       doc.text(rows[i][1], M + CW - 140, y, { width: 140, align: 'right' });

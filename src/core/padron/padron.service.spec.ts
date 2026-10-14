@@ -109,6 +109,25 @@ function serviceCon(respuesta: () => Promise<unknown>) {
     assert.deepEqual(r.observaciones, ['La CUIT no posee impuestos activos']);
   });
 
+  await test('CUIT limitada/cancelada por RG 3832 (no confiable/apócrifa) → inactivo', async () => {
+    // Respuesta real de ARCA (oct 2026) para un CUIT rechazado en RCEL por apócrifo.
+    const { service } = serviceCon(async () => ({
+      errorConstancia: {
+        apellido: 'PERALTA',
+        nombre: 'SAMIRA GUADALUPE',
+        idPersona: 27466553196,
+        error: [
+          'La CUIT del contribuyente fue limitada en los términos de la RG AFIP 3832/16. Motivo: CUIT LIMITADA - Incluido en Base Contribuyentes NO Confiable.',
+          'La CUIT fue cancelada de acuerdo a: CUIT LIMITADA - Incluido en Base Contribuyentes NO Confiable.',
+        ],
+      },
+    }));
+    const r = await service.consultar('27466553196', 't1');
+    assert.equal(r.estado, 'inactivo');
+    assert.equal(r.nombre, 'PERALTA SAMIRA GUADALUPE');
+    assert.equal(r.observaciones.length, 2);
+  });
+
   await test('CUIT inexistente → no_encontrado', async () => {
     const { service } = serviceCon(async () => null);
     assert.equal((await service.consultar(CUIT_NYM, 't1')).estado, 'no_encontrado');

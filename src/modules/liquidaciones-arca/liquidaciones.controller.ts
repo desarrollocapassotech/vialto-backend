@@ -14,6 +14,7 @@ import {
   UseInterceptors,
   HttpCode,
   HttpStatus,
+  ParseEnumPipe,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
@@ -45,6 +46,7 @@ import {
   UpdateConceptoLiquidacionDto,
 } from "./dto/concepto-liquidacion.dto";
 import { ConceptosLiquidacionService } from "./conceptos-liquidacion.service";
+import { ReceptorPadronService } from "./receptor-padron.service";
 
 // ── RUTAS REGULARES (USUARIOS) ──────────────────────────────────────────────
 
@@ -59,6 +61,7 @@ export class LiquidacionesController {
     private readonly contratoPdfService: LiquidacionContratoPdfService,
     private readonly facturaPdfService: FacturaPdfService,
     private readonly conceptosService: ConceptosLiquidacionService,
+    private readonly receptorPadron: ReceptorPadronService,
   ) {}
 
   // ── Config (requiere emision-facturas-arca o emision-liquido-producto-arca) ─
@@ -421,6 +424,25 @@ export class LiquidacionesController {
   }
 
   @ApiOperation({
+    summary:
+      "Verifica en el padrón de ARCA si el CUIT del receptor permite emitir (no dado de baja / apócrifo)",
+    description:
+      "Mismo chequeo que corre al emitir, sin tirar error: el front lo usa para deshabilitar 'Emitir'. Solo bloquea en producción; si ARCA no responde, no bloquea.",
+  })
+  @Get("receptor-padron/:entidad/:id")
+  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca")
+  @Roles("admin", "member", "superadmin")
+  verificarReceptorPadron(
+    @CurrentAuth() auth: AuthPayload,
+    @Param("entidad", new ParseEnumPipe(["clientes", "transportistas"]))
+    entidad: "clientes" | "transportistas",
+    @Param("id") id: string,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.receptorPadron.verificarRegistro(auth.tenantId, entidad, id);
+  }
+
+  @ApiOperation({
     summary: "Emitir factura existente a ARCA (Tipo A o B, automático)",
   })
   @Post("facturas/:facturaId/emitir")
@@ -588,6 +610,7 @@ export class LiquidacionesPlatformController {
     private readonly pdfService: LiquidacionPdfService,
     private readonly contratoPdfService: LiquidacionContratoPdfService,
     private readonly facturaPdfService: FacturaPdfService,
+    private readonly receptorPadron: ReceptorPadronService,
   ) {}
 
   private requiredTenantId(tenantId?: string): string {
@@ -723,9 +746,21 @@ export class LiquidacionesPlatformController {
   emitirLiquidacion(
     @Query("tenantId") tenantId: string | undefined,
     @Param("id") id: string,
+    @Body() dto: EmitirLiquidacionDto,
   ) {
     const tid = this.requiredTenantId(tenantId);
-    return this.service.emitirLiquidacion(tid, id);
+    return this.service.emitirLiquidacion(tid, id, dto?.ptoVenta);
+  }
+
+  @Get("receptor-padron/:entidad/:id")
+  verificarReceptorPadron(
+    @Query("tenantId") tenantId: string | undefined,
+    @Param("entidad", new ParseEnumPipe(["clientes", "transportistas"]))
+    entidad: "clientes" | "transportistas",
+    @Param("id") id: string,
+  ) {
+    const tid = this.requiredTenantId(tenantId);
+    return this.receptorPadron.verificarRegistro(tid, entidad, id);
   }
 
   @Get("liquidaciones/:id/pdf-anulacion")

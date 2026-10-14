@@ -65,4 +65,11 @@ export class UpdateLiquidacionDto {
   @IsString()
   @MaxLength(2048)
   comprobanteUrl?: string | null;
+
+  /** Opción de proveedor seleccionada para el contrato comercial PDF; `null` limpia la selección. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(255)
+  proveedorContrato?: string | null;
 }

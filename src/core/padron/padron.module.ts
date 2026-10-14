@@ -6,5 +6,6 @@ import { PadronValidacionService } from './padron-validacion.service';
 @Module({
   controllers: [PadronController],
   providers: [PadronService, PadronValidacionService],
+  exports: [PadronService],
 })
 export class PadronModule {}

@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, type MovimientoCuentaCorriente } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { FacturacionService } from '../facturacion/facturacion.service';
 import { ViajesService } from '../viajes/viajes.service';
@@ -13,6 +13,8 @@ import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
+import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
+import { repartirImputacion } from './imputacion-reparto.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import {
   importeTotalConIvaPorTramo,
@@ -582,18 +584,7 @@ export class CuentaCorrienteService {
     });
   }
 
-  async crearImputacion(tenantId: string, dto: CreateImputacionCcDto, userId?: string) {
-    const importe = this.normalizeImporte(dto.importe);
-    const [pago, cargo] = await Promise.all([
-      this.prisma.movimientoCuentaCorriente.findFirst({
-        where: { id: dto.pagoId, tenantId },
-      }),
-      this.prisma.movimientoCuentaCorriente.findFirst({
-        where: { id: dto.cargoId, tenantId },
-      }),
-    ]);
-    if (!pago) throw new NotFoundException('Pago no encontrado');
-    if (!cargo) throw new NotFoundException('Comprobante no encontrado');
+  private validarParImputacion(pago: MovimientoCuentaCorriente, cargo: MovimientoCuentaCorriente) {
     if (pago.tipo !== 'pago') {
       throw new BadRequestException('El movimiento elegido como pago no es un pago');
     }
@@ -606,6 +597,76 @@ export class CuentaCorrienteService {
     if (pago.moneda !== cargo.moneda) {
       throw new BadRequestException('El pago y el comprobante deben estar en la misma moneda');
     }
+  }
+
+  /** Crea la imputación, recalcula estados y la refleja en Facturación / pagos del viaje. */
+  private async aplicarImputacion(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    pago: MovimientoCuentaCorriente,
+    cargo: MovimientoCuentaCorriente,
+    importe: number,
+    userId?: string,
+  ) {
+    const creada = await tx.imputacionCuentaCorriente.create({
+      data: { tenantId, pagoId: pago.id, cargoId: cargo.id, importe, createdBy: userId ?? null },
+    });
+    await this.recalcularEstados(tx, pago.id, cargo.id);
+
+    // Unificación con Facturación: si el cargo imputado viene de una factura real
+    // (tenant con Facturación), este pago también queda reflejado allá — misma
+    // lógica que "marcar como cobrada", ver FacturacionService. Los tenants sin
+    // Facturación nunca tienen cargos con facturaId, así que esto nunca corre
+    // para ellos (Riedel incluido).
+    if (cargo.facturaId) {
+      const pagoFacturacion = await this.facturacion.registrarPagoDesdeCuentaCorriente(
+        tenantId,
+        cargo.facturaId,
+        importe,
+        pago.fecha,
+        pago.referencia,
+        tx,
+      );
+      if (pagoFacturacion) {
+        await tx.imputacionCuentaCorriente.update({
+          where: { id: creada.id },
+          data: { pagoFacturacionId: pagoFacturacion.id },
+        });
+      }
+    }
+
+    // Espejo simétrico del lado proveedor: si el cargo es de un fletero y viene de
+    // un viaje (Flujo C), el pago también se refleja en `Viaje.pagosTransportista`
+    // — misma unificación que arriba, ver ViajesService.
+    if (cargo.proveedorId && cargo.viajeId) {
+      await this.viajes.registrarPagoTransportistaDesdeCuentaCorriente(
+        tenantId,
+        cargo.viajeId,
+        creada.id,
+        importe,
+        cargo.moneda,
+        pago.fecha,
+        pago.referencia,
+        tx,
+      );
+    }
+
+    return creada;
+  }
+
+  async crearImputacion(tenantId: string, dto: CreateImputacionCcDto, userId?: string) {
+    const importe = this.normalizeImporte(dto.importe);
+    const [pago, cargo] = await Promise.all([
+      this.prisma.movimientoCuentaCorriente.findFirst({
+        where: { id: dto.pagoId, tenantId },
+      }),
+      this.prisma.movimientoCuentaCorriente.findFirst({
+        where: { id: dto.cargoId, tenantId },
+      }),
+    ]);
+    if (!pago) throw new NotFoundException('Pago no encontrado');
+    if (!cargo) throw new NotFoundException('Comprobante no encontrado');
+    this.validarParImputacion(pago, cargo);
 
     const [imputadoDelPago, imputadoDelCargo] = await Promise.all([
       this.sumaImputaciones('pagoId', pago.id),
@@ -619,52 +680,69 @@ export class CuentaCorrienteService {
       throw new BadRequestException('El importe supera el saldo pendiente del comprobante');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const creada = await tx.imputacionCuentaCorriente.create({
-        data: { tenantId, pagoId: pago.id, cargoId: cargo.id, importe, createdBy: userId ?? null },
-      });
-      await this.recalcularEstados(tx, pago.id, cargo.id);
+    return this.prisma.$transaction(
+      (tx) => this.aplicarImputacion(tx, tenantId, pago, cargo, importe, userId),
+      CC_INTERACTIVE_TX,
+    );
+  }
 
-      // Unificación con Facturación: si el cargo imputado viene de una factura real
-      // (tenant con Facturación), este pago también queda reflejado allá — misma
-      // lógica que "marcar como cobrada", ver FacturacionService. Los tenants sin
-      // Facturación nunca tienen cargos con facturaId, así que esto nunca corre
-      // para ellos (Riedel incluido).
-      if (cargo.facturaId) {
-        const pagoFacturacion = await this.facturacion.registrarPagoDesdeCuentaCorriente(
-          tenantId,
-          cargo.facturaId,
-          importe,
-          pago.fecha,
-          pago.referencia,
-          tx,
-        );
-        if (pagoFacturacion) {
-          await tx.imputacionCuentaCorriente.update({
-            where: { id: creada.id },
-            data: { pagoFacturacionId: pagoFacturacion.id },
-          });
-        }
+  /**
+   * Imputa un comprobante con dos cobros/pagos en una sola operación: se consume primero
+   * el de menor disponible y el otro cubre solo lo que falta (`repartirImputacion`). Todo
+   * en una transacción: o se aplican ambas imputaciones o ninguna.
+   */
+  async crearImputacionMultiple(
+    tenantId: string,
+    dto: CreateImputacionMultipleCcDto,
+    userId?: string,
+  ) {
+    if (new Set(dto.pagoIds).size !== dto.pagoIds.length) {
+      throw new BadRequestException('No se puede elegir el mismo cobro dos veces');
+    }
+    const cargo = await this.prisma.movimientoCuentaCorriente.findFirst({
+      where: { id: dto.cargoId, tenantId },
+    });
+    if (!cargo) throw new NotFoundException('Comprobante no encontrado');
+    const pagos = await this.prisma.movimientoCuentaCorriente.findMany({
+      where: { id: { in: dto.pagoIds }, tenantId },
+    });
+    if (pagos.length !== dto.pagoIds.length) throw new NotFoundException('Pago no encontrado');
+    for (const pago of pagos) this.validarParImputacion(pago, cargo);
+
+    const imputadoDelCargo = await this.sumaImputaciones('cargoId', cargo.id);
+    const pendienteCargo = cargo.importe - imputadoDelCargo;
+    if (pendienteCargo <= EPS) {
+      throw new BadRequestException('El comprobante ya no tiene saldo pendiente');
+    }
+    const conDisponible = await Promise.all(
+      pagos.map(async (p) => ({
+        pago: p,
+        disponible: p.importe - (await this.sumaImputaciones('pagoId', p.id)),
+      })),
+    );
+    if (conDisponible.some((p) => p.disponible <= EPS)) {
+      throw new BadRequestException('Uno de los cobros elegidos ya no tiene saldo disponible');
+    }
+
+    const reparto = repartirImputacion(
+      pendienteCargo,
+      conDisponible.map(({ pago, disponible }) => ({
+        id: pago.id,
+        disponible,
+        fecha: pago.fecha,
+        createdAt: pago.createdAt,
+      })),
+    ).filter((r) => r.importe > EPS);
+
+    const imputaciones = await this.prisma.$transaction(async (tx) => {
+      const creadas = [];
+      for (const r of reparto) {
+        const pago = pagos.find((p) => p.id === r.pagoId)!;
+        creadas.push(await this.aplicarImputacion(tx, tenantId, pago, cargo, r.importe, userId));
       }
-
-      // Espejo simétrico del lado proveedor: si el cargo es de un fletero y viene de
-      // un viaje (Flujo C), el pago también se refleja en `Viaje.pagosTransportista`
-      // — misma unificación que arriba, ver ViajesService.
-      if (cargo.proveedorId && cargo.viajeId) {
-        await this.viajes.registrarPagoTransportistaDesdeCuentaCorriente(
-          tenantId,
-          cargo.viajeId,
-          creada.id,
-          importe,
-          cargo.moneda,
-          pago.fecha,
-          pago.referencia,
-          tx,
-        );
-      }
-
-      return creada;
+      return creadas;
     }, CC_INTERACTIVE_TX);
+    return { imputaciones };
   }
 
   async eliminarImputacion(id: string, tenantId: string) {

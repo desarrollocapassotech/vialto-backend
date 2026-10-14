@@ -35,6 +35,7 @@
     "test:arca-fecha-factura": "ts-node src/modules/liquidaciones-arca/arca-fecha-factura.util.spec.ts",
     "test:viaje-estado-financiero": "ts-node src/modules/viajes/viaje-estado-financiero.spec.ts",
     "test:viaje-cuenta-corriente": "ts-node src/modules/viajes/viaje-cuenta-corriente.spec.ts",
+    "test:cc-imputacion-reparto": "ts-node src/modules/cuenta-corriente/imputacion-reparto.util.spec.ts",
     "test:importaciones": "ts-node src/modules/importaciones/engine/importaciones.spec.ts",
     "test:importaciones-detectar": "ts-node src/modules/importaciones/detectar-hojas.spec.ts",
     "test:padron": "ts-node src/core/padron/padron.service.spec.ts",

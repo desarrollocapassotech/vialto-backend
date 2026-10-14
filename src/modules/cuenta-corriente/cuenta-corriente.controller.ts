@@ -10,6 +10,7 @@ import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
+import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -191,6 +192,19 @@ export class CuentaCorrienteController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.crearImputacion(auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({
+    summary: 'Imputar un cargo con dos pagos a la vez (primero se consume el de menor disponible)',
+  })
+  @Post('imputaciones/multiple')
+  @Roles('admin', 'superadmin')
+  crearImputacionMultiple(
+    @Body() dto: CreateImputacionMultipleCcDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.crearImputacionMultiple(auth.tenantId, dto, auth.userId);
   }
 
   @ApiOperation({ summary: 'Deshacer una imputación de pago a cargo' })

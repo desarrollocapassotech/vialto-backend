@@ -281,7 +281,7 @@ Un campo nuevo "día sin hora" va a **medianoche UTC vía `fechaCalendarioAr`**,
 
 **Excepción — ARCA:** la fecha de comprobante (`CbteFch`) tiene su propia lógica en `arca.util.ts` (`formatFechaCbteArgentina`, `resolveFechaCbteFactura`, ventana de ±5 días); no reemplazarla por estos helpers.
 
-Historia: oct 2026, Bressan reportó una carga de combustible con 14/10 en el listado y 13/10 en el detalle. La auditoría corrigió en el backend: carga de combustible sin fecha o con hora (crear/editar, admin y chofer, límites de km), fecha de la corrección manual de km (`VehiculosService.hoyUtc`), fecha de emisión de las facturas generadas al importar viajes y período del import (`importaciones-post-viajes.service.ts`), y "vencido" del tablero de cuenta corriente. Datos: 1.821 cargas legacy (jul–ago 2026, migradas con hora) se normalizaron en prod a medianoche UTC de su día en Argentina (281 cambiaron de día); respaldo en `_backup_cargas_combustible_fecha_20261014` (borrar una vez validado).
+Historia: oct 2026, Bressan reportó una carga de combustible con 14/10 en el listado y 13/10 en el detalle. La auditoría corrigió en el backend: carga de combustible sin fecha o con hora (crear/editar, admin y chofer, límites de km), fecha de la corrección manual de km (`VehiculosService.hoyUtc`), fecha de emisión de las facturas generadas al importar viajes y período del import (`importaciones-post-viajes.service.ts`), y "vencido" del tablero de cuenta corriente. Datos: 1.821 cargas legacy (jul–ago 2026, migradas con hora) se normalizaron en prod y en QA a medianoche UTC de su día en Argentina (281 cambiaron de día en cada una); respaldo en `_backup_cargas_combustible_fecha_20261014` en ambas bases (borrar una vez validado).
 
 ---
 

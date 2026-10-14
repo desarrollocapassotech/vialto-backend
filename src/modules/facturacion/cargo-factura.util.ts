@@ -8,7 +8,7 @@ export function conceptoCargoFactura(numero: string | null | undefined): string 
   return n ? `Venta automática por factura ${n}` : "Venta automática por factura";
 }
 
-/** Concepto del movimiento negativo que compensa el cargo de una factura anulada/eliminada (VTO-431). */
+/** Concepto del crédito (Haber) que compensa el cargo de una factura anulada/eliminada (VTO-431). */
 export function conceptoAnulacionFactura(numero: string | null | undefined): string {
   const n = numero?.trim();
   return n ? `Anulación factura ${n}` : "Anulación de factura";

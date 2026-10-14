@@ -1229,7 +1229,7 @@ export class FacturacionService {
       });
       await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
       // VTO-431, anulación interna (sin ARCA): el movimiento de la factura se compensa con
-      // un negativo (sobrevive al borrado: `facturaId` pasa a null) y los viajes vuelven a
+      // un crédito en el Haber (sobrevive al borrado: `facturaId` pasa a null) y los viajes vuelven a
       // tener su movimiento de viaje.
       await anularCargoFacturaCc(
         tx,

@@ -217,7 +217,7 @@ test('con liquidación vigente del transportista el lado proveedor no se toca', 
   assert.equal(movs.filter((m) => m.proveedorId).length, 0);
 });
 
-test('cancelar: negativo que compensa, original intacto y anulado, cobros a cuenta; reabrir crea uno nuevo de hoy', async () => {
+test('cancelar: crédito en el Haber que compensa, original intacto y anulado, cobros a cuenta; reabrir crea uno nuevo de hoy', async () => {
   const { tx, movs, imps } = fakeTx();
   const v = viajeBase({ transportistaId: 'p1', precioTransportistaExterno: 800 });
   await sincronizarCuentaCorrienteViaje(tx, v, OPTS);
@@ -230,14 +230,15 @@ test('cancelar: negativo que compensa, original intacto y anulado, cobros a cuen
   assert.equal(venta.estadoDisponibilidad, 'anulado');
   assert.equal(venta.importe, 1000);
   const negVenta = movs.find((m) => m.anulaMovimientoId === venta.id)!;
-  assert.equal(negVenta.importe, -1000);
+  assert.equal(negVenta.tipo, 'credito');
+  assert.equal(negVenta.importe, 1000);
   assert.equal(negVenta.concepto, 'Anulación por cancelación del viaje V-0001');
   assert.equal(movs.filter((m) => m.origen === 'anulacion').length, 2);
   assert.equal(imps.length, 0);
   assert.equal(movs.find((m) => m.id === 'cobro')!.estadoImputacion, 'no_imputado');
   assert.equal(saldo(movs), saldoAntes);
 
-  // Cancelar otra vez no genera un segundo negativo.
+  // Cancelar otra vez no genera un segundo crédito.
   await sincronizarCuentaCorrienteViaje(tx, { ...v, etapa: 'cancelado' }, OPTS);
   assert.equal(movs.filter((m) => m.origen === 'anulacion').length, 2);
 

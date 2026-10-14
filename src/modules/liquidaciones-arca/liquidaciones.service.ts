@@ -1289,7 +1289,7 @@ export class LiquidacionesService {
       // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada,
       // el sync recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
-      // VTO-431: negativo que compensa la liquidación (comprobante: la NC/ND) y los
+      // VTO-431: crédito (Haber) que compensa la liquidación (comprobante: la NC/ND) y los
       // viajes vuelven a tener su movimiento de viaje.
       await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
@@ -1418,7 +1418,7 @@ export class LiquidacionesService {
     // recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
-    // VTO-431: negativo que compensa la liquidación y los viajes recuperan su movimiento.
+    // VTO-431: crédito (Haber) que compensa la liquidación y los viajes recuperan su movimiento.
     await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
     const updated = await this.findById(tenantId, liquidacionId);
@@ -1687,7 +1687,7 @@ export class LiquidacionesService {
         { facturaId },
       );
 
-      // VTO-431: negativo que compensa la factura, con el número de la nota de crédito;
+      // VTO-431: crédito (Haber) que compensa la factura, con el número de la nota de crédito;
       // los cobros imputados quedan a cuenta y los viajes recuperan su movimiento de viaje.
       // Best-effort: la NC ya se emitió en AFIP.
       try {

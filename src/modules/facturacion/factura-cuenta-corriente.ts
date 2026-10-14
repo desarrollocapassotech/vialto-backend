@@ -5,7 +5,7 @@ import { sincronizarCuentaCorrienteViajesPorIds } from "../viajes/viaje-cuenta-c
 /**
  * VTO-431, lado cliente: al anular (ARCA, nota de crédito) o eliminar (anulación
  * interna, sin ARCA) una factura, su movimiento de cuenta corriente se compensa con un
- * negativo y sus cobros imputados quedan a cuenta. Los viajes que estaban en la factura
+ * crédito en el Haber y sus cobros imputados quedan a cuenta. Los viajes que estaban en la factura
  * vuelven a figurar sin facturar con un movimiento nuevo de viaje (fecha de hoy).
  *
  * Función plana (sin DI) porque la usan `FacturacionService.removeFactura` y

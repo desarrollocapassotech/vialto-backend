@@ -19,7 +19,7 @@ import { round2 } from "./arca-iva.util";
  * liquidación (concepto, número, fecha de la liquidación e importe líquido —neto con
  * comisión, IVA y conceptos—; la fecha original queda en `fechaOrigen`). Con varios
  * viajes queda una sola fila: los movimientos de los otros viajes se unifican en ella.
- * VTO-431: al anular (o eliminar el borrador) se compensa con un negativo y los viajes
+ * VTO-431: al anular (o eliminar el borrador) se compensa con un crédito en el Haber y los viajes
  * vuelven a tener su movimiento de viaje.
  */
 
@@ -138,7 +138,7 @@ export async function sincronizarCargoLiquidacionCc(
 }
 
 /**
- * Compensa el movimiento de la liquidación con un negativo (comprobante: la NC/ND de
+ * Compensa el movimiento de la liquidación con un crédito en el Haber (comprobante: la NC/ND de
  * anulación si la hay, si no el número de la liquidación) y regenera el movimiento de
  * viaje del lado proveedor. Para eliminar un borrador, llamarla ANTES de borrar la
  * liquidación con `viajesLiberados: true`, así los viajes ya no la ven vigente.

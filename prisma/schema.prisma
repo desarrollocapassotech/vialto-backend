@@ -795,7 +795,7 @@ model MovimientoCuentaCorriente {
    */
   liquidacionId        String?
   liquidacion          Liquidacion?               @relation(fields: [liquidacionId], references: [id], onDelete: SetNull)
-  tipo                 String // cargo | pago
+  tipo                 String // cargo (Debe) | pago (Haber) | credito (Haber: anulación/nota de crédito aplicada a `anulaMovimientoId`; no es cobranza)
   origen               String                     @default("manual") // manual | viaje | factura | liquidacion | anulacion
   /**
    * Fecha original del movimiento de viaje antes de transformarse en el de la factura/liquidación (dato de referencia; orden y vencimientos usan `fecha`).

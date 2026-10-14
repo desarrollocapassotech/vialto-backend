@@ -5,12 +5,14 @@ import { fechaCalendarioAr } from "../util/fecha-ar.util";
  * Operaciones de cuenta corriente compartidas por Viajes, Facturación y Liquidaciones
  * (funciones planas sobre un `TransactionClient`, sin depender de ningún módulo).
  *
- * VTO-431 — anulación con movimiento negativo: el movimiento original nunca se borra ni
- * se edita (solo queda marcado `anulado`, que lo saca de saldos, tablero e imputación) y
- * se agrega uno nuevo por el mismo importe en negativo, vinculado al original por
- * `anulaMovimientoId` (único: no se puede anular dos veces). El negativo también queda
- * `anulado`, así que los saldos —que excluyen lo anulado— no cambian; el historial
- * (saldo acumulado) cuenta el par completo con `cuentaEnHistorialCc`.
+ * VTO-431 — anulación con un CRÉDITO en el Haber (como una nota de crédito): el
+ * movimiento original nunca se borra ni se edita (solo queda marcado `anulado`, que lo
+ * saca de saldos, tablero e imputación) y se agrega uno nuevo `tipo: 'credito'` por el
+ * mismo importe, vinculado al original por `anulaMovimientoId` (único: no se puede anular
+ * dos veces) — queda aplicado a ese original. Un crédito NO es un cobro/pago: no se
+ * ofrece para imputar, no cuenta como cobranza ni genera `Pago` en Facturación. También
+ * queda `anulado`, así que los saldos —que excluyen lo anulado— no cambian; el historial
+ * (saldo acumulado) cuenta el par completo con `cuentaEnHistorialCc`/`signoHistorialCc`.
  */
 
 const EPS = 1e-6;
@@ -37,7 +39,7 @@ function estadoImputacionPorMonto(imputado: number, importe: number): string {
 /**
  * ¿El movimiento suma en el saldo acumulado del historial? Todo suma salvo un cargo
  * anulado SIN compensación (anulaciones previas a VTO-431, o unificados en una factura
- * o liquidación): un cargo anulado con su negativo suma igual, porque el par se cancela.
+ * o liquidación): un cargo anulado con su crédito suma igual, porque el par se cancela.
  */
 export function cuentaEnHistorialCc(m: {
   tipo: string;
@@ -47,6 +49,11 @@ export function cuentaEnHistorialCc(m: {
 }): boolean {
   if (m.tipo !== "cargo" || m.estadoDisponibilidad !== "anulado") return true;
   return !!m.anulaMovimientoId || !!m.compensado;
+}
+
+/** Signo en el saldo: un cargo (Debe) suma; un cobro/pago o un crédito (Haber) resta. */
+export function signoHistorialCc(tipo: string): 1 | -1 {
+  return tipo === "cargo" ? 1 : -1;
 }
 
 async function recalcularEstadoImputacionPago(tx: Tx, tenantId: string, pagoId: string) {
@@ -165,9 +172,9 @@ export async function totalImputadoCargo(tx: Tx, tenantId: string, cargoId: stri
 }
 
 /**
- * VTO-431: compensa un cargo con un movimiento nuevo en negativo. El original queda
- * intacto (solo pasa a `anulado`) y sus cobros/pagos imputados quedan a cuenta.
- * Idempotente: un cargo ya anulado no se vuelve a compensar. Devuelve el negativo creado.
+ * VTO-431: compensa un cargo con un crédito en el Haber por el mismo importe. El original
+ * queda intacto (solo pasa a `anulado`) y sus cobros/pagos imputados quedan a cuenta.
+ * Idempotente: un cargo ya anulado no se vuelve a compensar. Devuelve el crédito creado.
  */
 export async function compensarMovimientoCc(
   tx: Tx,
@@ -182,22 +189,24 @@ export async function compensarMovimientoCc(
   if (yaCompensado) return null;
 
   await liberarImputacionesDeCargo(tx, tenantId, original);
-  const negativo = await tx.movimientoCuentaCorriente.create({
+  const credito = await tx.movimientoCuentaCorriente.create({
     data: {
       tenantId,
       clienteId: original.clienteId,
       proveedorId: original.proveedorId,
       contraparteId: original.contraparteId,
       viajeId: original.viajeId,
-      tipo: "cargo",
+      tipo: "credito",
       origen: "anulacion",
       concepto: datos.concepto,
-      importe: -original.importe,
+      importe: original.importe,
       moneda: original.moneda,
       fecha: datos.fecha ?? hoyCc(),
       numeroComprobante: datos.numeroComprobante ?? original.numeroComprobante,
       referencia: original.referencia,
+      // Ya aplicado al original: fuera de saldos, tablero e imputación.
       estadoDisponibilidad: "anulado",
+      estadoImputacion: "imputado",
       anulaMovimientoId: original.id,
     },
   });
@@ -205,5 +214,5 @@ export async function compensarMovimientoCc(
     where: { id: original.id },
     data: { estadoDisponibilidad: "anulado" },
   });
-  return negativo;
+  return credito;
 }

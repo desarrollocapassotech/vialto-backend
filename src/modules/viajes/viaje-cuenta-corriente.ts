@@ -25,7 +25,7 @@ import { numeroVisibleViaje } from "./viaje-numero-visible.util";
  * - Con factura vigente (lado cliente) o liquidación vigente (lado proveedor), el
  *   movimiento ya se transformó en el del comprobante: este sync no toca ese lado.
  * - Viaje cancelado, importe en 0 o cambio de cliente/transportista: el movimiento que
- *   ya no corresponde se compensa con un negativo (`compensarMovimientoCc`); sus cobros
+ *   ya no corresponde se compensa con un crédito en el Haber (`compensarMovimientoCc`); sus cobros
  *   imputados quedan a cuenta. Si después vuelve a corresponder, se crea uno nuevo.
  * - Finalizar el viaje no crea ni duplica nada.
  */

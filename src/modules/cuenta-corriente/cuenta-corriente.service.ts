@@ -15,7 +15,10 @@ import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dt
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
 import { repartirImputacion } from './imputacion-reparto.util';
-import { cuentaEnHistorialCc } from '../../shared/cuenta-corriente/movimiento-cc.util';
+import {
+  cuentaEnHistorialCc,
+  signoHistorialCc,
+} from '../../shared/cuenta-corriente/movimiento-cc.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import {
   importeTotalConIvaPorTramo,
@@ -164,7 +167,7 @@ export class CuentaCorrienteService {
       include: {
         imputacionesComoCargo: { select: { importe: true } },
         imputacionesComoPago: { select: { importe: true } },
-        // VTO-431: vínculo entre el movimiento anulado y su negativo, para mostrarlos juntos.
+        // VTO-431: vínculo entre el movimiento anulado y su crédito de anulación, para mostrarlos juntos.
         anuladoPor: { select: { id: true, fecha: true } },
         anulaMovimiento: { select: { id: true, fecha: true, concepto: true } },
       },
@@ -182,8 +185,10 @@ export class CuentaCorrienteService {
         m.tipo === 'cargo'
           ? imputacionesComoCargo.reduce((s, i) => s + i.importe, 0)
           : imputacionesComoPago.reduce((s, i) => s + i.importe, 0);
-      // Un cargo anulado (o su negativo) ya no tiene nada pendiente.
-      const anulado = m.tipo === 'cargo' && m.estadoDisponibilidad === 'anulado';
+      // Un cargo anulado ya no tiene nada pendiente, y un crédito de anulación ya está
+      // aplicado a su original.
+      const anulado =
+        m.tipo === 'credito' || (m.tipo === 'cargo' && m.estadoDisponibilidad === 'anulado');
       return { ...m, pendiente: anulado ? 0 : Math.max(m.importe - imputado, 0) };
     });
   }
@@ -439,8 +444,10 @@ export class CuentaCorrienteService {
     const porMoneda = new Map<string, { cargos: number; pagos: number }>();
     for (const row of grouped) {
       const entry = porMoneda.get(row.moneda) ?? { cargos: 0, pagos: 0 };
+      // Los créditos de anulación quedan `anulado` (fuera de este where) junto con su
+      // original; igual se discrimina el tipo explícitamente para no confundirlos con pagos.
       if (row.tipo === 'cargo') entry.cargos = row._sum.importe ?? 0;
-      else entry.pagos = row._sum.importe ?? 0;
+      else if (row.tipo === 'pago') entry.pagos = row._sum.importe ?? 0;
       porMoneda.set(row.moneda, entry);
     }
     return Array.from(porMoneda.entries()).map(([moneda, v]) => ({
@@ -462,14 +469,15 @@ export class CuentaCorrienteService {
     };
   }
 
-  /** Suma de cargos - pagos (sin distinguir moneda), usado solo por exportarMovimientos para el running total. */
+  /** Suma de cargos − pagos − créditos (sin distinguir moneda), usado solo por exportarMovimientos para el running total. */
   private async calcSaldoAcumulado(
     tenantId: string,
     contraparteId: string,
     opts?: { hasta?: Date; before?: Date },
   ) {
     // Misma regla que el historial (`cuentaEnHistorialCc`): un cargo anulado cuenta si
-    // tiene su negativo (o es el negativo); solo se excluye el anulado sin compensación.
+    // tiene su crédito de anulación (y el crédito cuenta); solo se excluye el anulado sin
+    // compensación (anulaciones previas a VTO-431, movimientos unificados).
     const baseWhere: Prisma.MovimientoCuentaCorrienteWhereInput = {
       tenantId,
       contraparteId,
@@ -481,17 +489,17 @@ export class CuentaCorrienteService {
       ...(opts?.hasta ? { fecha: { lte: opts.hasta } } : {}),
       ...(opts?.before ? { fecha: { lt: opts.before } } : {}),
     };
-    const [cargos, pagos] = await Promise.all([
+    const [cargos, haber] = await Promise.all([
       this.prisma.movimientoCuentaCorriente.aggregate({
         where: { ...baseWhere, tipo: 'cargo' },
         _sum: { importe: true },
       }),
       this.prisma.movimientoCuentaCorriente.aggregate({
-        where: { ...baseWhere, tipo: 'pago' },
+        where: { ...baseWhere, tipo: { in: ['pago', 'credito'] } },
         _sum: { importe: true },
       }),
     ]);
-    return (cargos._sum.importe ?? 0) - (pagos._sum.importe ?? 0);
+    return (cargos._sum.importe ?? 0) - (haber._sum.importe ?? 0);
   }
 
   async exportarMovimientos(tenantId: string, query: ExportarMovimientosQueryDto) {
@@ -522,9 +530,10 @@ export class CuentaCorrienteService {
     // carga y la lista sale con el último cargado primero (PDF y Excel la usan tal cual).
     let acumulado = saldoInicial;
     const items = movimientos.map((mov) => {
-      // Un cargo anulado se sigue listando (auditoría); suma solo si tiene su negativo.
+      // Un cargo anulado se sigue listando (auditoría); suma solo si tiene su crédito de
+      // anulación, que resta como un cobro.
       if (cuentaEnHistorialCc({ ...mov, compensado: !!mov.anuladoPor })) {
-        acumulado += mov.tipo === 'cargo' ? mov.importe : -mov.importe;
+        acumulado += signoHistorialCc(mov.tipo) * mov.importe;
       }
       return {
         id: mov.id,

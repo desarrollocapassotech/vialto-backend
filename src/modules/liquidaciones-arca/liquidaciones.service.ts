@@ -62,7 +62,12 @@ import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
 import { assertCvlpEmitDatosCompletos } from './cvlp-emit-validation.util';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { AnularFacturaDto } from './dto/anular-factura.dto';
-import { conceptoCargoFactura } from '../facturacion/cargo-factura.util';
+import { conceptoAnulacionFactura, conceptoCargoFactura } from '../facturacion/cargo-factura.util';
+import { anularCargoFacturaCc } from '../facturacion/factura-cuenta-corriente';
+import {
+  anularCargoLiquidacionAntesDeEliminar,
+  sincronizarCargoLiquidacionCc,
+} from './liquidacion-cuenta-corriente';
 import { ReceptorPadronService } from './receptor-padron.service';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
@@ -92,6 +97,24 @@ export class LiquidacionesService {
   /** Acceso a nuevos modelos Prisma pendientes de regenerar el cliente. */
   private get db(): PrismaAny {
     return this.prisma as PrismaAny;
+  }
+
+  /**
+   * Cuenta corriente (lado proveedor) tras cualquier cambio de la liquidación: crea o
+   * actualiza su movimiento, o lo compensa si se anuló (`liquidacion-cuenta-corriente.ts`).
+   * Best-effort: la operación principal (ej. el CAE de ARCA) ya ocurrió, así que un error
+   * acá se loguea en vez de cortar la respuesta.
+   */
+  private async sincronizarCuentaCorrienteLiquidacion(tenantId: string, liquidacionId: string) {
+    try {
+      await sincronizarCargoLiquidacionCc(this.prisma, tenantId, liquidacionId);
+    } catch (e) {
+      this.logger.error(
+        `[cuenta-corriente] No se pudo sincronizar la liquidación ${liquidacionId}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
   }
 
   private async tieneModulo(tenantId: string, modulo: string): Promise<boolean> {
@@ -422,6 +445,7 @@ export class LiquidacionesService {
     }
 
     await syncLiquidacionEstadoViajes(this.db, tenantId, dto.viajeIds);
+    await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacion.id);
 
     return this.findById(tenantId, liquidacion.id);
   }
@@ -693,6 +717,8 @@ export class LiquidacionesService {
     if (dto.viajeIds !== undefined) {
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsParaSync);
     }
+    // Montos o viajes pudieron cambiar: el movimiento de la liquidación se actualiza.
+    await this.sincronizarCuentaCorrienteLiquidacion(tenantId, id);
 
     return this.findById(tenantId, id);
   }
@@ -972,6 +998,8 @@ export class LiquidacionesService {
         },
       });
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsLiquidacion);
+      // Ya tiene número de AFIP y su líquido final.
+      await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
       return this.findById(tenantId, liquidacionId);
     } catch (err) {
@@ -1229,6 +1257,8 @@ export class LiquidacionesService {
       // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada,
       // el sync recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+      // VTO-431: crédito (Haber) que compensa la liquidación (comprobante: la NC/ND).
+      await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
       const updated = await this.findById(tenantId, liquidacionId);
       // Asegura nombre en la respuesta inmediata (findById también lo resuelve).
@@ -1355,6 +1385,8 @@ export class LiquidacionesService {
     // recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+    // VTO-431: crédito (Haber) que compensa la liquidación.
+    await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
     const updated = await this.findById(tenantId, liquidacionId);
     return { ...updated, anuladoPorNombre: anuladoPorLabel };
@@ -1621,6 +1653,21 @@ export class LiquidacionesService {
         viajeIdsToSync,
         { facturaId },
       );
+
+      // VTO-431: crédito (Haber) que compensa la factura, con el número de la nota de crédito;
+      // los cobros imputados quedan a cuenta. Best-effort: la NC ya se emitió en AFIP.
+      try {
+        await anularCargoFacturaCc(this.prisma, tenantId, facturaId, {
+          concepto: conceptoAnulacionFactura(facturaRaw.numero),
+          numeroComprobante: formatNumeroComprobante(ptoVentaNc, cbteNro),
+        });
+      } catch (ccErr) {
+        this.logger.error(
+          `[anularFacturaArca] No se pudo registrar la anulación en cuenta corriente para ${facturaId}: ${
+            ccErr instanceof Error ? ccErr.message : String(ccErr)
+          }`,
+        );
+      }
 
       let notaCreditoUrl: string | null = null;
       try {
@@ -1907,6 +1954,9 @@ export class LiquidacionesService {
       );
     }
     const viajeIds = liq.viajes.map((v) => v.viajeId);
+    // VTO-431: el movimiento de la liquidación se compensa con un crédito antes de
+    // borrarla (sobrevive con `liquidacionId` en null).
+    await anularCargoLiquidacionAntesDeEliminar(this.prisma, tenantId, id);
     await this.prisma.liquidacionViaje.deleteMany({ where: { liquidacionId: id } });
     await this.prisma.liquidacion.delete({ where: { id } });
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);

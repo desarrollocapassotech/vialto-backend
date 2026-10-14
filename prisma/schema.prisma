@@ -54,26 +54,26 @@ model Tenant {
    * Habilita la opción de exportar el reporte PAUT / MIC CRT en el módulo de Viajes.
    * Por defecto desactivado para nuevas empresas.
    */
-  habilitarExportacionPautMicCrt Boolean  @default(false)
+  habilitarExportacionPautMicCrt  Boolean  @default(false)
   /**
    * Método de anulación del comprobante CVLP (060) — configurable solo desde superadmin (panel Empresas).
    * 'nota_credito_debito' (default, todo tenant nuevo): anulación emitiendo NC/ND asociada vía AFIP SDK,
    * comportamiento histórico. 'manual': sin emisión a ARCA — anulación en 2 pasos (pendiente_anulacion →
    * anulado) con comprobante pre-impreso adjunto por el usuario. Ver Liquidacion.estado y CLAUDE.md.
    */
-  liquidacionAnulacionMetodo     String   @default("nota_credito_debito")
+  liquidacionAnulacionMetodo      String   @default("nota_credito_debito")
   /**
    * true = oculta el selector de país en origen/destino de Viajes (queda solo
    * el buscador de ciudad); usa paisOrigenDestinoFijoId como país fijo.
    */
-  paisOrigenDestinoOculto        Boolean  @default(false)
+  paisOrigenDestinoOculto         Boolean  @default(false)
   /**
    * Id de Pais (catálogo propio del tenant, ver modelo Pais) a usar cuando
    * paisOrigenDestinoOculto=true. Sin relación Prisma a propósito (mismo
    * criterio que Cliente.idFiscal): si se borra el Pais referenciado, el
    * frontend lo trata como "no configurado" y vuelve a mostrar el selector.
    */
-  paisOrigenDestinoFijoId        String?
+  paisOrigenDestinoFijoId         String?
   /**
    * Unidad de cantidad de flete del tenant — 'TN' (default, toneladas) | 'UD' (unidades).
    * Determina cómo se etiqueta la columna/campo "Cantidad" en los PDF de Factura A/B,
@@ -81,14 +81,14 @@ model Tenant {
    * de Viajes. Configurable solo desde superadmin (panel "Configuración por empresa").
    * Ver `cantidad-unidad.util.ts`.
    */
-  unidadCantidadViajes           String   @default("TN")
+  unidadCantidadViajes            String   @default("TN")
   /**
    * true = al cargar el CUIT de un Cliente/Transportista se valida contra el padrón de
    * ARCA y se autocompletan nombre/domicilio (ver core/padron). Deshabilitado por defecto;
    * se prende solo desde superadmin ("Campos por empresa" → General). No depende de
    * ningún módulo ARCA.
    */
-  validacionCuitArcaHabilitada   Boolean  @default(false)
+  validacionCuitArcaHabilitada    Boolean  @default(false)
   /**
    * Con qué flota trabaja la empresa — 'mixta' (default: flota propia + transportistas
    * externos) | 'propia' (solo flota propia) | 'externa' (solo transportistas externos).
@@ -97,34 +97,34 @@ model Tenant {
    * ("Campos por empresa" → General). Reemplaza a las opciones "flotaPropia" /
    * "transportistaExterno" que vivían en la config de campos de Choferes.
    */
-  tipoFlota                      String   @default("mixta")
+  tipoFlota                       String   @default("mixta")
   /**
    * true (default) = el tenant ve el dashboard en la pantalla de inicio. false = no hay
    * dashboard: "/" redirige al primer módulo contratado (orden del menú lateral, ver
    * `lib/tenantHome.ts` del frontend). Se configura solo desde superadmin
    * ("Configuración por empresa" → General).
    */
-  dashboardHabilitado            Boolean  @default(true)
+  dashboardHabilitado             Boolean  @default(true)
   /**
    * true (default) = origen/destino de Viajes se eligen de un buscador de ciudades
    * (catálogo externo, obliga a elegir de la lista) y el import valida las ciudades del
    * Excel contra ese catálogo. false = texto libre, sin sugerencias ni validación. Se
    * configura solo desde superadmin ("Configuración por empresa" → General).
    */
-  recomendacionCiudadesHabilitada Boolean @default(true)
+  recomendacionCiudadesHabilitada Boolean  @default(true)
   /**
    * true = en Facturas está la acción "Marcar como cobrada" (registra un pago por el
    * saldo pendiente). false (default) = la acción se oculta y el endpoint la rechaza. Se
    * configura solo desde superadmin ("Configuración por empresa" → General).
    */
-  marcarCobradaHabilitada        Boolean  @default(false)
+  marcarCobradaHabilitada         Boolean  @default(false)
   /**
    * Opciones de proveedores / entidades configuradas para el encabezado del contrato comercial PDF
    * (ej: ["EMPRESA LOGÍSTICA S.A. (ARGENTINA)", "EMPRESA LOGÍSTICA S.A. (URUGUAY)"]).
    * Se configura desde superadmin ("Configuración por empresa" → General).
    */
-  opcionesProveedorLiquidacion   String[] @default([])
-  createdAt                     DateTime @default(now())
+  opcionesProveedorLiquidacion    String[] @default([])
+  createdAt                       DateTime @default(now())
 
   clientes                   Cliente[]
   transportistas             Transportista[]
@@ -177,9 +177,9 @@ model Tenant {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Cliente {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   tenantId            String
-  tenant              Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant              Tenant    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   nombre              String
   idFiscal            String?
   email               String?
@@ -197,7 +197,7 @@ model Cliente {
    */
   arcaValidadoHuella  String?
   arcaValidadoAt      DateTime?
-  createdAt           DateTime @default(now())
+  createdAt           DateTime  @default(now())
 
   viajes           Viaje[]
   viajesCliente    ViajeCliente[]
@@ -775,26 +775,47 @@ model Pago {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model MovimientoCuentaCorriente {
-  id                   String         @id @default(cuid())
+  id                   String                     @id @default(cuid())
   tenantId             String
-  tenant               Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  tenant               Tenant                     @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
   clienteId            String?
-  cliente              Cliente?       @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  cliente              Cliente?                   @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   proveedorId          String?
-  proveedor            Transportista? @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  proveedor            Transportista?             @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
   /**
-   * = clienteId ?? proveedorId. Columna auxiliar no nula que existe solo para que el índice único por viaje funcione: en Postgres un unique constraint con columnas nullable no bloquea duplicados cuando la columna que falta es NULL (dos filas con clienteId=NULL nunca chocan entre sí).
+   * = clienteId ?? proveedorId. Columna auxiliar no nula para agrupar por cuenta sin distinguir lado. (Hasta oct 2026 sostenía un único por viaje/contraparte; se sacó porque un viaje puede tener varios movimientos: original anulado, su negativo y uno nuevo tras anular la factura — VTO-431.)
    */
   contraparteId        String
   viajeId              String?
-  viaje                Viaje?         @relation(fields: [viajeId], references: [id], onDelete: SetNull)
+  viaje                Viaje?                     @relation(fields: [viajeId], references: [id], onDelete: SetNull)
   facturaId            String?
-  factura              Factura?       @relation(fields: [facturaId], references: [id], onDelete: SetNull)
-  tipo                 String // cargo | pago
-  origen               String         @default("manual") // manual | viaje | factura
+  factura              Factura?                   @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  /**
+   * Cargo de proveedor que nació de un viaje y se transformó al liquidarlo (una fila por liquidación).
+   */
+  liquidacionId        String?
+  liquidacion          Liquidacion?               @relation(fields: [liquidacionId], references: [id], onDelete: SetNull)
+  tipo                 String // cargo (Debe) | pago (Haber) | credito (Haber: anulación/nota de crédito aplicada a `anulaMovimientoId`; no es cobranza)
+  origen               String                     @default("manual") // manual | factura | liquidacion | anulacion (`viaje`: solo datos viejos, los viajes ya no generan movimientos)
+  /**
+   * Sin uso: era la fecha del movimiento de viaje transformado en el de la factura/liquidación (circuito descartado en oct 2026, la cuenta corriente depende solo de facturas y liquidaciones). Se deja la columna para no migrar.
+   */
+  fechaOrigen          DateTime?
+  /**
+   * Solo movimientos de anulación (origen `anulacion`, importe negativo): el movimiento que compensan. Único: un movimiento se anula una sola vez.
+   */
+  anulaMovimientoId    String?                    @unique
+  anulaMovimiento      MovimientoCuentaCorriente? @relation("AnulacionMovimientoCc", fields: [anulaMovimientoId], references: [id], onDelete: SetNull)
+  anuladoPor           MovimientoCuentaCorriente? @relation("AnulacionMovimientoCc")
   concepto             String
   importe              Float
-  moneda               String         @default("ARS")
+  /**
+   * Solo ventas/compras manuales cargadas con IVA: importe sin IVA, % y monto de IVA (detalle para consulta). `importe` es siempre el total (neto + IVA), lo que suma al saldo. null = sin IVA.
+   */
+  importeNeto          Float?
+  ivaPct               Float?
+  ivaMonto             Float?
+  moneda               String                     @default("ARS")
   fecha                DateTime
   fechaVencimiento     DateTime?
   /**
@@ -805,19 +826,19 @@ model MovimientoCuentaCorriente {
   /**
    * Solo aplica a cargos: pendiente | parcial | cancelado, según cuánto de su importe cubren las imputaciones recibidas. Se recalcula, nunca se edita a mano.
    */
-  estadoDisponibilidad String         @default("pendiente")
+  estadoDisponibilidad String                     @default("pendiente")
   /**
    * Solo aplica a pagos: no_imputado | imputado_parcial | imputado, según cuánto de su importe fue aplicado a cargos puntuales. Se recalcula, nunca se edita a mano.
    */
-  estadoImputacion     String         @default("no_imputado")
-  createdAt            DateTime       @default(now())
+  estadoImputacion     String                     @default("no_imputado")
+  createdAt            DateTime                   @default(now())
   createdBy            String?
 
   imputacionesComoCargo ImputacionCuentaCorriente[] @relation("ImputacionCargo")
   imputacionesComoPago  ImputacionCuentaCorriente[] @relation("ImputacionPago")
 
-  @@unique([tenantId, viajeId, contraparteId])
   @@unique([tenantId, facturaId])
+  @@unique([tenantId, liquidacionId])
   @@index([tenantId])
   @@index([tenantId, clienteId])
   @@index([tenantId, clienteId, tipo])
@@ -1578,6 +1599,7 @@ model Liquidacion {
   viajes          LiquidacionViaje[]
   conceptosLineas LiquidacionConceptoLinea[]
   arcaLogs        ArcaLog[]
+  movimientosCc   MovimientoCuentaCorriente[]
 
   @@index([tenantId])
   @@index([tenantId, transportistaId])
@@ -1591,23 +1613,23 @@ model Liquidacion {
  * Arranca vacío: cada cuenta define los que necesita (seguro, combustible, etc.).
  */
 model ConceptoLiquidacion {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre    String
+  id                  String   @id @default(cuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  nombre              String
   /// favor = suma al líquido del transportista; contra = descuenta
-  signo     String
-  ivaPct    Float    @default(21)
-  activo    Boolean  @default(true)
+  signo               String
+  ivaPct              Float    @default(21)
+  activo              Boolean  @default(true)
   /// Monto base unitario. Al cargarlo en una liquidación: monto × cantidad.
-  monto     Float?
+  monto               Float?
   /// Cantidad por defecto. Se ignora si cantidadIgualViajes.
-  cantidad  Float    @default(1)
+  cantidad            Float    @default(1)
   /// true = la cantidad es siempre la cantidad de viajes de la liquidación.
-  cantidadIgualViajes Boolean @default(false)
-  bloqueado Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  cantidadIgualViajes Boolean  @default(false)
+  bloqueado           Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   lineas LiquidacionConceptoLinea[]
 

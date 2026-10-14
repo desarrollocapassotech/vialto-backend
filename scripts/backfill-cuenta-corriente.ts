@@ -1,23 +1,16 @@
 /**
- * Backfill histórico de Cuenta Corriente: genera/actualiza los cargos de
- * `MovimientoCuentaCorriente` para viajes finalizados y facturas de cliente que ya
- * existían ANTES de que esta integración se implementara. Sin esto, un tenant que
- * prenda el módulo `cuenta-corriente` solo vería actividad nueva a partir de ese
- * momento — el historial previo nunca disparó los hooks de
- * `viajes.service.ts`/`facturacion.service.ts` porque esos corren dentro de los
- * métodos de alta/edición (update, addGasto, createFactura, addPagoTransportista...),
- * no retroactivamente sobre lo que ya estaba en la base.
+ * Backfill de Cuenta Corriente: genera/actualiza los movimientos de las facturas de
+ * cliente y de las liquidaciones a proveedores que ya existían. La cuenta corriente
+ * depende solo de facturas y liquidaciones (los viajes no generan movimientos), así que
+ * esto alcanza para que una empresa que prende el módulo vea su historial completo.
  *
- * A diferencia de otros scripts de este repo, este SÍ instancia el contexto real de
- * Nest (`NestFactory.createApplicationContext`) en vez de reimplementar la lógica a
- * mano con Prisma crudo — el cálculo del lado proveedor (`calcularAcordado`, que
- * contempla Liquidaciones ARCA) es demasiado complejo para duplicarlo sin riesgo de
- * que diverja de la lógica real. Usa un módulo standalone mínimo (no el `AppModule`
- * completo) para no levantar de paso cron jobs ni el envío de notificaciones.
+ * Instancia el contexto real de Nest para las facturas (reutiliza
+ * `FacturacionService.backfillCuentaCorriente`, con su cálculo de cobro) y usa la misma
+ * función plana que corre en producción para las liquidaciones
+ * (`sincronizarCargoLiquidacionCc`). Módulo standalone mínimo: no levanta crons ni
+ * notificaciones.
  *
- * Idempotente: reutiliza los mismos `upsert` que ya corren en producción para
- * actividad nueva (`ViajesService.upsertCargoFinalizacion/upsertCargoTransportista`,
- * `FacturacionService.upsertCargoFactura`) — correr de nuevo no duplica nada.
+ * Idempotente: correr de nuevo no duplica nada.
  *
  * Uso:
  *   npm run backfill:cuenta-corriente:dry                    ← preview, sin escribir
@@ -28,15 +21,15 @@
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { PrismaModule } from '../src/shared/prisma/prisma.module';
+import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { VialtoSharedModule } from '../src/shared/vialto-shared.module';
 import { AuthModule } from '../src/core/auth/auth.module';
-import { ViajesModule } from '../src/modules/viajes/viajes.module';
 import { FacturacionModule } from '../src/modules/facturacion/facturacion.module';
-import { ViajesService } from '../src/modules/viajes/viajes.service';
 import { FacturacionService } from '../src/modules/facturacion/facturacion.service';
+import { sincronizarCargoLiquidacionCc } from '../src/modules/liquidaciones-arca/liquidacion-cuenta-corriente';
 
 @Module({
-  imports: [PrismaModule, VialtoSharedModule, AuthModule, ViajesModule, FacturacionModule],
+  imports: [PrismaModule, VialtoSharedModule, AuthModule, FacturacionModule],
 })
 class BackfillCuentaCorrienteModule {}
 
@@ -52,7 +45,7 @@ async function main() {
   const { isDryRun, tenantId } = parseArgs();
 
   console.log('\n══════════════════════════════════════════════════════════');
-  console.log('  Backfill: cargos históricos de Cuenta Corriente');
+  console.log('  Backfill: movimientos de Cuenta Corriente (facturas y liquidaciones)');
   console.log(`  Modo: ${isDryRun ? '🔍 DRY RUN (sin cambios en BD)' : '✍️  APLICANDO CAMBIOS'}`);
   if (tenantId) console.log(`  Tenant: ${tenantId}`);
   console.log('══════════════════════════════════════════════════════════\n');
@@ -62,18 +55,10 @@ async function main() {
   });
 
   try {
-    const viajesService = app.get(ViajesService);
     const facturacionService = app.get(FacturacionService);
+    const prisma = app.get(PrismaService);
 
-    console.log('— Viajes (cargos cliente + proveedor) —');
-    const resultadosViajes = await viajesService.backfillCuentaCorriente({
-      tenantId,
-      dryRun: isDryRun,
-    });
-    resultadosViajes.forEach((r) => console.log('  ' + r));
-    if (resultadosViajes.length === 0) console.log('  (sin viajes finalizados)');
-
-    console.log('\n— Facturas (cargos cliente) —');
+    console.log('— Facturas (clientes) —');
     const resultadosFacturas = await facturacionService.backfillCuentaCorriente({
       tenantId,
       dryRun: isDryRun,
@@ -81,9 +66,32 @@ async function main() {
     resultadosFacturas.forEach((r) => console.log('  ' + r));
     if (resultadosFacturas.length === 0) console.log('  (sin facturas de cliente)');
 
-    const total = resultadosViajes.length + resultadosFacturas.length;
+    console.log('\n— Liquidaciones (proveedores) —');
+    const liquidaciones = await prisma.liquidacion.findMany({
+      where: tenantId ? { tenantId } : {},
+      select: { id: true, tenantId: true, estado: true, liquido: true },
+    });
+    for (const liq of liquidaciones) {
+      const existe = await prisma.movimientoCuentaCorriente.findFirst({
+        where: { tenantId: liq.tenantId, liquidacionId: liq.id, tipo: 'cargo' },
+        select: { id: true },
+      });
+      console.log(
+        `  [liquidación] ${liq.tenantId} ${liq.id} (${liq.estado}) → ${existe ? 'update' : 'CREATE'} $${liq.liquido}`,
+      );
+      if (!isDryRun) {
+        try {
+          await sincronizarCargoLiquidacionCc(prisma, liq.tenantId, liq.id);
+        } catch (e) {
+          console.log(`    ⚠️ SKIP (${e instanceof Error ? e.message : String(e)})`);
+        }
+      }
+    }
+    if (liquidaciones.length === 0) console.log('  (sin liquidaciones)');
+
+    const total = resultadosFacturas.length + liquidaciones.length;
     console.log(
-      `\n${isDryRun ? '💡 Ejecutar sin --dry-run para aplicar.' : '✅ Backfill completado.'} (${total} movimientos evaluados)`,
+      `\n${isDryRun ? '💡 Ejecutar sin --dry-run para aplicar.' : '✅ Backfill completado.'} (${total} comprobantes evaluados)`,
     );
     console.log('══════════════════════════════════════════════════════════\n');
   } finally {

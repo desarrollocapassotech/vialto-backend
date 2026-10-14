@@ -14,6 +14,11 @@ import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
+import {
+  importeTotalConIvaPorTramo,
+  ivaMontoDeTramos,
+  roundMoney2,
+} from '../../shared/util/factura-estado-lectura';
 
 const EPS = 1e-6;
 
@@ -78,9 +83,13 @@ export class CuentaCorrienteService {
     if (tipo !== 'cargo') {
       throw new BadRequestException('Los cobros y pagos no llevan IVA');
     }
-    const redondear = (n: number) => Math.round(n * 100) / 100;
-    const monto = redondear((neto * ivaPct) / 100);
-    return { pct: ivaPct, monto, total: redondear(neto + monto) };
+    // Misma cuenta que el IVA de cabecera de una factura (redondeo a 2 decimales).
+    const base = roundMoney2(neto);
+    return {
+      pct: ivaPct,
+      monto: ivaMontoDeTramos(base, [], ivaPct),
+      total: importeTotalConIvaPorTramo(base, [], ivaPct),
+    };
   }
 
   /**
@@ -286,7 +295,7 @@ export class CuentaCorrienteService {
         origen: 'manual',
         concepto,
         importe: iva ? iva.total : neto,
-        importeNeto: iva ? neto : null,
+        importeNeto: iva ? roundMoney2(neto) : null,
         ivaPct: iva ? iva.pct : null,
         ivaMonto: iva ? iva.monto : null,
         moneda: dto.moneda?.trim() || 'ARS',

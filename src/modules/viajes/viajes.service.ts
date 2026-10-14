@@ -51,11 +51,14 @@ import {
 } from "./viaje-estados";
 import { syncLiquidacionEstadoViaje } from "./viaje-estado-financiero";
 import {
+  actualizarEstadoCargoLiquidacionCc,
   calcularAcordadoTransportista,
   estadoDisponibilidadCcDesde,
   montoCargoCliente,
   sincronizarCuentaCorrienteViaje,
   tenantTieneFacturacion,
+  viajeTieneFacturaVigente,
+  viajeTieneLiquidacionVigente,
 } from "./viaje-cuenta-corriente";
 import {
   buildViajeExportacionesResponse,
@@ -543,6 +546,8 @@ export class ViajesService {
    * suma actual de `pagosTransportista` — usado por `addPagoTransportista` y
    * `deletePagoTransportista`. Si el cargo todavía no existe (viaje sin precio del
    * transportista, o anterior a que se generara) no hace nada: no hay nada que sincronizar.
+   * Si el viaje ya está liquidado, su movimiento es el de la liquidación (puede abarcar
+   * varios viajes): se recalcula sumando los pagos de todos ellos.
    */
   private async sincronizarCargoCcTransportista(
     tx: Prisma.TransactionClient,
@@ -552,12 +557,25 @@ export class ViajesService {
     moneda: string,
     pagado: number,
   ) {
+    const liquidacionVigente = await tx.liquidacionViaje.findFirst({
+      where: {
+        tenantId,
+        viajeId,
+        liquidacion: { transportistaId, estado: { not: "anulado" } },
+      },
+      select: { liquidacionId: true },
+    });
+    if (liquidacionVigente) {
+      await actualizarEstadoCargoLiquidacionCc(tx, tenantId, liquidacionVigente.liquidacionId);
+      return;
+    }
     const cargo = await tx.movimientoCuentaCorriente.findFirst({
       where: {
         tenantId,
         viajeId,
         proveedorId: transportistaId,
         tipo: "cargo",
+        origen: "viaje",
         moneda,
         estadoDisponibilidad: { not: "anulado" },
       },
@@ -682,11 +700,11 @@ export class ViajesService {
 
   /**
    * Backfill histórico / regularización: recorre los viajes no cancelados y les
-   * genera el cargo de cuenta corriente que les falte (cliente sin Facturación y
-   * proveedor), con la misma `sincronizarCuentaCorrienteViaje` que corre al crear o
-   * editar un viaje. Cubre tanto viajes finalizados de antes de esta integración como
-   * viajes en curso creados antes de que el cargo naciera al crear el viaje (oct 2026).
-   * Idempotente — correr de nuevo no duplica. Ojo: un cargo ya existente sin
+   * genera el movimiento de cuenta corriente que les falte, con la misma
+   * `sincronizarCuentaCorrienteViaje` que corre al crear o editar un viaje. El lado
+   * cliente solo si el viaje no tiene factura vigente (si la tiene, el movimiento es el
+   * de la factura) y el proveedor solo si no tiene liquidación vigente.
+   * Idempotente — correr de nuevo no duplica. Ojo: un movimiento ya existente sin
    * imputaciones se realinea al importe actual del viaje (fecha y concepto no cambian).
    * Usado por `scripts/backfill-cuenta-corriente.ts`, no se expone por HTTP.
    */
@@ -701,7 +719,6 @@ export class ViajesService {
     });
 
     const ivaCache = new Map<string, boolean>();
-    const facturacionCache = new Map<string, boolean>();
 
     for (const viaje of viajes) {
       const v = viaje as unknown as ViajeConVehiculosViaje;
@@ -709,27 +726,33 @@ export class ViajesService {
         ivaCache.set(v.tenantId, await this.ivaTransportistaHabilitado(v.tenantId));
       }
       const ivaTransportistaHabilitado = ivaCache.get(v.tenantId)!;
-      if (!facturacionCache.has(v.tenantId)) {
-        facturacionCache.set(v.tenantId, await this.tieneFacturacion(v.tenantId));
-      }
-      const conFacturacion = facturacionCache.get(v.tenantId)!;
 
-      const existentes = await this.prisma.movimientoCuentaCorriente.findMany({
-        where: { tenantId: v.tenantId, viajeId: v.id, tipo: "cargo", origen: "viaje" },
+      const vigentes = await this.prisma.movimientoCuentaCorriente.findMany({
+        where: {
+          tenantId: v.tenantId,
+          viajeId: v.id,
+          tipo: "cargo",
+          origen: "viaje",
+          estadoDisponibilidad: { not: "anulado" },
+        },
         select: { clienteId: true, proveedorId: true },
       });
       const etiqueta = `${v.tenantId} viaje ${numeroVisibleViaje(v)}`;
-      if (!conFacturacion) {
+      if (!viajeTieneFacturaVigente(v)) {
         const monto = montoCargoCliente(v);
         if (monto > 0) {
-          const existe = existentes.some((m) => m.clienteId === v.clienteId);
+          const existe = vigentes.some((m) => m.clienteId === v.clienteId);
           resultados.push(`[cliente] ${etiqueta} → ${existe ? "update" : "CREATE"} $${monto}`);
         }
       }
-      if (v.transportistaId && v.precioTransportistaExterno) {
+      if (
+        v.transportistaId &&
+        v.precioTransportistaExterno &&
+        !viajeTieneLiquidacionVigente(v, v.transportistaId)
+      ) {
         const acordado = this.calcularAcordado(v, ivaTransportistaHabilitado);
         if (acordado > 0) {
-          const existe = existentes.some((m) => m.proveedorId === v.transportistaId);
+          const existe = vigentes.some((m) => m.proveedorId === v.transportistaId);
           resultados.push(`[proveedor] ${etiqueta} → ${existe ? "update" : "CREATE"} $${acordado}`);
         }
       }
@@ -737,7 +760,7 @@ export class ViajesService {
       if (opts.dryRun) continue;
       try {
         await this.prisma.$transaction((tx) =>
-          sincronizarCuentaCorrienteViaje(tx, v, { ivaTransportistaHabilitado, conFacturacion }),
+          sincronizarCuentaCorrienteViaje(tx, v, { ivaTransportistaHabilitado }),
         );
       } catch (e) {
         resultados.push(
@@ -1411,7 +1434,6 @@ export class ViajesService {
     );
     const destinosNorm = resolveDestinosParaCreate(dto);
     const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
-    const conFacturacion = await this.tieneFacturacion(tenantId);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -1475,10 +1497,7 @@ export class ViajesService {
           include: VIAJE_INCLUDE_FULL,
         });
         // El movimiento de cuenta corriente nace con el viaje (no al finalizarlo).
-        await sincronizarCuentaCorrienteViaje(tx, out, {
-          ivaTransportistaHabilitado,
-          conFacturacion,
-        });
+        await sincronizarCuentaCorrienteViaje(tx, out, { ivaTransportistaHabilitado });
         const outSinIva = this.zerarIvaTransportistaSiDeshabilitado(
           out,
           ivaTransportistaHabilitado,
@@ -1740,6 +1759,24 @@ export class ViajesService {
         ? this.parseEtapaViaje(String(dto.etapa))
         : etapaActual;
 
+    // VTO-431: un viaje facturado o liquidado no se cancela directo — primero se anula
+    // (o elimina) la factura/liquidación, y cada paso deja su propia compensación en
+    // Cuenta Corriente, sin duplicar.
+    if (etapaSiguiente === "cancelado" && etapaActual !== "cancelado") {
+      const facturacionEstado = String((current as any).facturacionEstado ?? "sin_facturar");
+      const liquidacionEstado = (current as any).liquidacionEstado as string | null;
+      if (!["sin_facturar", "anulado"].includes(facturacionEstado)) {
+        throw new BadRequestException(
+          "El viaje tiene una factura vigente: anulala (o eliminala) antes de cancelar el viaje.",
+        );
+      }
+      if (liquidacionEstado && !["sin_liquidar", "anulado"].includes(liquidacionEstado)) {
+        throw new BadRequestException(
+          "El viaje tiene una liquidación vigente: anulala (o eliminala) antes de cancelar el viaje.",
+        );
+      }
+    }
+
     const data: Prisma.ViajeUpdateInput = {
       ...dto,
       monto:
@@ -1898,14 +1935,10 @@ export class ViajesService {
           where: { id, tenantId },
           include: VIAJE_INCLUDE_FULL,
         })) as unknown as ViajeConVehiculosViaje;
-        const conFacturacion = await this.tieneFacturacion(full.tenantId);
-        if (esEtapaFinal(full.etapa) && !conFacturacion) {
+        if (esEtapaFinal(full.etapa) && !(await this.tieneFacturacion(full.tenantId))) {
           this.assertMontoParaFinalizar(full);
         }
-        await sincronizarCuentaCorrienteViaje(tx, full, {
-          ivaTransportistaHabilitado,
-          conFacturacion,
-        });
+        await sincronizarCuentaCorrienteViaje(tx, full, { ivaTransportistaHabilitado });
         const fullSinIva = this.zerarIvaTransportistaSiDeshabilitado(
           full,
           ivaTransportistaHabilitado,
@@ -1951,7 +1984,6 @@ export class ViajesService {
     const gastosActualizados = [...gastosActuales, nuevoGasto];
     const ivaTransportistaHabilitado =
       await this.ivaTransportistaHabilitado(tenantId);
-    const conFacturacion = await this.tieneFacturacion(tenantId);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
@@ -1966,10 +1998,7 @@ export class ViajesService {
         include: VIAJE_INCLUDE_FULL,
       })) as unknown as ViajeConVehiculosViaje;
 
-      await sincronizarCuentaCorrienteViaje(tx, full, {
-        ivaTransportistaHabilitado,
-        conFacturacion,
-      });
+      await sincronizarCuentaCorrienteViaje(tx, full, { ivaTransportistaHabilitado });
 
       return calcularMontosReales(full);
     }, VIAJE_INTERACTIVE_TX);

@@ -3,10 +3,7 @@ import { Prisma } from "@prisma/client"; // Importante: necesario para capturar 
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { generateNumeroViaje } from "../../viajes/generate-viaje-numero";
 import { syncLiquidacionEstadoViaje } from "../../viajes/viaje-estado-financiero";
-import {
-  sincronizarCuentaCorrienteViajePorId,
-  tenantTieneFacturacion,
-} from "../../viajes/viaje-cuenta-corriente";
+import { sincronizarCuentaCorrienteViajePorId } from "../../viajes/viaje-cuenta-corriente";
 import { TenantFieldConfigService } from "../../../core/tenant-field-config/tenant-field-config.service";
 import { assertFechaDescargaValida } from "../../viajes/viajes.service";
 import { assertTransportistaEfectivoSubcontratacion } from "../../viajes/viaje-operacion-exclusiva";
@@ -48,21 +45,17 @@ export class ViajesProcessor implements IImportProcessor {
   ) {}
 
   /**
-   * Mismos flags que `ViajesService` usa para la cuenta corriente del viaje: si el
-   * lado cliente nace de la factura (tenant con Facturación) y si el % de IVA del
-   * transportista entra en el acordado.
+   * Mismo flag que `ViajesService` usa para la cuenta corriente del viaje: si el % de
+   * IVA del transportista entra en el acordado.
    */
   private async opcionesCuentaCorriente(tenantId: string) {
-    const [ivaTransportistaHabilitado, conFacturacion] = await Promise.all([
-      this.tenantFieldConfig.isCampoVisible(
-        tenantId,
-        "viajes",
-        "edicion_viaje",
-        "precioTransportistaIvaIncluidoPct",
-      ),
-      tenantTieneFacturacion(this.prisma, tenantId),
-    ]);
-    return { ivaTransportistaHabilitado, conFacturacion };
+    const ivaTransportistaHabilitado = await this.tenantFieldConfig.isCampoVisible(
+      tenantId,
+      "viajes",
+      "edicion_viaje",
+      "precioTransportistaIvaIncluidoPct",
+    );
+    return { ivaTransportistaHabilitado };
   }
 
   /**

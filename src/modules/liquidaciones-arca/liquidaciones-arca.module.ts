@@ -10,9 +10,10 @@ import { FacturaPdfService } from './factura-pdf.service';
 import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
 import { PadronModule } from '../../core/padron/padron.module';
 import { ReceptorPadronService } from './receptor-padron.service';
+import { TenantFieldConfigModule } from '../../core/tenant-field-config/tenant-field-config.module';
 
 @Module({
-  imports: [PrismaModule, PadronModule],
+  imports: [PrismaModule, PadronModule, TenantFieldConfigModule],
   controllers: [LiquidacionesController, LiquidacionesPlatformController],
   providers: [
     ArcaClientService,

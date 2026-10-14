@@ -1,30 +1,32 @@
 import { Prisma } from "@prisma/client";
 import { ymdAr } from "../../shared/util/fecha-ar.util";
+import {
+  compensarMovimientoCc,
+  estadoDisponibilidadPorMonto,
+  totalImputadoCargo,
+} from "../../shared/cuenta-corriente/movimiento-cc.util";
 import { engrosarConIva } from "./viaje-ganancia-bruta.util";
 import { numeroVisibleViaje } from "./viaje-numero-visible.util";
 
 /**
- * Cuenta corriente generada desde un viaje (oct 2026: nace al CREAR el viaje, no al
- * finalizarlo). Funciones planas sobre un `TransactionClient`, mismo patrón que
- * `viaje-estado-financiero.ts`, para que las usen tanto `ViajesService` (alta/edición
- * manual) como `importaciones/processors/viajes.processor.ts` (carga masiva) sin que
- * un módulo dependa del otro.
+ * Cuenta corriente generada desde un viaje. Funciones planas sobre un `TransactionClient`,
+ * mismo patrón que `viaje-estado-financiero.ts`, para que las usen `ViajesService`,
+ * el import de Excel, Facturación y Liquidaciones sin que un módulo dependa del otro.
  *
- * Reglas:
- * - Cliente (a cobrar): venta por `monto` + otros gastos en la misma moneda, si es > 0.
- *   Solo en tenants SIN Facturación: con Facturación el cargo nace de la factura.
- * - Proveedor/fletero (a pagar): compra por el acordado con el transportista externo
- *   (`calcularAcordadoTransportista`), si es > 0.
- * - Fecha = día de creación del viaje (en Argentina, a medianoche UTC). Concepto
- *   "... por creación del viaje X". Ambos se fijan al crear el movimiento y no se
- *   vuelven a tocar (tampoco en movimientos generados antes de este cambio).
- * - Mientras el cargo no tenga imputaciones, sigue al viaje: importe, moneda y estado.
- *   Con imputaciones queda congelado (requiere intervención manual).
- * - Viaje cancelado, importe que pasa a 0, o cambio de cliente/transportista: el cargo
- *   que ya no corresponde se anula si no tiene imputaciones. Un cargo anulado sin
- *   imputaciones se reactiva si vuelve a corresponder (ej. viaje que deja de estar
- *   cancelado).
- * - Finalizar el viaje no crea ni duplica nada: el cargo ya existe y solo lo sigue.
+ * Reglas (VTO-426 / VTO-430 / VTO-431):
+ * - El movimiento nace al CREAR el viaje, en todas las empresas (con o sin Facturación).
+ *   Cliente: venta por `monto` + otros gastos en la misma moneda. Proveedor: compra por
+ *   el acordado con el transportista (`calcularAcordadoTransportista`). Solo si es > 0.
+ * - Fecha = día de creación del viaje; concepto "... por creación del viaje X". Si el
+ *   viaje ya tuvo movimientos (ej. se anuló su factura y vuelve a estar sin facturar),
+ *   el nuevo lleva fecha de hoy. Fecha y concepto no se reescriben después.
+ * - Mientras no tenga imputaciones, sigue al viaje (importe/moneda/estado).
+ * - Con factura vigente (lado cliente) o liquidación vigente (lado proveedor), el
+ *   movimiento ya se transformó en el del comprobante: este sync no toca ese lado.
+ * - Viaje cancelado, importe en 0 o cambio de cliente/transportista: el movimiento que
+ *   ya no corresponde se compensa con un negativo (`compensarMovimientoCc`); sus cobros
+ *   imputados quedan a cuenta. Si después vuelve a corresponder, se crea uno nuevo.
+ * - Finalizar el viaje no crea ni duplica nada.
  */
 
 const EPS = 1e-6;
@@ -45,12 +47,16 @@ export type ViajeParaCuentaCorriente = {
   monedaPrecioTransportistaExterno?: string | null;
   precioTransportistaIvaIncluidoPct?: number | null;
   pagosTransportista?: unknown;
+  facturaId?: string | null;
+  /** Debe traer `arcaEstado` (lo incluyen `VIAJE_CC_INCLUDE` y `VIAJE_INCLUDE_FULL`). */
+  factura?: { id?: string; arcaEstado?: string | null } | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   liquidacionesViaje?: any[];
 };
 
-/** Include mínimo para poder calcular el acordado con el transportista (Liquidación vigente). */
+/** Include mínimo: factura (para saber si está vigente) y liquidaciones (acordado y vigencia). */
 export const VIAJE_CC_INCLUDE = {
+  factura: { select: { id: true, arcaEstado: true } },
   liquidacionesViaje: {
     include: {
       liquidacion: { include: { conceptosLineas: true, viajes: true } },
@@ -58,9 +64,28 @@ export const VIAJE_CC_INCLUDE = {
   },
 } satisfies Prisma.ViajeInclude;
 
+/** El viaje tiene una factura que no está anulada: su lado cliente lo maneja la factura. */
+export function viajeTieneFacturaVigente(viaje: ViajeParaCuentaCorriente): boolean {
+  if (!viaje.facturaId) return false;
+  return viaje.factura?.arcaEstado !== "anulado";
+}
+
+/** El viaje tiene una liquidación no anulada para ese transportista: su lado proveedor lo maneja la liquidación. */
+export function viajeTieneLiquidacionVigente(
+  viaje: ViajeParaCuentaCorriente,
+  transportistaId: string | null,
+): boolean {
+  if (!transportistaId) return false;
+  return (viaje.liquidacionesViaje ?? []).some(
+    (lv) =>
+      lv.liquidacion &&
+      lv.liquidacion.estado !== "anulado" &&
+      lv.liquidacion.transportistaId === transportistaId,
+  );
+}
+
 /**
- * Si el tenant tiene Facturación (manual o ARCA), el cargo del cliente nace de la
- * factura emitida, no del viaje. Mismo OR que el resto del proyecto.
+ * Si el tenant tiene Facturación (manual o ARCA). Mismo OR que el resto del proyecto.
  */
 export async function tenantTieneFacturacion(
   client: Pick<Prisma.TransactionClient, "tenant">,
@@ -75,9 +100,7 @@ export async function tenantTieneFacturacion(
 }
 
 export function estadoDisponibilidadCcDesde(pagado: number, importe: number): string {
-  if (pagado <= EPS) return "pendiente";
-  if (pagado + EPS >= importe) return "cancelado";
-  return "parcial";
+  return estadoDisponibilidadPorMonto(pagado, importe);
 }
 
 function monedaNormalizada(m: string | null | undefined): "ARS" | "USD" {
@@ -203,24 +226,19 @@ function fechaCreacionViaje(createdAt: Date): Date {
   return new Date(`${ymdAr(createdAt)}T00:00:00.000Z`);
 }
 
-async function tieneImputaciones(
-  tx: Prisma.TransactionClient,
-  tenantId: string,
-  cargoId: string,
-): Promise<boolean> {
-  const imputado = await tx.imputacionCuentaCorriente.aggregate({
-    where: { tenantId, cargoId },
-    _sum: { importe: true },
-  });
-  return (imputado._sum.importe ?? 0) > 0;
-}
+export type LadoCc = "cliente" | "proveedor";
 
-type LadoCc = "cliente" | "proveedor";
+export type OpcionesCcViaje = {
+  /** Solo hace falta para el lado proveedor (acordado con IVA del transportista). */
+  ivaTransportistaHabilitado?: boolean;
+  /** Lados a sincronizar; por defecto ambos. */
+  lados?: LadoCc[];
+};
 
 /**
- * Deja en la cuenta corriente de un lado (cliente o proveedor) a lo sumo un cargo
- * vigente del viaje: el de `contraparteId` por `importe`. Cualquier otro cargo del
- * viaje en ese lado (otra contraparte, o importe 0) se anula si no tiene imputaciones.
+ * Deja en la cuenta corriente de un lado (cliente o proveedor) a lo sumo un movimiento
+ * de viaje vigente: el de `contraparteId` por `importe`. Cualquier otro movimiento de
+ * viaje vigente en ese lado (otra contraparte, importe 0, viaje cancelado) se compensa.
  */
 async function sincronizarLado(
   tx: Prisma.TransactionClient,
@@ -233,34 +251,42 @@ async function sincronizarLado(
     estadoDisponibilidad: string;
   },
 ) {
-  const existentes = await tx.movimientoCuentaCorriente.findMany({
+  const filtroLado =
+    lado === "cliente" ? { clienteId: { not: null } } : { proveedorId: { not: null } };
+  const vigentes = await tx.movimientoCuentaCorriente.findMany({
     where: {
       tenantId: viaje.tenantId,
       viajeId: viaje.id,
       tipo: "cargo",
       origen: "viaje",
-      ...(lado === "cliente" ? { clienteId: { not: null } } : { proveedorId: { not: null } }),
+      estadoDisponibilidad: { not: "anulado" },
+      ...filtroLado,
     },
   });
 
-  const corresponde = objetivo.importe > EPS && !!objetivo.contraparteId;
+  const numeroVisible = numeroVisibleViaje(viaje);
+  const cancelado = viaje.etapa === "cancelado";
+  const corresponde = !cancelado && objetivo.importe > EPS && !!objetivo.contraparteId;
   const actual = corresponde
-    ? existentes.find((m) => m.contraparteId === objetivo.contraparteId)
+    ? vigentes.find((m) => m.contraparteId === objetivo.contraparteId)
     : undefined;
 
-  for (const m of existentes) {
-    if (m === actual || m.estadoDisponibilidad === "anulado") continue;
-    if (await tieneImputaciones(tx, viaje.tenantId, m.id)) continue;
-    await tx.movimientoCuentaCorriente.update({
-      where: { id: m.id },
-      data: { estadoDisponibilidad: "anulado" },
+  for (const m of vigentes) {
+    if (m === actual) continue;
+    const motivo = cancelado
+      ? "cancelación del viaje"
+      : m.contraparteId !== objetivo.contraparteId
+        ? `cambio de ${lado === "cliente" ? "cliente" : "transportista"} del viaje`
+        : "viaje sin importe";
+    await compensarMovimientoCc(tx, viaje.tenantId, m, {
+      concepto: `Anulación por ${motivo} ${numeroVisible}`,
     });
   }
 
   if (!corresponde) return;
 
   if (actual) {
-    if (await tieneImputaciones(tx, viaje.tenantId, actual.id)) return;
+    if ((await totalImputadoCargo(tx, viaje.tenantId, actual.id)) > 0) return;
     // Fecha, concepto y referencia quedan como se crearon: solo se sigue el importe.
     await tx.movimientoCuentaCorriente.update({
       where: { id: actual.id },
@@ -273,8 +299,14 @@ async function sincronizarLado(
     return;
   }
 
-  const numeroVisible = numeroVisibleViaje(viaje);
+  // Primer movimiento del viaje con esta contraparte: fecha de creación del viaje. Si ya
+  // tuvo otros (anulados, o transformados en una factura/liquidación después anulada),
+  // el nuevo es de hoy.
   const contraparteId = objetivo.contraparteId!;
+  const yaTuvo = await tx.movimientoCuentaCorriente.findFirst({
+    where: { tenantId: viaje.tenantId, viajeId: viaje.id, contraparteId, tipo: "cargo" },
+    select: { id: true },
+  });
   await tx.movimientoCuentaCorriente.create({
     data: {
       tenantId: viaje.tenantId,
@@ -286,7 +318,7 @@ async function sincronizarLado(
       concepto: `${lado === "cliente" ? "Venta" : "Compra"} automática por creación del viaje ${numeroVisible}`,
       importe: objetivo.importe,
       moneda: objetivo.moneda,
-      fecha: fechaCreacionViaje(viaje.createdAt),
+      fecha: yaTuvo ? new Date(`${ymdAr()}T00:00:00.000Z`) : fechaCreacionViaje(viaje.createdAt),
       referencia: numeroVisible,
       estadoDisponibilidad: objetivo.estadoDisponibilidad,
     },
@@ -294,57 +326,110 @@ async function sincronizarLado(
 }
 
 /**
- * Crea o actualiza los cargos de cuenta corriente del viaje (cliente y proveedor)
- * según su estado actual. Idempotente: llamarlo después de cada alta/edición del
- * viaje (o al agregar un gasto) deja la cuenta alineada con el viaje.
+ * Crea, actualiza o compensa los movimientos de cuenta corriente del viaje según su
+ * estado actual. Idempotente: llamarlo después de cada alta/edición del viaje, al
+ * agregar un gasto, o al anular/eliminar su factura o liquidación, deja la cuenta
+ * alineada con el viaje.
  */
 export async function sincronizarCuentaCorrienteViaje(
   tx: Prisma.TransactionClient,
   viaje: ViajeParaCuentaCorriente,
-  opts: { ivaTransportistaHabilitado: boolean; conFacturacion: boolean },
+  opts: OpcionesCcViaje = {},
 ) {
-  const cancelado = viaje.etapa === "cancelado";
+  const lados = opts.lados ?? ["cliente", "proveedor"];
 
-  // Con Facturación el lado cliente nace de la factura. Igual se anula al cancelar,
-  // por si quedó un cargo de viaje de antes de que el tenant tuviera Facturación.
-  if (!opts.conFacturacion || cancelado) {
+  if (lados.includes("cliente") && !viajeTieneFacturaVigente(viaje)) {
     await sincronizarLado(tx, viaje, "cliente", {
       contraparteId: viaje.clienteId,
-      importe: cancelado ? 0 : montoCargoCliente(viaje),
+      importe: montoCargoCliente(viaje),
       moneda: monedaNormalizada(viaje.monedaMonto),
       estadoDisponibilidad: "pendiente",
     });
   }
 
-  const moneda = monedaNormalizada(viaje.monedaPrecioTransportistaExterno);
-  const acordado =
-    cancelado || !viaje.transportistaId || !viaje.precioTransportistaExterno
-      ? 0
-      : calcularAcordadoTransportista(viaje, opts.ivaTransportistaHabilitado);
-  const pagos = Array.isArray(viaje.pagosTransportista)
-    ? (viaje.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
-    : [];
-  const pagado = pagos
-    .filter((p) => monedaNormalizada(p.moneda) === moneda)
-    .reduce((acc, p) => acc + (Number(p.monto) || 0), 0);
-  await sincronizarLado(tx, viaje, "proveedor", {
-    contraparteId: viaje.transportistaId,
-    importe: acordado,
-    moneda,
-    estadoDisponibilidad: estadoDisponibilidadCcDesde(pagado, acordado),
-  });
+  if (
+    lados.includes("proveedor") &&
+    !viajeTieneLiquidacionVigente(viaje, viaje.transportistaId)
+  ) {
+    const moneda = monedaNormalizada(viaje.monedaPrecioTransportistaExterno);
+    const acordado =
+      !viaje.transportistaId || !viaje.precioTransportistaExterno
+        ? 0
+        : calcularAcordadoTransportista(viaje, opts.ivaTransportistaHabilitado ?? false);
+    const pagos = Array.isArray(viaje.pagosTransportista)
+      ? (viaje.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
+      : [];
+    const pagado = pagos
+      .filter((p) => monedaNormalizada(p.moneda) === moneda)
+      .reduce((acc, p) => acc + (Number(p.monto) || 0), 0);
+    await sincronizarLado(tx, viaje, "proveedor", {
+      contraparteId: viaje.transportistaId,
+      importe: acordado,
+      moneda,
+      estadoDisponibilidad: estadoDisponibilidadCcDesde(pagado, acordado),
+    });
+  }
 }
 
-/** Variante que carga el viaje por id (para quien no lo tiene ya con `liquidacionesViaje`). */
+/** Variante que carga el viaje por id (para quien no lo tiene ya con factura y liquidaciones). */
 export async function sincronizarCuentaCorrienteViajePorId(
   tx: Prisma.TransactionClient,
   tenantId: string,
   viajeId: string,
-  opts: { ivaTransportistaHabilitado: boolean; conFacturacion: boolean },
+  opts: OpcionesCcViaje = {},
 ) {
-  const viaje = await tx.viaje.findFirstOrThrow({
+  const viaje = await tx.viaje.findFirst({
     where: { id: viajeId, tenantId },
     include: VIAJE_CC_INCLUDE,
   });
+  if (!viaje) return;
   await sincronizarCuentaCorrienteViaje(tx, viaje, opts);
+}
+
+/**
+ * Estado de pago del movimiento de una liquidación (puede abarcar varios viajes): lo
+ * pagado es la suma de `pagosTransportista` de todos sus viajes en la moneda del
+ * movimiento — incluye los pagos cargados desde Viajes y los espejos de imputaciones
+ * de Cuenta Corriente.
+ */
+export async function actualizarEstadoCargoLiquidacionCc(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  liquidacionId: string,
+) {
+  const cargo = await tx.movimientoCuentaCorriente.findFirst({
+    where: { tenantId, liquidacionId, tipo: "cargo", estadoDisponibilidad: { not: "anulado" } },
+  });
+  if (!cargo) return;
+  const viajes = await tx.liquidacionViaje.findMany({
+    where: { tenantId, liquidacionId },
+    select: { viaje: { select: { pagosTransportista: true } } },
+  });
+  const pagado = viajes.reduce((acc, lv) => {
+    const pagos = Array.isArray(lv.viaje.pagosTransportista)
+      ? (lv.viaje.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
+      : [];
+    return (
+      acc +
+      pagos
+        .filter((p) => monedaNormalizada(p.moneda) === monedaNormalizada(cargo.moneda))
+        .reduce((s, p) => s + (Number(p.monto) || 0), 0)
+    );
+  }, 0);
+  await tx.movimientoCuentaCorriente.update({
+    where: { id: cargo.id },
+    data: { estadoDisponibilidad: estadoDisponibilidadCcDesde(pagado, cargo.importe) },
+  });
+}
+
+/** Igual que `sincronizarCuentaCorrienteViajePorId`, para varios viajes (ej. los de una factura anulada). */
+export async function sincronizarCuentaCorrienteViajesPorIds(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  viajeIds: string[],
+  opts: OpcionesCcViaje = {},
+) {
+  for (const viajeId of new Set(viajeIds)) {
+    await sincronizarCuentaCorrienteViajePorId(tx, tenantId, viajeId, opts);
+  }
 }

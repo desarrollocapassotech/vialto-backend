@@ -15,6 +15,7 @@ import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dt
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
 import { repartirImputacion } from './imputacion-reparto.util';
+import { cuentaEnHistorialCc } from '../../shared/cuenta-corriente/movimiento-cc.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import {
   importeTotalConIvaPorTramo,
@@ -163,6 +164,9 @@ export class CuentaCorrienteService {
       include: {
         imputacionesComoCargo: { select: { importe: true } },
         imputacionesComoPago: { select: { importe: true } },
+        // VTO-431: vínculo entre el movimiento anulado y su negativo, para mostrarlos juntos.
+        anuladoPor: { select: { id: true, fecha: true } },
+        anulaMovimiento: { select: { id: true, fecha: true, concepto: true } },
       },
       // Orden de carga (último cargado primero), no por `fecha`: un cobro con fecha
       // anterior a otros movimientos tiene que aparecer arriba al registrarlo.
@@ -178,7 +182,9 @@ export class CuentaCorrienteService {
         m.tipo === 'cargo'
           ? imputacionesComoCargo.reduce((s, i) => s + i.importe, 0)
           : imputacionesComoPago.reduce((s, i) => s + i.importe, 0);
-      return { ...m, pendiente: Math.max(m.importe - imputado, 0) };
+      // Un cargo anulado (o su negativo) ya no tiene nada pendiente.
+      const anulado = m.tipo === 'cargo' && m.estadoDisponibilidad === 'anulado';
+      return { ...m, pendiente: anulado ? 0 : Math.max(m.importe - imputado, 0) };
     });
   }
 
@@ -318,11 +324,7 @@ export class CuentaCorrienteService {
 
   async update(id: string, tenantId: string, dto: UpdateMovimientoCcDto) {
     const current = await this.findOne(id, tenantId);
-    if (current.origen === 'viaje') {
-      throw new BadRequestException(
-        'Los cargos automáticos de viaje no se editan manualmente',
-      );
-    }
+    this.assertEditableAMano(current, 'editar');
     await this.assertSinImputaciones(current, 'editar');
 
     const cambiaContraparte = dto.clienteId !== undefined || dto.proveedorId !== undefined;
@@ -378,13 +380,28 @@ export class CuentaCorrienteService {
     });
   }
 
-  async remove(id: string, tenantId: string) {
-    const current = await this.findOne(id, tenantId);
-    if (current.origen === 'viaje') {
+  /**
+   * Solo los movimientos cargados a mano se editan/eliminan desde acá. Los de viaje,
+   * factura y liquidación los mantiene su módulo de origen, y una anulación (o un
+   * movimiento ya anulado) queda como está para auditoría (VTO-431).
+   */
+  private assertEditableAMano(
+    mov: { origen: string; estadoDisponibilidad: string },
+    accion: 'editar' | 'eliminar',
+  ) {
+    if (mov.origen !== 'manual') {
       throw new BadRequestException(
-        'Los cargos automáticos de viaje no pueden eliminarse',
+        `Los movimientos automáticos (viaje, factura, liquidación o anulación) no se pueden ${accion} a mano`,
       );
     }
+    if (mov.estadoDisponibilidad === 'anulado') {
+      throw new BadRequestException(`Un movimiento anulado no se puede ${accion}`);
+    }
+  }
+
+  async remove(id: string, tenantId: string) {
+    const current = await this.findOne(id, tenantId);
+    this.assertEditableAMano(current, 'eliminar');
     await this.assertSinImputaciones(current, 'eliminar');
     return this.prisma.movimientoCuentaCorriente.delete({ where: { id } });
   }
@@ -451,10 +468,16 @@ export class CuentaCorrienteService {
     contraparteId: string,
     opts?: { hasta?: Date; before?: Date },
   ) {
-    const baseWhere = {
+    // Misma regla que el historial (`cuentaEnHistorialCc`): un cargo anulado cuenta si
+    // tiene su negativo (o es el negativo); solo se excluye el anulado sin compensación.
+    const baseWhere: Prisma.MovimientoCuentaCorrienteWhereInput = {
       tenantId,
       contraparteId,
-      estadoDisponibilidad: { not: 'anulado' },
+      OR: [
+        { estadoDisponibilidad: { not: 'anulado' } },
+        { anulaMovimientoId: { not: null } },
+        { anuladoPor: { isNot: null } },
+      ],
       ...(opts?.hasta ? { fecha: { lte: opts.hasta } } : {}),
       ...(opts?.before ? { fecha: { lt: opts.before } } : {}),
     };
@@ -491,6 +514,7 @@ export class CuentaCorrienteService {
         contraparteId,
         fecha: { gte: desde, lte: hasta },
       },
+      include: { anuladoPor: { select: { id: true } } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
 
@@ -498,8 +522,8 @@ export class CuentaCorrienteService {
     // carga y la lista sale con el último cargado primero (PDF y Excel la usan tal cual).
     let acumulado = saldoInicial;
     const items = movimientos.map((mov) => {
-      // Un cargo anulado se sigue listando (auditoría) pero no suma al saldo.
-      if (mov.estadoDisponibilidad !== 'anulado') {
+      // Un cargo anulado se sigue listando (auditoría); suma solo si tiene su negativo.
+      if (cuentaEnHistorialCc({ ...mov, compensado: !!mov.anuladoPor })) {
         acumulado += mov.tipo === 'cargo' ? mov.importe : -mov.importe;
       }
       return {
@@ -590,6 +614,9 @@ export class CuentaCorrienteService {
     }
     if (cargo.tipo !== 'cargo') {
       throw new BadRequestException('El movimiento elegido no es un comprobante de compra/venta');
+    }
+    if (cargo.estadoDisponibilidad === 'anulado') {
+      throw new BadRequestException('El comprobante está anulado: no se le pueden imputar cobros ni pagos');
     }
     if (pago.contraparteId !== cargo.contraparteId) {
       throw new BadRequestException('El pago y el comprobante deben ser de la misma contraparte');

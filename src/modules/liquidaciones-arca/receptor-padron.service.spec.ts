@@ -31,7 +31,16 @@ function serviceCon(respuesta: () => Promise<unknown>) {
       },
     },
   };
-  return { service: new ReceptorPadronService(padron), padron, calls };
+  // Prisma falso: un transportista de TENANT y la config ARCA en producción.
+  const prisma = {
+    transportista: {
+      findFirst: async ({ where }: any) =>
+        where.tenantId === TENANT && where.id === 't1' ? { ...receptor } : null,
+    },
+    cliente: { findFirst: async () => null },
+    arcaConfig: { findUnique: async () => ({ ambiente: 'produccion' }) },
+  };
+  return { service: new ReceptorPadronService(padron, prisma as any), padron, calls };
 }
 
 const activo = async () => ({ datosGenerales: { razonSocial: 'X SA', estadoClave: 'ACTIVO' } });
@@ -39,19 +48,45 @@ const inactivo = async () => ({ datosGenerales: { razonSocial: 'X SA', estadoCla
 const receptor = { nombre: 'X SA', idFiscal: CUIT, pais: 'AR' };
 
 (async () => {
+  // Prisma carga el .env al importarse: el switch de QA no tiene que afectar estas pruebas.
+  delete process.env.PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION;
+
   await test('CUIT activo → emite', async () => {
     const { service } = serviceCon(activo);
     await service.assertReceptorActivo(TENANT, 'produccion', receptor, 'cliente');
   });
 
-  await test('CUIT inactivo (apócrifo) → 422 con el CUIT en el mensaje', async () => {
+  await test('CUIT inactivo (apócrifo) → 422 con mensaje corto', async () => {
     const { service } = serviceCon(inactivo);
     await assert.rejects(
       service.assertReceptorActivo(TENANT, 'produccion', receptor, 'transportista'),
       (e: unknown) =>
         e instanceof UnprocessableEntityException &&
-        String((e.getResponse() as { message: string }).message).includes(CUIT),
+        (e.getResponse() as { message: string }).message ===
+          'No se puede emitir: el CUIT del transportista está dado de baja en ARCA (contribuyente no confiable / apócrifo).',
     );
+  });
+
+  await test('verificarRegistro: bloqueado → { bloqueado, mensaje } sin tirar', async () => {
+    const { service } = serviceCon(inactivo);
+    const r = await service.verificarRegistro(TENANT, 'transportistas', 't1');
+    assert.equal(r.bloqueado, true);
+  });
+
+  await test('verificarRegistro: activo → no bloqueado', async () => {
+    const { service } = serviceCon(activo);
+    assert.deepEqual(await service.verificarRegistro(TENANT, 'transportistas', 't1'), {
+      bloqueado: false,
+    });
+  });
+
+  await test('verificarRegistro: registro de otra empresa → no encontrado', async () => {
+    const { service, calls } = serviceCon(inactivo);
+    await assert.rejects(
+      service.verificarRegistro('org_otra', 'transportistas', 't1'),
+      (e: unknown) => (e as { getStatus?: () => number }).getStatus?.() === 404,
+    );
+    assert.equal(calls.n, 0);
   });
 
   await test('CUIT inexistente → 422', async () => {

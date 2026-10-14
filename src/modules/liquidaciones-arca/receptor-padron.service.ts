@@ -1,5 +1,12 @@
-import { HttpException, Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
+import {
+  HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { PadronService } from '../../core/padron/padron.service';
+import { PrismaService } from '../../shared/prisma/prisma.service';
 import { cuitDigitoVerificadorValido, normalizarCuit } from '../../shared/util/cuit';
 
 /** Antigüedad máxima de la consulta al padrón para emitir: un CUIT puede pasar a apócrifo en cualquier momento. */
@@ -23,7 +30,50 @@ type ReceptorFiscal = {
 export class ReceptorPadronService {
   private readonly logger = new Logger(ReceptorPadronService.name);
 
-  constructor(private readonly padron: PadronService) {}
+  constructor(
+    private readonly padron: PadronService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * Mismo chequeo que la emisión, pero sin tirar: lo usa el front para deshabilitar
+   * "Emitir" antes de intentarlo. Lee el ambiente de la config ARCA del tenant.
+   */
+  async verificarRegistro(
+    tenantId: string,
+    entidad: 'clientes' | 'transportistas',
+    id: string,
+  ): Promise<{ bloqueado: false } | { bloqueado: true; mensaje: string }> {
+    const receptor =
+      entidad === 'clientes'
+        ? await this.prisma.cliente.findFirst({
+            where: { id, tenantId },
+            select: { nombre: true, idFiscal: true, pais: true },
+          })
+        : await this.prisma.transportista.findFirst({
+            where: { id, tenantId },
+            select: { nombre: true, idFiscal: true, pais: true },
+          });
+    if (!receptor) {
+      throw new NotFoundException(entidad === 'clientes' ? 'Cliente no encontrado' : 'Transportista no encontrado');
+    }
+    const config = await this.prisma.arcaConfig.findUnique({
+      where: { tenantId },
+      select: { ambiente: true },
+    });
+    try {
+      await this.assertReceptorActivo(
+        tenantId,
+        config?.ambiente ?? 'homologacion',
+        receptor,
+        entidad === 'clientes' ? 'cliente' : 'transportista',
+      );
+      return { bloqueado: false };
+    } catch (err) {
+      if (!(err instanceof UnprocessableEntityException)) throw err;
+      return { bloqueado: true, mensaje: (err.getResponse() as { message: string }).message };
+    }
+  }
 
   async assertReceptorActivo(
     tenantId: string,
@@ -62,13 +112,12 @@ export class ReceptorPadronService {
     if (estado !== 'inactivo' && estado !== 'no_encontrado') return;
 
     const quien = rol === 'cliente' ? 'del cliente' : 'del transportista';
-    const nombre = receptor.nombre ? ` (${receptor.nombre})` : '';
     const motivo =
       estado === 'no_encontrado'
-        ? 'no figura en el padrón de ARCA'
-        : 'está inactivo, limitado o cancelado en ARCA (por ejemplo, marcado como apócrifo / contribuyente no confiable)';
+        ? 'no existe en ARCA'
+        : 'está dado de baja en ARCA (contribuyente no confiable / apócrifo)';
     throw new UnprocessableEntityException({
-      message: `No se puede emitir: el CUIT ${quien}${nombre} ${cuit} ${motivo}. Revisá el CUIT o consultá con el receptor.`,
+      message: `No se puede emitir: el CUIT ${quien} ${motivo}.`,
       detalle: { cuit, estadoPadron: estado, observaciones },
     });
   }

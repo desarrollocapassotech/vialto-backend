@@ -139,7 +139,9 @@ export class CuentaCorrienteService {
         imputacionesComoCargo: { select: { importe: true } },
         imputacionesComoPago: { select: { importe: true } },
       },
-      orderBy: { fecha: 'desc' },
+      // Orden de carga (último cargado primero), no por `fecha`: un cobro con fecha
+      // anterior a otros movimientos tiene que aparecer arriba al registrarlo.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 500,
     });
 
@@ -456,9 +458,11 @@ export class CuentaCorrienteService {
         contraparteId,
         fecha: { gte: desde, lte: hasta },
       },
-      orderBy: [{ fecha: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
 
+    // Mismo orden que el detalle en pantalla: el saldo acumulado se recorre en orden de
+    // carga y la lista sale con el último cargado primero (PDF y Excel la usan tal cual).
     let acumulado = saldoInicial;
     const items = movimientos.map((mov) => {
       // Un cargo anulado se sigue listando (auditoría) pero no suma al saldo.
@@ -487,7 +491,7 @@ export class CuentaCorrienteService {
       periodo: { desde, hasta },
       saldoInicial,
       saldoFinal: acumulado,
-      movimientos: items,
+      movimientos: items.reverse(),
     };
   }
 

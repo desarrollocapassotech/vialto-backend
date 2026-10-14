@@ -2,14 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import * as PDFDocument from 'pdfkit';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
-import { round2 } from './arca-iva.util';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import {
   adelantoDesdePagos,
   buildLiquidacionContratoTotales,
-  crtMicRemitoDesdeDocumento,
+  encabezadoContratoProveedor,
   fmtContratoDate,
   mercaderiaDesdeProductos,
+  resolverDocsViajeContrato,
   type LiquidacionContratoTotales,
   type LiquidacionContratoViajeInput,
 } from './liquidacion-contrato.util';
@@ -107,28 +107,18 @@ export class LiquidacionContratoPdfService {
     });
     if (!liq) throw new NotFoundException('Liquidación no encontrada');
 
-    const tenantIdPropio2 = await this.prisma.tenant.findUnique({
+    const tenantConfig = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: tenantId },
       select: {
-        idPropio2Habilitado: true,
-        idPropio2Label: true,
         unidadCantidadViajes: true,
       },
     });
-    const unidad = normalizeUnidadCantidad(tenantIdPropio2?.unidadCantidadViajes);
+    const unidad = normalizeUnidadCantidad(tenantConfig?.unidadCantidadViajes);
 
     const viajes: LiquidacionContratoViajeInput[] = liq.viajes.map((lv) => {
       const v = lv.viaje;
-      const idPropio2ValorRaw = v.idPropio2?.trim();
-      const idPropio2Habilitado = Boolean(
-        tenantIdPropio2?.idPropio2Habilitado && idPropio2ValorRaw,
-      );
-      const idPropio2Label = idPropio2Habilitado
-        ? tenantIdPropio2?.idPropio2Label?.trim() || 'ID Propio 2'
-        : null;
-      const idPropio2Valor = idPropio2Habilitado ? idPropio2ValorRaw : null;
       const moneda = (liq.moneda || v.monedaPrecioTransportistaExterno || 'ARS').toUpperCase();
-      const docs = crtMicRemitoDesdeDocumento(v.documentoAduanero);
+      const docs = resolverDocsViajeContrato(v);
       const toneladas = lv.tnDestino ?? v.cantidadTransportista ?? null;
       const precioPorTn =
         lv.tarifaTransportista ?? v.precioUnitarioTransportista ?? null;
@@ -141,8 +131,6 @@ export class LiquidacionContratoPdfService {
       return {
         numero: numeroVisibleViaje(v),
         numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado,
-        idPropio2Label,
-        idPropio2Valor,
         origen: v.origen,
         destino: v.destino,
         fechaCarga: v.fechaCarga,
@@ -163,6 +151,12 @@ export class LiquidacionContratoPdfService {
     const totales = buildLiquidacionContratoTotales({
       viajes,
       ivaPct: liq.ivaPct ?? 21,
+      comision: liq.comision,
+      comisionPct: liq.comisionPct,
+      conceptosLineas: liq.conceptosLineas,
+      ivaPersistido: liq.gastosAdminIva,
+      liquidoPersistido: liq.liquido,
+      moneda: liq.moneda,
       liq,
     });
 
@@ -204,6 +198,7 @@ export class LiquidacionContratoPdfService {
       periodoDesde: Date;
       periodoHasta: Date;
       cantViajes: number;
+      proveedorContrato?: string | null;
       transportista: {
         nombre: string;
         idFiscal: string | null;
@@ -241,6 +236,7 @@ export class LiquidacionContratoPdfService {
       periodoDesde: Date;
       periodoHasta: Date;
       cantViajes: number;
+      proveedorContrato?: string | null;
       transportista: {
         nombre: string;
         idFiscal: string | null;
@@ -268,21 +264,25 @@ export class LiquidacionContratoPdfService {
       .text(emisorNombre.toUpperCase(), M, y, { width: CW, align: 'right' });
     y += 42;
 
+    const { titulo, subtitulo } = encabezadoContratoProveedor(liq.proveedorContrato);
     doc
       .font('Helvetica-Bold')
-      .fontSize(14)
+      .fontSize(subtitulo ? 14 : 13)
       .fillColor(CHARCOAL)
-      .text('LIQUIDACIÓN DE FLETE', M, y, { width: CW, align: 'center' });
-    y += 18;
-    doc
-      .font('Helvetica')
-      .fontSize(8)
-      .fillColor(STEEL)
-      .text('Contrato / liquidación a proveedor', M, y, {
-        width: CW,
-        align: 'center',
-      });
-    y += 16;
+      .text(titulo, M, y, { width: CW, align: 'center' });
+    y += subtitulo ? 18 : 24;
+
+    if (subtitulo) {
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .fillColor(STEEL)
+        .text(subtitulo, M, y, {
+          width: CW,
+          align: 'center',
+        });
+      y += 16;
+    }
     doc
       .moveTo(M, y)
       .lineTo(M + CW, y)
@@ -323,12 +323,26 @@ export class LiquidacionContratoPdfService {
     }
     y = this.ensure(doc, y, 90);
     y = this.section(doc, y, 'Total consolidado');
-    this.moneyRows(
-      doc,
-      y,
-      this.buildMoneyRows(totales),
-      true,
-    );
+    const consolidadoRows: [string, string, boolean?][] = [
+      ['Subtotal', fmtMoney(totales.subtotal, totales.moneda)],
+    ];
+    if (totales.comision > 0) {
+      consolidadoRows.push([
+        totales.comisionPct > 0 ? `Comisión (${this.pctLabel(totales.comisionPct)})` : 'Comisión',
+        `- ${fmtMoney(totales.comision, totales.moneda)}`,
+      ]);
+    }
+    for (const c of totales.conceptos) {
+      const valorStr = c.signo === 'contra' ? `- ${fmtMoney(c.monto, totales.moneda)}` : `+ ${fmtMoney(c.monto, totales.moneda)}`;
+      consolidadoRows.push([c.label, valorStr]);
+    }
+    if (totales.comision > 0 || totales.conceptos.length > 0) {
+      consolidadoRows.push(['Neto gravado', fmtMoney(totales.netoGravado, totales.moneda)]);
+    }
+    consolidadoRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)]);
+    consolidadoRows.push(['Adelanto', fmtMoney(totales.adelanto ?? 0, totales.moneda)]);
+    consolidadoRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, totales.moneda), true]);
+    this.moneyRows(doc, y, consolidadoRows);
   }
 
   private drawViajeUnico(
@@ -360,10 +374,28 @@ export class LiquidacionContratoPdfService {
       ['Destino', dash(v.destino)],
     ]);
     y = this.section(doc, y, 'Detalle de flete');
-    y = this.moneyRows(doc, y, [
-      [`Valor acordado x ${unidad}`, v.precioPorTn != null ? fmtMoney(v.precioPorTn, totales.moneda) : '—'],
-      ...this.buildMoneyRows(totales),
-    ], true);
+    const viajeUnicoRows: [string, string, boolean?][] = [
+      [`Valor acordado x ${unidad}`, v.precioPorTn != null ? fmtMoney(v.precioPorTn, v.moneda) : '—'],
+      ['Subtotal', fmtMoney(v.subtotal, v.moneda)],
+    ];
+    if (totales.comision > 0) {
+      viajeUnicoRows.push([
+        totales.comisionPct > 0 ? `Comisión (${this.pctLabel(totales.comisionPct)})` : 'Comisión',
+        `- ${fmtMoney(totales.comision, v.moneda)}`,
+      ]);
+    }
+    for (const c of totales.conceptos) {
+      const valorStr = c.signo === 'contra' ? `- ${fmtMoney(c.monto, v.moneda)}` : `+ ${fmtMoney(c.monto, v.moneda)}`;
+      viajeUnicoRows.push([c.label, valorStr]);
+    }
+    if (totales.comision > 0 || totales.conceptos.length > 0) {
+      viajeUnicoRows.push(['Neto gravado', fmtMoney(totales.netoGravado, v.moneda)]);
+    }
+    viajeUnicoRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, v.moneda)]);
+    viajeUnicoRows.push(['Adelanto', fmtMoney(v.adelanto, v.moneda)]);
+    viajeUnicoRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, v.moneda), true]);
+    viajeUnicoRows.push(['Moneda', v.moneda, false]);
+    y = this.moneyRows(doc, y, viajeUnicoRows);
     return y;
   }
 
@@ -384,14 +416,32 @@ export class LiquidacionContratoPdfService {
       ['Destino', destinos],
     ]);
     y = this.section(doc, y, 'Detalle de flete');
-    y = this.moneyRows(doc, y, [
+    const mismoPrecioRows: [string, string, boolean?][] = [
       [
         `Valor acordado x ${unidad}`,
         g.precioPorTn != null ? fmtMoney(g.precioPorTn, totales.moneda) : '—',
       ],
       [capitalizar(unidadCantidadPlural(unidad)), fmtNum(g.toneladas)],
-      ...this.buildMoneyRows(totales),
-    ], true);
+      ['Subtotal', fmtMoney(g.subtotal, totales.moneda)],
+    ];
+    if (totales.comision > 0) {
+      mismoPrecioRows.push([
+        totales.comisionPct > 0 ? `Comisión (${this.pctLabel(totales.comisionPct)})` : 'Comisión',
+        `- ${fmtMoney(totales.comision, totales.moneda)}`,
+      ]);
+    }
+    for (const c of totales.conceptos) {
+      const valorStr = c.signo === 'contra' ? `- ${fmtMoney(c.monto, totales.moneda)}` : `+ ${fmtMoney(c.monto, totales.moneda)}`;
+      mismoPrecioRows.push([c.label, valorStr]);
+    }
+    if (totales.comision > 0 || totales.conceptos.length > 0) {
+      mismoPrecioRows.push(['Neto gravado', fmtMoney(totales.netoGravado, totales.moneda)]);
+    }
+    mismoPrecioRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)]);
+    mismoPrecioRows.push(['Adelanto', fmtMoney(g.adelanto ?? 0, totales.moneda)]);
+    mismoPrecioRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, totales.moneda), true]);
+    mismoPrecioRows.push(['Moneda', totales.moneda, false]);
+    y = this.moneyRows(doc, y, mismoPrecioRows);
     return y;
   }
 
@@ -430,16 +480,12 @@ export class LiquidacionContratoPdfService {
       ].join('  ·  ');
       doc.font('Helvetica-Bold').fontSize(8).fillColor(CHARCOAL).text(line, M, y, { width: CW });
       y += 12;
-      const idPropio2Segmento =
-        v.idPropio2Label && v.idPropio2Valor
-          ? `  ·  ${v.idPropio2Label}: ${v.idPropio2Valor}`
-          : '';
       doc
         .font('Helvetica')
         .fontSize(7.5)
         .fillColor(STEEL)
         .text(
-          `Chofer: ${dash(v.choferNombre)}  ·  Mercadería: ${dash(v.mercaderia)}  ·  ${unidad}: ${fmtNum(v.toneladas)}${idPropio2Segmento}`,
+          `Chofer: ${dash(v.choferNombre)}  ·  Mercadería: ${dash(v.mercaderia)}  ·  ${unidad}: ${fmtNum(v.toneladas)}`,
           M,
           y,
           { width: CW },
@@ -493,68 +539,20 @@ export class LiquidacionContratoPdfService {
     doc.font('Helvetica').fontSize(9).fillColor(CHARCOAL).text(value, x, y + 10, { width: w });
   }
 
-  private buildMoneyRows(
-    totales: LiquidacionContratoTotales,
-  ): [string, string][] {
-    const rows: [string, string][] = [];
-    const tieneComision = totales.comision > 0 || totales.comisionPct > 0;
-    const tieneConceptos = (totales.conceptosLineas?.length ?? 0) > 0;
-
-    if (tieneComision || tieneConceptos) {
-      rows.push(['Bruto', fmtMoney(totales.bruto, totales.moneda)]);
-      if (tieneComision) {
-        const comLabel =
-          totales.comisionPct > 0
-            ? `Comisión (${this.pctLabel(totales.comisionPct)})`
-            : 'Comisión';
-        rows.push([comLabel, `- ${fmtMoney(totales.comision, totales.moneda)}`]);
-      }
-      for (const c of totales.conceptosLineas ?? []) {
-        const signo = c.signo === 'contra' ? '- ' : '+ ';
-        const esTodos = c.modoAplicacion === 'TODOS_LOS_VIAJES';
-        const cant = esTodos
-          ? Math.max(totales.cantViajes, 1)
-          : c.cantidad && c.cantidad > 0
-            ? c.cantidad
-            : 1;
-        const montoUnitario = esTodos
-          ? c.monto
-          : c.montoUnitario != null
-            ? c.montoUnitario
-            : c.monto;
-        const montoTotal = esTodos ? round2(c.monto * cant) : round2(c.monto);
-        const cantInfo =
-          cant !== 1 && montoUnitario != null
-            ? ` (${cant.toLocaleString('es-AR')} × ${fmtMoney(montoUnitario, totales.moneda)})`
-            : '';
-        rows.push([
-          `${c.nombreSnapshot}${cantInfo}`,
-          `${signo}${fmtMoney(montoTotal, totales.moneda)}`,
-        ]);
-      }
-      rows.push(['Subtotal', fmtMoney(totales.subtotal, totales.moneda)]);
-    } else {
-      rows.push(['Subtotal', fmtMoney(totales.subtotal, totales.moneda)]);
-    }
-
-    rows.push([
-      `IVA ${this.pctLabel(totales.ivaPct)}`,
-      fmtMoney(totales.iva, totales.moneda),
-    ]);
-    rows.push(['Total flete', fmtMoney(totales.totalFlete, totales.moneda)]);
-    return rows;
-  }
-
   private moneyRows(
     doc: PDFKit.PDFDocument,
     y: number,
-    rows: [string, string][],
+    rows: [string, string, boolean?][],
     lastBold = false,
   ): number {
     for (let i = 0; i < rows.length; i++) {
       y = this.ensure(doc, y, 16);
+      const isExplicitBold = rows[i][2];
       const isTotal = rows[i][0].toLowerCase().startsWith('total');
-      const bold = (lastBold && i === rows.length - 1) || isTotal;
+      const bold =
+        isExplicitBold !== undefined
+          ? isExplicitBold
+          : (lastBold && i === rows.length - 1) || isTotal;
       doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).fillColor(CHARCOAL);
       doc.text(rows[i][0], M, y, { width: CW - 140 });
       doc.text(rows[i][1], M + CW - 140, y, { width: 140, align: 'right' });

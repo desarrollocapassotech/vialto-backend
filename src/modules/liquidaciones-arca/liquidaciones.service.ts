@@ -63,6 +63,7 @@ import { assertCvlpEmitDatosCompletos } from './cvlp-emit-validation.util';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { AnularFacturaDto } from './dto/anular-factura.dto';
 import { conceptoCargoFactura } from '../facturacion/cargo-factura.util';
+import { ReceptorPadronService } from './receptor-padron.service';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
 // Tipos para los nuevos modelos Prisma hasta que se ejecute `prisma generate`
@@ -85,6 +86,7 @@ export class LiquidacionesService {
     private readonly conceptosLiquidacion: ConceptosLiquidacionService,
     private readonly facturaPdf: FacturaPdfService,
     private readonly clerkUsers: ClerkVialtoRoleService,
+    private readonly receptorPadron: ReceptorPadronService,
   ) {}
 
   /** Acceso a nuevos modelos Prisma pendientes de regenerar el cliente. */
@@ -374,6 +376,7 @@ export class LiquidacionesService {
           cbteTipo: getCbteTipoCvlp(transportista.condicionIva),
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
+          proveedorContrato: dto.proveedorContrato?.trim() || null,
           createdBy: userId,
           updatedAt: new Date(),
           viajes: {
@@ -482,6 +485,9 @@ export class LiquidacionesService {
     }
     if (dto.comprobanteUrl !== undefined) {
       data.comprobanteUrl = dto.comprobanteUrl || null;
+    }
+    if (dto.proveedorContrato !== undefined) {
+      data.proveedorContrato = dto.proveedorContrato?.trim() || null;
     }
 
     // ── Reemplazo del conjunto de viajes (solo borrador) ────────────────────
@@ -732,6 +738,7 @@ export class LiquidacionesService {
         },
         transportista: {
           select: {
+            nombre: true,
             idFiscal: true,
             condicionIva: true,
             domicilio: true,
@@ -791,6 +798,16 @@ export class LiquidacionesService {
     if (liquidacion.estado === 'pendiente_cae' && liquidacion.payloadHash === payloadHash) {
       throw new ConflictException(
         'La liquidación ya tiene una solicitud de CAE en curso. Esperar la respuesta o usar reintento.',
+      );
+    }
+
+    // Fail-fast: CUIT del transportista inactivo/apócrifo en el padrón (solo producción).
+    if (liquidacion.transportista) {
+      await this.receptorPadron.assertReceptorActivo(
+        tenantId,
+        config.ambiente,
+        liquidacion.transportista,
+        'transportista',
       );
     }
 
@@ -2079,6 +2096,14 @@ export class LiquidacionesService {
     // Fail-fast: fecha de emisión fuera de la ventana de AFIP, antes de marcar la factura
     // como pendiente (el chequeo contra el último comprobante del PV va más abajo).
     resolveFechaCbteFactura(facturaRaw.fechaEmision);
+
+    // Fail-fast: CUIT del cliente inactivo/apócrifo en el padrón (solo producción).
+    await this.receptorPadron.assertReceptorActivo(
+      tenantId,
+      ambiente,
+      facturaRaw.cliente,
+      'cliente',
+    );
 
     // Marcar como pendiente antes de llamar a AFIP SDK
     await (this.prisma as PrismaAny).factura.update({

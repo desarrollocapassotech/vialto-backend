@@ -10,6 +10,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
 import { VehiculosPaginatedQueryDto } from './dto/vehiculos-paginated-query.dto';
+import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 
 function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -145,11 +146,12 @@ export class VehiculosService {
     });
   }
 
-  /** Medianoche UTC de hoy: la fecha de toda corrección manual de km (no se permite backdatear). */
+  /**
+   * Hoy (en Argentina) a medianoche UTC: la fecha de toda corrección manual de km (no se
+   * permite backdatear). Misma convención que `CargaCombustible.fecha`.
+   */
   private static hoyUtc(): Date {
-    const fecha = new Date();
-    fecha.setUTCHours(0, 0, 0, 0);
-    return fecha;
+    return fechaCalendarioAr();
   }
 
   /**

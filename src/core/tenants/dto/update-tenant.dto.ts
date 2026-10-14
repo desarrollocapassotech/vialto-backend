@@ -51,4 +51,7 @@ export class UpdateTenantDto {
 
   /** true = habilita "Marcar como cobrada" en Facturas (default false: oculta y el endpoint la rechaza). */
   @IsOptional() @IsBoolean() marcarCobradaHabilitada?: boolean;
+
+  /** Opciones de proveedores/entidades para el contrato comercial PDF de liquidaciones. */
+  @IsOptional() @IsArray() @IsString({ each: true }) opcionesProveedorLiquidacion?: string[];
 }

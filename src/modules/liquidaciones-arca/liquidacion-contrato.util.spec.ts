@@ -16,6 +16,7 @@ const assert = {
 import {
   buildLiquidacionContratoTotales,
   encabezadoContratoProveedor,
+  resolverDocsViajeContrato,
 } from './liquidacion-contrato.util';
 
 function test(name: string, fn: () => void) {
@@ -127,6 +128,141 @@ test('encabezado con espacios en blanco realiza trim adecuadamente', () => {
   const soloEspacios = encabezadoContratoProveedor('   ');
   assert.equal(soloEspacios.titulo, 'LIQUIDACIÓN DE FLETE');
   assert.equal(soloEspacios.subtitulo, 'Contrato / liquidación a proveedor');
+});
+
+test('resolverDocsViajeContrato prioriza MIC desde ID 1 y Remito desde ID 2', () => {
+  const docs = resolverDocsViajeContrato({
+    numeroIdentificacionPersonalizado: 'MIC-9921',
+    idPropio2: 'REM-1004',
+    documentoAduanero: {
+      crtNumero: 'CRT-555',
+      micNumero: 'MIC-NOMINA-VIEJA',
+      remito: 'REM-VIEJO',
+    },
+  });
+  assert.equal(docs.crt, 'CRT-555');
+  assert.equal(docs.mic, 'MIC-9921');
+  assert.equal(docs.remito, 'REM-1004');
+});
+
+test('resolverDocsViajeContrato aplica trim en IDs personalizados', () => {
+  const docs = resolverDocsViajeContrato({
+    numeroIdentificacionPersonalizado: '   MIC-ESPACIADO   ',
+    idPropio2: '   REM-ESPACIADO   ',
+  });
+  assert.equal(docs.mic, 'MIC-ESPACIADO');
+  assert.equal(docs.remito, 'REM-ESPACIADO');
+  assert.equal(docs.crt, null);
+});
+
+test('resolverDocsViajeContrato fallback a documento aduanero si IDs personalizados están vacíos', () => {
+  const docs = resolverDocsViajeContrato({
+    numeroIdentificacionPersonalizado: '   ',
+    idPropio2: null,
+    documentoAduanero: {
+      crtNumero: 'CRT-777',
+      micNumero: 'MIC-FALLBACK',
+      remitoNumero: 'REM-FALLBACK',
+    },
+  });
+  assert.equal(docs.crt, 'CRT-777');
+  assert.equal(docs.mic, 'MIC-FALLBACK');
+  assert.equal(docs.remito, 'REM-FALLBACK');
+});
+
+test('resolverDocsViajeContrato retorna null en todos los campos si no hay datos', () => {
+  const docs = resolverDocsViajeContrato(null);
+  assert.equal(docs.crt, null);
+  assert.equal(docs.mic, null);
+  assert.equal(docs.remito, null);
+
+  const vacio = resolverDocsViajeContrato({});
+  assert.equal(vacio.crt, null);
+  assert.equal(vacio.mic, null);
+  assert.equal(vacio.remito, null);
+});
+
+test('buildLiquidacionContratoTotales descuenta comision de la base gravada e IVA sobre neto', () => {
+  const t = buildLiquidacionContratoTotales({
+    ivaPct: 21,
+    viajes: [
+      {
+        ...base,
+        toneladas: 10,
+        precioPorTn: 100,
+        subtotal: 1000,
+        adelanto: 100,
+      },
+    ],
+    comision: 50,
+    comisionPct: 5,
+  });
+  // subtotal = 1000, comision = 50 -> netoGravado = 950
+  assert.equal(t.subtotal, 1000);
+  assert.equal(t.comision, 50);
+  assert.equal(t.comisionPct, 5);
+  assert.equal(t.netoGravado, 950);
+  // IVA 21% sobre 950 = 199.50
+  assert.equal(t.iva, 199.5);
+  // Total a pagar = 950 + 199.50 - 100 (adelanto) = 1049.50
+  assert.equal(t.totalAPagar, 1049.5);
+});
+
+test('buildLiquidacionContratoTotales no descuenta ni aplica comision cuando es 0 o nula', () => {
+  const t = buildLiquidacionContratoTotales({
+    ivaPct: 21,
+    viajes: [
+      {
+        ...base,
+        toneladas: 10,
+        precioPorTn: 100,
+        subtotal: 1000,
+        adelanto: 100,
+      },
+    ],
+    comision: 0,
+    comisionPct: 0,
+  });
+  assert.equal(t.comision, 0);
+  assert.equal(t.comisionPct, 0);
+  assert.equal(t.netoGravado, 1000);
+  assert.equal(t.iva, 210);
+  assert.equal(t.totalAPagar, 1110);
+});
+
+test('buildLiquidacionContratoTotales con conceptos y datos persistidos coincide con detalle de liquidacion', () => {
+  const t = buildLiquidacionContratoTotales({
+    ivaPct: 21,
+    viajes: [
+      {
+        ...base,
+        toneladas: 33.06,
+        precioPorTn: 60000,
+        subtotal: 1983600,
+        adelanto: 0,
+      },
+    ],
+    comision: 158688,
+    comisionPct: 8,
+    conceptosLineas: [
+      {
+        nombreSnapshot: 'Gastos administrativos',
+        signo: 'contra',
+        monto: 3500,
+        ivaPct: 21,
+      },
+    ],
+    ivaPersistido: 382496.52,
+    liquidoPersistido: 2203908.52,
+  });
+  assert.equal(t.subtotal, 1983600);
+  assert.equal(t.comision, 158688);
+  assert.equal(t.conceptos.length, 1);
+  assert.equal(t.conceptos[0].label, 'Gastos administrativos (IVA 21%)');
+  assert.equal(t.conceptos[0].monto, 3500);
+  assert.equal(t.netoGravado, 1821412);
+  assert.equal(t.iva, 382496.52);
+  assert.equal(t.totalAPagar, 2203908.52);
 });
 
 console.log('liquidacion-contrato.util.spec.ts OK');

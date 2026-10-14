@@ -13,6 +13,7 @@ import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
+import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 
 const EPS = 1e-6;
 
@@ -161,10 +162,10 @@ export class CuentaCorrienteService {
    * El "pendiente" de cada cargo descuenta lo ya imputado — no es el importe bruto.
    */
   async tablero(tenantId: string, diasProximos = 15, desde?: string, hasta?: string) {
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
+    // Hoy en Argentina a medianoche UTC, igual que `fechaVencimiento` (no la medianoche del server).
+    const hoy = fechaCalendarioAr();
     const limite = new Date(hoy);
-    limite.setDate(limite.getDate() + diasProximos);
+    limite.setUTCDate(limite.getUTCDate() + diasProximos);
 
     const cargosAbiertos = await this.prisma.movimientoCuentaCorriente.findMany({
       where: {

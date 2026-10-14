@@ -12,6 +12,7 @@ import { NotificacionesCronService } from "../notificaciones/notificaciones-cron
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { KM_DELTA_PLAUSIBLE_MAX } from "../../shared/util/combustible-km.constants";
 import { evaluarLitrosImporteFase1 } from "../../shared/util/combustible-fase1.util";
+import { fechaCalendarioAr } from "../../shared/util/fecha-ar.util";
 
 import { CreateCargaDto } from "./dto/create-carga.dto";
 import { UpdateCargaDto } from "./dto/update-carga.dto";
@@ -70,6 +71,7 @@ function endOfDayLocal(ymd: string): Date {
   const [y, m, d] = ymd.split("-").map(Number);
   return new Date(y, m - 1, d, 23, 59, 59, 999);
 }
+
 
 /** Punto de referencia de km en la línea de tiempo de un vehículo: una carga real o una corrección manual de admin (ver `VehiculoKmEdicion`). */
 type LimiteKm = { km: number; fecha: Date; createdAt: Date; origen: "carga" | "edicion" } | null;
@@ -340,7 +342,7 @@ export class CombustibleService {
     const { prev, next } = await this.getLimitesCronologicos(
       tenantId,
       vehiculoId,
-      new Date(fecha),
+      fechaCalendarioAr(fecha),
       excludeId,
       targetCreatedAt,
     );
@@ -483,8 +485,7 @@ export class CombustibleService {
       dto.vehiculoId,
       dto.choferId,
     );
-    const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
-    fechaCarga.setUTCHours(0, 0, 0, 0);
+    const fechaCarga = fechaCalendarioAr(dto.fecha);
     const createdAtValue = dto.createdAt ? new Date(dto.createdAt) : undefined;
 
     await this.assertKmNoRetroceso(
@@ -554,10 +555,7 @@ export class CombustibleService {
     }
 
     const nextKm = dto.km !== undefined ? dto.km : carga.km;
-    const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
-    if (dto.fecha) {
-      efectivaFecha.setUTCHours(0, 0, 0, 0);
-    }
+    const efectivaFecha = dto.fecha ? fechaCalendarioAr(dto.fecha) : carga.fecha;
     if (nextVehiculo) {
       await this.assertKmNoRetroceso(
         auth.tenantId,
@@ -687,8 +685,7 @@ export class CombustibleService {
         `No se encontró el vehículo con patente "${dto.patente}" en esta empresa`,
       );
     }
-    const fechaCarga = dto.fecha ? new Date(dto.fecha) : new Date();
-    fechaCarga.setUTCHours(0, 0, 0, 0);
+    const fechaCarga = fechaCalendarioAr(dto.fecha);
     const createdAtValue = dto.createdAt ? new Date(dto.createdAt) : undefined;
 
     await this.assertKmNoRetroceso(tenantId, vehiculo.id, fechaCarga, dto.km, undefined, createdAtValue);
@@ -963,8 +960,7 @@ export class CombustibleService {
     if (!vehiculo) return null;
 
     if (fecha) {
-      const targetFecha = new Date(fecha);
-      targetFecha.setUTCHours(0, 0, 0, 0);
+      const targetFecha = fechaCalendarioAr(fecha);
 
       const targetCreatedAt = await this.getTargetCreatedAtForEdit(excludeId);
 
@@ -1030,10 +1026,7 @@ export class CombustibleService {
     }
 
     const nextKm = dto.km !== undefined ? dto.km : carga.km;
-    const efectivaFecha = dto.fecha ? new Date(dto.fecha) : carga.fecha;
-    if (dto.fecha) {
-      efectivaFecha.setUTCHours(0, 0, 0, 0);
-    }
+    const efectivaFecha = dto.fecha ? fechaCalendarioAr(dto.fecha) : carga.fecha;
     const efectivoVehiculoId = vehiculoId ?? carga.vehiculoId;
     if (efectivoVehiculoId) {
       await this.assertKmNoRetroceso(

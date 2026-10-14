@@ -1318,7 +1318,7 @@ Al cargar/editar un CUIT argentino en Cliente o Transportista, el frontend consu
   - Domicilio: se compara normalizado (sin tildes, mayúsculas ni puntuación). Si el usuario lo deja escrito a su manera después de ver lo de ARCA, `confirmar` marca igual con los datos actuales (exige que el CUIT siga activo; sale de la caché, no gasta otra consulta).
   - Pruebas: `npm run test:padron-validacion` (huella, reconsulta al cambiar datos, diferencias, rechazado, confirmar, opt-in, aislamiento por tenant).
 - **Chequeo del receptor antes de emitir por ARCA (oct 2026)**: `ReceptorPadronService` (`modules/liquidaciones-arca/receptor-padron.service.ts`, importa `PadronModule`, que ahora exporta `PadronService`). `emitirFacturaArca` (receptor = cliente) y `emitirLiquidacion` (receptor = transportista) lo llaman antes de marcar `pendiente_cae`: si el CUIT figura inactivo (caso real: "CUIT receptora inactiva por haber sido marcada como apócrifa") o no existe, cortan con 422 `{ message, detalle }` y el comprobante no se toca. Motivo: ese rechazo de ARCA llegaba recién al emitir. Reglas:
-  - Solo tenants con `emision-facturas-arca` / `emision-liquido-producto-arca` (lo garantizan los guards de esos endpoints) y solo en **producción** (en homologación se emite con el CUIT de prueba).
+  - Solo tenants con `emision-facturas-arca` / `emision-liquido-producto-arca` (lo garantizan los guards de esos endpoints) y solo en **producción** (en homologación se emite con el CUIT de prueba). Excepción para probarlo: `PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION=true` lo activa también en homologación — cargarla **solo en el backend de QA**, nunca en producción.
   - **No** depende del opt-in `validacionCuitArcaHabilitada` ni usa la huella `arcaValidadoHuella`: un CUIT validado puede pasar a apócrifo después. Usa `PadronService.consultar(..., { maxAgeMs })` con caché de 24 h como máximo (en vez de 7 días).
   - Si el padrón no responde (503, tope diario 429, sin configurar), **no bloquea**: loguea y emite igual.
   - Gasta cuota de la cuenta de afipsdk del padrón (1 consulta por CUIT cada 24 h).
@@ -1477,6 +1477,7 @@ PADRON_AFIP_SDK_API_KEY=          # token de la cuenta de afipsdk dedicada al pa
 PADRON_CUIT=                      # CUIT dueño del certificado de plataforma
 PADRON_CERT=                      # certificado PEM (una línea con \n literales)
 PADRON_KEY=                       # clave privada PEM (una línea con \n literales)
+PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION= # "true" SOLO en QA: chequea el CUIT del receptor al emitir también en homologación
 
 # Módulo notificaciones (alertas por email vía Resend) — sin RESEND_API_KEY el cron
 # sigue corriendo pero solo loguea, no envía nada (ver ResendEmailService)

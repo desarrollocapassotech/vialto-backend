@@ -31,8 +31,11 @@ export class ReceptorPadronService {
     receptor: ReceptorFiscal,
     rol: 'cliente' | 'transportista',
   ): Promise<void> {
-    // En homologación se emite con el CUIT de prueba de AFIP SDK: no aplica.
-    if (ambiente !== 'produccion') return;
+    // En homologación se emite con el CUIT de prueba de AFIP SDK: no aplica. Salvo que
+    // PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION=true (solo en el backend de QA, para probarlo).
+    if (ambiente !== 'produccion' && process.env.PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION !== 'true') {
+      return;
+    }
 
     const pais = (receptor.pais ?? '').trim().toUpperCase();
     if (pais !== '' && pais !== 'AR' && pais !== 'ARGENTINA') return;

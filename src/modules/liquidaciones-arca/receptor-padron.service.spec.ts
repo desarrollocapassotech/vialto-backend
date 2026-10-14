@@ -70,6 +70,19 @@ const receptor = { nombre: 'X SA', idFiscal: CUIT, pais: 'AR' };
     assert.equal(calls.n, 0);
   });
 
+  await test('homologación con PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION=true (QA) → chequea', async () => {
+    const { service } = serviceCon(inactivo);
+    process.env.PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION = 'true';
+    try {
+      await assert.rejects(
+        service.assertReceptorActivo(TENANT, 'homologacion', receptor, 'cliente'),
+        UnprocessableEntityException,
+      );
+    } finally {
+      delete process.env.PADRON_CHEQUEO_RECEPTOR_HOMOLOGACION;
+    }
+  });
+
   await test('ARCA caído → no bloquea la emisión', async () => {
     const { service } = serviceCon(async () => {
       throw new Error('ECONNRESET');

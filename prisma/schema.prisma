@@ -794,6 +794,12 @@ model MovimientoCuentaCorriente {
   origen               String         @default("manual") // manual | viaje | factura
   concepto             String
   importe              Float
+  /**
+   * Solo ventas/compras manuales cargadas con IVA: importe sin IVA, % y monto de IVA (detalle para consulta). `importe` es siempre el total (neto + IVA), lo que suma al saldo. null = sin IVA.
+   */
+  importeNeto          Float?
+  ivaPct               Float?
+  ivaMonto             Float?
   moneda               String         @default("ARS")
   fecha                DateTime
   fechaVencimiento     DateTime?

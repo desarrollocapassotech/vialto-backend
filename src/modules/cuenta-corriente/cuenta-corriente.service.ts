@@ -70,6 +70,20 @@ export class CuentaCorrienteService {
   }
 
   /**
+   * IVA de una venta/compra manual: el movimiento se registra por el total (neto + IVA)
+   * y se guarda el detalle para consulta. Cobros/pagos no llevan IVA. null = sin IVA.
+   */
+  private calcularIva(tipo: string, neto: number, ivaPct?: number | null) {
+    if (ivaPct == null || ivaPct <= 0) return null;
+    if (tipo !== 'cargo') {
+      throw new BadRequestException('Los cobros y pagos no llevan IVA');
+    }
+    const redondear = (n: number) => Math.round(n * 100) / 100;
+    const monto = redondear((neto * ivaPct) / 100);
+    return { pct: ivaPct, monto, total: redondear(neto + monto) };
+  }
+
+  /**
    * Texto por defecto cuando no se tipea un concepto — en lenguaje comercial
    * (venta/cobro del lado cliente, compra/pago del lado proveedor) en vez de la
    * jerga contable "cargo"/"cobranza" que no resultaba clara para el usuario.
@@ -258,7 +272,8 @@ export class CuentaCorrienteService {
       tenantId,
       dto,
     );
-    const importe = this.normalizeImporte(dto.importe);
+    const neto = this.normalizeImporte(dto.importe);
+    const iva = this.calcularIva(dto.tipo, neto, dto.ivaPct);
     const concepto = dto.concepto?.trim() || this.defaultConcepto(dto.tipo, !!dto.clienteId);
     const fecha = new Date(dto.fecha);
     return this.prisma.movimientoCuentaCorriente.create({
@@ -270,7 +285,10 @@ export class CuentaCorrienteService {
         tipo: dto.tipo,
         origen: 'manual',
         concepto,
-        importe,
+        importe: iva ? iva.total : neto,
+        importeNeto: iva ? neto : null,
+        ivaPct: iva ? iva.pct : null,
+        ivaMonto: iva ? iva.monto : null,
         moneda: dto.moneda?.trim() || 'ARS',
         fecha,
         fechaVencimiento:
@@ -326,6 +344,10 @@ export class CuentaCorrienteService {
         concepto: dto.concepto?.trim(),
         importe:
           dto.importe === undefined ? undefined : this.normalizeImporte(dto.importe),
+        // Si cambia el importe o el tipo, el detalle de IVA de la carga original ya no aplica.
+        ...(dto.importe !== undefined || tipo !== current.tipo
+          ? { importeNeto: null, ivaPct: null, ivaMonto: null }
+          : {}),
         moneda: dto.moneda?.trim() || undefined,
         fecha: dto.fecha === undefined ? undefined : fecha,
         fechaVencimiento:

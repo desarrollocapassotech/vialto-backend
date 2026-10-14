@@ -22,8 +22,6 @@ import {
   roundMoney2,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
-import { sincronizarCuentaCorrienteViajesPorIds } from "../viajes/viaje-cuenta-corriente";
-import { moverImputaciones } from "../../shared/cuenta-corriente/movimiento-cc.util";
 import {
   conceptoAnulacionFactura,
   conceptoCargoFactura,
@@ -31,6 +29,7 @@ import {
   importeCargoFactura,
 } from "./cargo-factura.util";
 import { anularCargoFacturaCc } from "./factura-cuenta-corriente";
+import { formatNumeroComprobante } from "../liquidaciones-arca/arca.util";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
 import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
 
@@ -771,17 +770,11 @@ export class FacturacionService {
   }
 
   /**
-   * Cuenta corriente (cuentas por cobrar) — VTO-430: al facturar, el movimiento que
-   * nació con el viaje se TRANSFORMA en el de la factura (concepto, comprobante, fecha
-   * de emisión e importe de la factura; la fecha original queda en `fechaOrigen`), en
-   * vez de sumarse otro. Con varios viajes queda una sola fila por factura: los
-   * movimientos de los otros viajes se unifican en ella (sus imputaciones pasan a esta
-   * fila y ellos quedan `anulado`). Si ningún viaje tiene movimiento (factura sin viajes
-   * o viajes anteriores a este circuito), se crea la fila de la factura como siempre.
-   * Las imputaciones que venían del viaje no tenían `Pago` en Facturación: se le crea
-   * el espejo, para que Facturas y Cuenta corriente sigan coincidiendo en lo cobrado.
-   * Solo facturas de cliente. Idempotente por `(tenantId, facturaId)`. Llamarla con los
-   * viajes ya vinculados a la factura.
+   * Cuenta corriente (cuentas por cobrar): la cuenta corriente depende solo de facturas
+   * y liquidaciones. El movimiento de la venta nace al crear la factura —también un
+   * borrador con ARCA— y se actualiza al editarla (importe, número, fechas). Una factura
+   * = una fila, por el mismo importe contra el que Facturas mide el cobro. Solo facturas
+   * de cliente. Idempotente por `(tenantId, facturaId)`.
    */
   private async upsertCargoFactura(
     tx: Prisma.TransactionClient,
@@ -813,69 +806,15 @@ export class FacturacionService {
       numeroComprobante: factura.numero,
     };
 
-    let cargo = await tx.movimientoCuentaCorriente.findFirst({
+    const cargo = await tx.movimientoCuentaCorriente.findFirst({
       where: { tenantId, facturaId: factura.id, tipo: "cargo" },
     });
-    // Ya compensado (factura anulada): queda como está, para auditoría.
+    // Ya compensado (factura anulada/eliminada): queda como está, para auditoría.
     if (cargo?.estadoDisponibilidad === "anulado") return;
-
-    const viajes = await tx.viaje.findMany({
-      where: { tenantId, facturaId: factura.id },
-      select: { id: true },
-    });
-    const deViajes = viajes.length
-      ? await tx.movimientoCuentaCorriente.findMany({
-          where: {
-            tenantId,
-            clienteId: factura.clienteId,
-            viajeId: { in: viajes.map((v) => v.id) },
-            tipo: "cargo",
-            origen: "viaje",
-            estadoDisponibilidad: { not: "anulado" },
-          },
-          orderBy: { createdAt: "asc" },
-        })
-      : [];
-
     if (cargo) {
-      cargo = await tx.movimientoCuentaCorriente.update({ where: { id: cargo.id }, data: datos });
-    } else if (deViajes.length > 0) {
-      const base = deViajes.shift()!;
-      cargo = await tx.movimientoCuentaCorriente.update({
-        where: { id: base.id },
-        data: { ...datos, fechaOrigen: base.fecha },
-      });
+      await tx.movimientoCuentaCorriente.update({ where: { id: cargo.id }, data: datos });
     } else {
-      cargo = await tx.movimientoCuentaCorriente.create({ data: { tenantId, ...datos } });
-    }
-
-    for (const m of deViajes) {
-      await moverImputaciones(tx, tenantId, m.id, cargo.id);
-      await tx.movimientoCuentaCorriente.update({
-        where: { id: m.id },
-        data: { estadoDisponibilidad: "anulado" },
-      });
-    }
-
-    const sinEspejo = await tx.imputacionCuentaCorriente.findMany({
-      where: { tenantId, cargoId: cargo.id, pagoFacturacionId: null },
-      include: { pago: { select: { fecha: true, referencia: true } } },
-    });
-    for (const imp of sinEspejo) {
-      const pagoFacturacion = await this.registrarPagoDesdeCuentaCorriente(
-        tenantId,
-        factura.id,
-        imp.importe,
-        imp.pago.fecha,
-        imp.pago.referencia,
-        tx,
-      );
-      if (pagoFacturacion) {
-        await tx.imputacionCuentaCorriente.update({
-          where: { id: imp.id },
-          data: { pagoFacturacionId: pagoFacturacion.id },
-        });
-      }
+      await tx.movimientoCuentaCorriente.create({ data: { tenantId, ...datos } });
     }
   }
 
@@ -1060,7 +999,6 @@ export class FacturacionService {
       });
 
       // Revinculación de viajes si se indica
-      let idsDesvinculados: string[] = [];
       if (dto.viajeIds !== undefined) {
         const newIds = dto.viajeIds;
 
@@ -1069,7 +1007,7 @@ export class FacturacionService {
           where: { facturaId: id, tenantId, id: { notIn: newIds } },
           select: { id: true },
         });
-        idsDesvinculados = desvinculados.map((v) => v.id);
+        const idsDesvinculados = desvinculados.map((v) => v.id);
 
         if (idsDesvinculados.length > 0) {
           await tx.viaje.updateMany({
@@ -1180,18 +1118,8 @@ export class FacturacionService {
         await this.actualizarEstadoCargoFactura(tx, tenantId, updated, cobrado);
       } else {
         // Sin cliente la factura deja de ser una venta: se compensa su movimiento.
-        await anularCargoFacturaCc(
-          tx,
-          tenantId,
-          id,
-          { concepto: conceptoAnulacionFactura(updated.numero) },
-          viajeIdsActuales,
-        );
-      }
-      // Viajes que salieron de la factura: vuelven a tener su propio movimiento de viaje.
-      if (idsDesvinculados.length > 0) {
-        await sincronizarCuentaCorrienteViajesPorIds(tx, tenantId, idsDesvinculados, {
-          lados: ["cliente"],
+        await anularCargoFacturaCc(tx, tenantId, id, {
+          concepto: conceptoAnulacionFactura(updated.numero),
         });
       }
       return this.toShape(updated, tieneArca);
@@ -1228,16 +1156,12 @@ export class FacturacionService {
         data: { facturaId: null },
       });
       await syncFacturacionEstadoViajes(tx, tenantId, viajeIds);
-      // VTO-431, anulación interna (sin ARCA): el movimiento de la factura se compensa con
-      // un crédito en el Haber (sobrevive al borrado: `facturaId` pasa a null) y los viajes vuelven a
-      // tener su movimiento de viaje.
-      await anularCargoFacturaCc(
-        tx,
-        tenantId,
-        id,
-        { concepto: conceptoAnulacionFactura(factura?.numero) },
-        viajeIds,
-      );
+      // VTO-431: eliminar la factura (borrador con ARCA, o anulación interna sin ARCA)
+      // compensa su movimiento con un crédito en el Haber, que sobrevive al borrado
+      // (`facturaId` pasa a null).
+      await anularCargoFacturaCc(tx, tenantId, id, {
+        concepto: conceptoAnulacionFactura(factura?.numero),
+      });
       return tx.factura.delete({ where: { id } });
     }, FACTURA_INTERACTIVE_TX);
   }
@@ -1398,13 +1322,27 @@ export class FacturacionService {
           where: { tenantId: factura.tenantId, facturaId: factura.id },
         });
         const totalPagado = factura.pagos.reduce((s, p) => s + p.importe, 0);
+        const anulada = factura.arcaEstado === "anulado";
         resultados.push(
           `[factura] ${factura.tenantId} ${factura.numero ?? factura.id} → ${existe ? "update" : "CREATE"} ` +
-            `$${factura.importe} (pagado: $${totalPagado})`,
+            `$${factura.importe} (pagado: $${totalPagado})${anulada ? " + crédito por anulación" : ""}`,
         );
         if (!opts.dryRun) {
-          await this.prisma.$transaction((tx) => this.upsertCargoFactura(tx, factura));
-          await this.syncViajesEstadoTrasPago(factura.id, factura.tenantId);
+          await this.prisma.$transaction(async (tx) => {
+            await this.upsertCargoFactura(tx, factura);
+            // Anulada con ARCA antes de este circuito: el par completo, la venta y su
+            // crédito con el número de la nota de crédito (idempotente).
+            if (anulada) {
+              await anularCargoFacturaCc(tx, factura.tenantId, factura.id, {
+                concepto: conceptoAnulacionFactura(factura.numero),
+                numeroComprobante:
+                  factura.anulacionCbteNro != null
+                    ? formatNumeroComprobante(factura.anulacionPtoVenta ?? 0, factura.anulacionCbteNro)
+                    : null,
+              });
+            }
+          });
+          if (!anulada) await this.syncViajesEstadoTrasPago(factura.id, factura.tenantId);
         }
       } catch (e) {
         resultados.push(

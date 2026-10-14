@@ -64,12 +64,10 @@ import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.servic
 import { AnularFacturaDto } from './dto/anular-factura.dto';
 import { conceptoAnulacionFactura, conceptoCargoFactura } from '../facturacion/cargo-factura.util';
 import { anularCargoFacturaCc } from '../facturacion/factura-cuenta-corriente';
-import { sincronizarCuentaCorrienteViajesPorIds } from '../viajes/viaje-cuenta-corriente';
 import {
   anularCargoLiquidacionAntesDeEliminar,
   sincronizarCargoLiquidacionCc,
 } from './liquidacion-cuenta-corriente';
-import { TenantFieldConfigService } from '../../core/tenant-field-config/tenant-field-config.service';
 import { ReceptorPadronService } from './receptor-padron.service';
 
 // DocTipo AFIP: 80=CUIT, 99=Consumidor Final
@@ -94,7 +92,6 @@ export class LiquidacionesService {
     private readonly facturaPdf: FacturaPdfService,
     private readonly clerkUsers: ClerkVialtoRoleService,
     private readonly receptorPadron: ReceptorPadronService,
-    private readonly tenantFieldConfig: TenantFieldConfigService,
   ) {}
 
   /** Acceso a nuevos modelos Prisma pendientes de regenerar el cliente. */
@@ -102,40 +99,15 @@ export class LiquidacionesService {
     return this.prisma as PrismaAny;
   }
 
-  /** Mismo flag que `ViajesService.ivaTransportistaHabilitado` (acordado del movimiento de viaje). */
-  private ivaTransportistaHabilitado(tenantId: string): Promise<boolean> {
-    return this.tenantFieldConfig.isCampoVisible(
-      tenantId,
-      'viajes',
-      'edicion_viaje',
-      'precioTransportistaIvaIncluidoPct',
-    );
-  }
-
   /**
-   * Cuenta corriente (lado proveedor) tras cualquier cambio de la liquidación: transforma
-   * los movimientos de sus viajes en el de la liquidación, o lo compensa si se anuló
-   * (`liquidacion-cuenta-corriente.ts`). `viajeIdsRegenerar`: viajes que pudieron salir
-   * de la liquidación y vuelven a necesitar su movimiento de viaje.
+   * Cuenta corriente (lado proveedor) tras cualquier cambio de la liquidación: crea o
+   * actualiza su movimiento, o lo compensa si se anuló (`liquidacion-cuenta-corriente.ts`).
    * Best-effort: la operación principal (ej. el CAE de ARCA) ya ocurrió, así que un error
    * acá se loguea en vez de cortar la respuesta.
    */
-  private async sincronizarCuentaCorrienteLiquidacion(
-    tenantId: string,
-    liquidacionId: string,
-    viajeIdsRegenerar: string[] = [],
-  ) {
+  private async sincronizarCuentaCorrienteLiquidacion(tenantId: string, liquidacionId: string) {
     try {
-      const ivaTransportistaHabilitado = await this.ivaTransportistaHabilitado(tenantId);
-      await sincronizarCargoLiquidacionCc(this.prisma, tenantId, liquidacionId, {
-        ivaTransportistaHabilitado,
-      });
-      if (viajeIdsRegenerar.length > 0) {
-        await sincronizarCuentaCorrienteViajesPorIds(this.prisma, tenantId, viajeIdsRegenerar, {
-          lados: ['proveedor'],
-          ivaTransportistaHabilitado,
-        });
-      }
+      await sincronizarCargoLiquidacionCc(this.prisma, tenantId, liquidacionId);
     } catch (e) {
       this.logger.error(
         `[cuenta-corriente] No se pudo sincronizar la liquidación ${liquidacionId}: ${
@@ -745,12 +717,8 @@ export class LiquidacionesService {
     if (dto.viajeIds !== undefined) {
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsParaSync);
     }
-    // Montos o viajes pudieron cambiar; los viajes que salieron recuperan su movimiento.
-    await this.sincronizarCuentaCorrienteLiquidacion(
-      tenantId,
-      id,
-      dto.viajeIds !== undefined ? viajeIdsParaSync : [],
-    );
+    // Montos o viajes pudieron cambiar: el movimiento de la liquidación se actualiza.
+    await this.sincronizarCuentaCorrienteLiquidacion(tenantId, id);
 
     return this.findById(tenantId, id);
   }
@@ -1289,8 +1257,7 @@ export class LiquidacionesService {
       // Los vínculos LiquidacionViaje se conservan (auditoría); al estar anulada,
       // el sync recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
-      // VTO-431: crédito (Haber) que compensa la liquidación (comprobante: la NC/ND) y los
-      // viajes vuelven a tener su movimiento de viaje.
+      // VTO-431: crédito (Haber) que compensa la liquidación (comprobante: la NC/ND).
       await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
       const updated = await this.findById(tenantId, liquidacionId);
@@ -1418,7 +1385,7 @@ export class LiquidacionesService {
     // recalcula liquidacionEstado = 'anulado' y libera el viaje para re-liquidar.
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
-    // VTO-431: crédito (Haber) que compensa la liquidación y los viajes recuperan su movimiento.
+    // VTO-431: crédito (Haber) que compensa la liquidación.
     await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
     const updated = await this.findById(tenantId, liquidacionId);
@@ -1688,19 +1655,12 @@ export class LiquidacionesService {
       );
 
       // VTO-431: crédito (Haber) que compensa la factura, con el número de la nota de crédito;
-      // los cobros imputados quedan a cuenta y los viajes recuperan su movimiento de viaje.
-      // Best-effort: la NC ya se emitió en AFIP.
+      // los cobros imputados quedan a cuenta. Best-effort: la NC ya se emitió en AFIP.
       try {
-        await anularCargoFacturaCc(
-          this.prisma,
-          tenantId,
-          facturaId,
-          {
-            concepto: conceptoAnulacionFactura(facturaRaw.numero),
-            numeroComprobante: formatNumeroComprobante(ptoVentaNc, cbteNro),
-          },
-          viajeIdsToSync,
-        );
+        await anularCargoFacturaCc(this.prisma, tenantId, facturaId, {
+          concepto: conceptoAnulacionFactura(facturaRaw.numero),
+          numeroComprobante: formatNumeroComprobante(ptoVentaNc, cbteNro),
+        });
       } catch (ccErr) {
         this.logger.error(
           `[anularFacturaArca] No se pudo registrar la anulación en cuenta corriente para ${facturaId}: ${
@@ -1994,16 +1954,12 @@ export class LiquidacionesService {
       );
     }
     const viajeIds = liq.viajes.map((v) => v.viajeId);
-    // VTO-431: el movimiento de la liquidación se compensa antes de borrarla (sobrevive
-    // con `liquidacionId` en null) y, ya borrada, los viajes recuperan su movimiento.
+    // VTO-431: el movimiento de la liquidación se compensa con un crédito antes de
+    // borrarla (sobrevive con `liquidacionId` en null).
     await anularCargoLiquidacionAntesDeEliminar(this.prisma, tenantId, id);
     await this.prisma.liquidacionViaje.deleteMany({ where: { liquidacionId: id } });
     await this.prisma.liquidacion.delete({ where: { id } });
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
-    await sincronizarCuentaCorrienteViajesPorIds(this.prisma, tenantId, viajeIds, {
-      lados: ['proveedor'],
-      ivaTransportistaHabilitado: await this.ivaTransportistaHabilitado(tenantId),
-    });
   }
 
   async findAll(tenantId: string, estado?: string) {

@@ -796,9 +796,9 @@ model MovimientoCuentaCorriente {
   liquidacionId        String?
   liquidacion          Liquidacion?               @relation(fields: [liquidacionId], references: [id], onDelete: SetNull)
   tipo                 String // cargo (Debe) | pago (Haber) | credito (Haber: anulación/nota de crédito aplicada a `anulaMovimientoId`; no es cobranza)
-  origen               String                     @default("manual") // manual | viaje | factura | liquidacion | anulacion
+  origen               String                     @default("manual") // manual | factura | liquidacion | anulacion (`viaje`: solo datos viejos, los viajes ya no generan movimientos)
   /**
-   * Fecha original del movimiento de viaje antes de transformarse en el de la factura/liquidación (dato de referencia; orden y vencimientos usan `fecha`).
+   * Sin uso: era la fecha del movimiento de viaje transformado en el de la factura/liquidación (circuito descartado en oct 2026, la cuenta corriente depende solo de facturas y liquidaciones). Se deja la columna para no migrar.
    */
   fechaOrigen          DateTime?
   /**

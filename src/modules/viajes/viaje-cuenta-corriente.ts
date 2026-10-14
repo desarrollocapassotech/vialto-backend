@@ -17,7 +17,8 @@ import { numeroVisibleViaje } from "./viaje-numero-visible.util";
  * - El movimiento nace al CREAR el viaje, en todas las empresas (con o sin Facturación).
  *   Cliente: venta por `monto` + otros gastos en la misma moneda. Proveedor: compra por
  *   el acordado con el transportista (`calcularAcordadoTransportista`). Solo si es > 0.
- * - Fecha = día de creación del viaje; concepto "... por creación del viaje X". Si el
+ * - Fecha = día de creación del viaje; concepto "NUEVO VIAJE X" (en pantalla, estado
+ *   "Sin facturar" / "Sin liquidar" mientras siga siendo movimiento de viaje). Si el
  *   viaje ya tuvo movimientos (ej. se anuló su factura y vuelve a estar sin facturar),
  *   el nuevo lleva fecha de hoy. Fecha y concepto no se reescriben después.
  * - Mientras no tenga imputaciones, sigue al viaje (importe/moneda/estado).
@@ -226,6 +227,25 @@ function fechaCreacionViaje(createdAt: Date): Date {
   return new Date(`${ymdAr(createdAt)}T00:00:00.000Z`);
 }
 
+/**
+ * "NUEVO VIAJE 2026-000012", o con ID propio, con la etiqueta que le da la empresa:
+ * "NUEVO VIAJE CTG: 10128901406" (`Tenant.labelIdentificacionPersonalizadaViajes`,
+ * "ID propio" si no tiene; mismo fallback que los PDFs).
+ */
+export async function conceptoNuevoViaje(
+  tx: Pick<Prisma.TransactionClient, "tenant">,
+  viaje: Pick<ViajeParaCuentaCorriente, "tenantId" | "numero" | "numeroIdentificacionPersonalizado">,
+): Promise<string> {
+  const idPropio = viaje.numeroIdentificacionPersonalizado?.trim();
+  if (!idPropio) return `NUEVO VIAJE ${viaje.numero}`;
+  const tenant = await tx.tenant.findUnique({
+    where: { clerkOrgId: viaje.tenantId },
+    select: { labelIdentificacionPersonalizadaViajes: true },
+  });
+  const label = tenant?.labelIdentificacionPersonalizadaViajes?.trim() || "ID propio";
+  return `NUEVO VIAJE ${label}: ${idPropio}`;
+}
+
 export type LadoCc = "cliente" | "proveedor";
 
 export type OpcionesCcViaje = {
@@ -303,6 +323,7 @@ async function sincronizarLado(
   // tuvo otros (anulados, o transformados en una factura/liquidación después anulada),
   // el nuevo es de hoy.
   const contraparteId = objetivo.contraparteId!;
+  const concepto = await conceptoNuevoViaje(tx, viaje);
   const yaTuvo = await tx.movimientoCuentaCorriente.findFirst({
     where: { tenantId: viaje.tenantId, viajeId: viaje.id, contraparteId, tipo: "cargo" },
     select: { id: true },
@@ -315,7 +336,7 @@ async function sincronizarLado(
       viajeId: viaje.id,
       tipo: "cargo",
       origen: "viaje",
-      concepto: `${lado === "cliente" ? "Venta" : "Compra"} automática por creación del viaje ${numeroVisible}`,
+      concepto,
       importe: objetivo.importe,
       moneda: objetivo.moneda,
       fecha: yaTuvo ? new Date(`${ymdAr()}T00:00:00.000Z`) : fechaCreacionViaje(viaje.createdAt),

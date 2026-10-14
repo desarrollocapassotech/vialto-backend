@@ -69,6 +69,7 @@ function fakeTx() {
     imputacionCuentaCorriente: tabla(imps, 'imp', { pagoFacturacionId: null }),
     pago: tabla([], 'pf'),
     viaje: { findFirst: async () => null, update: async () => null },
+    tenant: { findUnique: async () => ({ labelIdentificacionPersonalizadaViajes: 'CTG' }) },
   };
   return { tx: tx as unknown as Prisma.TransactionClient, movs, imps };
 }
@@ -116,14 +117,14 @@ test('al crear con cliente e importe: venta con fecha y concepto de creación', 
   const m = movs[0];
   assert.equal(m.clienteId, 'c1');
   assert.equal(m.importe, 1000);
-  assert.equal(m.concepto, 'Venta automática por creación del viaje V-0001');
+  assert.equal(m.concepto, 'NUEVO VIAJE V-0001');
   assert.equal((m.fecha as Date).toISOString(), '2026-10-14T00:00:00.000Z');
 });
 
 test('ID personalizado: el concepto usa el número visible', async () => {
   const { tx, movs } = fakeTx();
   await sincronizarCuentaCorrienteViaje(tx, viajeBase({ numeroIdentificacionPersonalizado: 'CTG-77' }), OPTS);
-  assert.equal(movs[0].concepto, 'Venta automática por creación del viaje CTG-77');
+  assert.equal(movs[0].concepto, 'NUEVO VIAJE CTG: CTG-77');
 });
 
 test('transportista con precio: compra en la cuenta del proveedor (con IVA a sumar)', async () => {
@@ -135,7 +136,7 @@ test('transportista con precio: compra en la cuenta del proveedor (con IVA a sum
   );
   const compra = movs.find((m) => m.proveedorId === 'p1')!;
   assert.equal(compra.importe, 1210);
-  assert.equal(compra.concepto, 'Compra automática por creación del viaje V-0001');
+  assert.equal(compra.concepto, 'NUEVO VIAJE V-0001');
 });
 
 test('sin importe no genera; al cargarlo después sí', async () => {
@@ -173,7 +174,7 @@ test('finalizar no duplica ni cambia fecha o concepto', async () => {
   await sincronizarCuentaCorrienteViaje(tx, viajeBase(), OPTS);
   await sincronizarCuentaCorrienteViaje(tx, viajeBase({ etapa: 'finalizado' }), OPTS);
   assert.equal(movs.length, 1);
-  assert.equal(movs[0].concepto, 'Venta automática por creación del viaje V-0001');
+  assert.equal(movs[0].concepto, 'NUEVO VIAJE V-0001');
 });
 
 test('también en empresas con Facturación el viaje genera la venta (VTO-430)', async () => {

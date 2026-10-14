@@ -3,6 +3,11 @@ import { Prisma } from "@prisma/client"; // Importante: necesario para capturar 
 import { PrismaService } from "../../../shared/prisma/prisma.service";
 import { generateNumeroViaje } from "../../viajes/generate-viaje-numero";
 import { syncLiquidacionEstadoViaje } from "../../viajes/viaje-estado-financiero";
+import {
+  sincronizarCuentaCorrienteViajePorId,
+  tenantTieneFacturacion,
+} from "../../viajes/viaje-cuenta-corriente";
+import { TenantFieldConfigService } from "../../../core/tenant-field-config/tenant-field-config.service";
 import { assertFechaDescargaValida } from "../../viajes/viajes.service";
 import { assertTransportistaEfectivoSubcontratacion } from "../../viajes/viaje-operacion-exclusiva";
 import {
@@ -37,7 +42,28 @@ export function motivoBloqueoReimportViaje(
 
 @Injectable()
 export class ViajesProcessor implements IImportProcessor {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantFieldConfig: TenantFieldConfigService,
+  ) {}
+
+  /**
+   * Mismos flags que `ViajesService` usa para la cuenta corriente del viaje: si el
+   * lado cliente nace de la factura (tenant con Facturación) y si el % de IVA del
+   * transportista entra en el acordado.
+   */
+  private async opcionesCuentaCorriente(tenantId: string) {
+    const [ivaTransportistaHabilitado, conFacturacion] = await Promise.all([
+      this.tenantFieldConfig.isCampoVisible(
+        tenantId,
+        "viajes",
+        "edicion_viaje",
+        "precioTransportistaIvaIncluidoPct",
+      ),
+      tenantTieneFacturacion(this.prisma, tenantId),
+    ]);
+    return { ivaTransportistaHabilitado, conFacturacion };
+  }
 
   /**
    * `ValidatedRow` declara `fechaCarga`/`fechaDescarga` como `Date`, pero en
@@ -350,6 +376,7 @@ export class ViajesProcessor implements IImportProcessor {
     const extras = scalarDataFromRow(row, "Viaje", {
       skip: Object.keys(especiales),
     });
+    const opcionesCc = await this.opcionesCuentaCorriente(tenantId);
     await this.prisma.$transaction(async (tx) => {
       await tx.viaje.update({
         where: { id: viajeId },
@@ -357,6 +384,8 @@ export class ViajesProcessor implements IImportProcessor {
       });
       // El transportista puede haber cambiado — resincronizar.
       await syncLiquidacionEstadoViaje(tx, tenantId, viajeId);
+      // Importe, cliente o transportista pueden haber cambiado: la cuenta corriente sigue al viaje.
+      await sincronizarCuentaCorrienteViajePorId(tx, tenantId, viajeId, opcionesCc);
       await this.upsertProductoViaje(tx, tenantId, viajeId, row);
     });
 
@@ -376,6 +405,7 @@ export class ViajesProcessor implements IImportProcessor {
     tenantId: string,
     createdBy: string,
   ): Promise<{ id: string; facturado: boolean }> {
+    const opcionesCc = await this.opcionesCuentaCorriente(tenantId);
     return await this.prisma.$transaction(async (tx) => {
       // generateNumeroViaje espera PrismaService pero es compatible con TransactionClient — el cast es seguro.
       const numero = await generateNumeroViaje(tx as any, tenantId);
@@ -530,6 +560,8 @@ export class ViajesProcessor implements IImportProcessor {
       // Igual que en la creación manual: sin esto, un viaje con transportista en un
       // tenant con ARCA queda en liquidacionEstado null en vez de "sin_liquidar".
       await syncLiquidacionEstadoViaje(tx, tenantId, viaje.id);
+      // Igual que el alta manual: el movimiento de cuenta corriente nace con el viaje.
+      await sincronizarCuentaCorrienteViajePorId(tx, tenantId, viaje.id, opcionesCc);
 
       // `vehiculoId` puede ser un solo id o, con columnas "multiple" (ej.
       // patente de tractor + semirremolque separadas por "/"), un array —

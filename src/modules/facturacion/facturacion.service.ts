@@ -824,7 +824,7 @@ export class FacturacionService {
   }
 
   /**
-   * Reversión análoga a `revertirCargoFinalizacionSiCorresponde` (viajes): al anular o
+   * Reversión análoga a la del cargo de viaje cancelado (`viaje-cuenta-corriente.ts`): al anular o
    * eliminar una factura, el cargo que había generado se marca `anulado` en vez de
    * borrarse, salvo que ya tenga imputaciones (pagos aplicados) — ese caso requiere
    * intervención manual, no se toca solo.

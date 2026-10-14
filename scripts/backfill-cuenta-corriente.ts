@@ -1,6 +1,6 @@
 /**
  * Backfill histórico de Cuenta Corriente: genera/actualiza los cargos de
- * `MovimientoCuentaCorriente` para viajes finalizados y facturas de cliente que ya
+ * `MovimientoCuentaCorriente` para viajes no cancelados y facturas de cliente que ya
  * existían ANTES de que esta integración se implementara. Sin esto, un tenant que
  * prenda el módulo `cuenta-corriente` solo vería actividad nueva a partir de ese
  * momento — el historial previo nunca disparó los hooks de
@@ -15,8 +15,8 @@
  * que diverja de la lógica real. Usa un módulo standalone mínimo (no el `AppModule`
  * completo) para no levantar de paso cron jobs ni el envío de notificaciones.
  *
- * Idempotente: reutiliza los mismos `upsert` que ya corren en producción para
- * actividad nueva (`ViajesService.upsertCargoFinalizacion/upsertCargoTransportista`,
+ * Idempotente: reutiliza la misma lógica que ya corre en producción para actividad
+ * nueva (`sincronizarCuentaCorrienteViaje` de `viajes/viaje-cuenta-corriente.ts`,
  * `FacturacionService.upsertCargoFactura`) — correr de nuevo no duplica nada.
  *
  * Uso:

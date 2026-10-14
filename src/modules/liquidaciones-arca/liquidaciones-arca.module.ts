@@ -8,9 +8,11 @@ import { LiquidacionPdfService } from './liquidacion-pdf.service';
 import { LiquidacionContratoPdfService } from './liquidacion-contrato-pdf.service';
 import { FacturaPdfService } from './factura-pdf.service';
 import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
+import { PadronModule } from '../../core/padron/padron.module';
+import { ReceptorPadronService } from './receptor-padron.service';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, PadronModule],
   controllers: [LiquidacionesController, LiquidacionesPlatformController],
   providers: [
     ArcaClientService,
@@ -20,6 +22,7 @@ import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
     LiquidacionContratoPdfService,
     FacturaPdfService,
     ConceptosLiquidacionService,
+    ReceptorPadronService,
   ],
   exports: [
     ArcaConfigService,

@@ -14,7 +14,14 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Tope diario de consultas reales a ARCA por tenant (los hits de caché no cuentan). */
 const MAX_CONSULTAS_DIARIAS_POR_TENANT = 100;
 
-const toArray = <T>(v: T | T[] | null | undefined): T[] =>
+/**
+ * Observaciones de `errorConstancia` que significan que el CUIT no puede operar. Caso real
+ * (oct 2026): "La CUIT ... fue limitada en los términos de la RG AFIP 3832/16 ... Incluido en
+ * Base Contribuyentes NO Confiable" + "La CUIT fue cancelada ...".
+ */
+const OBSERVACION_BLOQUEANTE = /limitad|cancelad|ap[oó]crif|no confiable/i;
+
+const toArray =<T>(v: T | T[] | null | undefined): T[] =>
   v == null ? [] : Array.isArray(v) ? v : [v];
 
 const ENTIDADES_HTML: Record<string, string> = {
@@ -54,11 +61,23 @@ function normalizePem(pem: string): string {
 @Injectable()
 export class PadronService {
   private readonly logger = new Logger(PadronService.name);
-  private readonly cache = new Map<string, { data: PadronConsulta; expiresAt: number }>();
+  private readonly cache = new Map<
+    string,
+    { data: PadronConsulta; fetchedAt: number; expiresAt: number }
+  >();
   private readonly consultasPorTenant = new Map<string, { dia: string; cantidad: number }>();
   private afip: Afip | null = null;
 
-  async consultar(cuitRaw: string, rateKey: string): Promise<PadronConsulta> {
+  /**
+   * `maxAgeMs`: antigüedad máxima aceptada de la caché para esta llamada (por defecto, la
+   * caché de 7 días). La emisión ARCA pide una más corta: un CUIT puede pasar a apócrifo
+   * en cualquier momento.
+   */
+  async consultar(
+    cuitRaw: string,
+    rateKey: string,
+    opts: { maxAgeMs?: number } = {},
+  ): Promise<PadronConsulta> {
     const cuit = normalizarCuit(cuitRaw);
     if (cuit.length !== 11) {
       throw new BadRequestException('El CUIT/CUIL debe tener 11 dígitos.');
@@ -68,7 +87,14 @@ export class PadronService {
     }
 
     const cached = this.cache.get(cuit);
-    if (cached && cached.expiresAt > Date.now()) return cached.data;
+    const ahora = Date.now();
+    if (
+      cached &&
+      cached.expiresAt > ahora &&
+      (opts.maxAgeMs == null || ahora - cached.fetchedAt <= opts.maxAgeMs)
+    ) {
+      return cached.data;
+    }
 
     this.registrarConsulta(rateKey);
 
@@ -86,7 +112,8 @@ export class PadronService {
     }
 
     const data = this.mapPersona(cuit, persona);
-    this.cache.set(cuit, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+    const fetchedAt = Date.now();
+    this.cache.set(cuit, { data, fetchedAt, expiresAt: fetchedAt + CACHE_TTL_MS });
     return data;
   }
 
@@ -146,11 +173,16 @@ export class PadronService {
     });
 
     if (!dg) {
-      // ARCA no emite la constancia (requerimientos pendientes, etc.) pero el CUIT existe.
+      // ARCA no emite la constancia pero el CUIT existe. Puede ser algo menor (requerimientos
+      // pendientes) o un bloqueo: CUIT limitada/cancelada por la RG 3832 (base de
+      // contribuyentes no confiables / apócrifos). Para ARCA ese receptor no puede recibir
+      // comprobantes ("CUIT receptora inactiva por apócrifa"), así que cuenta como inactivo.
       const nombre = [errorConstancia?.apellido, errorConstancia?.nombre].filter(Boolean).join(' ');
       return {
         cuit,
-        estado: 'con_observaciones',
+        estado: observaciones.some((o) => OBSERVACION_BLOQUEANTE.test(o))
+          ? 'inactivo'
+          : 'con_observaciones',
         nombre: decodificarEntidades(nombre) || null,
         domicilio: null,
         condicionIva: null,

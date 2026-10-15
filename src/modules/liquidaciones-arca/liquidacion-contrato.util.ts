@@ -28,7 +28,16 @@ export type LiquidacionContratoGrupo = {
   viajes: LiquidacionContratoViajeInput[];
   toneladas: number;
   subtotal: number;
-  adelanto: number;
+  adelanto?: number;
+};
+
+export type LiquidacionContratoConceptoLinea = {
+  nombreSnapshot: string;
+  signo: string;
+  monto: number;
+  cantidad?: number;
+  montoUnitario?: number | null;
+  modoAplicacion?: string;
 };
 
 export type LiquidacionContratoConcepto = {
@@ -41,14 +50,16 @@ export type LiquidacionContratoTotales = {
   grupos: LiquidacionContratoGrupo[];
   mismoPrecio: boolean;
   toneladas: number;
+  bruto: number;
   subtotal: number;
   comision: number;
   comisionPct: number;
   conceptos: LiquidacionContratoConcepto[];
+  conceptosLineas: LiquidacionContratoConceptoLinea[];
   netoGravado: number;
   ivaPct: number;
   iva: number;
-  adelanto: number;
+  adelanto?: number;
   totalFlete: number;
   totalAPagar: number;
   moneda: string;
@@ -173,7 +184,7 @@ export function adelantoDesdePagos(pagos: unknown, moneda: string): number {
 
 export function buildLiquidacionContratoTotales(args: {
   viajes: LiquidacionContratoViajeInput[];
-  ivaPct: number;
+  ivaPct?: number;
   comision?: number | null;
   comisionPct?: number | null;
   conceptosLineas?: Array<{
@@ -184,11 +195,32 @@ export function buildLiquidacionContratoTotales(args: {
     ivaPct?: number | null;
     cantidad?: number | null;
     montoUnitario?: number | null;
+    modoAplicacion?: string | null;
   }> | null;
   ivaPersistido?: number | null;
   liquidoPersistido?: number | null;
+  moneda?: string | null;
+  liq?: {
+    bruto?: number | null;
+    comision?: number | null;
+    comisionPct?: number | null;
+    ivaPct?: number | null;
+    gastosAdminIva?: number | null;
+    liquido?: number | null;
+    moneda?: string | null;
+    cantViajes?: number | null;
+    conceptosLineas?: Array<{
+      nombreSnapshot?: string | null;
+      nombre?: string | null;
+      signo?: string | null;
+      monto?: number | null;
+      ivaPct?: number | null;
+      cantidad?: number | null;
+      montoUnitario?: number | null;
+      modoAplicacion?: string | null;
+    }> | null;
+  } | null;
 }): LiquidacionContratoTotales {
-  const ivaPct = Number.isFinite(args.ivaPct) ? args.ivaPct : 0;
   const map = new Map<string, LiquidacionContratoGrupo>();
   for (const v of args.viajes) {
     const key = precioKey(v.precioPorTn);
@@ -210,31 +242,45 @@ export function buildLiquidacionContratoTotales(args: {
     if (b.precioPorTn == null) return -1;
     return a.precioPorTn - b.precioPorTn;
   });
-  const subtotal = round2(grupos.reduce((s, g) => s + g.subtotal, 0));
-  const adelanto = round2(grupos.reduce((s, g) => s + g.adelanto, 0));
+
   const toneladas = round2(grupos.reduce((s, g) => s + g.toneladas, 0));
+  const adelanto = round2(grupos.reduce((s, g) => s + (g.adelanto ?? 0), 0));
+  const subtotalViajes = round2(grupos.reduce((s, g) => s + g.subtotal, 0));
+
+  const cantViajes = args.liq?.cantViajes ?? args.viajes.length;
+  const rawBruto = args.liq?.bruto != null ? round2(args.liq.bruto) : subtotalViajes;
+  const rawComision = args.liq?.comision !== undefined ? args.liq.comision : args.comision;
+  const rawComisionPct = args.liq?.comisionPct !== undefined ? args.liq.comisionPct : args.comisionPct;
+  const rawConceptosLineas = args.liq?.conceptosLineas ?? args.conceptosLineas;
+  const rawIvaPct = args.liq?.ivaPct !== undefined ? args.liq.ivaPct : args.ivaPct;
+  const ivaPersistido = args.liq?.gastosAdminIva !== undefined ? args.liq.gastosAdminIva : args.ivaPersistido;
+  const liquidoPersistido = args.liq?.liquido !== undefined ? args.liq.liquido : args.liquidoPersistido;
 
   const comisionPct =
-    typeof args.comisionPct === 'number' && Number.isFinite(args.comisionPct) && args.comisionPct > 0
-      ? round2(args.comisionPct)
+    typeof rawComisionPct === 'number' && Number.isFinite(rawComisionPct) && rawComisionPct > 0
+      ? round2(rawComisionPct)
       : 0;
 
   let comision = 0;
-  if (typeof args.comision === 'number' && Number.isFinite(args.comision) && args.comision > 0) {
-    comision = round2(args.comision);
+  if (typeof rawComision === 'number' && Number.isFinite(rawComision) && rawComision > 0) {
+    comision = round2(rawComision);
   } else if (comisionPct > 0) {
-    comision = round2((subtotal * comisionPct) / 100);
+    comision = round2((rawBruto * comisionPct) / 100);
   }
 
   const conceptos: LiquidacionContratoConcepto[] = [];
+  const conceptosLineasMapped: LiquidacionContratoConceptoLinea[] = [];
   let conceptosNetoSum = 0;
-  for (const l of args.conceptosLineas ?? []) {
-    const monto = Math.abs(Number(l?.monto) || 0);
-    if (!monto) continue;
+  for (const l of rawConceptosLineas ?? []) {
+    const montoUnit = Math.abs(Number(l?.monto) || 0);
+    if (!montoUnit) continue;
     const nombre = l.nombreSnapshot?.trim() || l.nombre?.trim() || 'Concepto';
     const signo = String(l.signo || '').toLowerCase() === 'favor' ? 'favor' : 'contra';
     const linePct = l.ivaPct != null && Number.isFinite(Number(l.ivaPct)) ? Number(l.ivaPct) : null;
-    const cantidad = Number(l.cantidad) || 1;
+    const esTodos = l.modoAplicacion === 'TODOS_LOS_VIAJES';
+    const cantidad = esTodos ? Math.max(cantViajes, 1) : Number(l.cantidad) || 1;
+    const montoTotal = esTodos ? round2(montoUnit * cantidad) : montoUnit;
+
     const detalle = [
       cantidad !== 1 && l.montoUnitario != null
         ? `${cantidad.toLocaleString('es-AR')} × ${l.montoUnitario}`
@@ -242,35 +288,52 @@ export function buildLiquidacionContratoTotales(args: {
       linePct != null ? `IVA ${linePct}%` : null,
     ].filter(Boolean);
     const label = `${nombre}${detalle.length ? ` (${detalle.join(', ')})` : ''}`;
-    conceptos.push({ label, monto, signo });
-    conceptosNetoSum = round2(conceptosNetoSum + (signo === 'favor' ? monto : -monto));
+
+    conceptos.push({ label, monto: montoTotal, signo });
+    conceptosLineasMapped.push({
+      nombreSnapshot: nombre,
+      signo,
+      monto: montoTotal,
+      cantidad,
+      montoUnitario: l.montoUnitario,
+      modoAplicacion: l.modoAplicacion ?? undefined,
+    });
+    conceptosNetoSum = round2(conceptosNetoSum + (signo === 'favor' ? montoTotal : -montoTotal));
   }
 
+  const subtotal = rawBruto;
   const netoGravado = round2(subtotal - comision + conceptosNetoSum);
 
+  const ivaPct = Number.isFinite(rawIvaPct) ? Number(rawIvaPct) : 0;
   const iva =
-    typeof args.ivaPersistido === 'number' && Number.isFinite(args.ivaPersistido)
-      ? round2(args.ivaPersistido)
+    typeof ivaPersistido === 'number' && Number.isFinite(ivaPersistido)
+      ? round2(ivaPersistido)
       : ivaPct > 0
         ? round2((netoGravado * ivaPct) / 100)
         : 0;
 
   const totalAPagar =
-    typeof args.liquidoPersistido === 'number' && Number.isFinite(args.liquidoPersistido)
-      ? round2(args.liquidoPersistido - adelanto)
+    typeof liquidoPersistido === 'number' && Number.isFinite(liquidoPersistido)
+      ? round2(liquidoPersistido - adelanto)
       : round2(netoGravado + iva - adelanto);
 
-  const totalFlete = round2(subtotal + (ivaPct > 0 ? round2((subtotal * ivaPct) / 100) : 0) - adelanto);
-  const moneda = args.viajes[0]?.moneda ?? 'ARS';
+  const totalFlete =
+    typeof liquidoPersistido === 'number' && Number.isFinite(liquidoPersistido)
+      ? round2(liquidoPersistido)
+      : round2(subtotal + (ivaPct > 0 ? round2((subtotal * ivaPct) / 100) : 0) - adelanto);
+
+  const moneda = args.liq?.moneda || args.moneda || args.viajes[0]?.moneda || 'ARS';
 
   return {
     grupos,
-    mismoPrecio: grupos.length <= 1,
+    mismoPrecio: grupos.length === 1,
     toneladas,
+    bruto: rawBruto,
     subtotal,
     comision,
     comisionPct,
     conceptos,
+    conceptosLineas: conceptosLineasMapped,
     netoGravado,
     ivaPct,
     iva,
@@ -278,6 +341,6 @@ export function buildLiquidacionContratoTotales(args: {
     totalFlete,
     totalAPagar,
     moneda,
-    cantViajes: args.viajes.length,
+    cantViajes,
   };
 }

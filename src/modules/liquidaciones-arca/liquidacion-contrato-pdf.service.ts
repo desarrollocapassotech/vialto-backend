@@ -117,7 +117,7 @@ export class LiquidacionContratoPdfService {
 
     const viajes: LiquidacionContratoViajeInput[] = liq.viajes.map((lv) => {
       const v = lv.viaje;
-      const moneda = (v.monedaPrecioTransportistaExterno || 'ARS').toUpperCase();
+      const moneda = (liq.moneda || v.monedaPrecioTransportistaExterno || 'ARS').toUpperCase();
       const docs = resolverDocsViajeContrato(v);
       const toneladas = lv.tnDestino ?? v.cantidadTransportista ?? null;
       const precioPorTn =
@@ -156,6 +156,8 @@ export class LiquidacionContratoPdfService {
       conceptosLineas: liq.conceptosLineas,
       ivaPersistido: liq.gastosAdminIva,
       liquidoPersistido: liq.liquido,
+      moneda: liq.moneda,
+      liq,
     });
 
     let emisorNombre = liq.tenant?.name?.trim() || 'Liquidación';
@@ -312,11 +314,13 @@ export class LiquidacionContratoPdfService {
       this.drawViajeUnico(doc, y, totales.grupos[0].viajes[0], totales, unidad);
       return;
     }
-    if (totales.mismoPrecio) {
+    if (totales.grupos.length === 1 && totales.grupos[0]?.viajes?.length) {
       this.drawViajesMismoPrecio(doc, y, totales, unidad);
       return;
     }
-    y = this.drawViajesPorPrecio(doc, y, totales, unidad);
+    if (totales.grupos.length > 1) {
+      y = this.drawViajesPorPrecio(doc, y, totales, unidad);
+    }
     y = this.ensure(doc, y, 90);
     y = this.section(doc, y, 'Total consolidado');
     const consolidadoRows: [string, string, boolean?][] = [
@@ -336,7 +340,7 @@ export class LiquidacionContratoPdfService {
       consolidadoRows.push(['Neto gravado', fmtMoney(totales.netoGravado, totales.moneda)]);
     }
     consolidadoRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)]);
-    consolidadoRows.push(['Adelanto', fmtMoney(totales.adelanto, totales.moneda)]);
+    consolidadoRows.push(['Adelanto', fmtMoney(totales.adelanto ?? 0, totales.moneda)]);
     consolidadoRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, totales.moneda), true]);
     this.moneyRows(doc, y, consolidadoRows);
   }
@@ -434,7 +438,7 @@ export class LiquidacionContratoPdfService {
       mismoPrecioRows.push(['Neto gravado', fmtMoney(totales.netoGravado, totales.moneda)]);
     }
     mismoPrecioRows.push([`IVA ${this.pctLabel(totales.ivaPct)}`, fmtMoney(totales.iva, totales.moneda)]);
-    mismoPrecioRows.push(['Adelanto', fmtMoney(g.adelanto, totales.moneda)]);
+    mismoPrecioRows.push(['Adelanto', fmtMoney(g.adelanto ?? 0, totales.moneda)]);
     mismoPrecioRows.push(['Total a pagar', fmtMoney(totales.totalAPagar, totales.moneda), true]);
     mismoPrecioRows.push(['Moneda', totales.moneda, false]);
     y = this.moneyRows(doc, y, mismoPrecioRows);
@@ -544,10 +548,11 @@ export class LiquidacionContratoPdfService {
     for (let i = 0; i < rows.length; i++) {
       y = this.ensure(doc, y, 16);
       const isExplicitBold = rows[i][2];
+      const isTotal = rows[i][0].toLowerCase().startsWith('total');
       const bold =
         isExplicitBold !== undefined
           ? isExplicitBold
-          : lastBold && i === rows.length - 1;
+          : (lastBold && i === rows.length - 1) || isTotal;
       doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).fillColor(CHARCOAL);
       doc.text(rows[i][0], M, y, { width: CW - 140 });
       doc.text(rows[i][1], M + CW - 140, y, { width: 140, align: 'right' });
@@ -557,6 +562,7 @@ export class LiquidacionContratoPdfService {
   }
 
   private pctLabel(pct: number): string {
+    if (pct == null || !Number.isFinite(pct)) return '0%';
     if (Number.isInteger(pct) || Math.abs(pct - Math.round(pct)) < 1e-9) {
       return `${Math.round(pct)}%`;
     }

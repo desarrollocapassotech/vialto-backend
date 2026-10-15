@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { compensarMovimientoCc } from "../../shared/cuenta-corriente/movimiento-cc.util";
 import { fechaCalendarioAr } from "../../shared/util/fecha-ar.util";
 import { actualizarEstadoCargoLiquidacionCc } from "../viajes/viaje-cuenta-corriente";
+import { conceptoAnulacion } from "../facturacion/cargo-factura.util";
 import { formatNumeroComprobante } from "./arca.util";
 import { round2 } from "./arca-iva.util";
 
@@ -29,6 +30,7 @@ type LiquidacionCc = {
   cbteNro: number | null;
   anulacionPtoVenta?: number | null;
   anulacionCbteNro?: number | null;
+  anulacionCbteTipo?: number | null;
   createdAt: Date;
   viajes: Array<{ viajeId: string }>;
 };
@@ -37,12 +39,9 @@ function numeroLiquidacion(liq: Pick<LiquidacionCc, "ptoVenta" | "cbteNro">): st
   return liq.cbteNro ? formatNumeroComprobante(liq.ptoVenta ?? 0, liq.cbteNro) : null;
 }
 
-export function conceptoCargoLiquidacion(numero: string | null): string {
-  return numero ? `Compra automática por liquidación ${numero}` : "Compra automática por liquidación";
-}
-
-export function conceptoAnulacionLiquidacion(numero: string | null): string {
-  return numero ? `Anulación liquidación ${numero}` : "Anulación de liquidación";
+/** Concepto de la compra que genera una liquidación. Sin número: va en la columna Comprobante. */
+export function conceptoCargoLiquidacion(): string {
+  return "LIQUIDACION";
 }
 
 async function cargarLiquidacion(tx: Tx, tenantId: string, liquidacionId: string) {
@@ -69,7 +68,7 @@ export async function sincronizarCargoLiquidacionCc(tx: Tx, tenantId: string, li
     tipo: "cargo",
     origen: "liquidacion",
     liquidacionId: liq.id,
-    concepto: conceptoCargoLiquidacion(numero),
+    concepto: conceptoCargoLiquidacion(),
     importe: round2(liq.liquido),
     moneda: liq.moneda,
     numeroComprobante: numero,
@@ -114,7 +113,7 @@ async function anularCargoLiquidacionCc(tx: Tx, tenantId: string, liq: Liquidaci
     ? formatNumeroComprobante(liq.anulacionPtoVenta ?? 0, liq.anulacionCbteNro)
     : null;
   await compensarMovimientoCc(tx, tenantId, cargo, {
-    concepto: conceptoAnulacionLiquidacion(numero),
+    concepto: conceptoAnulacion(liq.anulacionCbteNro ? liq.anulacionCbteTipo : null),
     numeroComprobante: numeroAnulacion ?? numero,
   });
 }

@@ -62,7 +62,7 @@ import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
 import { assertCvlpEmitDatosCompletos } from './cvlp-emit-validation.util';
 import { ClerkVialtoRoleService } from '../../core/auth/clerk-vialto-role.service';
 import { AnularFacturaDto } from './dto/anular-factura.dto';
-import { conceptoAnulacionFactura, conceptoCargoFactura } from '../facturacion/cargo-factura.util';
+import { conceptoAnulacion, conceptoCargoFactura } from '../facturacion/cargo-factura.util';
 import { anularCargoFacturaCc } from '../facturacion/factura-cuenta-corriente';
 import {
   anularCargoLiquidacionAntesDeEliminar,
@@ -1658,7 +1658,7 @@ export class LiquidacionesService {
       // los cobros imputados quedan a cuenta. Best-effort: la NC ya se emitió en AFIP.
       try {
         await anularCargoFacturaCc(this.prisma, tenantId, facturaId, {
-          concepto: conceptoAnulacionFactura(facturaRaw.numero),
+          concepto: conceptoAnulacion(cbteTipoNc),
           numeroComprobante: formatNumeroComprobante(ptoVentaNc, cbteNro),
         });
       } catch (ccErr) {
@@ -2316,17 +2316,15 @@ export class LiquidacionesService {
       });
       await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
 
-      // El cargo de cuenta corriente se creó con la factura, antes de tener
-      // número: se le completa ahora el comprobante que asignó AFIP.
-      if (numeroAfip) {
-        await this.db.movimientoCuentaCorriente.updateMany({
-          where: { tenantId, facturaId, tipo: 'cargo' },
-          data: {
-            numeroComprobante: numeroAfip,
-            concepto: conceptoCargoFactura(numeroAfip),
-          },
-        });
-      }
+      // El cargo de cuenta corriente se creó con la factura, antes de emitirla: se le
+      // completa ahora la letra del comprobante y el número que asignó AFIP.
+      await this.db.movimientoCuentaCorriente.updateMany({
+        where: { tenantId, facturaId, tipo: 'cargo', estadoDisponibilidad: { not: 'anulado' } },
+        data: {
+          concepto: conceptoCargoFactura(cbteTipoFinal),
+          ...(numeroAfip ? { numeroComprobante: numeroAfip } : {}),
+        },
+      });
 
       // Generar PDF y subir a Cloudinary
       let comprobanteUrl: string | null = null;

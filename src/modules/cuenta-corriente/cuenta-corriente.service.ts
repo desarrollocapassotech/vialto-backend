@@ -104,8 +104,8 @@ export class CuentaCorrienteService {
    * jerga contable "cargo"/"cobranza" que no resultaba clara para el usuario.
    */
   private defaultConcepto(tipo: string, esCliente: boolean): string {
-    if (esCliente) return tipo === 'pago' ? 'Cobro manual' : 'Venta manual';
-    return tipo === 'pago' ? 'Pago manual' : 'Compra manual';
+    if (esCliente) return tipo === 'pago' ? 'COBRO' : 'Venta manual';
+    return tipo === 'pago' ? 'PAGO' : 'Compra manual';
   }
 
   private resolveFechaVencimiento(

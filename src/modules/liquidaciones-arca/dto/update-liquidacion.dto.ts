@@ -72,4 +72,11 @@ export class UpdateLiquidacionDto {
   @IsString()
   @MaxLength(255)
   proveedorContrato?: string | null;
+
+  /** N° de la factura que emitió el proveedor (liquidaciones sin ARCA); `null` lo borra. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(64)
+  numeroComprobanteProveedor?: string | null;
 }

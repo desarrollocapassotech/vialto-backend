@@ -121,4 +121,10 @@ export class CreateLiquidacionDto {
   @IsString()
   @MaxLength(255)
   proveedorContrato?: string;
+
+  /** N° de la factura que emitió el proveedor (liquidaciones sin ARCA). Se ve en Cuenta corriente. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  numeroComprobanteProveedor?: string;
 }

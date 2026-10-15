@@ -1592,6 +1592,13 @@ model Liquidacion {
    */
   proveedorContrato String?
 
+  /**
+   * N° de la factura que emitió el proveedor por esta liquidación (liquidaciones sin ARCA, que no
+   * tienen número propio). Se carga desde Liquidaciones o desde Cuenta corriente, y es el número
+   * que muestra la columna Comprobante del movimiento. Con ARCA manda el número del CVLP.
+   */
+  numeroComprobanteProveedor String?
+
   createdAt DateTime @default(now())
   createdBy String
   updatedAt DateTime @updatedAt

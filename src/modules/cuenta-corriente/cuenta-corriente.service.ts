@@ -15,6 +15,7 @@ import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dt
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
 import { repartirImputacion } from './imputacion-reparto.util';
+import { sincronizarCargoLiquidacionCc } from '../liquidaciones-arca/liquidacion-cuenta-corriente';
 import {
   cuentaEnHistorialCc,
   signoHistorialCc,
@@ -170,6 +171,7 @@ export class CuentaCorrienteService {
         // VTO-431: vínculo entre el movimiento anulado y su crédito de anulación, para mostrarlos juntos.
         anuladoPor: { select: { id: true, fecha: true } },
         anulaMovimiento: { select: { id: true, fecha: true, concepto: true } },
+        liquidacion: { select: { cbteNro: true } },
       },
       // Orden de carga (último cargado primero), no por `fecha`: un cobro con fecha
       // anterior a otros movimientos tiene que aparecer arriba al registrarlo.
@@ -180,7 +182,7 @@ export class CuentaCorrienteService {
     // "Saldo" de la línea: lo que todavía no se resolvió de ESE movimiento puntual
     // (un cargo, cuánto le falta cobrar/pagar; un pago, cuánto le falta imputar) —
     // no confundir con el saldo acumulado de la cuenta completa.
-    return rows.map(({ imputacionesComoCargo, imputacionesComoPago, ...m }) => {
+    return rows.map(({ imputacionesComoCargo, imputacionesComoPago, liquidacion, ...m }) => {
       const imputado =
         m.tipo === 'cargo'
           ? imputacionesComoCargo.reduce((s, i) => s + i.importe, 0)
@@ -189,8 +191,65 @@ export class CuentaCorrienteService {
       // aplicado a su original.
       const anulado =
         m.tipo === 'credito' || (m.tipo === 'cargo' && m.estadoDisponibilidad === 'anulado');
-      return { ...m, pendiente: anulado ? 0 : Math.max(m.importe - imputado, 0) };
+      return {
+        ...m,
+        pendiente: anulado ? 0 : Math.max(m.importe - imputado, 0),
+        comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null),
+      };
     });
+  }
+
+  /**
+   * ¿Se puede cargar/corregir el N° de comprobante desde Cuenta corriente? Solo en una
+   * compra de liquidación sin ARCA (el número es el de la factura del proveedor; con ARCA
+   * manda el del CVLP) o en una venta/compra manual. Las facturas se editan desde Facturas.
+   */
+  private comprobanteEditable(
+    m: { tipo: string; origen: string; estadoDisponibilidad: string; liquidacionId: string | null },
+    cbteNroLiquidacion: number | null,
+  ): boolean {
+    if (m.tipo !== 'cargo' || m.estadoDisponibilidad === 'anulado') return false;
+    if (m.origen === 'manual') return true;
+    return m.origen === 'liquidacion' && !!m.liquidacionId && cbteNroLiquidacion == null;
+  }
+
+  /**
+   * Carga o corrige el N° de comprobante desde Cuenta corriente. En una liquidación el
+   * número vive en la liquidación (`numeroComprobanteProveedor`, el mismo campo que se
+   * edita desde Liquidaciones) y el movimiento se refresca desde ahí, así nunca quedan dos
+   * números distintos. En una venta/compra manual se guarda en el movimiento.
+   */
+  async actualizarComprobante(tenantId: string, id: string, numero: string | null | undefined) {
+    const mov = await this.findOne(id, tenantId);
+    const liquidacion = mov.liquidacionId
+      ? await this.prisma.liquidacion.findFirst({
+          where: { id: mov.liquidacionId, tenantId },
+          select: { id: true, cbteNro: true },
+        })
+      : null;
+    if (!this.comprobanteEditable(mov, liquidacion?.cbteNro ?? null)) {
+      throw new BadRequestException(
+        mov.origen === 'liquidacion'
+          ? 'La liquidación se emitió con ARCA: su número es el del comprobante de AFIP.'
+          : mov.origen === 'factura'
+            ? 'El número de una factura se edita desde Facturas.'
+            : 'El comprobante de este movimiento no se puede editar.',
+      );
+    }
+    const valor = numero?.trim() || null;
+    if (liquidacion) {
+      await this.prisma.liquidacion.update({
+        where: { id: liquidacion.id },
+        data: { numeroComprobanteProveedor: valor, updatedAt: new Date() },
+      });
+      await sincronizarCargoLiquidacionCc(this.prisma, tenantId, liquidacion.id);
+    } else {
+      await this.prisma.movimientoCuentaCorriente.update({
+        where: { id: mov.id },
+        data: { numeroComprobante: valor },
+      });
+    }
+    return this.findOne(id, tenantId);
   }
 
   /**
@@ -289,11 +348,41 @@ export class CuentaCorrienteService {
     return row;
   }
 
+  /**
+   * Ventas y compras manuales solo en empresas que no tienen el módulo que las genera:
+   * con Facturación (manual o ARCA) las ventas salen únicamente de las facturas, y con
+   * Liquidaciones (manual o ARCA) las compras salen únicamente de las liquidaciones — así
+   * el mismo flete nunca se carga dos veces. Cobros y pagos manuales siempre se permiten.
+   * Espejo del front: `ventasNacenDeFacturas`/`comprasNacenDeLiquidaciones` (lib/tenantModules.ts).
+   */
+  private async assertCargoManualPermitido(tenantId: string, dto: CreateMovimientoCcDto) {
+    if (dto.tipo !== 'cargo') return;
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    const modules = new Set((tenant?.modules ?? []).map((m) => m.toLowerCase()));
+    if (dto.clienteId && (modules.has('facturacion') || modules.has('emision-facturas-arca'))) {
+      throw new BadRequestException(
+        'Tu empresa tiene Facturación: las ventas se registran al crear la factura.',
+      );
+    }
+    if (
+      dto.proveedorId &&
+      (modules.has('liquidaciones') || modules.has('emision-liquido-producto-arca'))
+    ) {
+      throw new BadRequestException(
+        'Tu empresa tiene Liquidaciones: las compras se registran al crear la liquidación.',
+      );
+    }
+  }
+
   async create(tenantId: string, dto: CreateMovimientoCcDto, userId?: string) {
     const { contraparteId, condicionPagoDias } = await this.assertContraparte(
       tenantId,
       dto,
     );
+    await this.assertCargoManualPermitido(tenantId, dto);
     const neto = this.normalizeImporte(dto.importe);
     const iva = this.calcularIva(dto.tipo, neto, dto.ivaPct);
     const concepto = dto.concepto?.trim() || this.defaultConcepto(dto.tipo, !!dto.clienteId);

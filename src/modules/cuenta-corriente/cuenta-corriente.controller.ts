@@ -11,6 +11,7 @@ import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
+import { UpdateComprobanteCcDto } from './dto/update-comprobante-cc.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -173,6 +174,21 @@ export class CuentaCorrienteController {
   ) {
     assertTenantId(auth.tenantId);
     return this.service.update(id, auth.tenantId, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      'Cargar o corregir el N° de comprobante (factura del proveedor en una liquidación sin ARCA, o venta/compra manual)',
+  })
+  @Patch('movimientos/:id/comprobante')
+  @Roles('admin', 'superadmin')
+  actualizarComprobante(
+    @Param('id') id: string,
+    @Body() dto: UpdateComprobanteCcDto,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.actualizarComprobante(auth.tenantId, id, dto.numeroComprobante);
   }
 
   @ApiOperation({ summary: 'Eliminar movimiento de cuenta corriente' })

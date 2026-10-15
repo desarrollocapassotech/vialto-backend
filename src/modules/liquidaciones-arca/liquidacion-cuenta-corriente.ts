@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { compensarMovimientoCc } from "../../shared/cuenta-corriente/movimiento-cc.util";
 import { fechaCalendarioAr } from "../../shared/util/fecha-ar.util";
 import { actualizarEstadoCargoLiquidacionCc } from "../viajes/viaje-cuenta-corriente";
+import { conceptoAnulacion } from "../facturacion/cargo-factura.util";
 import { formatNumeroComprobante } from "./arca.util";
 import { round2 } from "./arca-iva.util";
 
@@ -29,6 +30,7 @@ type LiquidacionCc = {
   cbteNro: number | null;
   anulacionPtoVenta?: number | null;
   anulacionCbteNro?: number | null;
+  anulacionCbteTipo?: number | null;
   createdAt: Date;
   viajes: Array<{ viajeId: string }>;
 };
@@ -39,10 +41,6 @@ function numeroLiquidacion(liq: Pick<LiquidacionCc, "ptoVenta" | "cbteNro">): st
 
 export function conceptoCargoLiquidacion(numero: string | null): string {
   return numero ? `Compra automática por liquidación ${numero}` : "Compra automática por liquidación";
-}
-
-export function conceptoAnulacionLiquidacion(numero: string | null): string {
-  return numero ? `Anulación liquidación ${numero}` : "Anulación de liquidación";
 }
 
 async function cargarLiquidacion(tx: Tx, tenantId: string, liquidacionId: string) {
@@ -114,7 +112,7 @@ async function anularCargoLiquidacionCc(tx: Tx, tenantId: string, liq: Liquidaci
     ? formatNumeroComprobante(liq.anulacionPtoVenta ?? 0, liq.anulacionCbteNro)
     : null;
   await compensarMovimientoCc(tx, tenantId, cargo, {
-    concepto: conceptoAnulacionLiquidacion(numero),
+    concepto: conceptoAnulacion(liq.anulacionCbteNro ? liq.anulacionCbteTipo : null),
     numeroComprobante: numeroAnulacion ?? numero,
   });
 }

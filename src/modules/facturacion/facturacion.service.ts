@@ -23,7 +23,7 @@ import {
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
 import {
-  conceptoAnulacionFactura,
+  conceptoAnulacion,
   conceptoCargoFactura,
   estadoCargoFactura,
   importeCargoFactura,
@@ -788,6 +788,8 @@ export class FacturacionService {
       moneda: string;
       fechaEmision: Date;
       fechaVencimiento: Date | null;
+      /** Tipo AFIP (1/6/11…) para la letra del concepto; null sin ARCA o antes de emitir. */
+      cbteTipo?: number | null;
     },
   ) {
     if (!factura.clienteId) return;
@@ -798,7 +800,7 @@ export class FacturacionService {
       tipo: "cargo",
       origen: "factura",
       facturaId: factura.id,
-      concepto: conceptoCargoFactura(factura.numero),
+      concepto: conceptoCargoFactura(factura.cbteTipo),
       importe: importeCargoFactura(factura),
       moneda: factura.moneda,
       fecha: factura.fechaEmision,
@@ -1119,7 +1121,7 @@ export class FacturacionService {
       } else {
         // Sin cliente la factura deja de ser una venta: se compensa su movimiento.
         await anularCargoFacturaCc(tx, tenantId, id, {
-          concepto: conceptoAnulacionFactura(updated.numero),
+          concepto: conceptoAnulacion(),
         });
       }
       return this.toShape(updated, tieneArca);
@@ -1141,11 +1143,6 @@ export class FacturacionService {
       ...viajesClientesAfectados.map((vc) => vc.viajeId),
     ]));
 
-    const factura = await this.prisma.factura.findFirst({
-      where: { id, tenantId },
-      select: { numero: true },
-    });
-
     return this.prisma.$transaction(async (tx) => {
       await tx.viaje.updateMany({
         where: { facturaId: id, tenantId },
@@ -1160,7 +1157,7 @@ export class FacturacionService {
       // compensa su movimiento con un crédito en el Haber, que sobrevive al borrado
       // (`facturaId` pasa a null).
       await anularCargoFacturaCc(tx, tenantId, id, {
-        concepto: conceptoAnulacionFactura(factura?.numero),
+        concepto: conceptoAnulacion(),
       });
       return tx.factura.delete({ where: { id } });
     }, FACTURA_INTERACTIVE_TX);
@@ -1334,7 +1331,7 @@ export class FacturacionService {
             // crédito con el número de la nota de crédito (idempotente).
             if (anulada) {
               await anularCargoFacturaCc(tx, factura.tenantId, factura.id, {
-                concepto: conceptoAnulacionFactura(factura.numero),
+                concepto: conceptoAnulacion(factura.anulacionCbteTipo),
                 numeroComprobante:
                   factura.anulacionCbteNro != null
                     ? formatNumeroComprobante(factura.anulacionPtoVenta ?? 0, factura.anulacionCbteNro)

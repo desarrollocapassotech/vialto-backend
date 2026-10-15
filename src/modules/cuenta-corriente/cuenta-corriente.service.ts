@@ -145,6 +145,7 @@ export class CuentaCorrienteService {
       hasta?: string;
     },
   ) {
+    const facturasConArca = await this.tieneEmisionFacturasArca(tenantId);
     const rows = await this.prisma.movimientoCuentaCorriente.findMany({
       where: {
         tenantId,
@@ -194,32 +195,70 @@ export class CuentaCorrienteService {
       return {
         ...m,
         pendiente: anulado ? 0 : Math.max(m.importe - imputado, 0),
-        comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null),
+        comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null, facturasConArca),
+        vencimientoEditable: this.vencimientoEditable(m),
       };
     });
   }
 
+  /** Con ARCA el número de una factura lo asigna AFIP al emitir (mismo criterio que Facturas). */
+  private async tieneEmisionFacturasArca(tenantId: string): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { modules: true },
+    });
+    return (tenant?.modules ?? []).some((m) => m.toLowerCase() === 'emision-facturas-arca');
+  }
+
   /**
-   * ¿Se puede cargar/corregir el N° de comprobante desde Cuenta corriente? Solo en una
-   * compra de liquidación sin ARCA (el número es el de la factura del proveedor; con ARCA
-   * manda el del CVLP) o en una venta/compra manual. Las facturas se editan desde Facturas.
+   * ¿Se puede cargar/corregir el vencimiento desde Cuenta corriente? En una venta de
+   * factura (se guarda en la factura, igual que editándola desde Facturas), en una compra
+   * de liquidación (con o sin ARCA: el número del CVLP no se toca, pero cuándo se le paga
+   * al proveedor sí) o en una venta/compra manual.
+   */
+  private vencimientoEditable(m: { tipo: string; origen: string; estadoDisponibilidad: string }) {
+    if (m.tipo !== 'cargo' || m.estadoDisponibilidad === 'anulado') return false;
+    return ['manual', 'factura', 'liquidacion'].includes(m.origen);
+  }
+
+  /**
+   * ¿Se puede cargar/corregir el N° de comprobante desde Cuenta corriente? En una venta de
+   * factura sin ARCA (con ARCA lo asigna AFIP), en una compra de liquidación sin CVLP (el
+   * número es el de la factura del proveedor) o en una venta/compra manual.
    */
   private comprobanteEditable(
-    m: { tipo: string; origen: string; estadoDisponibilidad: string; liquidacionId: string | null },
+    m: {
+      tipo: string;
+      origen: string;
+      estadoDisponibilidad: string;
+      liquidacionId: string | null;
+      facturaId: string | null;
+    },
     cbteNroLiquidacion: number | null,
+    facturasConArca: boolean,
   ): boolean {
     if (m.tipo !== 'cargo' || m.estadoDisponibilidad === 'anulado') return false;
     if (m.origen === 'manual') return true;
+    if (m.origen === 'factura') return !!m.facturaId && !facturasConArca;
     return m.origen === 'liquidacion' && !!m.liquidacionId && cbteNroLiquidacion == null;
   }
 
   /**
-   * Carga o corrige el N° de comprobante desde Cuenta corriente. En una liquidación el
-   * número vive en la liquidación (`numeroComprobanteProveedor`, el mismo campo que se
-   * edita desde Liquidaciones) y el movimiento se refresca desde ahí, así nunca quedan dos
-   * números distintos. En una venta/compra manual se guarda en el movimiento.
+   * Carga o corrige el N° de comprobante y/o el vencimiento desde Cuenta corriente (cada
+   * uno solo si viene en el dto). El dato vive en el comprobante de origen y el movimiento
+   * se refresca desde ahí, así nunca quedan dos valores distintos:
+   * - factura: número y vencimiento se guardan en la factura (`updateFactura`, el mismo
+   *   camino que editarla desde Facturas, que valida el número único y resincroniza el cargo);
+   * - liquidación: el número va a `numeroComprobanteProveedor` (el mismo campo que se edita
+   *   desde Liquidaciones); el vencimiento se guarda en el movimiento (la liquidación no
+   *   tiene uno propio y el sync no lo pisa);
+   * - venta/compra manual: todo en el movimiento.
    */
-  async actualizarComprobante(tenantId: string, id: string, numero: string | null | undefined) {
+  async actualizarComprobante(
+    tenantId: string,
+    id: string,
+    dto: { numeroComprobante?: string | null; fechaVencimiento?: string | null },
+  ) {
     const mov = await this.findOne(id, tenantId);
     const liquidacion = mov.liquidacionId
       ? await this.prisma.liquidacion.findFirst({
@@ -227,27 +266,62 @@ export class CuentaCorrienteService {
           select: { id: true, cbteNro: true },
         })
       : null;
-    if (!this.comprobanteEditable(mov, liquidacion?.cbteNro ?? null)) {
+    const facturasConArca =
+      mov.origen === 'factura' ? await this.tieneEmisionFacturasArca(tenantId) : false;
+
+    if (
+      dto.numeroComprobante !== undefined &&
+      !this.comprobanteEditable(mov, liquidacion?.cbteNro ?? null, facturasConArca)
+    ) {
       throw new BadRequestException(
         mov.origen === 'liquidacion'
           ? 'La liquidación se emitió con ARCA: su número es el del comprobante de AFIP.'
           : mov.origen === 'factura'
-            ? 'El número de una factura se edita desde Facturas.'
+            ? 'El número de la factura lo asigna ARCA al emitirla.'
             : 'El comprobante de este movimiento no se puede editar.',
       );
     }
-    const valor = numero?.trim() || null;
-    if (liquidacion) {
-      await this.prisma.liquidacion.update({
-        where: { id: liquidacion.id },
-        data: { numeroComprobanteProveedor: valor, updatedAt: new Date() },
+    if (dto.fechaVencimiento !== undefined && !this.vencimientoEditable(mov)) {
+      throw new BadRequestException('El vencimiento de este movimiento no se puede editar.');
+    }
+
+    if (mov.origen === 'factura' && mov.facturaId) {
+      const numero = dto.numeroComprobante?.trim();
+      if (dto.numeroComprobante !== undefined && !numero) {
+        // Sin ARCA el número de la factura es obligatorio (mismo criterio que Facturas).
+        throw new BadRequestException('Ingresá el número de la factura.');
+      }
+      await this.facturacion.updateFactura(mov.facturaId, tenantId, {
+        ...(numero ? { numero } : {}),
+        ...(dto.fechaVencimiento !== undefined
+          ? { fechaVencimiento: dto.fechaVencimiento ?? '' }
+          : {}),
       });
-      await sincronizarCargoLiquidacionCc(this.prisma, tenantId, liquidacion.id);
-    } else {
+      return this.findOne(id, tenantId);
+    }
+
+    if (dto.fechaVencimiento !== undefined) {
       await this.prisma.movimientoCuentaCorriente.update({
         where: { id: mov.id },
-        data: { numeroComprobante: valor },
+        data: {
+          fechaVencimiento: dto.fechaVencimiento ? fechaCalendarioAr(dto.fechaVencimiento) : null,
+        },
       });
+    }
+    if (dto.numeroComprobante !== undefined) {
+      const valor = dto.numeroComprobante?.trim() || null;
+      if (liquidacion) {
+        await this.prisma.liquidacion.update({
+          where: { id: liquidacion.id },
+          data: { numeroComprobanteProveedor: valor, updatedAt: new Date() },
+        });
+        await sincronizarCargoLiquidacionCc(this.prisma, tenantId, liquidacion.id);
+      } else {
+        await this.prisma.movimientoCuentaCorriente.update({
+          where: { id: mov.id },
+          data: { numeroComprobante: valor },
+        });
+      }
     }
     return this.findOne(id, tenantId);
   }

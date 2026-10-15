@@ -178,7 +178,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({
     summary:
-      'Cargar o corregir el N° de comprobante (factura del proveedor en una liquidación sin ARCA, o venta/compra manual)',
+      'Cargar o corregir el N° de comprobante y/o el vencimiento (factura, liquidación o venta/compra manual)',
   })
   @Patch('movimientos/:id/comprobante')
   @Roles('admin', 'superadmin')
@@ -188,7 +188,7 @@ export class CuentaCorrienteController {
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.actualizarComprobante(auth.tenantId, id, dto.numeroComprobante);
+    return this.service.actualizarComprobante(auth.tenantId, id, dto);
   }
 
   @ApiOperation({ summary: 'Eliminar movimiento de cuenta corriente' })

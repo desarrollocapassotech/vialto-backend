@@ -39,8 +39,9 @@ function numeroLiquidacion(liq: Pick<LiquidacionCc, "ptoVenta" | "cbteNro">): st
   return liq.cbteNro ? formatNumeroComprobante(liq.ptoVenta ?? 0, liq.cbteNro) : null;
 }
 
-export function conceptoCargoLiquidacion(numero: string | null): string {
-  return numero ? `Compra automática por liquidación ${numero}` : "Compra automática por liquidación";
+/** Concepto de la compra que genera una liquidación. Sin número: va en la columna Comprobante. */
+export function conceptoCargoLiquidacion(): string {
+  return "LIQUIDACION";
 }
 
 async function cargarLiquidacion(tx: Tx, tenantId: string, liquidacionId: string) {
@@ -67,7 +68,7 @@ export async function sincronizarCargoLiquidacionCc(tx: Tx, tenantId: string, li
     tipo: "cargo",
     origen: "liquidacion",
     liquidacionId: liq.id,
-    concepto: conceptoCargoLiquidacion(numero),
+    concepto: conceptoCargoLiquidacion(),
     importe: round2(liq.liquido),
     moneda: liq.moneda,
     numeroComprobante: numero,

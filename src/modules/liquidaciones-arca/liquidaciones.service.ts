@@ -400,6 +400,7 @@ export class LiquidacionesService {
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
           proveedorContrato: dto.proveedorContrato?.trim() || null,
+          numeroComprobanteProveedor: dto.numeroComprobanteProveedor?.trim() || null,
           createdBy: userId,
           updatedAt: new Date(),
           viajes: {
@@ -512,6 +513,9 @@ export class LiquidacionesService {
     }
     if (dto.proveedorContrato !== undefined) {
       data.proveedorContrato = dto.proveedorContrato?.trim() || null;
+    }
+    if (dto.numeroComprobanteProveedor !== undefined) {
+      data.numeroComprobanteProveedor = dto.numeroComprobanteProveedor?.trim() || null;
     }
 
     // ── Reemplazo del conjunto de viajes (solo borrador) ────────────────────

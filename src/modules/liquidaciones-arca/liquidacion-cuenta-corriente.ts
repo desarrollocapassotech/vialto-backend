@@ -28,6 +28,7 @@ type LiquidacionCc = {
   liquido: number;
   ptoVenta: number | null;
   cbteNro: number | null;
+  numeroComprobanteProveedor?: string | null;
   anulacionPtoVenta?: number | null;
   anulacionCbteNro?: number | null;
   anulacionCbteTipo?: number | null;
@@ -35,8 +36,15 @@ type LiquidacionCc = {
   viajes: Array<{ viajeId: string }>;
 };
 
-function numeroLiquidacion(liq: Pick<LiquidacionCc, "ptoVenta" | "cbteNro">): string | null {
-  return liq.cbteNro ? formatNumeroComprobante(liq.ptoVenta ?? 0, liq.cbteNro) : null;
+/**
+ * Número que muestra la columna Comprobante: el del CVLP si se emitió con ARCA; si no, el
+ * de la factura que cargó el proveedor (liquidaciones manuales).
+ */
+function numeroLiquidacion(
+  liq: Pick<LiquidacionCc, "ptoVenta" | "cbteNro" | "numeroComprobanteProveedor">,
+): string | null {
+  if (liq.cbteNro) return formatNumeroComprobante(liq.ptoVenta ?? 0, liq.cbteNro);
+  return liq.numeroComprobanteProveedor?.trim() || null;
 }
 
 /** Concepto de la compra que genera una liquidación. Sin número: va en la columna Comprobante. */

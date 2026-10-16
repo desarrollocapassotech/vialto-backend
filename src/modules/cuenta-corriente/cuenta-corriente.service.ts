@@ -198,6 +198,13 @@ export class CuentaCorrienteService {
         // Cargos a los que está imputado un cobro/pago (para mostrar su comprobante y
         // abrir la factura/liquidación cobrada cuando es uno solo).
         cargosImputadosIds: [...new Set(imputacionesComoPago.map((i) => i.cargoId))],
+        // Cuánto de este cobro/pago se aplicó a cada cargo (detalle "Ver imputaciones").
+        imputacionesPorCargo: Object.entries(
+          imputacionesComoPago.reduce<Record<string, number>>((acc, i) => {
+            acc[i.cargoId] = (acc[i.cargoId] ?? 0) + i.importe;
+            return acc;
+          }, {}),
+        ).map(([cargoId, importe]) => ({ cargoId, importe: roundMoney2(importe) })),
         comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null, facturasConArca),
         vencimientoEditable: this.vencimientoEditable(m),
       };

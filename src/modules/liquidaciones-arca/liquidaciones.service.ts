@@ -1323,6 +1323,8 @@ export class LiquidacionesService {
 
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+    // Cuenta corriente: el concepto pasa a "PENDIENTE ANULACION".
+    await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
     return this.findById(tenantId, liquidacionId);
   }

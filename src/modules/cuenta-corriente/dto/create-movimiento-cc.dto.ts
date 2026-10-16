@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsDateString, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateMovimientoCcDto {
@@ -16,4 +16,9 @@ export class CreateMovimientoCcDto {
   @IsOptional() @IsString() numeroComprobante?: string;
   @IsOptional() @IsString() formaPago?: string;
   @IsOptional() @IsString() referencia?: string;
+  /**
+   * Solo cobros/pagos: cargos (facturas/liquidaciones) a los que se imputa al registrarlo.
+   * El importe se reparte del más viejo al más nuevo; lo que sobre queda a cuenta.
+   */
+  @IsOptional() @IsArray() @IsString({ each: true }) imputarACargoIds?: string[];
 }

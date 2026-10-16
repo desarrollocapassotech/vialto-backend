@@ -168,7 +168,7 @@ export class CuentaCorrienteService {
       },
       include: {
         imputacionesComoCargo: { select: { importe: true } },
-        imputacionesComoPago: { select: { importe: true } },
+        imputacionesComoPago: { select: { importe: true, cargoId: true } },
         // VTO-431: vínculo entre el movimiento anulado y su crédito de anulación, para mostrarlos juntos.
         anuladoPor: { select: { id: true, fecha: true } },
         anulaMovimiento: { select: { id: true, fecha: true, concepto: true } },
@@ -195,6 +195,16 @@ export class CuentaCorrienteService {
       return {
         ...m,
         pendiente: anulado ? 0 : Math.max(m.importe - imputado, 0),
+        // Cargos a los que está imputado un cobro/pago (para mostrar su comprobante y
+        // abrir la factura/liquidación cobrada cuando es uno solo).
+        cargosImputadosIds: [...new Set(imputacionesComoPago.map((i) => i.cargoId))],
+        // Cuánto de este cobro/pago se aplicó a cada cargo (detalle "Ver imputaciones").
+        imputacionesPorCargo: Object.entries(
+          imputacionesComoPago.reduce<Record<string, number>>((acc, i) => {
+            acc[i.cargoId] = (acc[i.cargoId] ?? 0) + i.importe;
+            return acc;
+          }, {}),
+        ).map(([cargoId, importe]) => ({ cargoId, importe: roundMoney2(importe) })),
         comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null, facturasConArca),
         vencimientoEditable: this.vencimientoEditable(m),
       };
@@ -461,8 +471,16 @@ export class CuentaCorrienteService {
     const iva = this.calcularIva(dto.tipo, neto, dto.ivaPct);
     const concepto = dto.concepto?.trim() || this.defaultConcepto(dto.tipo, !!dto.clienteId);
     const fecha = new Date(dto.fecha);
-    return this.prisma.movimientoCuentaCorriente.create({
-      data: {
+    const moneda = dto.moneda?.trim() || 'ARS';
+    const cargosAImputar =
+      dto.tipo === 'pago' && dto.imputarACargoIds?.length
+        ? await this.cargosParaImputarAlRegistrar(tenantId, contraparteId, moneda, dto.imputarACargoIds)
+        : [];
+
+    // Cobro/pago y sus imputaciones juntos: o queda todo registrado o nada.
+    return this.prisma.$transaction(async (tx) => {
+      const creado = await tx.movimientoCuentaCorriente.create({
+        data: {
         tenantId,
         clienteId: dto.clienteId ?? null,
         proveedorId: dto.proveedorId ?? null,
@@ -474,7 +492,7 @@ export class CuentaCorrienteService {
         importeNeto: iva ? roundMoney2(neto) : null,
         ivaPct: iva ? iva.pct : null,
         ivaMonto: iva ? iva.monto : null,
-        moneda: dto.moneda?.trim() || 'ARS',
+        moneda,
         fecha,
         fechaVencimiento:
           dto.tipo === 'cargo'
@@ -487,7 +505,53 @@ export class CuentaCorrienteService {
           null,
         createdBy: userId ?? null,
       },
+      });
+
+      // Del cargo más viejo al más nuevo, cada uno hasta su saldo pendiente.
+      let restante = creado.importe;
+      for (const { cargo, pendiente } of cargosAImputar) {
+        if (restante <= EPS) break;
+        const importe = roundMoney2(Math.min(pendiente, restante));
+        await this.aplicarImputacion(tx, tenantId, creado, cargo, importe, userId);
+        restante = roundMoney2(restante - importe);
+      }
+      return tx.movimientoCuentaCorriente.findUniqueOrThrow({ where: { id: creado.id } });
+    }, CC_INTERACTIVE_TX);
+  }
+
+  /**
+   * Valida los cargos elegidos al registrar un cobro/pago y los devuelve ordenados del
+   * más viejo al más nuevo, con su saldo pendiente.
+   */
+  private async cargosParaImputarAlRegistrar(
+    tenantId: string,
+    contraparteId: string,
+    moneda: string,
+    ids: string[],
+  ) {
+    const unicos = [...new Set(ids)];
+    const cargos = await this.prisma.movimientoCuentaCorriente.findMany({
+      where: { id: { in: unicos }, tenantId, contraparteId, tipo: 'cargo' },
+      orderBy: [{ fecha: 'asc' }, { createdAt: 'asc' }],
     });
+    if (cargos.length !== unicos.length) {
+      throw new NotFoundException('Una de las facturas elegidas no existe o no es de esta cuenta');
+    }
+    const conPendiente = [];
+    for (const cargo of cargos) {
+      if (cargo.estadoDisponibilidad === 'anulado') {
+        throw new BadRequestException('Una de las facturas elegidas está anulada');
+      }
+      if (cargo.moneda !== moneda) {
+        throw new BadRequestException('Las facturas elegidas tienen que estar en la moneda del cobro');
+      }
+      const pendiente = cargo.importe - (await this.sumaImputaciones('cargoId', cargo.id));
+      if (pendiente <= EPS) {
+        throw new BadRequestException('Una de las facturas elegidas ya no tiene saldo pendiente');
+      }
+      conPendiente.push({ cargo, pendiente });
+    }
+    return conPendiente;
   }
 
   async update(id: string, tenantId: string, dto: UpdateMovimientoCcDto) {

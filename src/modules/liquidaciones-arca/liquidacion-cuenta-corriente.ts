@@ -32,6 +32,7 @@ type LiquidacionCc = {
   anulacionPtoVenta?: number | null;
   anulacionCbteNro?: number | null;
   anulacionCbteTipo?: number | null;
+  anulacionMetodo?: string | null;
   createdAt: Date;
   viajes: Array<{ viajeId: string }>;
 };
@@ -47,9 +48,30 @@ function numeroLiquidacion(
   return liq.numeroComprobanteProveedor?.trim() || null;
 }
 
-/** Concepto de la compra que genera una liquidación. Sin número: va en la columna Comprobante. */
-export function conceptoCargoLiquidacion(): string {
-  return "LIQUIDACION";
+/**
+ * Concepto de la compra que genera una liquidación (sin número: va en la columna
+ * Comprobante): "LIQUIDO PRODUCTO" si se emitió el CVLP con ARCA, "LIQUIDACION" si es
+ * manual, y "PENDIENTE ANULACION" mientras espera la anulación manual (al anularse vuelve
+ * a su concepto y el crédito dice "ANULACION MANUAL").
+ */
+export function conceptoCargoLiquidacion(
+  liq: Pick<LiquidacionCc, "estado" | "cbteNro">,
+): string {
+  if (liq.estado === "pendiente_anulacion") return "PENDIENTE ANULACION";
+  return liq.cbteNro != null ? "LIQUIDO PRODUCTO" : "LIQUIDACION";
+}
+
+/**
+ * Concepto del crédito que anula una liquidación: la NC/ND emitida con ARCA (ej. "NOTA DE
+ * CRÉDITO A"), "ANULACION MANUAL" con el método manual (comprobante pre-impreso) o
+ * "ANULACION" si se eliminó un borrador / sin ARCA. Depende de cómo anula la empresa.
+ */
+function conceptoAnulacionLiquidacion(
+  liq: Pick<LiquidacionCc, "anulacionCbteNro" | "anulacionCbteTipo" | "anulacionMetodo">,
+): string {
+  if (liq.anulacionCbteNro) return conceptoAnulacion(liq.anulacionCbteTipo);
+  if (liq.anulacionMetodo === "manual") return "ANULACION MANUAL";
+  return conceptoAnulacion();
 }
 
 async function cargarLiquidacion(tx: Tx, tenantId: string, liquidacionId: string) {
@@ -76,7 +98,7 @@ export async function sincronizarCargoLiquidacionCc(tx: Tx, tenantId: string, li
     tipo: "cargo",
     origen: "liquidacion",
     liquidacionId: liq.id,
-    concepto: conceptoCargoLiquidacion(),
+    concepto: conceptoCargoLiquidacion(liq),
     importe: round2(liq.liquido),
     moneda: liq.moneda,
     numeroComprobante: numero,
@@ -121,7 +143,7 @@ async function anularCargoLiquidacionCc(tx: Tx, tenantId: string, liq: Liquidaci
     ? formatNumeroComprobante(liq.anulacionPtoVenta ?? 0, liq.anulacionCbteNro)
     : null;
   await compensarMovimientoCc(tx, tenantId, cargo, {
-    concepto: conceptoAnulacion(liq.anulacionCbteNro ? liq.anulacionCbteTipo : null),
+    concepto: conceptoAnulacionLiquidacion(liq),
     numeroComprobante: numeroAnulacion ?? numero,
   });
 }

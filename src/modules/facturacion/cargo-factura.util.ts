@@ -23,8 +23,9 @@ export function conceptoCargoFactura(cbteTipo?: number | null): string {
 
 /**
  * Concepto del crédito (Haber) que compensa un comprobante anulado/eliminada (VTO-431):
- * "ANULACION", y si se anuló con un comprobante de AFIP, cuál fue (ej. "ANULACION - NOTA
- * DE CRÉDITO A"). Se usa para facturas y liquidaciones; el número va en Comprobante.
+ * si se anuló con una nota de crédito/débito de AFIP, solo esa nota (ej. "NOTA DE CRÉDITO
+ * A"); si no (anulación interna o manual), "ANULACION". Se usa para facturas y
+ * liquidaciones; el número va en Comprobante.
  */
 export function conceptoAnulacion(cbteTipoAnulacion?: number | null): string {
   if (cbteTipoAnulacion == null) return "ANULACION";
@@ -35,7 +36,7 @@ export function conceptoAnulacion(cbteTipoAnulacion?: number | null): string {
       : null;
   if (!tipo) return "ANULACION";
   const letra = letraComprobante(cbteTipoAnulacion);
-  return `ANULACION - ${tipo}${letra ? ` ${letra}` : ""}`;
+  return `${tipo}${letra ? ` ${letra}` : ""}`;
 }
 
 /**

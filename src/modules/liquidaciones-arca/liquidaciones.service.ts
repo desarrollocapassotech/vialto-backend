@@ -1238,7 +1238,7 @@ export class LiquidacionesService {
       const caeFechaVto = parseAfipDate(authResult.CAEFchVto);
       const anuladoAt = new Date();
       const anuladoPorLabel =
-        (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || userId;
+        (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || null;
 
       // El CVLP original se conserva (CAE / número / PDF siguen disponibles).
       await this.prisma.liquidacion.update({
@@ -1323,6 +1323,8 @@ export class LiquidacionesService {
 
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
+    // Cuenta corriente: el concepto pasa a "PENDIENTE ANULACION".
+    await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
     return this.findById(tenantId, liquidacionId);
   }
@@ -1370,7 +1372,7 @@ export class LiquidacionesService {
 
     const anuladoAt = new Date();
     const anuladoPorLabel =
-      (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || userId;
+      (await this.clerkUsers.getUserDisplayLabel(userId))?.trim() || null;
 
     await this.db.liquidacion.update({
       where: { id: liquidacionId },

@@ -26,7 +26,10 @@ export async function attachAnuladoPorNombres<T>(
   );
   return rows.map((r) => {
     const id = getAnuladoPor(r);
-    const nombre = id ? labels.get(id) || id : null;
+    // Nunca devolver el userId de Clerk como nombre: si no se puede resolver (usuario
+    // borrado, o datos copiados de otro entorno con otro Clerk), queda null y la UI
+    // muestra un texto genérico.
+    const nombre = id ? labels.get(id) ?? null : null;
     return { ...r, anuladoPorNombre: nombre };
   });
 }

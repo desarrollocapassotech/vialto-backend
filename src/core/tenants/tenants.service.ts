@@ -277,6 +277,16 @@ export class TenantsService {
     });
   }
 
+  /** Solo toca el orden de columnas de Viajes (endpoint abierto al admin de la empresa). */
+  async setViajesColumnasOrden(clerkOrgId: string, viajesColumnasOrden: string[]) {
+    await this.findOne(clerkOrgId);
+    return this.prisma.tenant.update({
+      where: { clerkOrgId },
+      data: { viajesColumnasOrden },
+      select: { clerkOrgId: true, viajesColumnasOrden: true },
+    });
+  }
+
   async setModules(clerkOrgId: string, modules: string[]) {
     await this.findOne(clerkOrgId);
     return this.prisma.tenant.update({ where: { clerkOrgId }, data: { modules } });

@@ -124,6 +124,14 @@ model Tenant {
    * Se configura desde superadmin ("Configuración por empresa" → General).
    */
   opcionesProveedorLiquidacion    String[] @default([])
+  /**
+   * Orden de las columnas de la grilla de Viajes (ids de `VIAJES_COLUMNAS_ORDENABLES`
+   * en `update-tenant.dto.ts`, espejo de `lib/viajesColumnasOrden.ts` del frontend).
+   * [] (default) = orden estándar. Ids que falten se agregan al final en su orden
+   * estándar; la visibilidad de cada columna sigue dependiendo de sus propios flags.
+   * Se configura solo desde superadmin ("Configuración por empresa" → General).
+   */
+  viajesColumnasOrden             String[] @default([])
   createdAt                       DateTime @default(now())
 
   clientes                   Cliente[]

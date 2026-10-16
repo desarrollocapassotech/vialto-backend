@@ -1,5 +1,31 @@
-import { IsString, IsOptional, IsArray, IsIn, IsInt, IsBoolean, IsDateString } from 'class-validator';
+import {
+  ArrayUnique,
+  IsString,
+  IsOptional,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsBoolean,
+  IsDateString,
+} from 'class-validator';
 import { Type } from 'class-transformer';
+
+/**
+ * Columnas reordenables de la grilla de Viajes (Tenant.viajesColumnasOrden).
+ * Espejo de `VIAJES_COLUMNAS` en `vialto-frontend/src/lib/viajesColumnasOrden.ts`:
+ * si se agrega una columna a la grilla, sumarla en los dos lados.
+ */
+export const VIAJES_COLUMNAS_ORDENABLES = [
+  'idSistema',
+  'idPropio1',
+  'idPropio2',
+  'cliente',
+  'transporte',
+  'chofer',
+  'etapa',
+  'origenDestino',
+  'cargaDescarga',
+] as const;
 
 export class UpdateTenantDto {
   @IsOptional() @IsString() name?: string;
@@ -54,4 +80,11 @@ export class UpdateTenantDto {
 
   /** Opciones de proveedores/entidades para el contrato comercial PDF de liquidaciones. */
   @IsOptional() @IsArray() @IsString({ each: true }) opcionesProveedorLiquidacion?: string[];
+
+  /** Orden de columnas de la grilla de Viajes. [] = orden estándar. */
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(VIAJES_COLUMNAS_ORDENABLES, { each: true })
+  viajesColumnasOrden?: string[];
 }

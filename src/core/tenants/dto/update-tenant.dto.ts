@@ -23,10 +23,10 @@ export const VIAJES_COLUMNAS_ORDENABLES = [
   'cliente',
   'transporte',
   'chofer',
-  'etapa',
   'origenDestino',
   'cargaDescarga',
   'productos',
+  'etapa',
 ] as const;
 
 export class UpdateTenantDto {

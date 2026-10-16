@@ -168,7 +168,7 @@ export class CuentaCorrienteService {
       },
       include: {
         imputacionesComoCargo: { select: { importe: true } },
-        imputacionesComoPago: { select: { importe: true } },
+        imputacionesComoPago: { select: { importe: true, cargoId: true } },
         // VTO-431: vínculo entre el movimiento anulado y su crédito de anulación, para mostrarlos juntos.
         anuladoPor: { select: { id: true, fecha: true } },
         anulaMovimiento: { select: { id: true, fecha: true, concepto: true } },
@@ -195,6 +195,9 @@ export class CuentaCorrienteService {
       return {
         ...m,
         pendiente: anulado ? 0 : Math.max(m.importe - imputado, 0),
+        // Cargos a los que está imputado un cobro/pago (para mostrar su comprobante y
+        // abrir la factura/liquidación cobrada cuando es uno solo).
+        cargosImputadosIds: [...new Set(imputacionesComoPago.map((i) => i.cargoId))],
         comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null, facturasConArca),
         vencimientoEditable: this.vencimientoEditable(m),
       };

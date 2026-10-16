@@ -51,13 +51,10 @@ function numeroLiquidacion(
 /**
  * Concepto de la compra que genera una liquidación (sin número: va en la columna
  * Comprobante): "LIQUIDO PRODUCTO" si se emitió el CVLP con ARCA, "LIQUIDACION" si es
- * manual, y "PENDIENTE ANULACION" mientras espera la anulación manual (al anularse vuelve
- * a su concepto y el crédito dice "ANULACION MANUAL").
+ * manual. Mientras espera la anulación manual no cambia (la cuenta corriente no muestra
+ * nada hasta que se anula: recién ahí aparece el crédito "ANULACION MANUAL").
  */
-export function conceptoCargoLiquidacion(
-  liq: Pick<LiquidacionCc, "estado" | "cbteNro">,
-): string {
-  if (liq.estado === "pendiente_anulacion") return "PENDIENTE ANULACION";
+export function conceptoCargoLiquidacion(liq: Pick<LiquidacionCc, "cbteNro">): string {
   return liq.cbteNro != null ? "LIQUIDO PRODUCTO" : "LIQUIDACION";
 }
 
@@ -72,6 +69,36 @@ function conceptoAnulacionLiquidacion(
   if (liq.anulacionCbteNro) return conceptoAnulacion(liq.anulacionCbteTipo);
   if (liq.anulacionMetodo === "manual") return "ANULACION MANUAL";
   return conceptoAnulacion();
+}
+
+/** `include` para traer el movimiento de la compra junto con la liquidación. */
+export const MOVIMIENTO_CC_PAGO_SELECT = {
+  where: { tipo: "cargo" },
+  select: { estadoDisponibilidad: true },
+} as const;
+
+/** pagada | pago_parcial | pendiente — null si no aplica (anulada o sin movimiento). */
+export type EstadoPagoLiquidacion = "pagada" | "pago_parcial" | "pendiente" | null;
+
+/**
+ * Estado de pago de una liquidación, leído SOLO de su movimiento en Cuenta corriente
+ * (Pendiente / Parcial / Cancelado según los pagos imputados): Liquidaciones lo muestra
+ * pero no lo cambia. Quita `movimientosCc` de la respuesta.
+ */
+export function conEstadoPago<T extends { estado: string; movimientosCc: { estadoDisponibilidad: string }[] }>(
+  liq: T,
+): Omit<T, "movimientosCc"> & { estadoPago: EstadoPagoLiquidacion } {
+  const { movimientosCc, ...rest } = liq;
+  const cargo = movimientosCc.find((m) => m.estadoDisponibilidad !== "anulado");
+  const estadoPago: EstadoPagoLiquidacion =
+    liq.estado === "anulado" || !cargo
+      ? null
+      : cargo.estadoDisponibilidad === "cancelado"
+        ? "pagada"
+        : cargo.estadoDisponibilidad === "parcial"
+          ? "pago_parcial"
+          : "pendiente";
+  return { ...rest, estadoPago };
 }
 
 async function cargarLiquidacion(tx: Tx, tenantId: string, liquidacionId: string) {

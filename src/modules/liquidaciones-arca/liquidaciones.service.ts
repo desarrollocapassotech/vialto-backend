@@ -66,6 +66,8 @@ import { conceptoAnulacion, conceptoCargoFactura } from '../facturacion/cargo-fa
 import { anularCargoFacturaCc } from '../facturacion/factura-cuenta-corriente';
 import {
   anularCargoLiquidacionAntesDeEliminar,
+  conEstadoPago,
+  MOVIMIENTO_CC_PAGO_SELECT,
   sincronizarCargoLiquidacionCc,
 } from './liquidacion-cuenta-corriente';
 import { ReceptorPadronService } from './receptor-padron.service';
@@ -1323,8 +1325,6 @@ export class LiquidacionesService {
 
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
     await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIds);
-    // Cuenta corriente: el concepto pasa a "PENDIENTE ANULACION".
-    await this.sincronizarCuentaCorrienteLiquidacion(tenantId, liquidacionId);
 
     return this.findById(tenantId, liquidacionId);
   }
@@ -1975,10 +1975,11 @@ export class LiquidacionesService {
         transportista: { select: { id: true, nombre: true, idFiscal: true } },
         viajes: { select: { viajeId: true, subtotal: true, tnDestino: true } },
         conceptosLineas: { orderBy: { orden: 'asc' } },
+        movimientosCc: MOVIMIENTO_CC_PAGO_SELECT,
       },
       orderBy: { createdAt: 'desc' },
     });
-    return attachAnuladoPorNombres(this.clerkUsers, rows);
+    return attachAnuladoPorNombres(this.clerkUsers, rows.map(conEstadoPago));
   }
 
   async findById(tenantId: string, id: string) {
@@ -2028,12 +2029,13 @@ export class LiquidacionesService {
           },
         },
         conceptosLineas: { orderBy: { orden: 'asc' } },
+        movimientosCc: MOVIMIENTO_CC_PAGO_SELECT,
       },
     });
     if (!liq || liq.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
     }
-    const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [liq]);
+    const [withNombre] = await attachAnuladoPorNombres(this.clerkUsers, [conEstadoPago(liq)]);
     return withNombre;
   }
 

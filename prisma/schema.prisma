@@ -132,6 +132,18 @@ model Tenant {
    * Se configura solo desde superadmin ("Configuración por empresa" → General).
    */
   viajesColumnasOrden             String[] @default([])
+  /**
+   * true = la grilla de Viajes muestra la columna de productos (apagada por defecto).
+   * Se configura solo desde superadmin ("Configuración por empresa" → pestaña Viajes).
+   */
+  viajesColumnaProductosHabilitada Boolean @default(false)
+  /**
+   * Label que reemplaza a "Producto" en todo el sistema salvo Stock y el término fiscal
+   * "Líquido Producto" (ej. "Grano"). null = "Producto". Ver `shared/util/producto-label.util.ts`.
+   */
+  productoLabel                   String?
+  /** Plural de productoLabel (ej. "Granos"). Lo genera la IA al guardar el singular; editable. */
+  productoLabelPlural             String?
   createdAt                       DateTime @default(now())
 
   clientes                   Cliente[]

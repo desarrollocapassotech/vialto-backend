@@ -38,6 +38,7 @@ import {
   viajeClientesViajeInclude,
   type ViajeClienteItem,
 } from "./viaje-clientes.helper";
+import { labelEnFrase, productoLabelsDeTenant } from "../../shared/util/producto-label.util";
 import { UpdateViajeDto } from "./dto/update-viaje.dto";
 import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
 import {
@@ -253,8 +254,10 @@ async function assertProductosAsignables(
     select: { id: true, activo: true },
   });
   if (rows.length !== ids.length) {
+    // Frases neutras: el label puede ser femenino ("Mercadería").
+    const { plural } = await productoLabelsDeTenant(prisma, tenantId);
     throw new BadRequestException(
-      "Algún producto no existe o no pertenece a esta empresa.",
+      `Hay ${labelEnFrase(plural)} que no existen o no pertenecen a esta empresa.`,
     );
   }
   const current = opts.currentProductoIds ?? new Set<string>();
@@ -262,8 +265,9 @@ async function assertProductosAsignables(
     if (!row.activo) {
       const conserva = opts.modo === "update" && current.has(row.id);
       if (opts.modo === "create" || !conserva) {
+        const { plural } = await productoLabelsDeTenant(prisma, tenantId);
         throw new BadRequestException(
-          "Ese producto está inactivo. Elegí otro o reactivalo desde Productos.",
+          `Hay ${labelEnFrase(plural)} con estado inactivo. Elegí otra opción o cambiá su estado desde ${plural}.`,
         );
       }
     }

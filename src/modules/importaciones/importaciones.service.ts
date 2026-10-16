@@ -41,6 +41,7 @@ import {
   construirConfigPorDefecto,
 } from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
+import { labelEnFrase, productoLabels } from "../../shared/util/producto-label.util";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
 
@@ -100,10 +101,36 @@ type TenantVisibilidadImport = {
   idPropio1Habilitado: boolean;
   idPropio2Habilitado: boolean;
   idPropio2Label: string | null;
+  productoLabel: string | null;
+  productoLabelPlural: string | null;
   tipoFlota: string;
   /** Código de 2 letras del país fijo (`paisOrigenDestinoOculto` + país elegido), o null. */
   paisFijoCodigo: string | null;
 } | null;
+
+/**
+ * Label propio de la empresa para una columna de import, o null si usa el del
+ * catálogo: "ID Propio 2" → `Tenant.idPropio2Label` (ej. "CPE"), y las columnas
+ * de producto de Viajes → `Tenant.productoLabel` (ej. "Grano", "Cantidad de grano").
+ */
+function labelDinamicoImport(
+  modulo: string,
+  field: string,
+  tenant: Pick<
+    NonNullable<TenantVisibilidadImport>,
+    "idPropio2Habilitado" | "idPropio2Label" | "productoLabel" | "productoLabelPlural"
+  > | null,
+): string | null {
+  if (modulo !== "viajes" || !tenant) return null;
+  if (field === "idPropio2" && tenant.idPropio2Habilitado) {
+    return tenant.idPropio2Label?.trim() || "ID Propio 2";
+  }
+  if (!tenant.productoLabel?.trim()) return null;
+  const { singular } = productoLabels(tenant);
+  if (field === "productoId") return singular;
+  if (field === "cantidadProducto") return `Cantidad de ${labelEnFrase(singular)}`;
+  return null;
+}
 
 /**
  * Módulos con columna `pais` que se fija sola cuando el tenant tiene país fijo
@@ -1028,15 +1055,11 @@ export class ImportacionesService {
     const estaOculta = await this.columnaImportOculta(tenantId, modulo, tenant);
     const columnas = getCatalogoColumnas(modulo).filter((c) => !estaOculta(c.field));
 
-    // El label de "ID Propio 2" no es estático: se resuelve contra
-    // Tenant.idPropio2Label (ej. "CPE" para NyM).
-    if (modulo !== "viajes" || !tenant?.idPropio2Habilitado) return columnas;
-    const label = tenant.idPropio2Label?.trim() || "ID Propio 2";
-    return columnas.map((c) =>
-      c.field === "idPropio2"
-        ? { ...c, campoLabel: label, defaultExcelHeader: label }
-        : c,
-    );
+    // Labels propios de la empresa (ID Propio 2, Producto): ver labelDinamicoImport.
+    return columnas.map((c) => {
+      const label = labelDinamicoImport(modulo, c.field, tenant);
+      return label ? { ...c, campoLabel: label, defaultExcelHeader: label } : c;
+    });
   }
 
   /** Flags del tenant que deciden qué columnas de import aplican (ver columnaImportOculta). */
@@ -1047,6 +1070,8 @@ export class ImportacionesService {
         idPropio1Habilitado: true,
         idPropio2Habilitado: true,
         idPropio2Label: true,
+        productoLabel: true,
+        productoLabelPlural: true,
         tipoFlota: true,
         paisOrigenDestinoOculto: true,
         paisOrigenDestinoFijoId: true,
@@ -1156,10 +1181,7 @@ export class ImportacionesService {
 
       const columnas: ColumnaEsperada[] = (config?.columns ?? []).flatMap((c) => {
         const enCatalogo = catalogo.find((cat) => cat.field === c.field);
-        const esIdPropio2 = modulo === "viajes" && c.field === "idPropio2";
-        const labelDinamico = esIdPropio2
-          ? tenantIdPropio2?.idPropio2Label?.trim() || "ID Propio 2"
-          : null;
+        const labelDinamico = labelDinamicoImport(modulo, c.field, tenantIdPropio2);
         const col: ColumnaEsperada = {
           // El excelHeader de un template ya guardado lo eligió el superadmin
           // para matchear el archivo real del tenant — solo se pisa con el
@@ -1751,6 +1773,9 @@ export class ImportacionesService {
             select: {
               idPropio1Habilitado: true,
               idPropio2Habilitado: true,
+              idPropio2Label: true,
+              productoLabel: true,
+              productoLabelPlural: true,
               tipoFlota: true,
             },
           })
@@ -1851,6 +1876,12 @@ export class ImportacionesService {
           (!col.excelHeaderAliases || col.excelHeaderAliases.length === 0)
         ) {
           col.excelHeaderAliases = catCol.excelHeaderAliases;
+        }
+        // La planilla descargable usa el label de la empresa como encabezado
+        // (ej. "Grano" en vez de "Producto"): se acepta también como alias.
+        const labelDinamico = labelDinamicoImport(modulo, col.field, tenantIdentificadores);
+        if (labelDinamico && labelDinamico.toLowerCase() !== col.excelHeader.toLowerCase()) {
+          col.excelHeaderAliases = [...(col.excelHeaderAliases ?? []), labelDinamico];
         }
       }
 

@@ -7,6 +7,7 @@ import {
   IsInt,
   IsBoolean,
   IsDateString,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -25,6 +26,7 @@ export const VIAJES_COLUMNAS_ORDENABLES = [
   'etapa',
   'origenDestino',
   'cargaDescarga',
+  'productos',
 ] as const;
 
 export class UpdateTenantDto {
@@ -87,4 +89,12 @@ export class UpdateTenantDto {
   @ArrayUnique()
   @IsIn(VIAJES_COLUMNAS_ORDENABLES, { each: true })
   viajesColumnasOrden?: string[];
+
+  /** true = la grilla de Viajes muestra la columna de productos. */
+  @IsOptional() @IsBoolean() viajesColumnaProductosHabilitada?: boolean;
+
+  /** Label que reemplaza a "Producto" (ej. "Grano"). null/"" = "Producto". Sin plural, se genera con IA. */
+  @IsOptional() @IsString() @MaxLength(40) productoLabel?: string | null;
+  /** Plural del label (corrección manual del generado). */
+  @IsOptional() @IsString() @MaxLength(40) productoLabelPlural?: string | null;
 }

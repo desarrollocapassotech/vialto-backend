@@ -18,6 +18,7 @@ import {
 } from "./pdf-homologacion-watermark";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
 import { normalizeUnidadCantidad } from "./cantidad-unidad.util";
+import { productoLabels } from "../../shared/util/producto-label.util";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -28,6 +29,8 @@ type TenantPdfConfig = {
   unidadCantidadViajes: string;
   idPropio1Habilitado: boolean;
   labelIdentificacionPersonalizadaViajes: string | null;
+  productoLabel: string | null;
+  productoLabelPlural: string | null;
 } | null;
 
 type PdfCbteAsoc = { tipo: number; ptoVenta: number; nro: number };
@@ -294,6 +297,8 @@ export class LiquidacionPdfService {
         unidadCantidadViajes: true,
         idPropio1Habilitado: true,
         labelIdentificacionPersonalizadaViajes: true,
+        productoLabel: true,
+        productoLabelPlural: true,
       },
     });
 
@@ -845,6 +850,7 @@ export class LiquidacionPdfService {
     let aligns: string[];
 
     const cantidadHeader = "Cantidad";
+    const productoHeader = productoLabels(tenantIdPropio2).singular;
     // Si los viajes usan ID propio, el encabezado lleva el nombre que le dio la empresa
     // (ej. "CTG") en vez del genérico "ID de Viaje".
     const labelIdPropio =
@@ -856,7 +862,7 @@ export class LiquidacionPdfService {
     if (isSingleTrip) {
       colWidths = [100, 157.28, 40, 65, 65, 42, 70];
       tHeaders = [
-        "Producto",
+        productoHeader,
         "Descripción",
         cantidadHeader,
         "Precio",
@@ -869,7 +875,7 @@ export class LiquidacionPdfService {
       colWidths = [60, 70, 127.28, 40, 60, 60, 42, 80];
       tHeaders = [
         labelIdViaje,
-        "Producto",
+        productoHeader,
         "Descripción",
         cantidadHeader,
         "Precio",

@@ -16,6 +16,7 @@ import {
 import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { normalizeUnidadCantidad } from './cantidad-unidad.util';
+import { productoLabels } from '../../shared/util/producto-label.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -73,6 +74,8 @@ type TenantPdfConfig = {
   idPropio2Label: string | null;
   unidadCantidadViajes: string;
   labelIdentificacionPersonalizadaViajes: string | null;
+  productoLabel: string | null;
+  productoLabelPlural: string | null;
 } | null;
 
 /**
@@ -136,7 +139,9 @@ function buildDetalleFlete(
   if (rutaPartes.length) partes.push(rutaPartes.join(' '));
 
   let detalle = partes.join(' – ');
-  if (producto) detalle += ` - PRODUCTO: ${producto}`;
+  if (producto) {
+    detalle += ` - ${productoLabels(tenantPdfConfig).singular.toUpperCase()}: ${producto}`;
+  }
   return detalle;
 }
 
@@ -274,6 +279,8 @@ export class FacturaPdfService {
         idPropio2Label: true,
         unidadCantidadViajes: true,
         labelIdentificacionPersonalizadaViajes: true,
+        productoLabel: true,
+        productoLabelPlural: true,
       },
     });
 

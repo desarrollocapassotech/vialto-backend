@@ -4,6 +4,7 @@ import { TenantGuard } from './guards/tenant.guard';
 import { TenantBootstrapService } from './tenant-bootstrap.service';
 import { FirebaseAdminService } from './firebase/firebase-admin.service';
 import { CloudinaryService } from './storage/cloudinary.service';
+import { IaJsonService } from './ia/ia-json.service';
 
 @Global()
 @Module({
@@ -13,6 +14,7 @@ import { CloudinaryService } from './storage/cloudinary.service';
     TenantBootstrapService,
     FirebaseAdminService,
     CloudinaryService,
+    IaJsonService,
   ],
   exports: [
     ModuleGuard,
@@ -20,6 +22,7 @@ import { CloudinaryService } from './storage/cloudinary.service';
     TenantBootstrapService,
     FirebaseAdminService,
     CloudinaryService,
+    IaJsonService,
   ],
 })
 export class VialtoSharedModule {}

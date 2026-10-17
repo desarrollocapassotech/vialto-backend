@@ -650,88 +650,107 @@ export class FacturaPdfService {
       .text(copia, M, y + 5, { width: CW, align: 'center' });
     y += 22;
 
+    // Encabezado con el formato del comprobante de ARCA: dos mitades (emisor | datos del
+    // comprobante) y el recuadro de la letra centrado en la hoja, sobre la línea divisoria.
     const hdrH = 108;
     doc.rect(M, y, CW, hdrH).stroke('#aaa');
-    const c1x = M + 160;
-    const c2x = M + 230;
-    doc.moveTo(c1x, y).lineTo(c1x, y + hdrH).stroke('#aaa');
-    doc.moveTo(c2x, y).lineTo(c2x, y + hdrH).stroke('#aaa');
+    const midX = M + CW / 2;
+    const BOX_W = 46;
+    const BOX_H = 42;
+    doc.moveTo(midX, y + BOX_H).lineTo(midX, y + hdrH).stroke('#aaa');
 
     {
       const hasLogo = Boolean(logoBuffer);
-      const LOGO_SIZE = 40;
-      const colW = 150;
-      const colX = M + 5;
-      let cy = y + 6;
+      const LOGO_H = 44;
+      // Mitad izquierda, sin pisar el recuadro de la letra.
+      const colX = M + 8;
+      const colW = CW / 2 - BOX_W / 2 - 16;
+      const emisor = config?.razonSocial ?? '';
 
+      // Arriba: el logo (si hay) o la razón social destacada, centrados como en ARCA.
+      let logoOk = false;
       if (hasLogo) {
         try {
-          doc.image(logoBuffer as Buffer, M + (160 - LOGO_SIZE) / 2, cy, { fit: [LOGO_SIZE, LOGO_SIZE] });
-          cy += LOGO_SIZE + 4;
-          doc.fontSize(6).font('Helvetica-Oblique').fillColor('#555')
-            .text('de', colX, cy, { width: colW, align: 'center' });
-          cy += 9;
+          doc.image(logoBuffer as Buffer, colX, y + 6, {
+            fit: [colW, LOGO_H],
+            align: 'center',
+            valign: 'center',
+          });
+          logoOk = true;
         } catch {
-          // sin logo
+          // logo ilegible: cae a la razón social
         }
       }
+      if (!logoOk) {
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#000')
+          .text(emisor, colX, y + 18, { width: colW, align: 'center' });
+      }
 
-      const align = hasLogo ? 'center' : 'left';
-      const emisor = config?.razonSocial ?? '';
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#000')
-        .text(emisor, colX, cy, { width: colW, align });
-      cy += doc.heightOfString(emisor, { width: colW }) + 3;
-
-      const domicilioTxt = config?.domicilioEmisor ?? '';
-      doc.fontSize(6.5).font('Helvetica').fillColor('#333')
-        .text(domicilioTxt, colX, cy, { width: colW, align });
-      cy += doc.heightOfString(domicilioTxt, { width: colW }) + 3;
-
+      // Abajo: los datos con la etiqueta en negrita, anclados al pie del encabezado.
       const condEmisorLabel = config?.condicionIvaEmisor
         ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ?? config.condicionIvaEmisor)
         : '';
-      doc.fontSize(6.5).font('Helvetica').fillColor('#333')
-        .text(condEmisorLabel, colX, cy, { width: colW, align });
+      const datos: Array<[string, string]> = [
+        ['Razón Social', emisor],
+        ['Domicilio Comercial', config?.domicilioEmisor ?? ''],
+        ['Condición frente al IVA', condEmisorLabel],
+      ];
+      doc.fontSize(7.5);
+      const alto = (label: string, valor: string) =>
+        doc.font('Helvetica').heightOfString(`${label}: ${valor}`, { width: colW });
+      let ly = y + hdrH - 6 - datos.reduce((acc, [l, v]) => acc + alto(l, v) + 3, 0) + 3;
+      for (const [label, valor] of datos) {
+        doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#000')
+          .text(`${label}: `, colX, ly, { width: colW, continued: true })
+          .font('Helvetica')
+          .text(valor);
+        ly += alto(label, valor) + 3;
+      }
+    }
+
+    const cbteTipo = facturaExt.cbteTipo ?? 6;
+    const letra = LETRA_POR_TIPO[cbteTipo] ?? 'B';
+
+    {
+      // Recuadro de la letra (RG 1415: solo letra + código), centrado en la hoja.
+      const boxX = midX - BOX_W / 2;
+      doc.rect(boxX, y, BOX_W, BOX_H).fillAndStroke('#fff', '#000');
+      doc.fontSize(26).font('Helvetica-Bold').fillColor('#000')
+        .text(letra, boxX, y + 3, { width: BOX_W, align: 'center' });
+      doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
+        .text(`COD. ${String(cbteTipo).padStart(2, '0')}`, boxX, y + BOX_H - 10, { width: BOX_W, align: 'center' });
     }
 
     {
-      const cbteTipo = facturaExt.cbteTipo ?? 6;
-      const tipoStr = LETRA_POR_TIPO[cbteTipo] ?? 'B';
-      doc.rect(c1x + 4, y + 6, 60, 60).stroke('#000');
-      doc.fontSize(36).font('Helvetica-Bold').fillColor('#000')
-        .text(tipoStr, c1x + 4, y + 14, { width: 60, align: 'center' });
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
-        .text(`COD. ${String(cbteTipo).padStart(3, '0')}`, c1x + 4, y + 72, { width: 60, align: 'center' });
-    }
+      const titleX = midX + BOX_W / 2 + 12;
+      const titleW = M + CW - titleX - 8;
+      doc.fontSize(18).font('Helvetica-Bold').fillColor('#000')
+        .text(`${TITULO_POR_TIPO[cbteTipo] ?? 'FACTURA'} ${letra}`, titleX, y + 8, { width: titleW });
 
-    {
-      const titleX = c2x + 6;
-      const titleW = CW - (c2x - M) - 6;
-      const tituloCbteTipo = facturaExt.cbteTipo ?? 6;
-      doc.fontSize(13).font('Helvetica-Bold').fillColor('#000')
-        .text(
-          TITULO_POR_TIPO[tituloCbteTipo] ?? 'FACTURA',
-          titleX,
-          y + 6,
-          { width: titleW },
-        );
+      // "Etiqueta: valor" con la etiqueta en negrita, como el comprobante de ARCA.
+      const linea = (label: string, valor: string, x: number, ly: number, w: number) => {
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
+          .text(`${label}: `, x, ly, { width: w, continued: true })
+          .font('Helvetica')
+          .text(valor);
+      };
 
-      const cbteNroStr = facturaExt.cbteNro && facturaExt.ptoVenta
-        ? `${String(facturaExt.ptoVenta).padStart(4, '0')}-${String(facturaExt.cbteNro).padStart(8, '0')}`
-        : factura.numero;
-
-      const dataY = y + 42;
-      const subColW = titleW / 2 - 6;
-      const rColX = titleX + subColW + 10;
-
-      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
-        .text(`Número: ${cbteNroStr}`, titleX, dataY, { width: subColW })
-        .text(`Fecha: ${fmtDate(factura.fechaEmision)}`, titleX, dataY + 13, { width: subColW });
-
-      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
-        .text(`CUIT: ${config?.cuitEmisor ?? ''}`, rColX, dataY, { width: subColW })
-        .text(`Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ''}`, rColX, dataY + 13, { width: subColW })
-        .text(`Inic. Act.: ${config?.inicActEmisor ?? ''}`, rColX, dataY + 26, { width: subColW });
+      let dy = y + 38;
+      if (facturaExt.cbteNro && facturaExt.ptoVenta) {
+        const mitad = titleW / 2;
+        linea('Punto de Venta', String(facturaExt.ptoVenta).padStart(5, '0'), titleX, dy, mitad);
+        linea('Comp. Nro', String(facturaExt.cbteNro).padStart(8, '0'), titleX + mitad, dy, mitad);
+      } else {
+        linea('Número', String(factura.numero ?? ''), titleX, dy, titleW);
+      }
+      dy += 12;
+      linea('Fecha de Emisión', fmtDate(factura.fechaEmision), titleX, dy, titleW);
+      dy += 18;
+      linea('CUIT', String(config?.cuitEmisor ?? ''), titleX, dy, titleW);
+      dy += 12;
+      linea('Ingresos Brutos', String(config?.ingBrutos ?? config?.cuitEmisor ?? ''), titleX, dy, titleW);
+      dy += 12;
+      linea('Fecha de Inicio de Actividades', String(config?.inicActEmisor ?? ''), titleX, dy, titleW);
     }
 
     y += hdrH + 2;

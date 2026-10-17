@@ -139,6 +139,9 @@ export class ViajesController {
       transportistaId,
       choferId,
       sinLiquidacionActiva: sinLiquidacionActiva || undefined,
+      incluirLiquidacionId:
+        queryParamFromRequest(req, "incluirLiquidacionId") ??
+        query.incluirLiquidacionId,
       tipoFecha,
       fechaDesde,
       fechaHasta,

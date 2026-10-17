@@ -177,14 +177,38 @@ export function buildViajesPaginatedWhere(
   if (chid) where.choferId = chid;
 
   if (query.sinLiquidacionActiva) {
-    where.liquidacionesViaje = {
-      none: {
-        liquidacion: {
-          ...(tid ? { transportistaId: tid } : {}),
-          estado: { not: 'anulado' },
+    const sinActiva: Prisma.ViajeWhereInput = {
+      liquidacionesViaje: {
+        none: {
+          liquidacion: {
+            ...(tid ? { transportistaId: tid } : {}),
+            estado: { not: 'anulado' },
+          },
         },
       },
     };
+    const lid = query.incluirLiquidacionId?.trim();
+    if (lid) {
+      // "Sin liquidación activa" O "de esta liquidación". `where.tenantId` ya acota la
+      // empresa, así que una liquidación de otra empresa no suma ningún viaje.
+      const prevAnd = where.AND;
+      const andArr: Prisma.ViajeWhereInput[] = Array.isArray(prevAnd)
+        ? [...prevAnd]
+        : prevAnd != null
+          ? [prevAnd]
+          : [];
+      where.AND = [
+        ...andArr,
+        {
+          OR: [
+            sinActiva,
+            { liquidacionesViaje: { some: { liquidacionId: lid } } },
+          ],
+        },
+      ];
+    } else {
+      Object.assign(where, sinActiva);
+    }
   }
 
   const tipoFecha = query.tipoFecha?.trim();

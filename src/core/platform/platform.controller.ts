@@ -144,6 +144,17 @@ export class PlatformController {
       queryParamFromRequest(req, "sortBy") ?? query.sortBy,
       queryParamFromRequest(req, "sortDir") ?? query.sortDir,
     );
+    // Igual que `viajes.controller.ts`: antes no se pasaba y la tabla de "Nueva
+    // liquidación" de superadmin traía también los viajes ya liquidados.
+    const sinLiqRaw =
+      queryParamFromRequest(req, "sinLiquidacionActiva") ??
+      (query.sinLiquidacionActiva != null
+        ? String(query.sinLiquidacionActiva)
+        : undefined);
+    const sinLiquidacionActiva =
+      sinLiqRaw === "1" ||
+      sinLiqRaw?.toLowerCase() === "true" ||
+      query.sinLiquidacionActiva === true;
     return this.service.viajesPaginated(tenantId, {
       page: query.page,
       pageSize: query.pageSize,
@@ -153,6 +164,10 @@ export class PlatformController {
       clienteId,
       transportistaId,
       choferId,
+      sinLiquidacionActiva: sinLiquidacionActiva || undefined,
+      incluirLiquidacionId:
+        queryParamFromRequest(req, "incluirLiquidacionId") ??
+        query.incluirLiquidacionId,
       tipoFecha,
       fechaDesde,
       fechaHasta,

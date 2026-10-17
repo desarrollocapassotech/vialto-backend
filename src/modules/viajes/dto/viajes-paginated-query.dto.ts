@@ -86,6 +86,16 @@ export class ViajesPaginatedQueryDto {
   @IsBoolean()
   sinLiquidacionActiva?: boolean;
 
+  /**
+   * Junto con `sinLiquidacionActiva`: suma además los viajes de esta liquidación (que sí
+   * tienen liquidación activa: la propia). Lo usan los modales de editar/emitir una
+   * liquidación guardada, para traer "sus viajes + los pendientes" en vez de todo el
+   * historial del transportista.
+   */
+  @IsOptional()
+  @IsString()
+  incluirLiquidacionId?: string;
+
   /** Filtrar rango sobre `fechaCarga` o `fechaDescarga` (requiere al menos una fecha). */
   @IsOptional()
   @IsIn(['carga', 'descarga'])

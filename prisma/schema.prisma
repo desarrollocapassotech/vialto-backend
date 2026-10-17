@@ -1515,6 +1515,7 @@ model ArcaConfig {
   ingBrutos                String? // N° Ing. Brutos (suele coincidir con CUIT)
   inicActEmisor            String? // Fecha de inicio de actividades (ej: 01/03/2015)
   logoUrl                  String? // Logo del emisor (Cloudinary), embebido en los PDF de comprobantes
+  leyendaFactura           String? // Texto en letra chica debajo de la condición de venta del PDF de factura (ej. mora)
   // Puntos de venta y ambiente
   ptoVentaCvlp             Int // punto de venta para CVLP tipo 60
   ptoVentaFactura          Int // punto de venta para Facturas A/B

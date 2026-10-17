@@ -247,6 +247,7 @@ export class FacturaPdfService {
             idFiscal: true,
             direccion: true,
             condicionIva: true,
+            condicionPagoDias: true,
           },
         },
         viajes: {
@@ -764,10 +765,29 @@ export class FacturaPdfService {
       const nameText = `Sr.(es): ${c?.nombre ?? ''}`;
       const domText = `Domicilio: ${c?.direccion ?? ''}`;
 
+      // Condición de venta: días de vencimiento de la propia factura (fecha de vencimiento −
+      // emisión, ambas a medianoche UTC) o, si no tiene, la condición de pago del cliente.
+      const diasVto = factura.fechaVencimiento && factura.fechaEmision
+        ? Math.round(
+            (new Date(factura.fechaVencimiento).getTime() - new Date(factura.fechaEmision).getTime()) /
+              86_400_000,
+          )
+        : (c?.condicionPagoDias ?? null);
+      const condicionVenta = diasVto != null && diasVto > 0
+        ? `Cta Cte – Vto ${diasVto} días`
+        : 'Cta Cte';
+      // Leyenda libre de la empresa (ArcaConfig.leyendaFactura, ej. intereses por mora), en
+      // letra chica debajo de la condición de venta. Solo en facturas, no en notas de crédito.
+      const leyenda = kind === 'factura' ? String(config?.leyendaFactura ?? '').trim() : '';
+      const LEYENDA_FONT = 6;
+      doc.fontSize(LEYENDA_FONT).font('Helvetica');
+      const leyendaH = leyenda ? doc.heightOfString(leyenda, { width: colW }) + 3 : 0;
+      doc.fontSize(7.5);
+
       const nameH = doc.heightOfString(nameText, { width: colW });
       const domH = doc.heightOfString(domText, { width: colW });
       const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
-      const rightTotalH = kind === 'nc' ? (5 + 12 * 4) : (5 + 12 * 2);
+      const rightTotalH = kind === 'nc' ? (5 + 12 * 4) : (5 + 12 + leyendaH + 12 + 5);
       const rcpH = Math.max(leftTotalH, rightTotalH, 48);
 
       doc.rect(M, y, CW, rcpH).stroke('#aaa');
@@ -789,8 +809,13 @@ export class FacturaPdfService {
 
       const rx = M + CW / 2 + 4;
       doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-        .text('Condición de Venta: CTA CTE', rx, y + 5, { width: colW })
-        .text('Moneda: Pesos', rx, y + 17, { width: colW });
+        .text(`Condición de Venta: ${condicionVenta}`, rx, y + 5, { width: colW });
+      if (leyenda) {
+        doc.fontSize(LEYENDA_FONT).font('Helvetica').fillColor('#555')
+          .text(leyenda, rx, y + 16, { width: colW });
+      }
+      doc.fontSize(7.5).font('Helvetica').fillColor('#333')
+        .text('Moneda: Pesos', rx, y + 17 + leyendaH, { width: colW });
 
       if (kind === 'nc') {
         const refCbteNro = facturaExt.cbteNro && facturaExt.ptoVenta

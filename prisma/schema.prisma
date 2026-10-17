@@ -1516,6 +1516,8 @@ model ArcaConfig {
   inicActEmisor            String? // Fecha de inicio de actividades (ej: 01/03/2015)
   logoUrl                  String? // Logo del emisor (Cloudinary), embebido en los PDF de comprobantes
   leyendaFactura           String? // Texto en letra chica debajo de la condición de venta del PDF de factura (ej. mora)
+  colorFactura             String? // Color de acento del PDF de factura/NC ("#RRGGBB"); null = blanco y negro
+  colorLiquidacion         String? // Color de acento del PDF de liquidación CVLP y su anulación; null = blanco y negro
   // Puntos de venta y ambiente
   ptoVentaCvlp             Int // punto de venta para CVLP tipo 60
   ptoVentaFactura          Int // punto de venta para Facturas A/B

@@ -945,6 +945,7 @@ export class PlatformService {
     dto: UpdateFacturaDto,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
+    await this.facturacionService.assertFacturaEditable(id, scopedTenantId);
     return this.facturacionService.updateFactura(id, scopedTenantId, dto);
   }
 

@@ -13,6 +13,7 @@ import {
   drawHomologacionWatermark,
   shouldShowHomologacionWatermark,
 } from './pdf-homologacion-watermark';
+import { pdfColoresComprobante } from './pdf-color-comprobante';
 import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { normalizeUnidadCantidad } from './cantidad-unidad.util';
@@ -642,23 +643,25 @@ export class FacturaPdfService {
     const M = MARGIN;
     const CW = COL_W;
     let y = M;
+    // Color de acento elegido por la empresa (ArcaConfig.colorFactura); sin color, los grises de siempre.
+    const col = pdfColoresComprobante(config?.colorFactura);
 
-    doc.rect(M, y, CW, 18).stroke('#000');
+    doc.rect(M, y, CW, 18).stroke(col.linea('#000'));
     doc
       .fontSize(9)
       .font('Helvetica-Bold')
-      .fillColor('#000')
+      .fillColor(col.texto('#000'))
       .text(copia, M, y + 5, { width: CW, align: 'center' });
     y += 22;
 
     // Encabezado con el formato del comprobante de ARCA: dos mitades (emisor | datos del
     // comprobante) y el recuadro de la letra centrado en la hoja, sobre la línea divisoria.
     const hdrH = 108;
-    doc.rect(M, y, CW, hdrH).stroke('#aaa');
+    doc.rect(M, y, CW, hdrH).stroke(col.linea('#aaa'));
     const midX = M + CW / 2;
     const BOX_W = 46;
     const BOX_H = 42;
-    doc.moveTo(midX, y + BOX_H).lineTo(midX, y + hdrH).stroke('#aaa');
+    doc.moveTo(midX, y + BOX_H).lineTo(midX, y + hdrH).stroke(col.linea('#aaa'));
 
     {
       const hasLogo = Boolean(logoBuffer);
@@ -715,8 +718,8 @@ export class FacturaPdfService {
     {
       // Recuadro de la letra (RG 1415: solo letra + código), centrado en la hoja.
       const boxX = midX - BOX_W / 2;
-      doc.rect(boxX, y, BOX_W, BOX_H).fillAndStroke('#fff', '#000');
-      doc.fontSize(26).font('Helvetica-Bold').fillColor('#000')
+      doc.rect(boxX, y, BOX_W, BOX_H).fillAndStroke('#fff', col.linea('#000'));
+      doc.fontSize(26).font('Helvetica-Bold').fillColor(col.texto('#000'))
         .text(letra, boxX, y + 3, { width: BOX_W, align: 'center' });
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
         .text(`COD. ${String(cbteTipo).padStart(2, '0')}`, boxX, y + BOX_H - 10, { width: BOX_W, align: 'center' });
@@ -725,7 +728,7 @@ export class FacturaPdfService {
     {
       const titleX = midX + BOX_W / 2 + 12;
       const titleW = M + CW - titleX - 8;
-      doc.fontSize(18).font('Helvetica-Bold').fillColor('#000')
+      doc.fontSize(18).font('Helvetica-Bold').fillColor(col.texto('#000'))
         .text(`${TITULO_POR_TIPO[cbteTipo] ?? 'FACTURA'} ${letra}`, titleX, y + 8, { width: titleW });
 
       // "Etiqueta: valor" con la etiqueta en negrita, como el comprobante de ARCA.
@@ -790,8 +793,8 @@ export class FacturaPdfService {
       const rightTotalH = kind === 'nc' ? (5 + 12 * 4) : (5 + 12 + leyendaH + 12 + 5);
       const rcpH = Math.max(leftTotalH, rightTotalH, 48);
 
-      doc.rect(M, y, CW, rcpH).stroke('#aaa');
-      doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke('#aaa');
+      doc.rect(M, y, CW, rcpH).stroke(col.linea('#aaa'));
+      doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke(col.linea('#aaa'));
 
       let ly = y + 5;
       doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
@@ -840,9 +843,9 @@ export class FacturaPdfService {
 
     // "Cantidad" genérico: la unidad (TN/UD) va solo en las líneas de viaje.
     const tHeaders = ['Detalle', 'Cantidad', 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
-    doc.rect(M, y, tableW, headerRowH).fill('#e8e8e8').stroke('#aaa');
+    doc.rect(M, y, tableW, headerRowH).fill(col.fondoEncabezadoTabla('#e8e8e8')).stroke('#aaa');
     tHeaders.forEach((h, i) => {
-      doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000')
+      doc.fontSize(6.5).font('Helvetica-Bold').fillColor(col.textoEncabezadoTabla('#000'))
         .text(h, colX[i] + cellPadX, y + cellPadY, {
           width: colWidths[i] - cellPadX * 2,
           align: i >= 1 ? 'right' : 'left',
@@ -908,7 +911,7 @@ export class FacturaPdfService {
     }
 
     const footerY = PAGE_H - MARGIN - 90;
-    doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke('#aaa');
+    doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke(col.linea('#aaa'));
 
     const pie = cvlpPdfPieFinanciero(
       {
@@ -925,7 +928,7 @@ export class FacturaPdfService {
 
     const footerBoxY = footerY + 12;
     const footerBoxH = 70;
-    doc.rect(M, footerBoxY, CW, footerBoxH).stroke('#aaa');
+    doc.rect(M, footerBoxY, CW, footerBoxH).stroke(col.linea('#aaa'));
 
     if (qrBuffer) {
       doc.image(qrBuffer, M + 4, footerBoxY + 4, { width: 62, height: 62 });

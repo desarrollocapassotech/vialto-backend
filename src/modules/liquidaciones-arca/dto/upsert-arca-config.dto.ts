@@ -1,4 +1,6 @@
-import { IsString, IsInt, IsNumber, IsIn, IsOptional, Min, Max, MaxLength } from 'class-validator';
+import { IsString, IsInt, IsNumber, IsIn, IsOptional, Matches, Min, Max, MaxLength } from 'class-validator';
+
+const COLOR_HEX_O_VACIO = /^(#[0-9a-fA-F]{6})?$/;
 
 export class UpsertArcaConfigDto {
   @IsString()
@@ -11,6 +13,11 @@ export class UpsertArcaConfigDto {
   @IsOptional() @IsString() inicActEmisor?: string;
   /** Leyenda en letra chica bajo la condición de venta del PDF de factura. Vacío = sin leyenda. */
   @IsOptional() @IsString() @MaxLength(1000) leyendaFactura?: string;
+  /** Color de acento del PDF ("#RRGGBB"). Vacío = blanco y negro. */
+  @IsOptional() @IsString() @Matches(COLOR_HEX_O_VACIO, { message: 'El color debe tener el formato #RRGGBB.' })
+  colorFactura?: string;
+  @IsOptional() @IsString() @Matches(COLOR_HEX_O_VACIO, { message: 'El color debe tener el formato #RRGGBB.' })
+  colorLiquidacion?: string;
 
   @IsInt()
   @Min(1)

@@ -926,6 +926,28 @@ export class FacturacionService {
     }
   }
 
+  /**
+   * Edición desde Facturas (PATCH /facturas/:id, tenant y plataforma): con ARCA solo se edita
+   * un borrador (`arcaEstado == null`). Una factura que ya entró al circuito de emisión
+   * (autorizada, esperando CAE, con error o anulada) se corrige anulándola y volviéndola a
+   * emitir. Sin ARCA no hay estados de emisión y se sigue pudiendo editar.
+   *
+   * No va dentro de `updateFactura` a propósito: Cuenta corriente usa ese método para editar
+   * el número/vencimiento de una factura, también con ARCA.
+   */
+  async assertFacturaEditable(id: string, tenantId: string): Promise<void> {
+    const factura = await this.prisma.factura.findFirst({
+      where: { id, tenantId },
+      select: { arcaEstado: true },
+    });
+    if (!factura) throw new NotFoundException("Factura no encontrada");
+    if (factura.arcaEstado != null && (await this.tieneArca(tenantId))) {
+      throw new BadRequestException(
+        "Solo se puede editar una factura en borrador. Una factura emitida en ARCA se corrige anulándola y volviéndola a emitir.",
+      );
+    }
+  }
+
   async updateFactura(id: string, tenantId: string, dto: UpdateFacturaDto) {
     const existing = await this.prisma.factura.findFirst({
       where: { id, tenantId },

@@ -77,12 +77,13 @@ export class FacturacionController {
   @ApiOperation({ summary: 'Actualizar factura (estado, vencimiento)' })
   @Patch('facturas/:id')
   @Roles('admin', 'superadmin')
-  updateFactura(
+  async updateFactura(
     @Param('id') id: string,
     @Body() dto: UpdateFacturaDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
+    await this.service.assertFacturaEditable(id, auth.tenantId);
     return this.service.updateFactura(id, auth.tenantId, dto);
   }
 

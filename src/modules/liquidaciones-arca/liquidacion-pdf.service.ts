@@ -18,7 +18,7 @@ import {
 } from "./pdf-homologacion-watermark";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
 import { normalizeUnidadCantidad } from "./cantidad-unidad.util";
-import { productoLabels } from "../../shared/util/producto-label.util";
+import { ymdAr } from "../../shared/util/fecha-ar.util";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -47,20 +47,81 @@ type PdfDrawOpts = {
   asociados?: PdfCbteAsoc[];
 };
 
-const CONDICION_IVA_LABEL: Record<number, string> = {
-  1: "RESP. INSCRIPTO",
-  4: "IVA SUJETO EXENTO",
-  5: "CONSUMIDOR FINAL",
-  6: "RESP. MONOTRIBUTO",
-};
-
-// Letra mostrada en el recuadro grande del comprobante. CVLP (60/61) se factura
-// fiscalmente como A/B según el destinatario, por eso comparte letra con Factura A/B.
+// Letra del recuadro del comprobante: CVLP 60 y sus anulaciones NC 3 / ND 2 son clase A;
+// 61, NC 8 y ND 7, clase B.
 const LETRA_POR_TIPO: Record<number, string> = {
   1: "A",
+  2: "A",
+  3: "A",
   6: "B",
+  7: "B",
+  8: "B",
   11: "C",
+  60: "A",
+  61: "B",
 };
+
+function letraComprobante(cbteTipo: number): string {
+  return LETRA_POR_TIPO[cbteTipo] ?? "A";
+}
+
+const CONDICION_IVA_TEXTO: Record<number, string> = {
+  1: "Responsable Inscripto",
+  4: "IVA Sujeto Exento",
+  5: "Consumidor Final",
+  6: "Responsable Monotributo",
+};
+
+function condicionIvaTexto(v: number | string | null | undefined): string {
+  if (v == null || v === "") return "";
+  return CONDICION_IVA_TEXTO[Number(v)] ?? String(v);
+}
+
+/** "30716741792" → "30-71674179-2"; cualquier otro formato se muestra tal cual. */
+function formatCuit(v: string | null | undefined): string {
+  const d = String(v ?? "").replace(/\D/g, "");
+  return d.length === 11 ? `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}` : String(v ?? "");
+}
+
+type ViajeDetalleCvlp = {
+  numero: string | number;
+  numeroIdentificacionPersonalizado?: string | null;
+  idPropio2?: string | null;
+  origen?: string | null;
+  destino?: string | null;
+  chofer?: { nombre?: string | null } | null;
+  productosViaje?: Array<{ producto?: { nombre?: string | null } | null }>;
+};
+
+/** Identificación del viaje: "CTG 101…-CP 0-1761" (ID propio + ID propio 2) o "Viaje #N". */
+function refViajeCvlp(v: ViajeDetalleCvlp, tenant: TenantPdfConfig): string {
+  const idPropio = v.numeroIdentificacionPersonalizado?.trim();
+  const usaIdPropio = (tenant?.idPropio1Habilitado ?? true) && Boolean(idPropio);
+  let ref = usaIdPropio
+    ? `${tenant?.labelIdentificacionPersonalizadaViajes?.trim() || "ID propio"} ${idPropio}`
+    : `Viaje #${v.numero}`;
+  const id2 = v.idPropio2?.trim();
+  if (tenant?.idPropio2Habilitado && id2) {
+    ref += `-${tenant.idPropio2Label?.trim() || "ID Propio 2"} ${id2}`;
+  }
+  return ref;
+}
+
+/**
+ * Detalle de una línea de viaje del CVLP: "Chofer — CTG 101…-CP 0-1761 — Origen a Destino —
+ * Producto" (cada parte solo si tiene dato). Espejo en el front: `detalleViajeCvlp` de
+ * `lib/pdfDetalleViaje.ts`.
+ */
+function detalleViajeCvlp(v: ViajeDetalleCvlp, tenant: TenantPdfConfig): string {
+  const ruta = [v.origen?.trim(), v.destino?.trim()].filter(Boolean).join(" a ");
+  const productos = (v.productosViaje ?? [])
+    .map((p) => p.producto?.nombre?.trim())
+    .filter(Boolean)
+    .join(", ");
+  return [v.chofer?.nombre?.trim(), refViajeCvlp(v, tenant), ruta, productos]
+    .filter(Boolean)
+    .join(" — ");
+}
 
 // ── Helpers numéricos ─────────────────────────────────────────────────────────
 
@@ -629,411 +690,269 @@ export class LiquidacionPdfService {
       .text(copia, M, y + 5, { width: CW, align: "center" });
     y += 22;
 
-    // ── Sección 1: emisor | tipo | título ────────────────────────────────────
-    const hdrH = 108;
-    doc.rect(M, y, CW, hdrH).stroke("#aaa");
+    // ── Sección 1: logo | emisor | letra | comprobante (recuadro redondeado) ──
+    const hdrH = 112;
+    const R = 6;
+    doc.roundedRect(M, y, CW, hdrH, R).stroke("#555");
 
-    // Líneas divisoras verticales
-    const c1x = M + 160; // fin col emisor
-    const c2x = M + 230; // fin col tipo
-    doc
-      .moveTo(c1x, y)
-      .lineTo(c1x, y + hdrH)
-      .stroke("#aaa");
-    doc
-      .moveTo(c2x, y)
-      .lineTo(c2x, y + hdrH)
-      .stroke("#aaa");
+    const hasLogo = Boolean(logoBuffer);
+    const logoW = hasLogo ? 134 : 0;
+    const letraX = M + 290; // columna de la letra
+    const letraW = 46;
+    const compX = letraX + letraW; // columna del comprobante
+    const compW = M + CW - compX;
+    const emisorX = M + logoW;
+    const emisorW = letraX - emisorX;
 
-    // Col 1: logo (si existe) + razón social + domicilio + condición IVA
-    {
-      const hasLogo = Boolean(logoBuffer);
-      const LOGO_SIZE = 40;
-      const colW = 150;
-      const colX = M + 5;
-      let cy = y + 6;
+    if (hasLogo) doc.moveTo(emisorX, y).lineTo(emisorX, y + hdrH).stroke("#555");
+    doc.moveTo(letraX, y).lineTo(letraX, y + hdrH).stroke("#555");
+    doc.moveTo(compX, y).lineTo(compX, y + hdrH).stroke("#555");
 
-      if (hasLogo) {
-        try {
-          doc.image(logoBuffer as Buffer, M + (160 - LOGO_SIZE) / 2, cy, {
-            fit: [LOGO_SIZE, LOGO_SIZE],
-          });
-          cy += LOGO_SIZE + 4;
-          doc
-            .fontSize(6)
-            .font("Helvetica-Oblique")
-            .fillColor("#555")
-            .text("de", colX, cy, { width: colW, align: "center" });
-          cy += 9;
-        } catch (e) {
-          console.error("LOGO ERROR:", e);
-          // Formato de imagen no soportado por pdfkit; se sigue sin logo.
-        }
+    // Logo
+    let logoOk = false;
+    if (hasLogo) {
+      try {
+        doc.image(logoBuffer as Buffer, M + 8, y + 8, {
+          fit: [logoW - 16, hdrH - 16],
+          align: "center",
+          valign: "center",
+        });
+        logoOk = true;
+      } catch (e) {
+        console.error("LOGO ERROR:", e);
+        // Formato de imagen no soportado por pdfkit; se sigue sin logo.
       }
-
-      const align = hasLogo ? "center" : "left";
-      const emisor = config?.razonSocial ?? "NyM Logística";
-      doc
-        .fontSize(9)
-        .font("Helvetica-Bold")
-        .fillColor("#000")
-        .text(emisor, colX, cy, { width: colW, align });
-      cy += doc.heightOfString(emisor, { width: colW }) + 3;
-
-      const domicilioTxt = config?.domicilioEmisor ?? "";
-      doc
-        .fontSize(6.5)
-        .font("Helvetica")
-        .fillColor("#333")
-        .text(domicilioTxt, colX, cy, { width: colW, align });
-      cy += doc.heightOfString(domicilioTxt, { width: colW }) + 3;
-
-      const condEmisorLabel = config?.condicionIvaEmisor
-        ? (CONDICION_IVA_LABEL[Number(config.condicionIvaEmisor)] ??
-          config.condicionIvaEmisor)
-        : "";
-      doc
-        .fontSize(6.5)
-        .font("Helvetica")
-        .fillColor("#333")
-        .text(condEmisorLabel, colX, cy, { width: colW, align });
     }
 
-    // Col 2: letra + tipo
-    const isLetter =
-      opts.cbteTipo === 1 || opts.cbteTipo === 6 || opts.cbteTipo === 11;
-    const isCodBox =
-      opts.cbteTipo === 60 ||
-      opts.cbteTipo === 61 ||
-      opts.cbteTipo === CBTE_TIPO_NC_CVLP ||
-      opts.kind === "nc";
-
-    if (isLetter) {
-      const tipoStr = LETRA_POR_TIPO[opts.cbteTipo] ?? String(opts.cbteTipo);
-      doc.rect(c1x + 4, y + 6, 60, 60).stroke("#000");
-      doc
-        .fontSize(36)
-        .font("Helvetica-Bold")
-        .fillColor("#000")
-        .text(tipoStr, c1x + 4, y + 14, { width: 60, align: "center" });
-
-      const codLabel = `COD. ${String(opts.cbteTipo).padStart(3, "0")}`;
+    // Emisor: razón social, domicilio y, al pie, la condición frente al IVA.
+    {
+      const x = emisorX + 10;
+      const w = emisorW - 18;
+      const emisor = config?.razonSocial ?? "";
+      const emisorTxt = logoOk ? `de ${emisor}` : emisor;
       doc
         .fontSize(10)
         .font("Helvetica-Bold")
         .fillColor("#000")
-        .text(codLabel, c1x + 4, y + 72, { width: 60, align: "center" });
-    } else if (isCodBox) {
-      // Diseño con "COD." arriba y el número grande abajo (CVLP y anulaciones)
-      doc.rect(c1x + 4, y + 6, 60, 60).stroke("#000");
+        .text(emisorTxt, x, y + 14, { width: w });
+      const cy = y + 14 + doc.heightOfString(emisorTxt, { width: w }) + 8;
       doc
-        .fontSize(12)
+        .fontSize(8)
+        .font("Helvetica")
+        .fillColor("#222")
+        .text(config?.domicilioEmisor ?? "", x, cy, { width: w, lineGap: 3 });
+      doc
+        .fontSize(8)
+        .font("Helvetica")
+        .fillColor("#222")
+        .text(`I.V.A.: ${condicionIvaTexto(config?.condicionIvaEmisor)}`, x, y + hdrH - 22, {
+          width: w,
+        });
+    }
+
+    // Letra + código del comprobante
+    {
+      const box = 30;
+      const bx = letraX + (letraW - box) / 2;
+      doc.rect(bx, y + 10, box, box).stroke("#000");
+      doc
+        .fontSize(18)
         .font("Helvetica-Bold")
         .fillColor("#000")
-        .text("COD.", c1x + 4, y + 16, { width: 60, align: "center" });
+        .text(letraComprobante(opts.cbteTipo), bx, y + 16, { width: box, align: "center" });
       doc
-        .fontSize(28)
-        .font("Helvetica-Bold")
+        .fontSize(6.5)
+        .font("Helvetica")
         .fillColor("#000")
-        .text(String(opts.cbteTipo).padStart(3, "0"), c1x + 4, y + 32, {
-          width: 60,
+        .text("Cod.", letraX, y + 44, { width: letraW, align: "center" })
+        .text(`N° ${String(opts.cbteTipo).padStart(2, "0")}`, letraX, y + 52, {
+          width: letraW,
           align: "center",
         });
     }
 
-    // Col 3: título + datos del comprobante (Número/Fecha a la izq., CUIT/Ing.Brutos/Inic.Act a la der.)
+    // Comprobante: título, número, datos fiscales del emisor y fecha en casillas.
     {
-      const titleX = c2x + 6;
-      const titleW = CW - (c2x - M) - 6;
+      const x = compX + 10;
+      const w = compW - 20;
       doc
-        .fontSize(opts.kind === "nc" ? 10 : 13)
+        .fontSize(opts.kind === "nc" ? 7.5 : 8.5)
         .font("Helvetica-Bold")
         .fillColor("#000")
-        .text(opts.title, titleX, y + 6, { width: titleW });
+        .text(opts.title, x, y + 10, { width: w, align: "center" });
+      const tituloH = doc.heightOfString(opts.title, { width: w });
 
       const cbteNroStr = opts.cbteNro
-        ? `${String(opts.ptoVenta).padStart(4, "0")}-${String(opts.cbteNro).padStart(8, "0")}`
+        ? `${String(opts.ptoVenta).padStart(4, "0")} - ${String(opts.cbteNro).padStart(8, "0")}`
         : "BORRADOR";
-
-      const dataY = y + 42;
-      const subColW = titleW / 2 - 6;
-      const rColX = titleX + subColW + 10;
-
       doc
-        .fontSize(7.5)
-        .font("Helvetica")
-        .fillColor("#000")
-        .text(`Número: ${cbteNroStr}`, titleX, dataY, { width: subColW })
-        .text(`Fecha: ${fmtDate(opts.fecha)}`, titleX, dataY + 13, {
-          width: subColW,
-        });
+        .fontSize(14)
+        .font("Helvetica-Bold")
+        .text(cbteNroStr, x, y + 14 + tituloH, { width: w, align: "center" });
 
+      const datosY = y + 54;
+      const datosW = w - 78; // a la derecha quedan las casillas de la fecha
       doc
-        .fontSize(7.5)
+        .fontSize(7)
         .font("Helvetica")
-        .fillColor("#000")
-        .text(`CUIT: ${config?.cuitEmisor ?? ""}`, rColX, dataY, {
-          width: subColW,
+        .fillColor("#222")
+        .text(`C.U.I.T. Nº ${formatCuit(config?.cuitEmisor)}`, x, datosY, { width: datosW })
+        .text(`Ingresos Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ""}`, x, datosY + 13, {
+          width: datosW,
         })
-        .text(
-          `Ing. Brutos: ${config?.ingBrutos ?? config?.cuitEmisor ?? ""}`,
-          rColX,
-          dataY + 13,
-          { width: subColW },
-        )
-        .text(`Inic. Act.: ${config?.inicActEmisor ?? ""}`, rColX, dataY + 26, {
-          width: subColW,
-        });
+        .text(`Inicio de Act.: ${config?.inicActEmisor ?? ""}`, x, datosY + 26, { width: datosW });
+
+      const [anio, mes, dia] = ymdAr(opts.fecha).split("-");
+      const celdas: [string, string][] = [
+        ["DIA", dia],
+        ["MES", mes],
+        ["AÑO", anio.slice(2)],
+      ];
+      const cw = 24;
+      const ch = 24;
+      const fx = x + w - cw * celdas.length;
+      const fy = y + hdrH - ch - 8;
+      celdas.forEach(([label, valor], i) => {
+        const cx0 = fx + i * cw;
+        doc.rect(cx0, fy, cw, ch).stroke("#555");
+        doc.moveTo(cx0, fy + 10).lineTo(cx0 + cw, fy + 10).stroke("#555");
+        doc
+          .fontSize(5.5)
+          .font("Helvetica-Bold")
+          .fillColor("#000")
+          .text(label, cx0, fy + 3, { width: cw, align: "center" });
+        doc
+          .fontSize(7.5)
+          .font("Helvetica")
+          .text(valor, cx0, fy + 13, { width: cw, align: "center" });
+      });
     }
 
-    y += hdrH + 2;
+    y += hdrH + 8;
 
     // ── Sección 2: receptor (transportista) ──────────────────────────────────
     {
       const t = liq.transportista;
-      const condLabel = t?.condicionIva
-        ? (CONDICION_IVA_LABEL[t.condicionIva] ?? String(t.condicionIva))
-        : "";
-      const colW = CW / 2 - 8;
-      const nameText = `Sr.(es): ${t?.nombre ?? ""}`;
-      const domText = `Domicilio: ${t?.domicilio ?? ""}`;
+      const x = M + 12;
+      const w = CW - 24;
+      const cuit = `C.U.I.T. Nº ${formatCuit(t?.idFiscal)}`;
+      doc.fontSize(8.5).font("Helvetica");
+      const cuitW = doc.widthOfString(cuit) + 4;
+      const domicilio = `Domicilio: ${t?.domicilio ?? ""}`;
+      const domW = w - cuitW - 16;
+      const domH = doc.heightOfString(domicilio, { width: domW });
+      const rcpH = 12 + 12 + 10 + domH + 12;
 
-      const nameH = doc.heightOfString(nameText, { width: colW });
-      const domH = doc.heightOfString(domText, { width: colW });
+      doc.roundedRect(M, y, CW, rcpH, R).stroke("#555");
+      doc.fillColor("#000").text(`Señor/es: ${t?.nombre ?? ""}`, x, y + 12, { width: w });
+      const domY = y + 12 + 12 + 10;
+      doc.text(domicilio, x, domY, { width: domW });
+      doc.text(cuit, x + w - cuitW, domY, { width: cuitW, align: "right" });
+      y += rcpH + 6;
+    }
 
-      const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
-      const rcpH = Math.max(leftTotalH, 48);
-
-      doc.rect(M, y, CW, rcpH).stroke("#aaa");
+    // ── Sección 3: IVA del receptor y condiciones de venta ───────────────────
+    {
+      const boxH = 28;
+      doc.roundedRect(M, y, CW, boxH, R).stroke("#555");
       doc
-        .moveTo(M + CW / 2, y)
-        .lineTo(M + CW / 2, y + rcpH)
-        .stroke("#aaa");
-
-      let ly = y + 5;
-      doc
-        .fontSize(8)
-        .font("Helvetica-Bold")
+        .fontSize(8.5)
+        .font("Helvetica")
         .fillColor("#000")
-        .text(nameText, M + 4, ly, { width: colW });
-      ly += nameH + 2;
-
-      doc
-        .fontSize(7.5)
-        .font("Helvetica")
-        .fillColor("#333")
-        .text(domText, M + 4, ly, { width: colW });
-      ly += domH + 2;
-
-      doc.text(`Cond. IVA: ${condLabel}`, M + 4, ly, { width: colW });
-      ly += 12;
-
-      doc.text(`C.U.I.T.: ${t?.idFiscal ?? ""}`, M + 4, ly, { width: colW });
-
-      const rx = M + CW / 2 + 4;
-      doc
-        .fontSize(7.5)
-        .font("Helvetica")
-        .fillColor("#333")
-        .text("Condición de Venta: CTA CTE", rx, y + 5, { width: colW })
-        .text("Moneda: Pesos", rx, y + 17, { width: colW });
-
-      y += rcpH + 2;
+        .text(`I.V.A.: ${condicionIvaTexto(liq.transportista?.condicionIva)}`, M + 12, y + 10, {
+          width: CW / 2 - 24,
+        })
+        .text("Condiciones de Venta: Cuenta Corriente", M + CW / 2, y + 10, {
+          width: CW / 2 - 12,
+        });
+      y += boxH + 12;
     }
 
-    // ── Tabla Principal ────────────────────────────────────────────
+    doc
+      .fontSize(8.5)
+      .font("Helvetica")
+      .fillColor("#000")
+      .text(
+        opts.kind === "nc"
+          ? "Anulación de la cuenta de venta y líquido producto según el siguiente detalle:"
+          : "Monto total FACTURADO por fletes realizados por su cuenta y orden según el siguiente detalle:",
+        M + 6,
+        y,
+        { width: CW - 12 },
+      );
+    y += 18;
+
+    // ── Tabla: Cantidad | Detalle | Tarifa | IVA % | Importe ─────────────────
     const footerY = PAGE_H - MARGIN - 90;
-    const isSingleTrip = (liq.viajes?.length ?? 0) <= 1;
-
-    let colWidths: number[];
-    let tHeaders: string[];
-    let aligns: string[];
-
-    const cantidadHeader = "Cantidad";
-    const productoHeader = productoLabels(tenantIdPropio2).singular;
-    // Si los viajes usan ID propio, el encabezado lleva el nombre que le dio la empresa
-    // (ej. "CTG") en vez del genérico "ID de Viaje".
-    const labelIdPropio =
-      tenantIdPropio2?.labelIdentificacionPersonalizadaViajes?.trim() || "ID propio";
-    const usaIdPropio =
-      (tenantIdPropio2?.idPropio1Habilitado ?? true) &&
-      (liq.viajes ?? []).some((lv) => lv.viaje.numeroIdentificacionPersonalizado?.trim());
-    const labelIdViaje = usaIdPropio ? labelIdPropio : "ID de Viaje";
-    if (isSingleTrip) {
-      colWidths = [100, 157.28, 40, 65, 65, 42, 70];
-      tHeaders = [
-        productoHeader,
-        "Descripción",
-        cantidadHeader,
-        "Precio",
-        "SubTotal",
-        "IVA %",
-        "SubTotal c/IVA",
-      ];
-      aligns = ["left", "left", "right", "right", "right", "right", "right"];
-    } else {
-      colWidths = [60, 70, 127.28, 40, 60, 60, 42, 80];
-      tHeaders = [
-        labelIdViaje,
-        productoHeader,
-        "Descripción",
-        cantidadHeader,
-        "Precio",
-        "SubTotal",
-        "IVA %",
-        "SubTotal c/IVA",
-      ];
-      aligns = [
-        "left",
-        "left",
-        "left",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-      ];
-    }
-
+    const colWidths = [62, CW - 62 - 72 - 40 - 80, 72, 40, 80];
+    const tHeaders = ["Cantidad", "Detalle", "Tarifa", "IVA %", "Importe"];
+    const aligns = ["left", "left", "right", "right", "right"] as const;
     const colX: number[] = [];
     let cx = M;
     for (const w of colWidths) {
       colX.push(cx);
       cx += w;
     }
+    const FILA_FONT = 7;
 
     const drawHeader = () => {
-      doc.rect(M, y, CW, 16).fill("#e8e8e8").stroke("#aaa");
       tHeaders.forEach((h, i) => {
         doc
-          .fontSize(6.5)
+          .fontSize(8)
           .font("Helvetica-Bold")
           .fillColor("#000")
-          .text(h, colX[i] + 2, y + 4, {
-            width: colWidths[i] - 4,
-            align: aligns[i] as any,
-          });
+          .text(h, colX[i] + 4, y, { width: colWidths[i] - 8, align: aligns[i] });
       });
-      y += 16;
+      y += 13;
+      doc.moveTo(M, y).lineTo(M + CW, y).stroke("#000");
+      y += 8;
     };
 
-    y += 5;
+    const drawFila = (cells: string[]) => {
+      doc.fontSize(FILA_FONT).font("Helvetica");
+      const rowH =
+        Math.max(...cells.map((c, i) => doc.heightOfString(c, { width: colWidths[i] - 8 }))) + 9;
+      if (y + rowH > footerY - 5) {
+        doc.addPage();
+        if (showTestWatermark) drawHomologacionWatermark(doc);
+        y = M;
+        drawHeader();
+      }
+      cells.forEach((text, i) => {
+        doc
+          .fontSize(FILA_FONT)
+          .font("Helvetica")
+          .fillColor("#000")
+          .text(text, colX[i] + 4, y, { width: colWidths[i] - 8, align: aligns[i] });
+      });
+      y += rowH;
+    };
+
     drawHeader();
 
+    const unidad = normalizeUnidadCantidad(tenantIdPropio2?.unidadCantidadViajes);
     for (const item of cvlp.items) {
-      if (
-        item.descripcion.toUpperCase().startsWith("FLETES") &&
-        liq.viajes?.length > 0
-      ) {
-        for (const lViaje of liq.viajes) {
-          const tripIva = lViaje.viaje.precioTransportistaIvaIncluidoPct || resolveIvaPct((liq as any).ivaPct ?? config?.ivaGastosAdmin);
-          if (tripIva !== item.ivaPct) continue;
-
-          const v = lViaje.viaje;
-
-          const idViajeText = (v.numeroIdentificacionPersonalizado ?? v.numero)
-            .toString()
-            .toUpperCase();
-          const prodText = "SERVICIOS LOGISTICOS";
-
-          const descParts = [];
-          if (isSingleTrip) {
-            const prefijo = usaIdPropio && v.numeroIdentificacionPersonalizado?.trim() ? labelIdPropio : "ID";
-            descParts.push(`${prefijo}: ${idViajeText}`);
-          }
-          if (tenantIdPropio2?.idPropio2Habilitado && v.idPropio2?.trim()) {
-            const label = tenantIdPropio2.idPropio2Label?.trim() || "ID Propio 2";
-            descParts.push(`${label}: ${v.idPropio2.trim()}`);
-          }
-          const ruta = [v.origen, v.destino].filter(Boolean).join(" - ");
-          if (ruta) descParts.push(`${ruta}`);
-          if (v.chofer?.nombre) {
-            descParts.push(`Chofer: ${v.chofer.nombre.trim()}`);
-          }
-
-          const descText = descParts.join("\n").toUpperCase();
-
-          // La unidad va en cada línea de viaje (el header dice "Cantidad" porque también
-          // abarca comisión y gastos, que no son toneladas).
-          const qty =
-            lViaje.tnDestino != null
-              ? `${fmtNum(lViaje.tnDestino)} ${normalizeUnidadCantidad(tenantIdPropio2?.unidadCantidadViajes)}`
-              : "1,00";
-          const precio = lViaje.tarifaTransportista ?? lViaje.subtotal ?? 0;
-          const base = lViaje.subtotal ?? 0;
-          const subtotalCiva = base * (1 + item.ivaPct / 100);
-
-          doc.fontSize(6.5).font("Helvetica");
-
-          let rowH = 16;
-          if (isSingleTrip) {
-            const hProd = doc.heightOfString(prodText, {
-              width: colWidths[0] - 4,
-            });
-            const hDesc = doc.heightOfString(descText, {
-              width: colWidths[1] - 4,
-            });
-            rowH = Math.max(16, hProd + 8, hDesc + 8);
-          } else {
-            const hId = doc.heightOfString(idViajeText, {
-              width: colWidths[0] - 4,
-            });
-            const hProd = doc.heightOfString(prodText, {
-              width: colWidths[1] - 4,
-            });
-            const hDesc = doc.heightOfString(descText, {
-              width: colWidths[2] - 4,
-            });
-            rowH = Math.max(16, hId + 8, hProd + 8, hDesc + 8);
-          }
-
-          if (y + rowH > footerY - 5) {
-            doc.addPage();
-            if (showTestWatermark) drawHomologacionWatermark(doc);
-            y = M;
-            drawHeader();
-          }
-
-          doc.rect(M, y, CW, rowH).stroke("#ddd");
-
-          const cells = isSingleTrip
-            ? [
-                prodText,
-                descText,
-                qty,
-                fmtNum(precio),
-                fmtNum(base),
-                fmtNum(item.ivaPct),
-                fmtNum(subtotalCiva),
-              ]
-            : [
-                idViajeText,
-                prodText,
-                descText,
-                qty,
-                fmtNum(precio),
-                fmtNum(base),
-                fmtNum(item.ivaPct),
-                fmtNum(subtotalCiva),
-              ];
-
-          cells.forEach((text, i) => {
-            doc
-              .fontSize(6.5)
-              .font("Helvetica")
-              .fillColor("#000")
-              .text(text, colX[i] + 2, y + 4, {
-                width: colWidths[i] - 4,
-                align: aligns[i] as any,
-              });
-          });
-          y += rowH;
-        }
+      if (!item.descripcion.toUpperCase().startsWith("FLETES") || !(liq.viajes?.length > 0)) {
+        continue;
+      }
+      for (const lViaje of liq.viajes) {
+        const tripIva =
+          lViaje.viaje.precioTransportistaIvaIncluidoPct ||
+          resolveIvaPct((liq as any).ivaPct ?? config?.ivaGastosAdmin);
+        if (tripIva !== item.ivaPct) continue;
+        const base = lViaje.subtotal ?? 0;
+        drawFila([
+          lViaje.tnDestino != null ? `${fmtNum(lViaje.tnDestino)} ${unidad}` : "1,00",
+          detalleViajeCvlp(lViaje.viaje, tenantIdPropio2),
+          fmtNum(lViaje.tarifaTransportista ?? base),
+          fmtNum(item.ivaPct),
+          fmtNum(base),
+        ]);
       }
     }
 
-    // Procesamiento de Conceptos Adicionales
-    // Procesamiento de Conceptos Adicionales
+    // Conceptos (comisión, gastos, etc.): agrupados por nombre; si se repiten con el
+    // mismo importe en varios viajes se consolidan en una línea "N x importe".
     const otrosItems = cvlp.items.filter(
       (i) => !i.descripcion.toUpperCase().startsWith("FLETES"),
     );
@@ -1047,146 +966,39 @@ export class LiquidacionPdfService {
       gruposOtros[baseName].push(item);
     }
 
-    // 1. Agregamos "prod" a la interfaz del array
-    const conceptosProcesados: {
-      prod: string;
-      desc: string;
-      tripId: string;
-      qty: number;
-      precio: number;
-      base: number;
-      ivaPct: number;
-      subtotal: number;
-    }[] = [];
-
     for (const baseName in gruposOtros) {
       const group = gruposOtros[baseName];
-      const allSameAmount = group.every(
-        (i) => i.importeBase === group[0].importeBase,
-      );
-
-      // 2. Determinamos qué mostrar en la columna "Producto"
-      let prodText = baseName;
-      // Si el concepto es la comisión, en la columna producto dejamos solo el título base
-      if (
-        baseName.includes("COMISIÓN TRANSPORTE") ||
-        baseName.includes("COMISION TRANSPORTE")
-      ) {
-        prodText = "COMISIÓN TRANSPORTE";
-      }
-
-      // Si son varios viajes y tienen el mismo monto, se consolidan
+      const allSameAmount = group.every((i) => i.importeBase === group[0].importeBase);
       if (group.length > 1 && allSameAmount) {
-        let totalBase = 0;
-        let totalSub = 0;
-        for (const i of group) {
-          totalBase += i.importeBase;
-          totalSub += i.subtotal;
+        const unit = group[0].importeBase;
+        drawFila([
+          fmtNum(group.length, 0),
+          `${baseName} — ${group.length} x ${fmtNum(unit)}`,
+          fmtNum(unit),
+          fmtNum(group[0].ivaPct),
+          fmtNum(group.reduce((acc, i) => acc + i.importeBase, 0)),
+        ]);
+        continue;
+      }
+      for (const item of group) {
+        const match = item.descripcion.match(/^(.*?)\s*\(Viaje #([^)]+)\)$/i);
+        let detalle = baseName;
+        if (match) {
+          const internalId = match[2].trim();
+          const lv = liq.viajes?.find((x) => String(x.viaje.numero) === internalId);
+          detalle = `${baseName} — ${lv ? refViajeCvlp(lv.viaje, tenantIdPropio2) : `Viaje #${internalId}`}`;
         }
-        conceptosProcesados.push({
-          prod: prodText,
-          desc: baseName,
-          tripId: "",
-          qty: group.length,
-          precio: group[0].importeBase,
-          base: totalBase,
-          ivaPct: group[0].ivaPct,
-          subtotal: totalSub,
-        });
-      } else {
-        // Se desglosan
-        for (const item of group) {
-          const match = item.descripcion.match(/^(.*?)\s*\(Viaje #([^)]+)\)$/i);
-          let tripIdText = "";
-          if (match && !isSingleTrip) {
-            const internalId = match[2].trim();
-            const tripMatch = liq.viajes?.find(
-              (lv) => String(lv.viaje.numero) === internalId,
-            );
-            tripIdText = (
-              tripMatch?.viaje.numeroIdentificacionPersonalizado ?? internalId
-            )
-              .toString()
-              .toUpperCase();
-            const idPropio2Valor = tripMatch?.viaje.idPropio2?.trim();
-            if (tenantIdPropio2?.idPropio2Habilitado && idPropio2Valor) {
-              const label = tenantIdPropio2.idPropio2Label?.trim() || "ID Propio 2";
-              tripIdText = `${tripIdText}\n${label}: ${idPropio2Valor}`.toUpperCase();
-            }
-          }
-          // Aquí la descripción final (con viaje) se mapea a 'desc', pero mantenemos el 'prodText' limpio
-          const descText = match ? item.descripcion.toUpperCase() : baseName;
-          conceptosProcesados.push({
-            prod: prodText,
-            desc: descText,
-            tripId: tripIdText,
-            qty: item.cantidad ?? 1,
-            precio: item.precioUnitario ?? item.importeBase,
-            base: item.importeBase,
-            ivaPct: item.ivaPct,
-            subtotal: item.subtotal,
-          });
-        }
+        const qty = item.cantidad ?? 1;
+        const unit = item.precioUnitario ?? item.importeBase;
+        if (qty > 1) detalle += ` — ${fmtNum(qty, 0)} x ${fmtNum(unit)}`;
+        drawFila([
+          fmtNum(qty, Number.isInteger(qty) ? 0 : 2),
+          detalle,
+          fmtNum(unit),
+          fmtNum(item.ivaPct),
+          fmtNum(item.importeBase),
+        ]);
       }
-    }
-
-    for (const cp of conceptosProcesados) {
-      doc.fontSize(6.5).font("Helvetica");
-      let rowH = 16;
-      if (isSingleTrip) {
-        // 3. Calculamos la altura separando cp.prod y cp.desc
-        const hProd = doc.heightOfString(cp.prod, { width: colWidths[0] - 4 });
-        const hDesc = doc.heightOfString(cp.desc, { width: colWidths[1] - 4 });
-        rowH = Math.max(16, hProd + 8, hDesc + 8);
-      } else {
-        const hId = doc.heightOfString(cp.tripId, { width: colWidths[0] - 4 });
-        const hProd = doc.heightOfString(cp.prod, { width: colWidths[1] - 4 });
-        const hDesc = doc.heightOfString(cp.desc, { width: colWidths[2] - 4 });
-        rowH = Math.max(16, hId + 8, hProd + 8, hDesc + 8);
-      }
-
-      if (y + rowH > footerY - 5) {
-        doc.addPage();
-        if (showTestWatermark) drawHomologacionWatermark(doc);
-        y = M;
-        drawHeader();
-      }
-
-      doc.rect(M, y, CW, rowH).stroke("#ddd");
-
-      // 4. Asignamos cp.prod a la primera columna, y cp.desc a la segunda
-      const cells = isSingleTrip
-        ? [
-            cp.prod,
-            cp.desc,
-            fmtNum(cp.qty),
-            fmtNum(cp.precio),
-            fmtNum(cp.base),
-            fmtNum(cp.ivaPct),
-            fmtNum(cp.subtotal),
-          ]
-        : [
-            cp.tripId,
-            cp.prod,
-            cp.desc,
-            fmtNum(cp.qty),
-            fmtNum(cp.precio),
-            fmtNum(cp.base),
-            fmtNum(cp.ivaPct),
-            fmtNum(cp.subtotal),
-          ];
-
-      cells.forEach((text, i) => {
-        doc
-          .fontSize(6.5)
-          .font("Helvetica")
-          .fillColor("#000")
-          .text(text, colX[i] + 2, y + 4, {
-            width: colWidths[i] - 4,
-            align: aligns[i] as any,
-          });
-      });
-      y += rowH;
     }
 
     // Comprobantes asociados (comprobante de anulación → CVLP original)

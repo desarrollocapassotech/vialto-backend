@@ -91,11 +91,15 @@ export const FACTURACION_ESTADOS_DISPONIBLES: readonly ViajeFacturacionEstado[] 
 
 /**
  * Estados que cuentan como "pendiente de facturar" en conteos y filtros (dashboard,
- * resumen de Viajes): un borrador sin emitir sigue pendiente.
+ * resumen de Viajes): un borrador sin emitir sigue pendiente, una factura rechazada por
+ * AFIP (`error_afip`) no se emitió, y un viaje cuya factura se anuló vuelve a quedar
+ * pendiente. Mismo criterio que `LIQUIDACION_ESTADOS_PENDIENTES`.
  */
 export const FACTURACION_ESTADOS_PENDIENTES: readonly ViajeFacturacionEstado[] = [
   'sin_facturar',
   'borrador',
+  'error_afip',
+  'anulado',
 ];
 
 /**
@@ -116,5 +120,17 @@ export type ViajeLiquidacionEstado = (typeof VIAJE_LIQUIDACION_ESTADOS)[number];
 
 export const LIQUIDACION_ESTADOS_DISPONIBLES: readonly ViajeLiquidacionEstado[] = [
   'sin_liquidar',
+  'anulado',
+];
+
+/**
+ * Estados que cuentan como "pendiente de liquidar" en conteos y filtros (resumen de
+ * Viajes): borrador sin emitir, liquidación rechazada por AFIP (`error_afip`) o anulada.
+ * Mismo criterio que `FACTURACION_ESTADOS_PENDIENTES`.
+ */
+export const LIQUIDACION_ESTADOS_PENDIENTES: readonly ViajeLiquidacionEstado[] = [
+  'sin_liquidar',
+  'borrador',
+  'error_afip',
   'anulado',
 ];

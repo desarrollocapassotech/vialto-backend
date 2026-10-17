@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
-import { FACTURACION_ESTADOS_PENDIENTES } from "./viaje-estados";
+import {
+  FACTURACION_ESTADOS_PENDIENTES,
+  LIQUIDACION_ESTADOS_PENDIENTES,
+} from "./viaje-estados";
 
 /** Zona operativa de listados de viajes (misma que el front: America/Argentina/Buenos_Aires). */
 export const VIAJES_FECHA_TZ = "America/Argentina/Buenos_Aires";
@@ -143,14 +146,19 @@ export function buildViajesPaginatedWhere(
 
   const facturacionEstado = query.facturacionEstado?.trim();
   if (facturacionEstado === "sin_facturar") {
-    // "Sin facturar" = pendiente de facturar: incluye los que tienen un borrador sin emitir.
+    // "Sin facturar" = pendiente de facturar: incluye borradores, errores de AFIP y anuladas.
     where.facturacionEstado = { in: [...FACTURACION_ESTADOS_PENDIENTES] };
   } else if (facturacionEstado) {
     where.facturacionEstado = facturacionEstado;
   }
 
   const liquidacionEstado = query.liquidacionEstado?.trim();
-  if (liquidacionEstado) where.liquidacionEstado = liquidacionEstado;
+  if (liquidacionEstado === "sin_liquidar") {
+    // "Sin liquidar" = pendiente de liquidar: incluye borradores, errores de AFIP y anuladas.
+    where.liquidacionEstado = { in: [...LIQUIDACION_ESTADOS_PENDIENTES] };
+  } else if (liquidacionEstado) {
+    where.liquidacionEstado = liquidacionEstado;
+  }
 
   const cid = query.clienteId?.trim();
   if (cid) where.clienteId = cid;

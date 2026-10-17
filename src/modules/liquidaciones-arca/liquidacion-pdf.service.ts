@@ -16,6 +16,7 @@ import {
   drawHomologacionWatermark,
   shouldShowHomologacionWatermark,
 } from "./pdf-homologacion-watermark";
+import { pdfColoresComprobante } from "./pdf-color-comprobante";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
 import { normalizeUnidadCantidad } from "./cantidad-unidad.util";
 import { ymdAr } from "../../shared/util/fecha-ar.util";
@@ -680,20 +681,22 @@ export class LiquidacionPdfService {
     const M = MARGIN;
     const CW = COL_W;
     let y = M;
+    // Color de acento elegido por la empresa (ArcaConfig.colorLiquidacion); sin color, los grises de siempre.
+    const col = pdfColoresComprobante(config?.colorLiquidacion);
 
     // ── Barra superior ORIGINAL/DUPLICADO (caja con borde, sin relleno) ───────
-    doc.rect(M, y, CW, 18).stroke("#000");
+    doc.rect(M, y, CW, 18).stroke(col.linea("#000"));
     doc
       .fontSize(9)
       .font("Helvetica-Bold")
-      .fillColor("#000")
+      .fillColor(col.texto("#000"))
       .text(copia, M, y + 5, { width: CW, align: "center" });
     y += 22;
 
     // ── Sección 1: logo | emisor | letra | comprobante (recuadro redondeado) ──
     const hdrH = 112;
     const R = 6;
-    doc.roundedRect(M, y, CW, hdrH, R).stroke("#555");
+    doc.roundedRect(M, y, CW, hdrH, R).stroke(col.linea("#555"));
 
     const hasLogo = Boolean(logoBuffer);
     const logoW = hasLogo ? 134 : 0;
@@ -704,9 +707,9 @@ export class LiquidacionPdfService {
     const emisorX = M + logoW;
     const emisorW = letraX - emisorX;
 
-    if (hasLogo) doc.moveTo(emisorX, y).lineTo(emisorX, y + hdrH).stroke("#555");
-    doc.moveTo(letraX, y).lineTo(letraX, y + hdrH).stroke("#555");
-    doc.moveTo(compX, y).lineTo(compX, y + hdrH).stroke("#555");
+    if (hasLogo) doc.moveTo(emisorX, y).lineTo(emisorX, y + hdrH).stroke(col.linea("#555"));
+    doc.moveTo(letraX, y).lineTo(letraX, y + hdrH).stroke(col.linea("#555"));
+    doc.moveTo(compX, y).lineTo(compX, y + hdrH).stroke(col.linea("#555"));
 
     // Logo
     let logoOk = false;
@@ -754,11 +757,11 @@ export class LiquidacionPdfService {
     {
       const box = 30;
       const bx = letraX + (letraW - box) / 2;
-      doc.rect(bx, y + 10, box, box).stroke("#000");
+      doc.rect(bx, y + 10, box, box).stroke(col.linea("#000"));
       doc
         .fontSize(18)
         .font("Helvetica-Bold")
-        .fillColor("#000")
+        .fillColor(col.texto("#000"))
         .text(letraComprobante(opts.cbteTipo), bx, y + 16, { width: box, align: "center" });
       doc
         .fontSize(6.5)
@@ -778,7 +781,7 @@ export class LiquidacionPdfService {
       doc
         .fontSize(opts.kind === "nc" ? 7.5 : 8.5)
         .font("Helvetica-Bold")
-        .fillColor("#000")
+        .fillColor(col.texto("#000"))
         .text(opts.title, x, y + 10, { width: w, align: "center" });
       const tituloH = doc.heightOfString(opts.title, { width: w });
 
@@ -814,8 +817,8 @@ export class LiquidacionPdfService {
       const fy = y + hdrH - ch - 8;
       celdas.forEach(([label, valor], i) => {
         const cx0 = fx + i * cw;
-        doc.rect(cx0, fy, cw, ch).stroke("#555");
-        doc.moveTo(cx0, fy + 10).lineTo(cx0 + cw, fy + 10).stroke("#555");
+        doc.rect(cx0, fy, cw, ch).stroke(col.linea("#555"));
+        doc.moveTo(cx0, fy + 10).lineTo(cx0 + cw, fy + 10).stroke(col.linea("#555"));
         doc
           .fontSize(5.5)
           .font("Helvetica-Bold")
@@ -843,7 +846,7 @@ export class LiquidacionPdfService {
       const domH = doc.heightOfString(domicilio, { width: domW });
       const rcpH = 12 + 12 + 10 + domH + 12;
 
-      doc.roundedRect(M, y, CW, rcpH, R).stroke("#555");
+      doc.roundedRect(M, y, CW, rcpH, R).stroke(col.linea("#555"));
       doc.fillColor("#000").text(`Señor/es: ${t?.nombre ?? ""}`, x, y + 12, { width: w });
       const domY = y + 12 + 12 + 10;
       doc.text(domicilio, x, domY, { width: domW });
@@ -854,7 +857,7 @@ export class LiquidacionPdfService {
     // ── Sección 3: IVA del receptor y condiciones de venta ───────────────────
     {
       const boxH = 28;
-      doc.roundedRect(M, y, CW, boxH, R).stroke("#555");
+      doc.roundedRect(M, y, CW, boxH, R).stroke(col.linea("#555"));
       doc
         .fontSize(8.5)
         .font("Helvetica")
@@ -900,11 +903,11 @@ export class LiquidacionPdfService {
         doc
           .fontSize(8)
           .font("Helvetica-Bold")
-          .fillColor("#000")
+          .fillColor(col.texto("#000"))
           .text(h, colX[i] + 4, y, { width: colWidths[i] - 8, align: aligns[i] });
       });
       y += 13;
-      doc.moveTo(M, y).lineTo(M + CW, y).stroke("#000");
+      doc.moveTo(M, y).lineTo(M + CW, y).stroke(col.linea("#000"));
       y += 8;
     };
 
@@ -1027,7 +1030,7 @@ export class LiquidacionPdfService {
     doc
       .moveTo(M, footerY - 4)
       .lineTo(M + CW, footerY - 4)
-      .stroke("#aaa");
+      .stroke(col.linea("#aaa"));
 
     // Pie: totales del comprobante armado (incluye conceptos configurables).
     const pie = cvlpPdfPieFinanciero(liq, cvlp);
@@ -1042,7 +1045,7 @@ export class LiquidacionPdfService {
 
     const footerBoxY = footerY + 12;
     const footerBoxH = 70;
-    doc.rect(M, footerBoxY, CW, footerBoxH).stroke("#aaa");
+    doc.rect(M, footerBoxY, CW, footerBoxH).stroke(col.linea("#aaa"));
 
     // QR
     if (qrBuffer) {

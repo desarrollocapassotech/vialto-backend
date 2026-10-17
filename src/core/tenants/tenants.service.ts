@@ -12,6 +12,7 @@ import { TenantBootstrapService } from '../../shared/tenant-bootstrap.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { ListTenantsDto } from './dto/list-tenants.dto';
+import { ProductoLabelPluralService } from './producto-label-plural.service';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
@@ -48,6 +49,7 @@ export class TenantsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantBootstrap: TenantBootstrapService,
+    private readonly productoLabelPlural: ProductoLabelPluralService,
   ) {}
 
   findAll() {
@@ -220,6 +222,32 @@ export class TenantsService {
     }
   }
 
+  /**
+   * Label de "Producto": al cambiar el singular sin mandar plural, el plural se
+   * genera con IA (con respaldo por regla). Vacío = vuelve a "Producto"/"Productos".
+   * Un plural mandado explícitamente (corrección del superadmin) se respeta.
+   */
+  private async resolverProductoLabel(
+    current: { productoLabel: string | null },
+    dto: UpdateTenantDto,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    if (dto.productoLabel !== undefined) {
+      const singular = dto.productoLabel?.trim() || null;
+      data.productoLabel = singular;
+      if (!singular) {
+        data.productoLabelPlural = null;
+        return;
+      }
+      if (dto.productoLabelPlural === undefined && singular !== current.productoLabel) {
+        data.productoLabelPlural = await this.productoLabelPlural.generar(singular);
+      }
+    }
+    if (dto.productoLabelPlural !== undefined) {
+      data.productoLabelPlural = dto.productoLabelPlural?.trim() || null;
+    }
+  }
+
   async update(clerkOrgId: string, dto: UpdateTenantDto) {
     const current = await this.findOne(clerkOrgId);
     const data: Record<string, unknown> = {
@@ -242,9 +270,20 @@ export class TenantsService {
       );
     }
     this.assertIdentificadoresValidos(current, dto, data);
+    await this.resolverProductoLabel(current, dto, data);
     return this.prisma.tenant.update({
       where: { clerkOrgId },
       data,
+    });
+  }
+
+  /** Solo toca el orden de columnas de Viajes (endpoint abierto al admin de la empresa). */
+  async setViajesColumnasOrden(clerkOrgId: string, viajesColumnasOrden: string[]) {
+    await this.findOne(clerkOrgId);
+    return this.prisma.tenant.update({
+      where: { clerkOrgId },
+      data: { viajesColumnasOrden },
+      select: { clerkOrgId: true, viajesColumnasOrden: true },
     });
   }
 

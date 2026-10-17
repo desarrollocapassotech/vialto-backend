@@ -21,6 +21,7 @@ const CONFIG_SELECT = {
   ingBrutos: true,
   inicActEmisor: true,
   logoUrl: true,
+  leyendaFactura: true,
   ptoVentaCvlp: true,
   ptoVentaFactura: true,
   ambiente: true,
@@ -105,6 +106,10 @@ export class ArcaConfigService {
       anulacionTipoComprobante: dto.anulacionTipoComprobante ?? 'nota_credito',
       updatedAt: now,
     };
+    // Solo si viene en el request: un cliente que no conoce el campo no la borra.
+    if (dto.leyendaFactura !== undefined) {
+      data.leyendaFactura = dto.leyendaFactura.trim() || null;
+    }
     // Solo sobreescribir cert/key si se envían con contenido.
     if (dto.certPemProduccion?.trim()) {
       data.certPemProduccion = encryptField(dto.certPemProduccion.trim());
@@ -192,6 +197,7 @@ export class ArcaConfigService {
       ingBrutos: CUIT_TEST_HOMOLOGACION,
       inicActEmisor: '01/01/2020',
       logoUrl: null as string | null,
+      leyendaFactura: null as string | null,
       ptoVentaCvlp: 1,
       ptoVentaFactura: 1,
       ambiente: 'homologacion' as const,

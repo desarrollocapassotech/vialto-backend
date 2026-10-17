@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { FACTURACION_ESTADOS_DISPONIBLES } from "./viaje-estados";
+import { labelEnFrase, productoLabelsDeTenant } from "../../shared/util/producto-label.util";
 
 export type ViajeClienteDestinoItem = { etiqueta: string };
 export type ViajeClienteProductoItem = {
@@ -144,13 +145,16 @@ export async function assertProductosClientesDelViaje(
     select: { id: true, activo: true },
   });
   if (rows.length !== ids.length) {
+    // Frases neutras: el label puede ser femenino ("Mercadería").
+    const { plural } = await productoLabelsDeTenant(db, tenantId);
     throw new BadRequestException(
-      "Algún producto de un cliente del viaje no existe o no pertenece a esta empresa.",
+      `Hay ${labelEnFrase(plural)} de un cliente del viaje que no existen o no pertenecen a esta empresa.`,
     );
   }
   if (rows.some((r) => !r.activo)) {
+    const { plural } = await productoLabelsDeTenant(db, tenantId);
     throw new BadRequestException(
-      "Ese producto está inactivo. Elegí otro o reactivalo desde Productos.",
+      `Hay ${labelEnFrase(plural)} con estado inactivo. Elegí otra opción o cambiá su estado desde ${plural}.`,
     );
   }
 }

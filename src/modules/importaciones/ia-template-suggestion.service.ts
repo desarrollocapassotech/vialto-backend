@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { CatalogoColumn } from "./template-catalogo";
+import { IaJsonService, type IaProveedor } from "../../shared/ia/ia-json.service";
 
 export interface SugerenciaTemplate {
   /** Proveedor que efectivamente respondió (puede no ser el principal, si hubo fallback). */
-  proveedor: "Gemini" | "Groq";
+  proveedor: IaProveedor;
   /** Modelo puntual usado dentro de ese proveedor. */
   modelo: string;
   /** Hoja del Excel que la IA identificó como la correcta para este módulo. */
@@ -44,63 +45,35 @@ const JSON_SCHEMA_GEMINI = {
  * Propone un mapeo de encabezados de Excel → campos del sistema usando IA.
  * Es solo una SUGERENCIA: nunca guarda nada, el superadmin la revisa y
  * corrige en el mismo formulario antes de guardar (igual que si la hubiera
- * completado a mano).
- *
- * Gemini es el proveedor principal (GEMINI_API_KEY). El modelo gratuito
- * suele devolver 503/429 por demanda alta — si eso pasa (incluso después de
- * reintentar), y hay una GROQ_API_KEY configurada, se cae a Groq (Llama,
- * también gratis) como respaldo, en vez de fallarle al usuario.
+ * completado a mano). Proveedores y reintentos: ver `IaJsonService`.
  */
 @Injectable()
 export class IaTemplateSuggestionService {
-  private readonly geminiApiKey = process.env.GEMINI_API_KEY;
-  private readonly geminiModel =
-    process.env.GEMINI_MODEL || "gemini-3.7-flash";
-  private readonly groqApiKey = process.env.GROQ_API_KEY;
-  // "llama-3.3-70b-versatile" se dio de baja en Groq el 16/8/26 — reemplazo
-  // recomendado por Groq mismo, configurable por env para no repetir esto.
-  private readonly groqModel =
-    process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+  constructor(private readonly ia: IaJsonService) {}
 
   async sugerir(
     catalogo: CatalogoColumn[],
     hojas: HojaMuestra[],
   ): Promise<SugerenciaTemplate> {
-    if (!this.geminiApiKey && !this.groqApiKey) {
+    if (!this.ia.configurada) {
       throw new BadRequestException(
         "La sugerencia con IA no está configurada en el servidor (falta GEMINI_API_KEY o GROQ_API_KEY).",
       );
     }
 
     const prompt = this.buildPrompt(catalogo, hojas);
-    const errores: string[] = [];
-    let text: string | null = null;
-    let proveedor: "Gemini" | "Groq" | null = null;
-    let modelo: string | null = null;
-
-    if (this.geminiApiKey) {
-      try {
-        text = await this.llamarGemini(prompt);
-        proveedor = "Gemini";
-        modelo = this.geminiModel;
-      } catch (e) {
-        errores.push(e instanceof Error ? e.message : "Error de Gemini.");
-      }
-    }
-
-    if (!text && this.groqApiKey) {
-      try {
-        text = await this.llamarGroq(prompt);
-        proveedor = "Groq";
-        modelo = this.groqModel;
-      } catch (e) {
-        errores.push(e instanceof Error ? e.message : "Error de Groq.");
-      }
-    }
-
-    if (!text || !proveedor || !modelo) {
+    let text: string;
+    let proveedor: IaProveedor;
+    let modelo: string;
+    try {
+      ({ text, proveedor, modelo } = await this.ia.generarJson(
+        prompt,
+        JSON_SCHEMA_GEMINI,
+        `{"hoja": "<nombre de hoja>", "filaEncabezados": <número>, "mapeos": [{"field": "<campo>", "excelHeader": "<encabezado o vacío>"}]}`,
+      ));
+    } catch (e) {
       throw new BadRequestException(
-        `No se pudo generar la sugerencia con IA. ${errores.join(" · ")}`,
+        `No se pudo generar la sugerencia con IA. ${e instanceof Error ? e.message : ""}`,
       );
     }
 
@@ -118,110 +91,6 @@ export class IaTemplateSuggestionService {
     }
 
     return this.normalizar(parsed, catalogo, hojas, proveedor, modelo);
-  }
-
-  private async llamarGemini(prompt: string): Promise<string> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.geminiApiKey}`;
-    const body = JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: JSON_SCHEMA_GEMINI,
-      },
-    });
-
-    const res = await this.fetchConReintentos(
-      "Gemini",
-      url,
-      { "Content-Type": "application/json" },
-      body,
-    );
-    if (!res.ok) {
-      throw new Error(await this.mensajeError("Gemini", res));
-    }
-
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("Gemini no devolvió ninguna sugerencia.");
-    return text;
-  }
-
-  private async llamarGroq(prompt: string): Promise<string> {
-    const url = "https://api.groq.com/openai/v1/chat/completions";
-    const promptConFormato = `${prompt}
-
-Respondé ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con esta forma exacta:
-{"hoja": "<nombre de hoja>", "filaEncabezados": <número>, "mapeos": [{"field": "<campo>", "excelHeader": "<encabezado o vacío>"}]}`;
-    const body = JSON.stringify({
-      model: this.groqModel,
-      messages: [{ role: "user", content: promptConFormato }],
-      response_format: { type: "json_object" },
-      temperature: 0,
-    });
-
-    const res = await this.fetchConReintentos(
-      "Groq",
-      url,
-      {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.groqApiKey}`,
-      },
-      body,
-    );
-    if (!res.ok) {
-      throw new Error(await this.mensajeError("Groq", res));
-    }
-
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const text = data.choices?.[0]?.message?.content;
-    if (!text) throw new Error("Groq no devolvió ninguna sugerencia.");
-    return text;
-  }
-
-  private async mensajeError(proveedor: string, res: Response): Promise<string> {
-    if (res.status === 503 || res.status === 429) {
-      return `${proveedor} está saturado en este momento.`;
-    }
-    const body = await res.text().catch(() => "");
-    return `${proveedor} devolvió un error (${res.status}). ${body.slice(0, 200)}`;
-  }
-
-  /**
-   * Los modelos gratuitos devuelven 503 (UNAVAILABLE) o 429 (rate limit)
-   * con bastante frecuencia por demanda alta — son errores transitorios, no
-   * de nuestro request, así que reintentamos con backoff antes de
-   * rendirnos (y eventualmente pasar al proveedor de respaldo).
-   */
-  private async fetchConReintentos(
-    proveedor: string,
-    url: string,
-    headers: Record<string, string>,
-    body: string,
-    intentos = 3,
-  ): Promise<Response> {
-    let ultimaRespuesta: Response | undefined;
-    for (let intento = 0; intento < intentos; intento++) {
-      if (intento > 0) {
-        await new Promise((r) => setTimeout(r, 1000 * 2 ** (intento - 1)));
-      }
-      try {
-        const res = await fetch(url, { method: "POST", headers, body });
-        if (res.ok || (res.status !== 503 && res.status !== 429)) {
-          return res;
-        }
-        ultimaRespuesta = res;
-      } catch {
-        if (intento === intentos - 1) {
-          throw new Error(`No se pudo conectar con ${proveedor}.`);
-        }
-      }
-    }
-    // Se agotaron los reintentos y el último intento fue 503/429.
-    return ultimaRespuesta!;
   }
 
   private buildPrompt(catalogo: CatalogoColumn[], hojas: HojaMuestra[]): string {
@@ -283,7 +152,7 @@ Reglas:
     },
     catalogo: CatalogoColumn[],
     hojas: HojaMuestra[],
-    proveedor: "Gemini" | "Groq",
+    proveedor: IaProveedor,
     modelo: string,
   ): SugerenciaTemplate {
     // Defensa contra alucinaciones: la hoja tiene que ser una que

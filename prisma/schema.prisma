@@ -124,6 +124,26 @@ model Tenant {
    * Se configura desde superadmin ("Configuración por empresa" → General).
    */
   opcionesProveedorLiquidacion    String[] @default([])
+  /**
+   * Orden de las columnas de la grilla de Viajes (ids de `VIAJES_COLUMNAS_ORDENABLES`
+   * en `update-tenant.dto.ts`, espejo de `lib/viajesColumnasOrden.ts` del frontend).
+   * [] (default) = orden estándar. Ids que falten se agregan al final en su orden
+   * estándar; la visibilidad de cada columna sigue dependiendo de sus propios flags.
+   * Se configura solo desde superadmin ("Configuración por empresa" → General).
+   */
+  viajesColumnasOrden             String[] @default([])
+  /**
+   * true = la grilla de Viajes muestra la columna de productos (apagada por defecto).
+   * Se configura solo desde superadmin ("Configuración por empresa" → pestaña Viajes).
+   */
+  viajesColumnaProductosHabilitada Boolean @default(false)
+  /**
+   * Label que reemplaza a "Producto" en todo el sistema salvo Stock y el término fiscal
+   * "Líquido Producto" (ej. "Grano"). null = "Producto". Ver `shared/util/producto-label.util.ts`.
+   */
+  productoLabel                   String?
+  /** Plural de productoLabel (ej. "Granos"). Lo genera la IA al guardar el singular; editable. */
+  productoLabelPlural             String?
   createdAt                       DateTime @default(now())
 
   clientes                   Cliente[]
@@ -1495,6 +1515,7 @@ model ArcaConfig {
   ingBrutos                String? // N° Ing. Brutos (suele coincidir con CUIT)
   inicActEmisor            String? // Fecha de inicio de actividades (ej: 01/03/2015)
   logoUrl                  String? // Logo del emisor (Cloudinary), embebido en los PDF de comprobantes
+  leyendaFactura           String? // Texto en letra chica debajo de la condición de venta del PDF de factura (ej. mora)
   // Puntos de venta y ambiente
   ptoVentaCvlp             Int // punto de venta para CVLP tipo 60
   ptoVentaFactura          Int // punto de venta para Facturas A/B

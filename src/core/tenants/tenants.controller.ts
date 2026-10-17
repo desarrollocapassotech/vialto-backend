@@ -15,6 +15,7 @@ import { TenantsService } from "./tenants.service";
 import { CreateTenantDto } from "./dto/create-tenant.dto";
 import { UpdateTenantDto } from "./dto/update-tenant.dto";
 import { ListTenantsDto } from "./dto/list-tenants.dto";
+import { ViajesColumnasOrdenDto } from "./dto/viajes-columnas-orden.dto";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { OwnTenantOrAdminGuard } from "../auth/own-tenant-or-admin.guard";
@@ -85,6 +86,19 @@ export class TenantsController {
   @Roles("superadmin")
   update(@Param("orgId") orgId: string, @Body() dto: UpdateTenantDto) {
     return this.service.update(orgId, dto);
+  }
+
+  @ApiOperation({
+    summary: "Orden de columnas de la grilla de Viajes (admin de la propia empresa o superadmin)",
+  })
+  @Patch(":orgId/viajes-columnas-orden")
+  @Roles("superadmin", "org:admin", "admin")
+  @UseGuards(OwnTenantOrAdminGuard)
+  setViajesColumnasOrden(
+    @Param("orgId") orgId: string,
+    @Body() dto: ViajesColumnasOrdenDto,
+  ) {
+    return this.service.setViajesColumnasOrden(orgId, dto.viajesColumnasOrden);
   }
 
   @ApiOperation({ summary: "Reemplazar lista de módulos activos del tenant" })

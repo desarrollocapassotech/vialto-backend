@@ -1,4 +1,4 @@
-import { IsString, IsInt, IsNumber, IsIn, IsOptional, Min, Max } from 'class-validator';
+import { IsString, IsInt, IsNumber, IsIn, IsOptional, Min, Max, MaxLength } from 'class-validator';
 
 export class UpsertArcaConfigDto {
   @IsString()
@@ -9,6 +9,8 @@ export class UpsertArcaConfigDto {
   @IsOptional() @IsString() condicionIvaEmisor?: string;
   @IsOptional() @IsString() ingBrutos?: string;
   @IsOptional() @IsString() inicActEmisor?: string;
+  /** Leyenda en letra chica bajo la condición de venta del PDF de factura. Vacío = sin leyenda. */
+  @IsOptional() @IsString() @MaxLength(1000) leyendaFactura?: string;
 
   @IsInt()
   @Min(1)

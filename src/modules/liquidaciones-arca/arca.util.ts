@@ -55,6 +55,27 @@ export function getCbteTipoCvlp(
 }
 
 /**
+ * Exige el dato fiscal del transportista según su país: condición frente al IVA si es
+ * argentino (o sin país), condición tributaria si es extranjero — mismo criterio que
+ * `collectCvlpEmitMissingFields`. Se usa al crear la liquidación (manual o ARCA).
+ */
+export function assertCondicionFiscalTransportista(t: {
+  condicionIva?: number | null;
+  pais?: string | null;
+  condicionTributaria?: string | null;
+}): void {
+  if (isArgentinaPais(t.pais)) {
+    getCbteTipoCvlp(t.condicionIva, t.pais);
+    return;
+  }
+  if (!t.condicionTributaria?.trim()) {
+    throw new BadRequestException(
+      'El transportista no tiene configurada su condición tributaria. Actualice sus datos maestros antes de operar.',
+    );
+  }
+}
+
+/**
  * Código 065 (NC de Líquido Producto). AFIP NO lo habilita por web service
  * (FEParamGetTiposCbte no lo lista; rechaza con 11001). Se conserva solo para
  * detección/compatibilidad en el PDF de anulaciones históricas.

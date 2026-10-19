@@ -586,7 +586,10 @@ export class ViajesService {
     const nuevoPago: Record<string, unknown> = {
       monto: importe,
       moneda,
-      fecha: fecha.toISOString(),
+      fecha:
+        fecha instanceof Date
+          ? fecha.toISOString().slice(0, 10)
+          : String(fecha).slice(0, 10),
       createdBy: "cuenta-corriente",
       createdAt: new Date().toISOString(),
       ccImputacionId,

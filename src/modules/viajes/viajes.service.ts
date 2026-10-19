@@ -101,6 +101,8 @@ const VIAJE_INCLUDE_FULL = {
       ptoVenta: true,
       fechaEmision: true,
       ivaPct: true,
+      // Comprobante adjunto (facturas manuales): el detalle del viaje lo ofrece con un clip.
+      comprobanteUrl: true,
       viajes: { select: { id: true, monto: true } },
     },
   },

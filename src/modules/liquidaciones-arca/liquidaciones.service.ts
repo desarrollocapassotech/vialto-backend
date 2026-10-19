@@ -31,6 +31,7 @@ import { ConfirmarAnulacionManualDto } from './dto/confirmar-anulacion-manual.dt
 import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import {
   assertFechaCbteHomologacionEnVentana,
+  assertCondicionFiscalTransportista,
   getCbteTipoCvlp,
   getCbteTipoAnulacionCvlp,
   getCbteTipoAnulacionFactura,
@@ -256,11 +257,18 @@ export class LiquidacionesService {
     // Obtener el transportista y su comisionPct
     const transportista = await (this.prisma as PrismaAny).transportista.findFirst({
       where: { id: dto.transportistaId, tenantId },
-      select: { id: true, condicionIva: true, comisionPct: true },
+      select: {
+        id: true,
+        condicionIva: true,
+        pais: true,
+        condicionTributaria: true,
+        comisionPct: true,
+      },
     });
     if (!transportista) {
       throw new NotFoundException('Transportista no encontrado');
     }
+    assertCondicionFiscalTransportista(transportista);
 
     // Determinar el % de comisión: dto > transportista > config default > 0
     const comisionPct = dto.comisionPct ?? transportista.comisionPct ?? config?.comisionPctDefault ?? 0;
@@ -398,7 +406,7 @@ export class LiquidacionesService {
           gastosAdminIva,
           liquido,
           estado: 'borrador',
-          cbteTipo: getCbteTipoCvlp(transportista.condicionIva),
+          cbteTipo: getCbteTipoCvlp(transportista.condicionIva, transportista.pais),
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
           proveedorContrato: dto.proveedorContrato?.trim() || null,
@@ -1437,6 +1445,7 @@ export class LiquidacionesService {
             idFiscal: true,
             direccion: true,
             condicionIva: true,
+            pais: true,
           },
         },
         clientesViaje: {
@@ -1506,6 +1515,7 @@ export class LiquidacionesService {
     const cbteTipoNc = getCbteTipoAnulacionFactura(
       factura.cbteTipo,
       facturaRaw.cliente.condicionIva,
+      facturaRaw.cliente.pais,
     );
     const ivaPctDefault = resolveIvaPct(
       factura.ivaPct ?? config.ivaGastosAdmin,

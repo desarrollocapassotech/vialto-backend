@@ -955,6 +955,25 @@ export class FacturacionService {
     });
     if (!existing) throw new NotFoundException("Factura no encontrada");
 
+    // "Adjuntar comprobante" (grilla / detalle): solo cambia el archivo. No pasa por el
+    // recálculo de importe, tramos ni cuenta corriente de la edición completa.
+    const soloComprobante =
+      dto.comprobanteUrl !== undefined &&
+      Object.entries(dto).every(
+        ([k, v]) => k === "comprobanteUrl" || v === undefined,
+      );
+    if (soloComprobante) {
+      await this.prisma.factura.updateMany({
+        where: { id, tenantId },
+        data: { comprobanteUrl: dto.comprobanteUrl || null },
+      });
+      const actualizada = await this.prisma.factura.findFirst({
+        where: { id, tenantId },
+        include: this.FACTURA_INCLUDE,
+      });
+      return this.toShape(actualizada!, await this.tieneArca(tenantId));
+    }
+
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 

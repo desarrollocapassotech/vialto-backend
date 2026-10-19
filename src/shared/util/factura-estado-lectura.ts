@@ -1,3 +1,5 @@
+import { fechaCalendarioAr } from "./fecha-ar.util";
+
 /**
  * Utilidades puras de lectura del estado de una factura.
  * Usadas por: facturacion, dashboard, platform.
@@ -160,7 +162,7 @@ export function computeEstadoFacturaLectura(args: {
     cantidadFactura?: number | null;
     precioUnitarioFactura?: number | null;
   }>;
-  fechaVencimiento: Date | null;
+  fechaVencimiento: Date | string | null;
   importeGuardado: number;
   pagos: { importe: number }[];
   arcaEstado: string | null;
@@ -169,6 +171,8 @@ export function computeEstadoFacturaLectura(args: {
   tramos?: FacturaTramoCobro[];
   ivaPctCabecera?: number | null;
   ivaMontoGuardado?: number | null;
+  /** Opcional: día de referencia para evaluar vencimiento (por defecto hoy en Argentina). */
+  hoyReferencia?: Date | string | null;
 }): FacturaEstadoResult {
   let estado: FacturaEstadoLectura = "facturado";
   if (args.tieneArca) {
@@ -203,11 +207,22 @@ export function computeEstadoFacturaLectura(args: {
     ? cobradoPorPagos
     : cobradoPorViajes || cobradoPorPagos;
 
-  const vencida =
-    !cobrado &&
-    estado === "facturado" &&
-    args.fechaVencimiento != null &&
-    new Date(args.fechaVencimiento) <= new Date();
+  let vencida = false;
+  if (!cobrado && estado === "facturado" && args.fechaVencimiento != null) {
+    const hoy = args.hoyReferencia
+      ? fechaCalendarioAr(
+          args.hoyReferencia instanceof Date
+            ? args.hoyReferencia.toISOString()
+            : args.hoyReferencia,
+        )
+      : fechaCalendarioAr();
+    const vto = fechaCalendarioAr(
+      args.fechaVencimiento instanceof Date
+        ? args.fechaVencimiento.toISOString()
+        : args.fechaVencimiento,
+    );
+    vencida = vto < hoy;
+  }
 
   return { estado, cobrado, vencida };
 }

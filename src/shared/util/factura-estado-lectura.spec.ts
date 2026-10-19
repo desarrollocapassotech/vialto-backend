@@ -142,4 +142,74 @@ test('sin tramo: pagos = neto alcanza (comportamiento actual)', () => {
   assert.equal(cobrado, true);
 });
 
+// Vencimiento de facturas
+test('el mismo día de vencimiento la factura sigue vigente (vencida = false)', () => {
+  const { vencida, estado, cobrado } = computeEstadoFacturaLectura({
+    viajes: [{ id: 'v1', facturacionEstado: 'facturado', monto: 1000 }],
+    fechaVencimiento: new Date('2026-10-14T00:00:00.000Z'),
+    hoyReferencia: '2026-10-14',
+    importeGuardado: 1000,
+    pagos: [],
+    arcaEstado: null,
+    tieneArca: false,
+  });
+  assert.equal(estado, 'facturado');
+  assert.equal(cobrado, false);
+  assert.equal(vencida, false, 'El 14/10 debe figurar como vigente, no vencida');
+});
+
+test('recién al día siguiente del vencimiento pasa a vencida (vencida = true)', () => {
+  const { vencida } = computeEstadoFacturaLectura({
+    viajes: [{ id: 'v1', facturacionEstado: 'facturado', monto: 1000 }],
+    fechaVencimiento: new Date('2026-10-14T00:00:00.000Z'),
+    hoyReferencia: '2026-10-15',
+    importeGuardado: 1000,
+    pagos: [],
+    arcaEstado: null,
+    tieneArca: false,
+  });
+  assert.equal(vencida, true, 'El 15/10 (día siguiente) debe figurar como vencida');
+});
+
+test('con fecha de vencimiento futura sigue vigente (vencida = false)', () => {
+  const { vencida } = computeEstadoFacturaLectura({
+    viajes: [{ id: 'v1', facturacionEstado: 'facturado', monto: 1000 }],
+    fechaVencimiento: new Date('2026-10-20T00:00:00.000Z'),
+    hoyReferencia: '2026-10-14',
+    importeGuardado: 1000,
+    pagos: [],
+    arcaEstado: null,
+    tieneArca: false,
+  });
+  assert.equal(vencida, false);
+});
+
+test('sin fecha de vencimiento no se marca como vencida', () => {
+  const { vencida } = computeEstadoFacturaLectura({
+    viajes: [{ id: 'v1', facturacionEstado: 'facturado', monto: 1000 }],
+    fechaVencimiento: null,
+    hoyReferencia: '2026-10-15',
+    importeGuardado: 1000,
+    pagos: [],
+    arcaEstado: null,
+    tieneArca: false,
+  });
+  assert.equal(vencida, false);
+});
+
+test('factura cobrada con vencimiento ayer no queda marcada como vencida', () => {
+  const { vencida, cobrado } = computeEstadoFacturaLectura({
+    viajes: [{ id: 'v1', facturacionEstado: 'cobrado', monto: 1000 }],
+    fechaVencimiento: new Date('2026-10-14T00:00:00.000Z'),
+    hoyReferencia: '2026-10-15',
+    importeGuardado: 1000,
+    pagos: [{ importe: 1000 }],
+    arcaEstado: null,
+    tieneArca: false,
+  });
+  assert.equal(cobrado, true);
+  assert.equal(vencida, false);
+});
+
 console.log('factura-estado-lectura.spec.ts: OK');
+

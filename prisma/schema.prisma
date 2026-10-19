@@ -634,6 +634,10 @@ model Viaje {
   observaciones               String?
   otrosGastos                 Json      @default("[]")
   pagosTransportista          Json      @default("[]")
+  /// Documentos del viaje: [{ id, url, titulo, nombre, bytes, mimeType, createdAt, createdBy }].
+  /// Máximo 3 y 10 MB entre todos (lo valida ViajesService.addAdjunto con el tamaño real).
+  /// Quitar = borrado lógico (borradoAt, borradoPor, archivoEliminado) + borrado en Cloudinary.
+  adjuntos                    Json      @default("[]")
   /**
    * Datos comerciales/aduaneros MIC·CRT (independientes del monto operativo del viaje).
    */

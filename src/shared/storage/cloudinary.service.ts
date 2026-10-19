@@ -352,9 +352,44 @@ export class CloudinaryService {
     return `vialto/mantenimiento/${tenantId}`;
   }
 
+  /** Carpeta de los documentos adjuntos de un viaje. */
+  viajesFolder(tenantId: string): string {
+    return `vialto/viajes/${tenantId}`;
+  }
+
   /** Adjunto de una orden de trabajo (PDF o imagen, hasta 10 MB). */
-  async uploadMantenimientoAdjunto(
+  uploadMantenimientoAdjunto(
     tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ): Promise<string> {
+    return this.uploadAdjuntoEnCarpeta(
+      this.mantenimientoFolder(tenantId),
+      buffer,
+      originalName,
+      mimeType,
+    );
+  }
+
+  /** Documento adjunto de un viaje (PDF o imagen, hasta 10 MB). */
+  uploadViajeAdjunto(
+    tenantId: string,
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+  ): Promise<string> {
+    return this.uploadAdjuntoEnCarpeta(
+      this.viajesFolder(tenantId),
+      buffer,
+      originalName,
+      mimeType,
+    );
+  }
+
+  /** Sube un PDF (raw) o una imagen a `folder`; mismo criterio para Mantenimiento y Viajes. */
+  private async uploadAdjuntoEnCarpeta(
+    folder: string,
     buffer: Buffer,
     originalName: string,
     mimeType: string,
@@ -381,7 +416,7 @@ export class CloudinaryService {
       const result = await new Promise<UploadApiResponse>((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           {
-            folder: this.mantenimientoFolder(tenantId),
+            folder,
             resource_type: isPdf ? 'raw' : 'image',
             public_id: publicId,
             access_mode: 'public',
@@ -401,7 +436,7 @@ export class CloudinaryService {
       return result.secure_url;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error al subir el archivo';
-      this.logger.error(`Cloudinary mantenimiento upload failed: ${message}`);
+      this.logger.error(`Cloudinary adjunto upload failed (${folder}): ${message}`);
       throw new BadGatewayException(
         message.includes('Invalid cloud_name')
           ? 'Cloudinary mal configurado (cloud name inválido). Revisá las variables de entorno.'
@@ -424,6 +459,37 @@ export class CloudinaryService {
       expires_at: expiresAt,
       ...(parsed.format ? { format: parsed.format } : {}),
     });
+  }
+
+  /**
+   * Borra de Cloudinary un archivo que subimos nosotros, solo si está dentro de `carpeta`
+   * (así nunca se borra un archivo de otra empresa o de otro módulo). Nunca tira:
+   * devuelve `true` si el archivo ya no existe (borrado ahora o inexistente) y `false` si
+   * no se pudo, para que el caller lo registre y se pueda reintentar.
+   */
+  async eliminarArchivo(storedUrl: string, carpeta: string): Promise<boolean> {
+    if (!this.configured) return false;
+    const parsed = this.parseCloudinaryStoredUrl(storedUrl);
+    if (!parsed || !parsed.publicId.startsWith(`${carpeta}/`)) return false;
+    // Los PDF se suben como `raw` con la extensión dentro del public_id
+    // (`…-nombre.pdf`); las imágenes, sin extensión.
+    const publicId =
+      parsed.resourceType === 'raw' && parsed.format
+        ? `${parsed.publicId}.${parsed.format}`
+        : parsed.publicId;
+    try {
+      const res = (await cloudinary.uploader.destroy(publicId, {
+        resource_type: parsed.resourceType,
+        invalidate: true,
+      })) as { result?: string };
+      if (res?.result === 'ok' || res?.result === 'not found') return true;
+      this.logger.warn(`Cloudinary destroy ${publicId}: ${res?.result ?? 'sin resultado'}`);
+      return false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Cloudinary destroy ${publicId} falló: ${message}`);
+      return false;
+    }
   }
 
   parseCloudinaryStoredUrl(

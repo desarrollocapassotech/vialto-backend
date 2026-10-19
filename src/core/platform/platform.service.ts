@@ -215,6 +215,27 @@ export class PlatformService {
     );
   }
 
+  addViajeAdjunto(
+    tenantId: string | undefined,
+    viajeId: string,
+    userId: string,
+    file: Express.Multer.File | undefined,
+    titulo: string | undefined,
+  ) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.addAdjunto(viajeId, scoped, userId, file, titulo);
+  }
+
+  deleteViajeAdjunto(
+    tenantId: string | undefined,
+    viajeId: string,
+    userId: string,
+    adjuntoId: string,
+  ) {
+    const scoped = this.requiredTenantId(tenantId);
+    return this.viajesService.deleteAdjunto(viajeId, scoped, userId, adjuntoId);
+  }
+
   deleteViajePagoTransportista(
     tenantId: string | undefined,
     viajeId: string,

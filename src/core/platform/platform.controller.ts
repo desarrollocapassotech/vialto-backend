@@ -318,6 +318,33 @@ export class PlatformController {
     );
   }
 
+  @Post("viajes/:id/adjuntos")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  addViajeAdjunto(
+    @Param("id") id: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body("titulo") titulo: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.addViajeAdjunto(tenantId, id, auth.userId, file, titulo);
+  }
+
+  @Delete("viajes/:id/adjuntos/:adjuntoId")
+  deleteViajeAdjunto(
+    @Param("id") id: string,
+    @Param("adjuntoId") adjuntoId: string,
+    @Query("tenantId") tenantId: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    return this.service.deleteViajeAdjunto(tenantId, id, auth.userId, adjuntoId);
+  }
+
   @Delete("viajes/:id/pagos-transportista/:index")
   deleteViajePagoTransportista(
     @Param("id") id: string,

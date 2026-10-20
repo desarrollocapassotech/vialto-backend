@@ -93,6 +93,9 @@ export class UpdateTenantDto {
   /** true = la grilla de Viajes muestra la columna de productos. */
   @IsOptional() @IsBoolean() viajesColumnaProductosHabilitada?: boolean;
 
+  /** true = la grilla de Viajes muestra la columna de observaciones. */
+  @IsOptional() @IsBoolean() viajesObservaciones?: boolean;
+
   /** Label que reemplaza a "Producto" (ej. "Grano"). null/"" = "Producto". Sin plural, se genera con IA. */
   @IsOptional() @IsString() @MaxLength(40) productoLabel?: string | null;
   /** Plural del label (corrección manual del generado). */

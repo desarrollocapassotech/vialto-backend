@@ -93,6 +93,9 @@ export class PadronValidacionService {
 
     const padron = await this.padron.consultar(cuit, tenantId);
     if (padron.estado === 'inactivo' || padron.estado === 'no_encontrado') {
+      if (datos.arcaValidadoHuella || datos.arcaValidadoAt) {
+        await this.limpiarMarca(tenantId, entidad, id);
+      }
       return { resultado: 'rechazado', padron };
     }
 
@@ -141,6 +144,9 @@ export class PadronValidacionService {
     }
     const padron = await this.padron.consultar(cuit, tenantId);
     if (padron.estado === 'inactivo' || padron.estado === 'no_encontrado') {
+      if (datos.arcaValidadoHuella || datos.arcaValidadoAt) {
+        await this.limpiarMarca(tenantId, entidad, id);
+      }
       return { resultado: 'rechazado', padron };
     }
     const validadoAt = await this.marcar(tenantId, entidad, id, huellaFiscal(datos));
@@ -208,5 +214,18 @@ export class PadronValidacionService {
           });
     if (count === 0) throw new NotFoundException();
     return validadoAt;
+  }
+
+  private async limpiarMarca(
+    tenantId: string,
+    entidad: PadronEntidad,
+    id: string,
+  ): Promise<void> {
+    const data = { arcaValidadoHuella: null, arcaValidadoAt: null };
+    const { count } =
+      entidad === 'clientes'
+        ? await this.prisma.cliente.updateMany({ where: { id, tenantId }, data })
+        : await this.prisma.transportista.updateMany({ where: { id, tenantId }, data });
+    if (count === 0) throw new NotFoundException();
   }
 }

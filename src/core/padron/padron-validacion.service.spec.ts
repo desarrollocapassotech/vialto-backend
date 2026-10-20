@@ -1,6 +1,6 @@
 /**
  * Pruebas de la validación de clientes/transportistas guardados contra el padrón
- * (marca/huella, diferencias, opt-in). Prisma y PadronService mockeados, sin red.
+ * (marca/huella, actualización automática, opt-in). Prisma y PadronService mockeados, sin red.
  * Ejecutar: npm run test:padron-validacion
  */
 import * as assert from 'node:assert/strict';
@@ -31,6 +31,7 @@ const padronActivo: PadronConsulta = {
 };
 
 type Row = {
+  nombre: string;
   idFiscal: string | null;
   pais: string | null;
   condicionIva: number | null;
@@ -68,6 +69,7 @@ function setup(row: Row, opts: { habilitada?: boolean; padron?: PadronConsulta }
 }
 
 const base: Row = {
+  nombre: 'NYM LOGISTICA SAS',
   idFiscal: '30-71674179-2',
   pais: 'AR',
   condicionIva: 1,
@@ -96,8 +98,8 @@ const base: Row = {
     assert.equal(consultas.n, 0);
   });
 
-  await test('cambió la condición IVA después de validar → la marca no vale y reconsulta', async () => {
-    const { service, consultas } = setup({
+  await test('cambió la condición IVA después de validar → reconsulta y pisa con la de ARCA', async () => {
+    const { service, consultas, row } = setup({
       ...base,
       condicionIva: 6,
       arcaValidadoHuella: huellaFiscal(base),
@@ -105,15 +107,24 @@ const base: Row = {
     });
     const r = await service.validar(TENANT, 'transportistas', 't1');
     assert.equal(consultas.n, 1);
-    assert.equal(r.resultado, 'diferencias');
-    assert.deepEqual((r as any).diferencias, ['condicionIva']);
+    assert.equal(r.resultado, 'actualizado');
+    assert.deepEqual((r as any).cambios, ['condicionIva']);
+    assert.equal(row.condicionIva, 1);
   });
 
-  await test('domicilio vacío → diferencia (el front precarga el de ARCA), sin marcar', async () => {
-    const { service, updates } = setup({ ...base, domicilio: null });
+  await test('razón social y domicilio distintos → se actualizan solos, el CUIT no se toca, queda la marca', async () => {
+    const { service, row, updates } = setup({ ...base, nombre: 'NyM', domicilio: null });
     const r = await service.validar(TENANT, 'transportistas', 't1');
-    assert.deepEqual((r as any).diferencias, ['domicilio']);
-    assert.equal(updates.length, 0);
+    assert.equal(r.resultado, 'actualizado');
+    assert.deepEqual((r as any).cambios, ['nombre', 'domicilio']);
+    assert.equal(updates.length, 1);
+    assert.equal(row.nombre, padronActivo.nombre);
+    assert.equal(row.domicilio, padronActivo.domicilio);
+    assert.equal(row.idFiscal, base.idFiscal);
+    assert.equal(row.arcaValidadoHuella, huellaFiscal(row));
+    // y la próxima validación sale de la marca, sin consultar
+    const r2 = await service.validar(TENANT, 'transportistas', 't1');
+    assert.equal((r2 as any).desdeMarca, true);
   });
 
   await test('CUIT inactivo en ARCA → rechazado', async () => {
@@ -130,14 +141,15 @@ const base: Row = {
     assert.equal(a.consultas.n + b.consultas.n, 0);
   });
 
-  await test('confirmar → marca con los datos actuales aunque el domicilio difiera', async () => {
-    const { service, row } = setup({ ...base, domicilio: 'Canciani 56 - Caroya' });
+  await test('confirmar → respeta la edición manual: la próxima validación no la pisa', async () => {
+    const { service, row, consultas } = setup({ ...base, domicilio: 'Canciani 56 - Caroya' });
     const r = await service.confirmar(TENANT, 'transportistas', 't1');
     assert.equal(r.resultado, 'validado');
+    assert.equal(row.domicilio, 'Canciani 56 - Caroya');
     assert.equal(row.arcaValidadoHuella, huellaFiscal(row));
-    // y la próxima validación sale de la marca
     const r2 = await service.validar(TENANT, 'transportistas', 't1');
     assert.equal((r2 as any).desdeMarca, true);
+    assert.equal(consultas.n, 1);
   });
 
   await test('empresa sin la validación habilitada → 403', async () => {

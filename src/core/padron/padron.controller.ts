@@ -52,7 +52,7 @@ export class PadronController {
 
   @ApiOperation({
     summary:
-      'Validar un cliente/transportista guardado contra el padrón de ARCA (no reconsulta si ya está validado con los mismos datos)',
+      'Validar un cliente/transportista guardado contra el padrón de ARCA y actualizar razón social / condición IVA / domicilio si difieren (no reconsulta si ya está validado con los mismos datos)',
   })
   @Post('validar/:entidad/:id')
   @Roles('admin', 'superadmin')
@@ -66,7 +66,8 @@ export class PadronController {
   }
 
   @ApiOperation({
-    summary: 'Marcar como validado contra ARCA un cliente/transportista que el usuario revisó y guardó',
+    summary:
+      'Marcar como validado un cliente/transportista que el usuario editó a mano después de la actualización automática desde ARCA',
   })
   @Post('validar/:entidad/:id/confirmar')
   @Roles('admin', 'superadmin')

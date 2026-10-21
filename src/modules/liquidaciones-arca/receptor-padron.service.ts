@@ -13,6 +13,7 @@ import { cuitDigitoVerificadorValido, normalizarCuit } from '../../shared/util/c
 const MAX_AGE_EMISION_MS = 24 * 60 * 60 * 1000;
 
 type ReceptorFiscal = {
+  id?: string | null;
   nombre?: string | null;
   idFiscal: string | null;
   pais: string | null;
@@ -48,11 +49,11 @@ export class ReceptorPadronService {
       entidad === 'clientes'
         ? await this.prisma.cliente.findFirst({
             where: { id, tenantId },
-            select: { nombre: true, idFiscal: true, pais: true },
+            select: { id: true, nombre: true, idFiscal: true, pais: true },
           })
         : await this.prisma.transportista.findFirst({
             where: { id, tenantId },
-            select: { nombre: true, idFiscal: true, pais: true },
+            select: { id: true, nombre: true, idFiscal: true, pais: true },
           });
     if (!receptor) {
       throw new NotFoundException(entidad === 'clientes' ? 'Cliente no encontrado' : 'Transportista no encontrado');
@@ -111,13 +112,27 @@ export class ReceptorPadronService {
 
     if (estado !== 'inactivo' && estado !== 'no_encontrado') return;
 
+    // Si el registro figuraba como validado, deja de figurar como validado al estar dado de baja o no existir.
+    if (receptor.id) {
+      const data = { arcaValidadoHuella: null, arcaValidadoAt: null };
+      if (rol === 'cliente') {
+        await this.prisma.cliente.updateMany({ where: { id: receptor.id, tenantId }, data });
+      } else {
+        await this.prisma.transportista.updateMany({ where: { id: receptor.id, tenantId }, data });
+      }
+    }
+
     const quien = rol === 'cliente' ? 'del cliente' : 'del transportista';
+    const cuitDisplay =
+      cuit.length === 11
+        ? `${cuit.slice(0, 2)}-${cuit.slice(2, 10)}-${cuit.slice(10)}`
+        : receptor.idFiscal?.trim() || cuit;
     const motivo =
       estado === 'no_encontrado'
         ? 'no existe en ARCA'
         : 'está dado de baja en ARCA (contribuyente no confiable / apócrifo)';
     throw new UnprocessableEntityException({
-      message: `No se puede emitir: el CUIT ${quien} ${motivo}.`,
+      message: `No se puede emitir: el CUIT ${cuitDisplay} ${quien} ${motivo}.`,
       detalle: { cuit, estadoPadron: estado, observaciones },
     });
   }

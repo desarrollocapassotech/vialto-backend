@@ -133,6 +133,19 @@ const base: Row = {
     assert.equal(r.resultado, 'rechazado');
   });
 
+  await test('CUIT inactivo en ARCA con marca previa → rechazado y limpia la marca', async () => {
+    const { service, updates, row } = setup(
+      { ...base, arcaValidadoHuella: 'vieja-huella', arcaValidadoAt: new Date() },
+      { padron: { ...padronActivo, estado: 'inactivo' } },
+    );
+    const r = await service.validar(TENANT, 'transportistas', 't1');
+    assert.equal(r.resultado, 'rechazado');
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0], { arcaValidadoHuella: null, arcaValidadoAt: null });
+    assert.equal(row.arcaValidadoHuella, null);
+    assert.equal(row.arcaValidadoAt, null);
+  });
+
   await test('sin CUIT o país extranjero → no_aplica, sin consultar', async () => {
     const a = setup({ ...base, idFiscal: null });
     assert.equal((await a.service.validar(TENANT, 'transportistas', 't1')).resultado, 'no_aplica');

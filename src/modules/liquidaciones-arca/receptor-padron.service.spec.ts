@@ -32,15 +32,26 @@ function serviceCon(respuesta: () => Promise<unknown>) {
     },
   };
   // Prisma falso: un transportista de TENANT y la config ARCA en producción.
+  const updates: any[] = [];
   const prisma = {
     transportista: {
       findFirst: async ({ where }: any) =>
-        where.tenantId === TENANT && where.id === 't1' ? { ...receptor } : null,
+        where.tenantId === TENANT && where.id === 't1' ? { id: 't1', ...receptor } : null,
+      updateMany: async (args: any) => {
+        updates.push(args);
+        return { count: 1 };
+      },
     },
-    cliente: { findFirst: async () => null },
+    cliente: {
+      findFirst: async () => null,
+      updateMany: async (args: any) => {
+        updates.push(args);
+        return { count: 1 };
+      },
+    },
     arcaConfig: { findUnique: async () => ({ ambiente: 'produccion' }) },
   };
-  return { service: new ReceptorPadronService(padron, prisma as any), padron, calls };
+  return { service: new ReceptorPadronService(padron, prisma as any), padron, calls, updates };
 }
 
 const activo = async () => ({ datosGenerales: { razonSocial: 'X SA', estadoClave: 'ACTIVO' } });
@@ -56,21 +67,25 @@ const receptor = { nombre: 'X SA', idFiscal: CUIT, pais: 'AR' };
     await service.assertReceptorActivo(TENANT, 'produccion', receptor, 'cliente');
   });
 
-  await test('CUIT inactivo (apócrifo) → 422 con mensaje corto', async () => {
-    const { service } = serviceCon(inactivo);
+  await test('CUIT inactivo (apócrifo) → 422 con CUIT y motivo claro', async () => {
+    const { service, updates } = serviceCon(inactivo);
     await assert.rejects(
-      service.assertReceptorActivo(TENANT, 'produccion', receptor, 'transportista'),
+      service.assertReceptorActivo(TENANT, 'produccion', { id: 't1', ...receptor }, 'transportista'),
       (e: unknown) =>
         e instanceof UnprocessableEntityException &&
         (e.getResponse() as { message: string }).message ===
-          'No se puede emitir: el CUIT del transportista está dado de baja en ARCA (contribuyente no confiable / apócrifo).',
+          'No se puede emitir: el CUIT 30-71674179-2 del transportista está dado de baja en ARCA (contribuyente no confiable / apócrifo).',
     );
+    // Verifica que se haya limpiado la marca de validado
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0].data, { arcaValidadoHuella: null, arcaValidadoAt: null });
   });
 
-  await test('verificarRegistro: bloqueado → { bloqueado, mensaje } sin tirar', async () => {
+  await test('verificarRegistro: bloqueado → { bloqueado, mensaje } con CUIT sin tirar', async () => {
     const { service } = serviceCon(inactivo);
     const r = await service.verificarRegistro(TENANT, 'transportistas', 't1');
     assert.equal(r.bloqueado, true);
+    assert.ok(r.mensaje.includes('30-71674179-2'));
   });
 
   await test('verificarRegistro: activo → no bloqueado', async () => {

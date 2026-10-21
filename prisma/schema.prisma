@@ -138,6 +138,11 @@ model Tenant {
    */
   viajesColumnaProductosHabilitada Boolean @default(false)
   /**
+   * true = la grilla de Viajes muestra la columna de observaciones (apagada por defecto).
+   * Se configura solo desde superadmin ("Configuración por empresa" → pestaña Viajes).
+   */
+  viajesObservaciones             Boolean  @default(false)
+  /**
    * Label que reemplaza a "Producto" en todo el sistema salvo Stock y el término fiscal
    * "Líquido Producto" (ej. "Grano"). null = "Producto". Ver `shared/util/producto-label.util.ts`.
    */

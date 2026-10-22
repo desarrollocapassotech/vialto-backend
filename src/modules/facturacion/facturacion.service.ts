@@ -830,11 +830,15 @@ export class FacturacionService {
     // (cbteTipo/ptoVenta/cbteNro → `numero`), así que se ignora lo que venga.
     // Además, un número cargado en una factura sin emitir la haría contar como
     // comprobante manual ("facturado") en `mapFacturacionEstado`.
-    // Tenants sin ARCA: comprobante externo, opcional (puede cargarse después).
+    // Tenants sin ARCA: comprobante externo, obligatorio (oct 2026; antes se podía
+    // cargar después). Es lo que identifica la venta en Cuenta corriente.
     // Normalizamos acá (no solo confiar en el frontend) para que un string
     // vacío/solo-espacios nunca llegue a guardarse como numero="" — eso
     // rompería la unicidad real (NULL sí admite múltiples filas, "" no).
     const numero = tieneArca ? null : dto.numero?.trim() || null;
+    if (!tieneArca && !numero) {
+      throw new BadRequestException('Ingresá el número de comprobante de la factura.');
+    }
     if (numero) {
       // Validación previa para atrapar el 99% de los casos antes de abrir transacción
       await this.assertNumeroFacturaUnico(tenantId, numero);

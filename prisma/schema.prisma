@@ -839,11 +839,15 @@ model MovimientoCuentaCorriente {
   concepto             String
   importe              Float
   /**
-   * Solo ventas/compras manuales cargadas con IVA: importe sin IVA, % y monto de IVA (detalle para consulta). `importe` es siempre el total (neto + IVA), lo que suma al saldo. null = sin IVA.
+   * Solo ventas/compras manuales cargadas con IVA: importe sin IVA, % y monto de IVA (detalle para consulta). `importe` es siempre el total (neto + IVA), lo que suma al saldo. null = sin IVA. Cargadas por líneas con alícuotas distintas: `ivaPct` null y el detalle en `lineas`.
    */
   importeNeto          Float?
   ivaPct               Float?
   ivaMonto             Float?
+  /**
+   * Solo ventas/compras manuales cargadas por líneas (como una factura): `[{ descripcion, importe (neto), ivaPct }]`. Detalle para consulta; los totales viven en `importeNeto`/`ivaMonto`/`importe`. null = cargada con un solo importe (datos previos a oct 2026).
+   */
+  lineas               Json?
   moneda               String                     @default("ARS")
   fecha                DateTime
   fechaVencimiento     DateTime?

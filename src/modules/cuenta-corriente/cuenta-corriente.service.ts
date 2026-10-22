@@ -100,13 +100,57 @@ export class CuentaCorrienteService {
   }
 
   /**
-   * Texto por defecto cuando no se tipea un concepto — en lenguaje comercial
-   * (venta/cobro del lado cliente, compra/pago del lado proveedor) en vez de la
-   * jerga contable "cargo"/"cobranza" que no resultaba clara para el usuario.
+   * Venta/compra manual cargada por líneas, como una factura: cada línea con su importe
+   * neto y su IVA. Misma cuenta que el pie de Facturas (`computeFacturaTotalesFromBases`
+   * del front): base agrupada por alícuota y el IVA redondeado por alícuota.
+   */
+  private calcularLineas(tipo: string, lineas: { descripcion: string; importe: number; ivaPct: number }[]) {
+    if (tipo !== 'cargo') {
+      throw new BadRequestException('Los cobros y pagos no llevan líneas');
+    }
+    if (lineas.length === 0) {
+      throw new BadRequestException('Agregá al menos una línea con importe');
+    }
+    const normalizadas = lineas.map((l) => {
+      const descripcion = l.descripcion?.trim() ?? '';
+      if (!descripcion) {
+        throw new BadRequestException('Todas las líneas necesitan una descripción');
+      }
+      return {
+        descripcion,
+        importe: roundMoney2(this.normalizeImporte(l.importe)),
+        ivaPct: l.ivaPct,
+      };
+    });
+    const basePorPct = new Map<number, number>();
+    for (const l of normalizadas) {
+      basePorPct.set(l.ivaPct, roundMoney2((basePorPct.get(l.ivaPct) ?? 0) + l.importe));
+    }
+    let neto = 0;
+    let ivaMonto = 0;
+    for (const [pct, base] of basePorPct) {
+      neto = roundMoney2(neto + base);
+      ivaMonto = roundMoney2(ivaMonto + roundMoney2((base * pct) / 100));
+    }
+    const pcts = [...basePorPct.keys()];
+    return {
+      lineas: normalizadas,
+      neto,
+      // Con alícuotas distintas no hay un único %: el detalle queda en `lineas`.
+      ivaPct: pcts.length === 1 ? pcts[0] : null,
+      ivaMonto,
+      total: roundMoney2(neto + ivaMonto),
+    };
+  }
+
+  /**
+   * Concepto de los movimientos manuales (el front lo muestra como "Tipo"): siempre
+   * automático, en lenguaje comercial (venta/cobro del lado cliente, compra/pago del
+   * lado proveedor) en vez de la jerga contable "cargo"/"cobranza".
    */
   private defaultConcepto(tipo: string, esCliente: boolean): string {
-    if (esCliente) return tipo === 'pago' ? 'COBRO' : 'Venta manual';
-    return tipo === 'pago' ? 'PAGO' : 'Compra manual';
+    if (esCliente) return tipo === 'pago' ? 'COBRO' : 'VENTA';
+    return tipo === 'pago' ? 'PAGO' : 'COMPRA';
   }
 
   private resolveFechaVencimiento(
@@ -256,7 +300,8 @@ export class CuentaCorrienteService {
   /**
    * ¿Se puede cargar/corregir el N° de comprobante desde Cuenta corriente? En una venta de
    * factura sin ARCA (con ARCA lo asigna AFIP), en una compra de liquidación sin CVLP (el
-   * número es el de la factura del proveedor) o en una venta/compra manual.
+   * número es el de la factura del proveedor), en una venta/compra manual o en un
+   * cobro/pago manual (su recibo / orden de pago, para completar los cargados sin número).
    */
   private comprobanteEditable(
     m: {
@@ -269,7 +314,9 @@ export class CuentaCorrienteService {
     cbteNroLiquidacion: number | null,
     facturasConArca: boolean,
   ): boolean {
-    if (m.tipo !== 'cargo' || m.estadoDisponibilidad === 'anulado') return false;
+    if (m.estadoDisponibilidad === 'anulado') return false;
+    if (m.tipo === 'pago') return m.origen === 'manual';
+    if (m.tipo !== 'cargo') return false;
     if (m.origen === 'manual') return true;
     if (m.origen === 'factura') return !!m.facturaId && !facturasConArca;
     return m.origen === 'liquidacion' && !!m.liquidacionId && cbteNroLiquidacion == null;
@@ -358,6 +405,9 @@ export class CuentaCorrienteService {
     }
     if (dto.numeroComprobante !== undefined) {
       const valor = dto.numeroComprobante?.trim() || null;
+      if (!valor && mov.origen === 'manual') {
+        throw new BadRequestException('Ingresá el número de comprobante');
+      }
       if (liquidacion) {
         await this.prisma.liquidacion.update({
           where: { id: liquidacion.id },
@@ -511,9 +561,24 @@ export class CuentaCorrienteService {
       dto,
     );
     await this.assertCargoManualPermitido(tenantId, dto);
-    const neto = this.normalizeImporte(dto.importe);
-    const iva = this.calcularIva(dto.tipo, neto, dto.ivaPct);
-    const concepto = dto.concepto?.trim() || this.defaultConcepto(dto.tipo, !!dto.clienteId);
+    // Todo movimiento manual se identifica por su comprobante (factura de la venta/compra,
+    // recibo u orden de pago del cobro/pago): es lo que muestra la grilla y lo que se elige
+    // al imputar.
+    if (!dto.numeroComprobante?.trim()) {
+      throw new BadRequestException('Ingresá el número de comprobante');
+    }
+    const porLineas = dto.lineas ? this.calcularLineas(dto.tipo, dto.lineas) : null;
+    if (!porLineas && dto.importe == null) {
+      throw new BadRequestException('Ingresá un importe');
+    }
+    const neto = porLineas ? porLineas.neto : this.normalizeImporte(dto.importe!);
+    const iva = porLineas
+      ? porLineas.ivaMonto > 0
+        ? { pct: porLineas.ivaPct, monto: porLineas.ivaMonto, total: porLineas.total }
+        : null
+      : this.calcularIva(dto.tipo, neto, dto.ivaPct);
+    // Siempre automático (VENTA/COMPRA/COBRO/PAGO): no se tipea a mano.
+    const concepto = this.defaultConcepto(dto.tipo, !!dto.clienteId);
     const fecha = new Date(dto.fecha);
     const moneda = dto.moneda?.trim() || 'ARS';
     const cargosAImputar =
@@ -536,6 +601,7 @@ export class CuentaCorrienteService {
         importeNeto: iva ? roundMoney2(neto) : null,
         ivaPct: iva ? iva.pct : null,
         ivaMonto: iva ? iva.monto : null,
+        lineas: porLineas ? porLineas.lineas : Prisma.DbNull,
         moneda,
         fecha,
         fechaVencimiento:
@@ -598,12 +664,28 @@ export class CuentaCorrienteService {
     return conPendiente;
   }
 
+  /**
+   * Edita un movimiento manual. Comprobante, fechas y medio de cobro se editan siempre;
+   * lo que mueve plata (importe, líneas, moneda, tipo, contraparte) solo sin imputaciones,
+   * porque dejaría inconsistentes los saldos de lo ya imputado.
+   */
   async update(id: string, tenantId: string, dto: UpdateMovimientoCcDto) {
     const current = await this.findOne(id, tenantId);
     this.assertEditableAMano(current, 'editar');
-    await this.assertSinImputaciones(current, 'editar');
 
     const cambiaContraparte = dto.clienteId !== undefined || dto.proveedorId !== undefined;
+    const cambiaMonto =
+      dto.importe !== undefined ||
+      dto.lineas !== undefined ||
+      (dto.moneda !== undefined && dto.moneda !== current.moneda) ||
+      (dto.tipo !== undefined && dto.tipo !== current.tipo) ||
+      cambiaContraparte;
+    if (cambiaMonto) {
+      await this.assertSinImputaciones(current, 'cambiar el importe, la moneda o la cuenta de');
+    }
+    if (dto.numeroComprobante !== undefined && !dto.numeroComprobante.trim()) {
+      throw new BadRequestException('Ingresá el número de comprobante');
+    }
     let clienteId = current.clienteId;
     let proveedorId = current.proveedorId;
     let contraparteId = current.contraparteId;
@@ -622,6 +704,12 @@ export class CuentaCorrienteService {
 
     const tipo = dto.tipo ?? current.tipo;
     const fecha = dto.fecha !== undefined ? new Date(dto.fecha) : current.fecha;
+    // Venta/compra por líneas: mismo cálculo que al crearla (total = neto + IVA por alícuota).
+    const porLineas = dto.lineas ? this.calcularLineas(tipo, dto.lineas) : null;
+    const referencia =
+      dto.formaPago !== undefined || dto.referencia !== undefined
+        ? (dto.formaPago ?? dto.referencia)?.trim() || null
+        : undefined;
 
     return this.prisma.movimientoCuentaCorriente.update({
       where: { id },
@@ -631,12 +719,22 @@ export class CuentaCorrienteService {
         contraparteId,
         tipo,
         concepto: dto.concepto?.trim(),
-        importe:
-          dto.importe === undefined ? undefined : this.normalizeImporte(dto.importe),
-        // Si cambia el importe o el tipo, el detalle de IVA de la carga original ya no aplica.
-        ...(dto.importe !== undefined || tipo !== current.tipo
-          ? { importeNeto: null, ivaPct: null, ivaMonto: null }
-          : {}),
+        ...(porLineas
+          ? {
+              importe: porLineas.total,
+              importeNeto: porLineas.ivaMonto > 0 ? porLineas.neto : null,
+              ivaPct: porLineas.ivaMonto > 0 ? porLineas.ivaPct : null,
+              ivaMonto: porLineas.ivaMonto > 0 ? porLineas.ivaMonto : null,
+              lineas: porLineas.lineas,
+            }
+          : {
+              importe:
+                dto.importe === undefined ? undefined : this.normalizeImporte(dto.importe),
+              // Si cambia el importe o el tipo, el detalle de IVA de la carga original ya no aplica.
+              ...(dto.importe !== undefined || tipo !== current.tipo
+                ? { importeNeto: null, ivaPct: null, ivaMonto: null, lineas: Prisma.DbNull }
+                : {}),
+            }),
         moneda: dto.moneda?.trim() || undefined,
         fecha: dto.fecha === undefined ? undefined : fecha,
         fechaVencimiento:
@@ -648,10 +746,7 @@ export class CuentaCorrienteService {
               ? this.resolveFechaVencimiento(fecha, condicionPagoDias)
               : undefined,
         numeroComprobante: dto.numeroComprobante?.trim() || undefined,
-        referencia:
-          dto.formaPago?.trim() ||
-          dto.referencia?.trim() ||
-          undefined,
+        referencia,
       },
     });
   }

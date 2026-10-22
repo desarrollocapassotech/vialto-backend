@@ -138,6 +138,11 @@ model Tenant {
    */
   viajesColumnaProductosHabilitada Boolean @default(false)
   /**
+   * true = la grilla de Viajes muestra la columna de observaciones (apagada por defecto).
+   * Se configura solo desde superadmin ("Configuración por empresa" → pestaña Viajes).
+   */
+  viajesObservaciones             Boolean  @default(false)
+  /**
    * Label que reemplaza a "Producto" en todo el sistema salvo Stock y el término fiscal
    * "Líquido Producto" (ej. "Grano"). null = "Producto". Ver `shared/util/producto-label.util.ts`.
    */
@@ -634,6 +639,10 @@ model Viaje {
   observaciones               String?
   otrosGastos                 Json      @default("[]")
   pagosTransportista          Json      @default("[]")
+  /// Documentos del viaje: [{ id, url, titulo, nombre, bytes, mimeType, createdAt, createdBy }].
+  /// Máximo 3 y 10 MB entre todos (lo valida ViajesService.addAdjunto con el tamaño real).
+  /// Quitar = borrado lógico (borradoAt, borradoPor, archivoEliminado) + borrado en Cloudinary.
+  adjuntos                    Json      @default("[]")
   /**
    * Datos comerciales/aduaneros MIC·CRT (independientes del monto operativo del viaje).
    */

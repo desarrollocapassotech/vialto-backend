@@ -10,8 +10,12 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import type { Request, Response } from "express";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { ViajesService } from "./viajes.service";
@@ -369,6 +373,41 @@ export class ViajesController {
       auth.userId,
       index,
     );
+  }
+
+  @ApiOperation({
+    summary: "Adjuntar un documento al viaje (PDF o imagen)",
+    description:
+      "multipart: `file` + `titulo` (obligatorio). Máximo 3 documentos y 10 MB entre todos.",
+  })
+  @Post(":id/adjuntos")
+  @Roles("admin", "superadmin")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  addAdjunto(
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body("titulo") titulo: string | undefined,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.addAdjunto(id, auth.tenantId, auth.userId, file, titulo);
+  }
+
+  @ApiOperation({ summary: "Quitar un documento del viaje" })
+  @Delete(":id/adjuntos/:adjuntoId")
+  @Roles("admin", "superadmin")
+  deleteAdjunto(
+    @Param("id") id: string,
+    @Param("adjuntoId") adjuntoId: string,
+    @CurrentAuth() auth: AuthPayload,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.deleteAdjunto(id, auth.tenantId, auth.userId, adjuntoId);
   }
 
   @ApiOperation({ summary: "Registrar gasto adicional en un viaje" })

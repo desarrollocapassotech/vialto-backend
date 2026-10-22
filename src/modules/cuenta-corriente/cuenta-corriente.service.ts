@@ -172,7 +172,27 @@ export class CuentaCorrienteService {
         // VTO-431: vínculo entre el movimiento anulado y su crédito de anulación, para mostrarlos juntos.
         anuladoPor: { select: { id: true, fecha: true } },
         anulaMovimiento: { select: { id: true, fecha: true, concepto: true } },
-        liquidacion: { select: { cbteNro: true } },
+        // Clips de la columna Comprobante (mismo criterio que las grillas de Facturas y
+        // Liquidaciones): adjunto o PDF de ARCA, y el de su anulación.
+        factura: {
+          select: {
+            cae: true,
+            comprobanteUrl: true,
+            arcaEstado: true,
+            anulacionCae: true,
+            notaCreditoUrl: true,
+          },
+        },
+        liquidacion: {
+          select: {
+            cbteNro: true,
+            comprobanteUrl: true,
+            estado: true,
+            anulacionMetodo: true,
+            anulacionCae: true,
+            anulacionManualComprobanteUrl: true,
+          },
+        },
       },
       // Orden de carga (último cargado primero), no por `fecha`: un cobro con fecha
       // anterior a otros movimientos tiene que aparecer arriba al registrarlo.
@@ -183,7 +203,7 @@ export class CuentaCorrienteService {
     // "Saldo" de la línea: lo que todavía no se resolvió de ESE movimiento puntual
     // (un cargo, cuánto le falta cobrar/pagar; un pago, cuánto le falta imputar) —
     // no confundir con el saldo acumulado de la cuenta completa.
-    return rows.map(({ imputacionesComoCargo, imputacionesComoPago, liquidacion, ...m }) => {
+    return rows.map(({ imputacionesComoCargo, imputacionesComoPago, factura, liquidacion, ...m }) => {
       const imputado =
         m.tipo === 'cargo'
           ? imputacionesComoCargo.reduce((s, i) => s + i.importe, 0)
@@ -207,6 +227,8 @@ export class CuentaCorrienteService {
         ).map(([cargoId, importe]) => ({ cargoId, importe: roundMoney2(importe) })),
         comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null, facturasConArca),
         vencimientoEditable: this.vencimientoEditable(m),
+        facturaComprobantes: factura,
+        liquidacionComprobantes: liquidacion,
       };
     });
   }
@@ -267,7 +289,11 @@ export class CuentaCorrienteService {
   async actualizarComprobante(
     tenantId: string,
     id: string,
-    dto: { numeroComprobante?: string | null; fechaVencimiento?: string | null },
+    dto: {
+      numeroComprobante?: string | null;
+      fechaVencimiento?: string | null;
+      comprobanteUrl?: string | null;
+    },
   ) {
     const mov = await this.findOne(id, tenantId);
     const liquidacion = mov.liquidacionId
@@ -294,6 +320,16 @@ export class CuentaCorrienteService {
     if (dto.fechaVencimiento !== undefined && !this.vencimientoEditable(mov)) {
       throw new BadRequestException('El vencimiento de este movimiento no se puede editar.');
     }
+    // El archivo vive en la factura/liquidación: una venta/compra manual no tiene dónde guardarlo.
+    if (
+      dto.comprobanteUrl !== undefined &&
+      (mov.origen === 'manual' ||
+        !this.comprobanteEditable(mov, liquidacion?.cbteNro ?? null, facturasConArca))
+    ) {
+      throw new BadRequestException('A este movimiento no se le puede adjuntar el comprobante.');
+    }
+    const comprobanteUrl =
+      dto.comprobanteUrl !== undefined ? dto.comprobanteUrl?.trim() || null : undefined;
 
     if (mov.origen === 'factura' && mov.facturaId) {
       const numero = dto.numeroComprobante?.trim();
@@ -306,6 +342,8 @@ export class CuentaCorrienteService {
         ...(dto.fechaVencimiento !== undefined
           ? { fechaVencimiento: dto.fechaVencimiento ?? '' }
           : {}),
+        // updateFactura toma '' como "quitar el adjunto".
+        ...(comprobanteUrl !== undefined ? { comprobanteUrl: comprobanteUrl ?? '' } : {}),
       });
       return this.findOne(id, tenantId);
     }
@@ -332,6 +370,12 @@ export class CuentaCorrienteService {
           data: { numeroComprobante: valor },
         });
       }
+    }
+    if (comprobanteUrl !== undefined && liquidacion) {
+      await this.prisma.liquidacion.update({
+        where: { id: liquidacion.id },
+        data: { comprobanteUrl, updatedAt: new Date() },
+      });
     }
     return this.findOne(id, tenantId);
   }

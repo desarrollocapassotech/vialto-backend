@@ -5,7 +5,9 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
 import { PrismaService } from "../../shared/prisma/prisma.service";
+import { CloudinaryService } from "../../shared/storage/cloudinary.service";
 import { ViajesAutoEstadoService } from "./viajes-auto-estado.service";
 import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
 import { CreateViajeDto } from "./dto/create-viaje.dto";
@@ -75,6 +77,51 @@ import {
   resolveViajesSort,
   type ViajesSortDir,
 } from "./viajes-paginated-query.util";
+
+/** Documentos por viaje: máximo 3 y 10 MB entre todos. */
+const MAX_ADJUNTOS_VIAJE = 3;
+const MAX_BYTES_ADJUNTOS_VIAJE = 10 * 1024 * 1024;
+
+type ViajeAdjunto = {
+  id: string;
+  url: string;
+  /** Título que carga el usuario (obligatorio). */
+  titulo: string;
+  /** Nombre original del archivo. */
+  nombre: string;
+  bytes: number;
+  mimeType: string;
+  createdAt: string;
+  createdBy: string;
+  /**
+   * Borrado lógico: el documento sale del viaje pero queda registrado para analizar el
+   * espacio ocupado y limpiar Cloudinary. `archivoEliminado` = si el archivo ya se borró
+   * de Cloudinary (false = quedó ahí, reintentar en una limpieza).
+   */
+  borradoAt?: string;
+  borradoPor?: string;
+  archivoEliminado?: boolean;
+};
+
+/** Documentos vigentes (sin los borrados): lo que cuenta para el tope de 3 / 10 MB. */
+function adjuntosActivos(adjuntos: ViajeAdjunto[]): ViajeAdjunto[] {
+  return adjuntos.filter((a) => !a.borradoAt);
+}
+
+/** Lee `Viaje.adjuntos` (Json) tolerando filas viejas o mal formadas. */
+function adjuntosDeViaje(raw: unknown): ViajeAdjunto[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Array<Partial<ViajeAdjunto>>)
+    .filter((a) => a && typeof a.id === "string" && typeof a.url === "string")
+    .map(
+      (a) =>
+        ({
+          ...a,
+          titulo: a.titulo || a.nombre || "Documento",
+          bytes: Number(a.bytes) || 0,
+        }) as ViajeAdjunto,
+    );
+}
 
 /** Transacciones con varios writes + Neon pueden superar el default de 5s de Prisma. */
 const VIAJE_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
@@ -295,6 +342,7 @@ export class ViajesService {
     private readonly prisma: PrismaService,
     private readonly autoEstado: ViajesAutoEstadoService,
     private readonly tenantFieldConfig: TenantFieldConfigService,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   /**
@@ -588,7 +636,10 @@ export class ViajesService {
     const nuevoPago: Record<string, unknown> = {
       monto: importe,
       moneda,
-      fecha: fecha.toISOString(),
+      fecha:
+        fecha instanceof Date
+          ? fecha.toISOString().slice(0, 10)
+          : String(fecha).slice(0, 10),
       createdBy: "cuenta-corriente",
       createdAt: new Date().toISOString(),
       ccImputacionId,
@@ -1845,6 +1896,111 @@ export class ViajesService {
     } catch (e) {
       this.assertNoUniqueConstraintViolation(e);
     }
+  }
+
+  /**
+   * Documentos del viaje (remito, carta de porte, fotos…): hasta 3 y 10 MB entre todos.
+   * El tope se controla acá con el tamaño real del archivo subido (no con lo que diga el
+   * cliente). Son datos operativos: se pueden agregar/quitar en cualquier etapa.
+   */
+  async addAdjunto(
+    id: string,
+    tenantId: string,
+    userId: string,
+    file: Express.Multer.File | undefined,
+    tituloRaw: string | undefined,
+  ) {
+    if (!file) throw new BadRequestException("Se requiere un archivo.");
+    const titulo = String(tituloRaw ?? "").trim();
+    if (!titulo) throw new BadRequestException("Ingresá un título para el documento.");
+    if (titulo.length > 120) {
+      throw new BadRequestException("El título no puede superar 120 caracteres.");
+    }
+    const esPdf =
+      file.mimetype === "application/pdf" ||
+      file.originalname?.toLowerCase().endsWith(".pdf");
+    if (!esPdf && !file.mimetype?.startsWith("image/")) {
+      throw new BadRequestException("El documento tiene que ser un PDF o una imagen.");
+    }
+
+    const viaje = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      select: { adjuntos: true },
+    });
+    if (!viaje) throw new NotFoundException("Viaje no encontrado");
+    const actuales = adjuntosDeViaje(viaje.adjuntos);
+    const activos = adjuntosActivos(actuales);
+    if (activos.length >= MAX_ADJUNTOS_VIAJE) {
+      throw new BadRequestException(
+        `El viaje ya tiene ${MAX_ADJUNTOS_VIAJE} documentos. Quitá uno para agregar otro.`,
+      );
+    }
+    const usados = activos.reduce((acc, a) => acc + a.bytes, 0);
+    if (usados + file.size > MAX_BYTES_ADJUNTOS_VIAJE) {
+      throw new BadRequestException(
+        "Los documentos del viaje no pueden superar 10 MB en total.",
+      );
+    }
+
+    const url = await this.cloudinary.uploadViajeAdjunto(
+      tenantId,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    const nuevo: ViajeAdjunto = {
+      id: randomUUID(),
+      url,
+      titulo,
+      nombre: file.originalname || "documento",
+      bytes: file.size,
+      mimeType: file.mimetype,
+      createdAt: new Date().toISOString(),
+      createdBy: userId,
+    };
+    await this.prisma.viaje.updateMany({
+      where: { id, tenantId },
+      data: { adjuntos: [...actuales, nuevo] as unknown as Prisma.InputJsonValue },
+    });
+    return this.findOne(id, tenantId);
+  }
+
+  /**
+   * Quita un documento del viaje: lo borra de Cloudinary y lo deja marcado como borrado
+   * (no se elimina de la lista), con `archivoEliminado` indicando si el borrado del
+   * archivo salió bien. Si Cloudinary falla, quitar el documento igual funciona.
+   */
+  async deleteAdjunto(
+    id: string,
+    tenantId: string,
+    userId: string,
+    adjuntoId: string,
+  ) {
+    const viaje = await this.prisma.viaje.findFirst({
+      where: { id, tenantId },
+      select: { adjuntos: true },
+    });
+    if (!viaje) throw new NotFoundException("Viaje no encontrado");
+    const actuales = adjuntosDeViaje(viaje.adjuntos);
+    const doc = adjuntosActivos(actuales).find((a) => a.id === adjuntoId);
+    if (!doc) throw new NotFoundException("Documento no encontrado");
+
+    const archivoEliminado = await this.cloudinary.eliminarArchivo(
+      doc.url,
+      this.cloudinary.viajesFolder(tenantId),
+    );
+    const borradoAt = new Date().toISOString();
+    await this.prisma.viaje.updateMany({
+      where: { id, tenantId },
+      data: {
+        adjuntos: actuales.map((a) =>
+          a.id === adjuntoId
+            ? { ...a, borradoAt, borradoPor: userId, archivoEliminado }
+            : a,
+        ) as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return this.findOne(id, tenantId);
   }
 
   async addGasto(

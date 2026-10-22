@@ -6,20 +6,29 @@ import { PadronConsulta } from './padron.types';
 
 export type PadronEntidad = 'clientes' | 'transportistas';
 
-/** Dato del registro que no coincide con lo que informa ARCA. */
-export type PadronDiferencia = 'condicionIva' | 'domicilio';
+/** Dato del registro que no coincidía con ARCA y se actualizó solo. El CUIT nunca se toca. */
+export type PadronDiferencia = 'nombre' | 'condicionIva' | 'domicilio';
 
 export type PadronValidacionResultado =
   /** Sin CUIT argentino válido: no hay nada que validar. */
   | { resultado: 'no_aplica' }
   /** Coincide con ARCA. `desdeMarca` = no se consultó: ya estaba validado con estos mismos datos. */
   | { resultado: 'validado'; validadoAt: Date; desdeMarca: boolean }
-  /** CUIT activo pero condición IVA / domicilio distintos (o vacíos): el front precarga lo de ARCA. */
-  | { resultado: 'diferencias'; padron: PadronConsulta; diferencias: PadronDiferencia[] }
+  /**
+   * CUIT activo pero razón social / condición IVA / domicilio distintos (o vacíos): se
+   * guardaron los de ARCA sin pedir confirmación y quedó la marca de validado.
+   */
+  | {
+      resultado: 'actualizado';
+      validadoAt: Date;
+      padron: PadronConsulta;
+      cambios: PadronDiferencia[];
+    }
   /** CUIT inactivo o inexistente en el padrón. */
   | { resultado: 'rechazado'; padron: PadronConsulta };
 
 type DatosFiscales = {
+  nombre: string;
   idFiscal: string | null;
   pais: string | null;
   condicionIva: number | null;
@@ -53,7 +62,8 @@ export function huellaFiscal(d: Pick<DatosFiscales, 'idFiscal' | 'condicionIva' 
 }
 
 /**
- * Valida un Cliente/Transportista guardado contra el padrón de ARCA y deja una marca
+ * Valida un Cliente/Transportista guardado contra el padrón de ARCA, actualiza solo la
+ * razón social / condición IVA / domicilio si difieren (nunca el CUIT) y deja una marca
  * (`arcaValidadoHuella`/`arcaValidadoAt`) para no volver a consultar mientras sus datos
  * fiscales no cambien. Respeta el opt-in `Tenant.validacionCuitArcaHabilitada`.
  */
@@ -83,31 +93,43 @@ export class PadronValidacionService {
 
     const padron = await this.padron.consultar(cuit, tenantId);
     if (padron.estado === 'inactivo' || padron.estado === 'no_encontrado') {
+      if (datos.arcaValidadoHuella || datos.arcaValidadoAt) {
+        await this.limpiarMarca(tenantId, entidad, id);
+      }
       return { resultado: 'rechazado', padron };
     }
 
-    const diferencias: PadronDiferencia[] = [];
+    // Lo que difiere de ARCA se actualiza solo (sin confirmación del usuario). El CUIT no.
+    const nuevos: Partial<Pick<DatosFiscales, 'nombre' | 'condicionIva' | 'domicilio'>> = {};
+    if (padron.nombre && datos.nombre.trim() !== padron.nombre) {
+      nuevos.nombre = padron.nombre;
+    }
     if (padron.condicionIva != null && datos.condicionIva !== padron.condicionIva) {
-      diferencias.push('condicionIva');
+      nuevos.condicionIva = padron.condicionIva;
     }
     if (
       padron.domicilio &&
       normalizarTexto(datos.domicilio) !== normalizarTexto(padron.domicilio)
     ) {
-      diferencias.push('domicilio');
+      nuevos.domicilio = padron.domicilio;
     }
-    if (diferencias.length > 0) {
-      return { resultado: 'diferencias', padron, diferencias };
-    }
-
-    const validadoAt = await this.marcar(tenantId, entidad, id, huella);
-    return { resultado: 'validado', validadoAt, desdeMarca: false };
+    const cambios = Object.keys(nuevos) as PadronDiferencia[];
+    const validadoAt = await this.marcar(
+      tenantId,
+      entidad,
+      id,
+      huellaFiscal({ ...datos, ...nuevos }),
+      nuevos,
+    );
+    return cambios.length > 0
+      ? { resultado: 'actualizado', validadoAt, padron, cambios }
+      : { resultado: 'validado', validadoAt, desdeMarca: false };
   }
 
   /**
-   * El usuario revisó los datos contra lo que informó ARCA y los guardó (aunque haya dejado
-   * el domicilio escrito a su manera): se marca como validado con los datos actuales.
-   * Exige que el CUIT siga activo en el padrón (sale de la caché, no gasta otra consulta).
+   * El usuario revisó y editó a mano los datos que se habían actualizado desde ARCA: se
+   * marca como validado con lo que guardó, para que la próxima validación no lo vuelva a
+   * pisar. Exige que el CUIT siga activo (sale de la caché, no gasta otra consulta).
    */
   async confirmar(
     tenantId: string,
@@ -122,6 +144,9 @@ export class PadronValidacionService {
     }
     const padron = await this.padron.consultar(cuit, tenantId);
     if (padron.estado === 'inactivo' || padron.estado === 'no_encontrado') {
+      if (datos.arcaValidadoHuella || datos.arcaValidadoAt) {
+        await this.limpiarMarca(tenantId, entidad, id);
+      }
       return { resultado: 'rechazado', padron };
     }
     const validadoAt = await this.marcar(tenantId, entidad, id, huellaFiscal(datos));
@@ -142,6 +167,7 @@ export class PadronValidacionService {
 
   private async leer(tenantId: string, entidad: PadronEntidad, id: string): Promise<DatosFiscales> {
     const select = {
+      nombre: true,
       idFiscal: true,
       pais: true,
       condicionIva: true,
@@ -165,19 +191,41 @@ export class PadronValidacionService {
     return row;
   }
 
+  /** Deja la marca de validado y, si viene `nuevos`, guarda en el mismo update los datos de ARCA. */
   private async marcar(
     tenantId: string,
     entidad: PadronEntidad,
     id: string,
     huella: string,
+    nuevos: Partial<Pick<DatosFiscales, 'nombre' | 'condicionIva' | 'domicilio'>> = {},
   ): Promise<Date> {
     const validadoAt = new Date();
-    const data = { arcaValidadoHuella: huella, arcaValidadoAt: validadoAt };
+    const { domicilio, ...resto } = nuevos;
+    const marca = { ...resto, arcaValidadoHuella: huella, arcaValidadoAt: validadoAt };
+    const { count } =
+      entidad === 'clientes'
+        ? await this.prisma.cliente.updateMany({
+            where: { id, tenantId },
+            data: { ...marca, ...(domicilio !== undefined && { direccion: domicilio }) },
+          })
+        : await this.prisma.transportista.updateMany({
+            where: { id, tenantId },
+            data: { ...marca, ...(domicilio !== undefined && { domicilio }) },
+          });
+    if (count === 0) throw new NotFoundException();
+    return validadoAt;
+  }
+
+  private async limpiarMarca(
+    tenantId: string,
+    entidad: PadronEntidad,
+    id: string,
+  ): Promise<void> {
+    const data = { arcaValidadoHuella: null, arcaValidadoAt: null };
     const { count } =
       entidad === 'clientes'
         ? await this.prisma.cliente.updateMany({ where: { id, tenantId }, data })
         : await this.prisma.transportista.updateMany({ where: { id, tenantId }, data });
     if (count === 0) throw new NotFoundException();
-    return validadoAt;
   }
 }

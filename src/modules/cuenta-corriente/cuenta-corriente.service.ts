@@ -300,7 +300,8 @@ export class CuentaCorrienteService {
   /**
    * ¿Se puede cargar/corregir el N° de comprobante desde Cuenta corriente? En una venta de
    * factura sin ARCA (con ARCA lo asigna AFIP), en una compra de liquidación sin CVLP (el
-   * número es el de la factura del proveedor) o en una venta/compra manual.
+   * número es el de la factura del proveedor), en una venta/compra manual o en un
+   * cobro/pago manual (su recibo / orden de pago, para completar los cargados sin número).
    */
   private comprobanteEditable(
     m: {
@@ -313,7 +314,9 @@ export class CuentaCorrienteService {
     cbteNroLiquidacion: number | null,
     facturasConArca: boolean,
   ): boolean {
-    if (m.tipo !== 'cargo' || m.estadoDisponibilidad === 'anulado') return false;
+    if (m.estadoDisponibilidad === 'anulado') return false;
+    if (m.tipo === 'pago') return m.origen === 'manual';
+    if (m.tipo !== 'cargo') return false;
     if (m.origen === 'manual') return true;
     if (m.origen === 'factura') return !!m.facturaId && !facturasConArca;
     return m.origen === 'liquidacion' && !!m.liquidacionId && cbteNroLiquidacion == null;
@@ -402,6 +405,9 @@ export class CuentaCorrienteService {
     }
     if (dto.numeroComprobante !== undefined) {
       const valor = dto.numeroComprobante?.trim() || null;
+      if (!valor && mov.origen === 'manual') {
+        throw new BadRequestException('Ingresá el número de comprobante');
+      }
       if (liquidacion) {
         await this.prisma.liquidacion.update({
           where: { id: liquidacion.id },
@@ -555,6 +561,12 @@ export class CuentaCorrienteService {
       dto,
     );
     await this.assertCargoManualPermitido(tenantId, dto);
+    // Todo movimiento manual se identifica por su comprobante (factura de la venta/compra,
+    // recibo u orden de pago del cobro/pago): es lo que muestra la grilla y lo que se elige
+    // al imputar.
+    if (!dto.numeroComprobante?.trim()) {
+      throw new BadRequestException('Ingresá el número de comprobante');
+    }
     const porLineas = dto.lineas ? this.calcularLineas(dto.tipo, dto.lineas) : null;
     if (!porLineas && dto.importe == null) {
       throw new BadRequestException('Ingresá un importe');

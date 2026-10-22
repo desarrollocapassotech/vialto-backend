@@ -178,7 +178,7 @@ export class CuentaCorrienteController {
 
   @ApiOperation({
     summary:
-      'Cargar o corregir el N° de comprobante y/o el vencimiento (factura, liquidación o venta/compra manual)',
+      'Cargar o corregir el N° de comprobante y/o el vencimiento (factura, liquidación, venta/compra manual o cobro/pago manual)',
   })
   @Patch('movimientos/:id/comprobante')
   @Roles('admin', 'superadmin')

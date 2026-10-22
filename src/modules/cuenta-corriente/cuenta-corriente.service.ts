@@ -100,13 +100,13 @@ export class CuentaCorrienteService {
   }
 
   /**
-   * Texto por defecto cuando no se tipea un concepto — en lenguaje comercial
-   * (venta/cobro del lado cliente, compra/pago del lado proveedor) en vez de la
-   * jerga contable "cargo"/"cobranza" que no resultaba clara para el usuario.
+   * Concepto de los movimientos manuales (el front lo muestra como "Tipo"): siempre
+   * automático, en lenguaje comercial (venta/cobro del lado cliente, compra/pago del
+   * lado proveedor) en vez de la jerga contable "cargo"/"cobranza".
    */
   private defaultConcepto(tipo: string, esCliente: boolean): string {
-    if (esCliente) return tipo === 'pago' ? 'COBRO' : 'Venta manual';
-    return tipo === 'pago' ? 'PAGO' : 'Compra manual';
+    if (esCliente) return tipo === 'pago' ? 'COBRO' : 'VENTA';
+    return tipo === 'pago' ? 'PAGO' : 'COMPRA';
   }
 
   private resolveFechaVencimiento(
@@ -513,7 +513,8 @@ export class CuentaCorrienteService {
     await this.assertCargoManualPermitido(tenantId, dto);
     const neto = this.normalizeImporte(dto.importe);
     const iva = this.calcularIva(dto.tipo, neto, dto.ivaPct);
-    const concepto = dto.concepto?.trim() || this.defaultConcepto(dto.tipo, !!dto.clienteId);
+    // Siempre automático (VENTA/COMPRA/COBRO/PAGO): no se tipea a mano.
+    const concepto = this.defaultConcepto(dto.tipo, !!dto.clienteId);
     const fecha = new Date(dto.fecha);
     const moneda = dto.moneda?.trim() || 'ARS';
     const cargosAImputar =

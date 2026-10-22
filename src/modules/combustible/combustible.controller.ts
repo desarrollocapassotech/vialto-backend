@@ -16,7 +16,10 @@ import { ClerkAuthGuard, AuthPayload } from "../../core/auth/clerk-auth.guard";
 import { RolesGuard } from "../../core/auth/roles.guard";
 import { Roles } from "../../core/auth/roles.decorator";
 import { CurrentAuth } from "../../core/auth/current-auth.decorator";
-import { CombustibleService } from "../../modules/combustible/combustible.service";
+import {
+  CombustibleService,
+  PERIODOS_SOSPECHOSAS,
+} from "../../modules/combustible/combustible.service";
 import { CreateCargaDto } from "../../modules/combustible/dto/create-carga.dto";
 import { AsignarVehiculoDto } from "../../modules/combustible/dto/asignar-vehiculo.dto";
 import { EditarKmVehiculoDto } from "../../core/vehiculos/dto/editar-km-vehiculo.dto";
@@ -85,6 +88,8 @@ export class CombustibleController {
     @Query("formaPago") formaPago?: string,
     @Query("sortBy") sortBy?: string,
     @Query("sortDir") sortDir?: "asc" | "desc",
+    /** Filtro rápido "Cargas sospechosas": todas | este_mes | mes_anterior | ultimos_3_meses. */
+    @Query("sospechoso") sospechoso?: string,
   ) {
     const id = this.requiredTenantId(tenantId, current);
     return this.service.findAll(
@@ -99,6 +104,7 @@ export class CombustibleController {
       formaPago,
       sortBy,
       sortDir,
+      PERIODOS_SOSPECHOSAS.find((p) => p === sospechoso),
     );
   }
 

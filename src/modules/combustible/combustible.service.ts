@@ -33,6 +33,31 @@ const OUTLIER_PCT_CATEGORIA = 0.3; // +30% de litros sobre el promedio de su cat
 const SEMAFORO_AMARILLO_PCT = 0.15; // costo/km +15% sobre el promedio de su categoría
 const SEMAFORO_ROJO_PCT = 0.5; // costo/km +50% sobre el promedio de su categoría
 
+/** Períodos del filtro rápido "Cargas sospechosas" del listado. */
+export const PERIODOS_SOSPECHOSAS = ["todas", "este_mes", "mes_anterior", "ultimos_3_meses"] as const;
+export type PeriodoSospechosas = (typeof PERIODOS_SOSPECHOSAS)[number];
+
+/**
+ * Rango de `fecha` de un período, por mes calendario de Argentina (`fecha` se guarda a
+ * medianoche UTC del día). "Últimos 3 meses" = el mes en curso y los dos anteriores.
+ */
+function rangoPeriodoSospechosas(periodo: PeriodoSospechosas): { gte: Date; lt?: Date } | null {
+  const hoy = fechaCalendarioAr();
+  const y = hoy.getUTCFullYear();
+  const m = hoy.getUTCMonth();
+  const inicioMes = (offset: number) => new Date(Date.UTC(y, m + offset, 1));
+  switch (periodo) {
+    case "este_mes":
+      return { gte: inicioMes(0) };
+    case "mes_anterior":
+      return { gte: inicioMes(-1), lt: inicioMes(0) };
+    case "ultimos_3_meses":
+      return { gte: inicioMes(-2) };
+    default:
+      return null;
+  }
+}
+
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
@@ -382,6 +407,7 @@ export class CombustibleService {
     formaPago?: string,
     sortBy?: string,
     sortDir?: "asc" | "desc",
+    periodoSospechosas?: PeriodoSospechosas,
   ) {
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(200, Math.max(1, limit));
@@ -413,10 +439,19 @@ export class CombustibleService {
       dynamicOrderBy = [{ createdAt: sortDir || "desc" }, { id: "desc" }];
     }
 
-    const [total, cargas] = await Promise.all([
-      this.prisma.cargaCombustible.count({ where }),
+    // Cargas sospechosas por período, con el resto de los filtros: alimentan los contadores
+    // del filtro rápido "Cargas sospechosas", así que se cuentan aunque no esté activo.
+    // El período va en un AND aparte para combinarse con el filtro de fecha de la columna.
+    const whereSospechosas = (periodo: PeriodoSospechosas) => {
+      const rango = rangoPeriodoSospechosas(periodo);
+      return { ...where, sospechoso: true, ...(rango && { AND: [{ fecha: rango }] }) };
+    };
+    const whereListado = periodoSospechosas ? whereSospechosas(periodoSospechosas) : where;
+
+    const [total, cargas, sospechosas] = await Promise.all([
+      this.prisma.cargaCombustible.count({ where: whereListado }),
       this.prisma.cargaCombustible.findMany({
-        where,
+        where: whereListado,
         orderBy: dynamicOrderBy,
         skip: (safePage - 1) * safeLimit,
         take: safeLimit,
@@ -425,9 +460,20 @@ export class CombustibleService {
           chofer: { select: { nombre: true } },
         },
       }),
+      Promise.all(
+        PERIODOS_SOSPECHOSAS.map((p) =>
+          this.prisma.cargaCombustible.count({ where: whereSospechosas(p) }),
+        ),
+      ).then(
+        (counts) =>
+          Object.fromEntries(PERIODOS_SOSPECHOSAS.map((p, i) => [p, counts[i]])) as Record<
+            PeriodoSospechosas,
+            number
+          >,
+      ),
     ]);
 
-    return { cargas, total, page: safePage, limit: safeLimit };
+    return { cargas, total, sospechosas, page: safePage, limit: safeLimit };
   }
 
   /** Estaciones distintas entre las cargas existentes, para poblar el filtro del listado. */

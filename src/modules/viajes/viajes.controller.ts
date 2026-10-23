@@ -37,6 +37,7 @@ import { assertTenantId } from "../../shared/util/assert-tenant";
 import { queryParamFromRequest } from "../../shared/util/express-query-string";
 import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
 import {
+  parseIdsCsv,
   parseViajesSortParams,
   parseFechaFiltroQuery,
   parseTipoFechaQuery,
@@ -58,9 +59,13 @@ export class ViajesController {
   @ApiOperation({ summary: "Listar viajes (opcionalmente filtrar por etapa)" })
   @Get()
   @Roles("admin", "member", "superadmin")
-  list(@CurrentAuth() auth: AuthPayload, @Query("etapa") etapa?: string) {
+  list(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("etapa") etapa?: string,
+    @Query("incluir") incluir?: string,
+  ) {
     assertTenantId(auth.tenantId);
-    return this.service.findAll(auth.tenantId, etapa);
+    return this.service.findAll(auth.tenantId, etapa, parseIdsCsv(incluir));
   }
 
   @ApiOperation({

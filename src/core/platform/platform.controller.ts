@@ -58,6 +58,7 @@ import { CreateDivisionDto } from "../../modules/stock/dto/create-division.dto";
 import { UpdateStockEgresoRemitoConfigDto } from "../../modules/stock/dto/update-stock-egreso-remito-config.dto";
 import { ViajesPaginatedQueryDto } from "../../modules/viajes/dto/viajes-paginated-query.dto";
 import {
+  parseIdsCsv,
   parseViajesSortParams,
   parseFechaFiltroQuery,
   parseTipoFechaQuery,
@@ -180,8 +181,11 @@ export class PlatformController {
   }
 
   @Get("viajes")
-  viajes(@Query("tenantId") tenantId?: string) {
-    return this.service.listViajes(tenantId);
+  viajes(
+    @Query("tenantId") tenantId?: string,
+    @Query("incluir") incluir?: string,
+  ) {
+    return this.service.listViajes(tenantId, parseIdsCsv(incluir));
   }
 
   @Get("viajes/:id/documento-aduanero")

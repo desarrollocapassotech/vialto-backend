@@ -774,8 +774,10 @@ export class ViajesService {
    * (Viajes, Facturación, Liquidaciones, Inicio) para ofrecer viajes y clientes: con el
    * tope solo, un viaje viejo sin facturar quedaba afuera y su cliente no aparecía en
    * "Nueva factura" (bug real LSF, oct 2026: 232 viajes, el pendiente era el n° 225).
+   * `incluirIds`: viajes que se traen siempre (los de la factura que se está editando,
+   * que ya están facturados y pueden ser viejos).
    */
-  async findAll(tenantId: string, etapa?: string) {
+  async findAll(tenantId: string, etapa?: string, incluirIds: string[] = []) {
     const ivaTransportistaHabilitado =
       await this.ivaTransportistaHabilitado(tenantId);
     const include = {
@@ -807,6 +809,7 @@ export class ViajesService {
             },
           },
           { liquidacionEstado: { in: [...LIQUIDACION_ESTADOS_PENDIENTES] } },
+          ...(incluirIds.length > 0 ? [{ id: { in: incluirIds } }] : []),
         ],
       },
       orderBy: { createdAt: "desc" },

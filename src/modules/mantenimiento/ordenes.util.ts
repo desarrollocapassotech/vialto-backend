@@ -4,6 +4,8 @@ import { KM_DELTA_PLAUSIBLE_MAX } from '../../shared/util/combustible-km.constan
 
 export const TIPOS_ORDEN = ['preventivo', 'correctivo'] as const;
 export const TIPOS_ITEM_ORDEN = ['general', 'mano_obra', 'repuesto', 'servicio_externo'] as const;
+/** `OrdenTrabajo.origen` de la OT que registra el chofer desde la app de Combustible. */
+export const ORIGEN_CHOFER = 'reporte_chofer' as const;
 
 export interface ItemOrdenInput {
   tipo?: string;

@@ -12,7 +12,7 @@ import { OdometroService } from '../../core/odometro/odometro.service';
 import { CreateOrdenTrabajoDto } from './dto/create-orden-trabajo.dto';
 import { UpdateOrdenTrabajoDto } from './dto/update-orden-trabajo.dto';
 import { OrdenesQueryDto } from './dto/ordenes-query.dto';
-import { calcularItems, evaluarKmOrden } from './ordenes.util';
+import { calcularItems, evaluarKmOrden, ORIGEN_CHOFER } from './ordenes.util';
 import { aDiaUtc } from './vencimiento.util';
 
 const detalleOrden = {
@@ -142,7 +142,8 @@ export class OrdenesService {
 
   // ── Escritura ────────────────────────────────────────────────────────────
 
-  async create(tenantId: string, userId: string, dto: CreateOrdenTrabajoDto) {
+  /** `origen`: solo para la OT que carga el chofer desde la app (`ORIGEN_CHOFER`); si no, se deduce de los planes. */
+  async create(tenantId: string, userId: string, dto: CreateOrdenTrabajoDto, origen?: typeof ORIGEN_CHOFER) {
     const vehiculoPlanIds = dto.vehiculoPlanIds ?? [];
     await this.assertVehiculo(tenantId, dto.vehiculoId);
     await this.assertTaller(tenantId, dto.tallerId);
@@ -158,7 +159,7 @@ export class OrdenesService {
           numero,
           vehiculoId: dto.vehiculoId,
           tipo: dto.tipo,
-          origen: vehiculoPlanIds.length > 0 ? 'plan' : 'manual',
+          origen: origen ?? (vehiculoPlanIds.length > 0 ? 'plan' : 'manual'),
           estado: 'cerrada',
           tallerId: dto.tallerId ?? null,
           fecha: aDiaUtc(new Date(dto.fecha)),
@@ -223,7 +224,8 @@ export class OrdenesService {
       ...(dto.descripcion !== undefined ? { descripcion: dto.descripcion || null } : {}),
       ...(dto.adjuntos !== undefined ? { adjuntos: dto.adjuntos } : {}),
       ...(calculo ? { costoTotal: calculo.costoTotal } : {}),
-      origen: planesFinales.length > 0 ? 'plan' : 'manual',
+      // Una OT que cargó el chofer desde la app lo sigue diciendo aunque la edite un admin.
+      origen: actual.origen === ORIGEN_CHOFER ? ORIGEN_CHOFER : planesFinales.length > 0 ? 'plan' : 'manual',
     };
 
     await this.prisma.$transaction(async (tx) => {

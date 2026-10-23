@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import type { NotificacionEvaluator, NotificacionItem } from './notificacion-evaluator.interface';
+import { fechaCalendarioAr } from '../../../shared/util/fecha-ar.util';
 
 /** Cuántos días hacia adelante se considera "por vencer" — mismo criterio que facturaPorVencer. */
 const DIAS_AVISO_VENCIMIENTO = 3;
@@ -22,10 +23,10 @@ export class CuentaCorrienteVencimientoEvaluator implements NotificacionEvaluato
   constructor(private readonly prisma: PrismaService) {}
 
   async evaluar(tenantId: string): Promise<NotificacionItem[]> {
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
+    // Hoy en Argentina a medianoche UTC, igual que `fechaVencimiento` (no el día del server en UTC).
+    const hoy = fechaCalendarioAr();
     const limite = new Date(hoy);
-    limite.setDate(limite.getDate() + DIAS_AVISO_VENCIMIENTO);
+    limite.setUTCDate(limite.getUTCDate() + DIAS_AVISO_VENCIMIENTO);
 
     const cargos = await this.prisma.movimientoCuentaCorriente.findMany({
       where: {
@@ -53,7 +54,8 @@ export class CuentaCorrienteVencimientoEvaluator implements NotificacionEvaluato
       items.push({
         entidadId: c.id,
         titulo: `${esCliente ? 'A cobrar' : 'A pagar'}: ${nombre}`,
-        detalle: `Vence el ${c.fechaVencimiento!.toLocaleDateString('es-AR')} · Saldo ${c.moneda} ${pendiente.toLocaleString('es-AR')}`,
+        // Día sin hora (medianoche UTC): se formatea en UTC para no mostrar el día anterior.
+        detalle: `Vence el ${c.fechaVencimiento!.toLocaleDateString('es-AR', { timeZone: 'UTC' })} · Saldo ${c.moneda} ${pendiente.toLocaleString('es-AR')}`,
       });
     }
     return items;

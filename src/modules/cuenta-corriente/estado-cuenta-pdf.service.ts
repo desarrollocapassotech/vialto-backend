@@ -1,8 +1,11 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import * as PDFDocument from 'pdfkit';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CuentaCorrienteService } from './cuenta-corriente.service';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
+import { ymdAr } from '../../shared/util/fecha-ar.util';
 
 function fmtMoney(n: number): string {
   return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -10,6 +13,27 @@ function fmtMoney(n: number): string {
 
 function fmtDate(d: Date): string {
   return d.toLocaleDateString('es-AR', { timeZone: 'UTC' });
+}
+
+/** Tamaño máximo del logo del encabezado (se ajusta manteniendo la proporción). */
+const LOGO_W = 110;
+const LOGO_H = 55;
+
+/**
+ * Logo de Vialto (fallback cuando la empresa no cargó uno). Vive en `vialto-backend/assets`
+ * (fuera de `src`, no lo copia el build): se lee desde el directorio de trabajo, que en
+ * Render y en local es la carpeta del backend. Se cachea; sin archivo, null.
+ */
+let logoVialtoCache: Buffer | null | undefined;
+function logoVialto(): Buffer | null {
+  if (logoVialtoCache === undefined) {
+    try {
+      logoVialtoCache = readFileSync(join(process.cwd(), 'assets', 'vialto-logo.png'));
+    } catch {
+      logoVialtoCache = null;
+    }
+  }
+  return logoVialtoCache;
 }
 
 function slugify(text: string): string {
@@ -24,23 +48,56 @@ function slugify(text: string): string {
 const MARGIN = 40;
 const PAGE_WIDTH = 595.28; // A4 en puntos
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-const COLS = {
-  fecha: { x: MARGIN, w: 65 },
-  concepto: { x: MARGIN + 65, w: 210 },
-  debe: { x: MARGIN + 65 + 210, w: 80 },
-  haber: { x: MARGIN + 65 + 210 + 80, w: 80 },
-  saldo: { x: MARGIN + 65 + 210 + 80 + 80, w: CONTENT_WIDTH - (65 + 210 + 80 + 80) },
+type Col = { x: number; w: number };
+type LayoutEstadoCuenta = {
+  fecha: Col;
+  tipo: Col;
+  comprobante: Col;
+  debe: Col;
+  haber: Col;
+  /** Una columna "Saldo acumulado" (moneda null) o una "Saldo {moneda}" por moneda. */
+  saldos: (Col & { moneda: string | null })[];
 };
+
+/**
+ * Columnas del estado de cuenta: Fecha · Tipo (el `concepto`: VENTA, COBRO, FACTURA A…) ·
+ * Comprobante · Debe · Haber · Saldo. El comprobante es el dato principal de cada fila. Con
+ * más de una moneda, el saldo se parte en una columna por moneda.
+ */
+function layoutEstadoCuenta(monedas: string[]): LayoutEstadoCuenta {
+  const multi = monedas.length > 1;
+  const anchos = multi
+    ? { fecha: 52, tipo: 50, comprobante: 108, debe: 80, haber: 80 }
+    : { fecha: 58, tipo: 62, comprobante: 130, debe: 78, haber: 78 };
+  let x = MARGIN;
+  const col = (w: number): Col => {
+    const c = { x, w };
+    x += w;
+    return c;
+  };
+  const fecha = col(anchos.fecha);
+  const tipo = col(anchos.tipo);
+  const comprobante = col(anchos.comprobante);
+  const debe = col(anchos.debe);
+  const haber = col(anchos.haber);
+  const resto = MARGIN + CONTENT_WIDTH - x;
+  const saldos = multi
+    ? monedas.map((moneda) => ({ ...col(resto / monedas.length), moneda }))
+    : [{ ...col(resto), moneda: null }];
+  return { fecha, tipo, comprobante, debe, haber, saldos };
+}
 const ROW_H = 18;
 const PAGE_BOTTOM = 780;
 
+// Listado de deudores: Contraparte · Tipo · Comprobante · Vencimiento · Pendiente.
 const COLS_DEUDORES = {
-  contraparte: { x: MARGIN, w: 150 },
-  concepto: { x: MARGIN + 150, w: 165 },
-  vencimiento: { x: MARGIN + 150 + 165, w: 70 },
+  contraparte: { x: MARGIN, w: 140 },
+  tipo: { x: MARGIN + 140, w: 62 },
+  comprobante: { x: MARGIN + 140 + 62, w: 115 },
+  vencimiento: { x: MARGIN + 140 + 62 + 115, w: 65 },
   pendiente: {
-    x: MARGIN + 150 + 165 + 70,
-    w: CONTENT_WIDTH - (150 + 165 + 70),
+    x: MARGIN + 140 + 62 + 115 + 65,
+    w: CONTENT_WIDTH - (140 + 62 + 115 + 65),
   },
 };
 
@@ -67,6 +124,7 @@ export class EstadoCuentaPdfService {
 
     const buffer = await this.buildPdf({
       tenantName: tenant?.name ?? 'Vialto',
+      logo: await this.logoEmpresa(tenantId),
       contraparteNombre: contraparte.nombre,
       contraparteTipo: esCliente ? 'Cliente' : 'Proveedor',
       reporte,
@@ -75,8 +133,52 @@ export class EstadoCuentaPdfService {
     return { buffer, filename };
   }
 
-  /** Listado de deudores: mismos datos y agrupamiento que el tablero del dashboard (vencidos / próximos / sin vencimiento, a cobrar / a pagar), exportado a PDF. */
-  async generateListadoDeudores(tenantId: string, diasProximos?: number) {
+  /**
+   * Logo para el encabezado: el de la empresa (cargado en Configuración ARCA, mismo que usan
+   * las facturas) o, si no tiene o no se puede descargar, el de Vialto. Nunca tira: sin
+   * ninguno de los dos, el PDF sale sin logo.
+   */
+  private async logoEmpresa(tenantId: string): Promise<Buffer | null> {
+    const config = await this.prisma.arcaConfig.findUnique({
+      where: { tenantId },
+      select: { logoUrl: true },
+    });
+    if (config?.logoUrl) {
+      try {
+        const res = await fetch(config.logoUrl);
+        if (res.ok) return Buffer.from(await res.arrayBuffer());
+      } catch {
+        // cae al logo de Vialto
+      }
+    }
+    return logoVialto();
+  }
+
+  /**
+   * Logo arriba a la derecha, a la altura del nombre de la empresa (estado de cuenta y
+   * listado de deudores). Si la imagen no se puede leer (formato no soportado por pdfkit),
+   * el PDF sale igual sin logo.
+   */
+  private drawLogo(doc: PDFKit.PDFDocument, logo: Buffer | null) {
+    if (!logo) return;
+    try {
+      doc.image(logo, MARGIN + CONTENT_WIDTH - LOGO_W, MARGIN, {
+        fit: [LOGO_W, LOGO_H],
+        align: 'right',
+      });
+    } catch {
+      // sin logo
+    }
+    doc.x = MARGIN;
+    doc.y = MARGIN;
+  }
+
+  /**
+   * "Pendientes de cobro" (clientes) o "Pendientes de pago" (proveedores): mismos datos y
+   * agrupamiento que el tablero del dashboard (vencidos / próximos / sin vencimiento), de UN
+   * solo lado, con su total. Antes era un único "Listado de deudores" con los dos lados.
+   */
+  async generateListadoDeudores(tenantId: string, lado: 'cliente' | 'proveedor', diasProximos?: number) {
     const [tenant, tablero] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { clerkOrgId: tenantId }, select: { name: true } }),
       this.cuentaCorriente.tablero(tenantId, diasProximos),
@@ -84,18 +186,25 @@ export class EstadoCuentaPdfService {
 
     const buffer = await this.buildListadoDeudoresPdf({
       tenantName: tenant?.name ?? 'Vialto',
+      logo: await this.logoEmpresa(tenantId),
       tablero,
+      lado,
     });
-    const filename = `listado-deudores-${new Date().toISOString().slice(0, 10)}.pdf`;
+    const filename = `${lado === 'cliente' ? 'pendientes-de-cobro' : 'pendientes-de-pago'}-${ymdAr()}.pdf`;
     return { buffer, filename };
   }
 
   private buildListadoDeudoresPdf(params: {
     tenantName: string;
+    /** Logo de la empresa o de Vialto (arriba a la derecha); null = sin logo. */
+    logo: Buffer | null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tablero: any;
+    lado: 'cliente' | 'proveedor';
   }): Promise<Buffer> {
-    const { tenantName, tablero } = params;
+    const { tenantName, logo, tablero, lado } = params;
+    const esCobro = lado === 'cliente';
+    const clave = esCobro ? 'cobrar' : 'pagar';
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: MARGIN });
@@ -104,8 +213,11 @@ export class EstadoCuentaPdfService {
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
 
-        doc.fontSize(16).font('Helvetica-Bold').fillColor('#000').text(tenantName);
-        doc.fontSize(11).font('Helvetica').fillColor('#333').text('Listado de deudores');
+        this.drawLogo(doc, logo);
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('#000')
+          .text(tenantName, MARGIN, MARGIN, { width: CONTENT_WIDTH - (logo ? LOGO_W + 10 : 0) });
+        doc.fontSize(11).font('Helvetica').fillColor('#333')
+          .text(esCobro ? 'Pendientes de cobro' : 'Pendientes de pago');
         doc.font('Helvetica').fontSize(9).fillColor('#333').text(`Al ${fmtDate(new Date())}`);
         doc.moveDown(1);
 
@@ -119,7 +231,8 @@ export class EstadoCuentaPdfService {
 
         let huboContenido = false;
         for (const { titulo, grupo } of grupos) {
-          if (grupo.cobrar.length === 0 && grupo.pagar.length === 0) continue;
+          const items = grupo[clave];
+          if (items.length === 0) continue;
           huboContenido = true;
 
           if (y + 20 > PAGE_BOTTOM) {
@@ -128,42 +241,31 @@ export class EstadoCuentaPdfService {
           }
           doc.font('Helvetica-Bold').fontSize(11).fillColor('#000').text(titulo, MARGIN, y);
           y = doc.y + 6;
-
-          if (grupo.cobrar.length > 0) {
-            y = this.drawListadoSubseccion(doc, y, 'A cobrar', grupo.cobrar);
-          }
-          if (grupo.pagar.length > 0) {
-            y = this.drawListadoSubseccion(doc, y, 'A pagar', grupo.pagar);
-          }
+          y = this.drawListadoSubseccion(doc, y, items, esCobro ? 'Cliente' : 'Proveedor');
           y += 8;
         }
 
         if (!huboContenido) {
           doc.font('Helvetica').fontSize(10).fillColor('#333')
-            .text('No hay comprobantes pendientes de cobro ni de pago.', MARGIN, y);
+            .text(`No hay comprobantes pendientes de ${esCobro ? 'cobro' : 'pago'}.`, MARGIN, y);
           y = doc.y;
         }
 
-        if (y + 60 > PAGE_BOTTOM) {
+        if (y + 40 > PAGE_BOTTOM) {
           doc.addPage();
           y = MARGIN;
         }
         y += 6;
         doc.moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#ccc').stroke();
         y += 10;
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000').text('Total a cobrar pendiente', MARGIN, y);
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000')
+          .text(esCobro ? 'Total a cobrar pendiente' : 'Total a pagar pendiente', MARGIN, y);
         y += 14;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const t of tablero.totales.porCobrarPendiente as any[]) {
-          doc.font('Helvetica').fontSize(9).fillColor('#333')
-            .text(`${t.moneda} ${fmtMoney(t.total)}`, MARGIN, y);
-          y += 13;
-        }
-        y += 6;
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000').text('Total a pagar pendiente', MARGIN, y);
-        y += 14;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const t of tablero.totales.porPagarPendiente as any[]) {
+        const totales = (esCobro ? tablero.totales.porCobrarPendiente : tablero.totales.porPagarPendiente) as {
+          moneda: string;
+          total: number;
+        }[];
+        for (const t of totales) {
           doc.font('Helvetica').fontSize(9).fillColor('#333')
             .text(`${t.moneda} ${fmtMoney(t.total)}`, MARGIN, y);
           y += 13;
@@ -173,7 +275,7 @@ export class EstadoCuentaPdfService {
           .font('Helvetica')
           .fontSize(7)
           .fillColor('#999')
-          .text(`Generado el ${fmtDate(new Date())} — Vialto`, MARGIN, doc.page.height - MARGIN - 15, {
+          .text(`Generado el ${fmtDate(new Date())} | Vialto Software`, MARGIN, doc.page.height - MARGIN - 15, {
             width: CONTENT_WIDTH,
             align: 'center',
           });
@@ -185,29 +287,28 @@ export class EstadoCuentaPdfService {
     });
   }
 
-  /** Tabla de una subsección (A cobrar / A pagar) del listado de deudores, con salto de página si hace falta. */
+  /** Tabla de un grupo (vencidos / próximos / sin vencimiento) del listado, con salto de página si hace falta. */
   private drawListadoSubseccion(
     doc: PDFKit.PDFDocument,
     yStart: number,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    titulo: string,
     items: any[],
+    /** Encabezado de la primera columna: "Cliente" o "Proveedor". */
+    contraparteLabel: string,
   ): number {
     let y = yStart;
     if (y + 20 > PAGE_BOTTOM) {
       doc.addPage();
       y = MARGIN;
     }
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#e8470a').text(titulo, MARGIN + 8, y);
-    y = doc.y + 4;
-    y = this.drawListadoHeader(doc, y);
+    y = this.drawListadoHeader(doc, y, contraparteLabel);
 
     doc.font('Helvetica').fontSize(8.5).fillColor('#000');
     for (const it of items) {
       if (y + ROW_H > PAGE_BOTTOM) {
         doc.addPage();
         y = MARGIN;
-        y = this.drawListadoHeader(doc, y);
+        y = this.drawListadoHeader(doc, y, contraparteLabel);
         doc.font('Helvetica').fontSize(8.5).fillColor('#000');
       }
       doc.text(it.contraparteNombre ?? '—', COLS_DEUDORES.contraparte.x, y, {
@@ -216,8 +317,14 @@ export class EstadoCuentaPdfService {
         ellipsis: true,
         lineBreak: false,
       });
-      doc.text(it.concepto, COLS_DEUDORES.concepto.x, y, {
-        width: COLS_DEUDORES.concepto.w - 5,
+      doc.text(it.concepto, COLS_DEUDORES.tipo.x, y, {
+        width: COLS_DEUDORES.tipo.w - 5,
+        height: ROW_H - 4,
+        ellipsis: true,
+        lineBreak: false,
+      });
+      doc.text(it.numeroComprobante?.trim() || '—', COLS_DEUDORES.comprobante.x, y, {
+        width: COLS_DEUDORES.comprobante.w - 5,
         height: ROW_H - 4,
         ellipsis: true,
         lineBreak: false,
@@ -237,10 +344,11 @@ export class EstadoCuentaPdfService {
     return y + 4;
   }
 
-  private drawListadoHeader(doc: PDFKit.PDFDocument, y: number): number {
+  private drawListadoHeader(doc: PDFKit.PDFDocument, y: number, contraparteLabel: string): number {
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#555');
-    doc.text('Contraparte', COLS_DEUDORES.contraparte.x, y, { width: COLS_DEUDORES.contraparte.w });
-    doc.text('Concepto', COLS_DEUDORES.concepto.x, y, { width: COLS_DEUDORES.concepto.w });
+    doc.text(contraparteLabel, COLS_DEUDORES.contraparte.x, y, { width: COLS_DEUDORES.contraparte.w });
+    doc.text('Tipo', COLS_DEUDORES.tipo.x, y, { width: COLS_DEUDORES.tipo.w });
+    doc.text('Comprobante', COLS_DEUDORES.comprobante.x, y, { width: COLS_DEUDORES.comprobante.w });
     doc.text('Vencimiento', COLS_DEUDORES.vencimiento.x, y, { width: COLS_DEUDORES.vencimiento.w });
     doc.text('Pendiente', COLS_DEUDORES.pendiente.x, y, {
       width: COLS_DEUDORES.pendiente.w - 5,
@@ -253,12 +361,14 @@ export class EstadoCuentaPdfService {
 
   private buildPdf(params: {
     tenantName: string;
+    /** Logo de la empresa o de Vialto (arriba a la derecha); null = sin logo. */
+    logo: Buffer | null;
     contraparteNombre: string;
     contraparteTipo: 'Cliente' | 'Proveedor';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     reporte: any;
   }): Promise<Buffer> {
-    const { tenantName, contraparteNombre, contraparteTipo, reporte } = params;
+    const { tenantName, logo, contraparteNombre, contraparteTipo, reporte } = params;
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: MARGIN });
@@ -267,7 +377,9 @@ export class EstadoCuentaPdfService {
         doc.on('end', () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
 
-        doc.fontSize(16).font('Helvetica-Bold').fillColor('#000').text(tenantName);
+        this.drawLogo(doc, logo);
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('#000')
+          .text(tenantName, MARGIN, MARGIN, { width: CONTENT_WIDTH - (logo ? LOGO_W + 10 : 0) });
         doc.fontSize(11).font('Helvetica').fillColor('#333').text('Estado de cuenta');
         doc.moveDown(0.5);
 
@@ -277,60 +389,102 @@ export class EstadoCuentaPdfService {
           .text(`Período: ${fmtDate(new Date(reporte.periodo.desde))} — ${fmtDate(new Date(reporte.periodo.hasta))}`);
         doc.moveDown(1);
 
+        const saldosIniciales = reporte.saldoInicial as { moneda: string; saldo: number }[];
+        const saldosFinales = reporte.saldoFinal as { moneda: string; saldo: number }[];
+        // Una moneda: columna única "Saldo acumulado". Varias: una columna de saldo por
+        // moneda ("Saldo ARS", "Saldo USD"), cada fila con el saldo de todas a ese momento.
+        const monedas = saldosFinales.map((s) => s.moneda);
+        const layout = layoutEstadoCuenta(monedas);
+        const multimoneda = layout.saldos.length > 1;
+
+        // Saldo de cada moneda después de cada movimiento: se recorre del más viejo al más
+        // nuevo (la lista viene al revés) arrastrando el último saldo conocido de cada moneda.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const movs = reporte.movimientos as any[];
+        const saldosPorFila = new Map<string, Map<string, number>>();
+        const corriendo = new Map(saldosIniciales.map((s) => [s.moneda, s.saldo]));
+        for (const mov of [...movs].reverse()) {
+          corriendo.set(mov.moneda, mov.saldoAcumulado);
+          saldosPorFila.set(mov.id, new Map(corriendo));
+        }
+
         let y = doc.y;
-        y = this.drawTableHeader(doc, y);
+        y = this.drawTableHeader(doc, y, layout);
 
         doc.font('Helvetica').fontSize(8.5).fillColor('#000');
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const mov of reporte.movimientos as any[]) {
+        for (const mov of movs) {
           if (y + ROW_H > PAGE_BOTTOM) {
             doc.addPage();
             y = MARGIN;
-            y = this.drawTableHeader(doc, y);
+            y = this.drawTableHeader(doc, y, layout);
             doc.font('Helvetica').fontSize(8.5).fillColor('#000');
           }
           const esDebe = mov.tipo === 'cargo';
-          doc.text(fmtDate(new Date(mov.fecha)), COLS.fecha.x, y, { width: COLS.fecha.w });
-          doc.text(mov.concepto, COLS.concepto.x, y, {
-            width: COLS.concepto.w - 5,
+          // Con varias monedas, el importe lleva la suya (si no, no se sabe de cuál es).
+          const importe = `${fmtMoney(mov.importe)}${multimoneda ? ` ${mov.moneda}` : ''}`;
+          doc.text(fmtDate(new Date(mov.fecha)), layout.fecha.x, y, { width: layout.fecha.w });
+          doc.text(mov.concepto, layout.tipo.x, y, {
+            width: layout.tipo.w - 5,
             height: ROW_H - 4,
             ellipsis: true,
             lineBreak: false,
           });
-          doc.text(esDebe ? fmtMoney(mov.importe) : '—', COLS.debe.x, y, {
-            width: COLS.debe.w - 5,
-            align: 'right',
+          doc.text(mov.numeroComprobante?.trim() || '—', layout.comprobante.x, y, {
+            width: layout.comprobante.w - 5,
+            height: ROW_H - 4,
+            ellipsis: true,
+            lineBreak: false,
           });
-          doc.text(!esDebe ? fmtMoney(mov.importe) : '—', COLS.haber.x, y, {
-            width: COLS.haber.w - 5,
-            align: 'right',
-          });
-          doc.text(`${fmtMoney(mov.saldoAcumulado)} ${mov.moneda}`, COLS.saldo.x, y, {
-            width: COLS.saldo.w - 5,
-            align: 'right',
-          });
+          doc.text(esDebe ? importe : '—', layout.debe.x, y, { width: layout.debe.w - 5, align: 'right' });
+          doc.text(!esDebe ? importe : '—', layout.haber.x, y, { width: layout.haber.w - 5, align: 'right' });
+          if (multimoneda) {
+            const saldos = saldosPorFila.get(mov.id);
+            for (const col of layout.saldos) {
+              doc.text(fmtMoney(saldos?.get(col.moneda!) ?? 0), col.x, y, { width: col.w - 5, align: 'right' });
+            }
+          } else {
+            const col = layout.saldos[0];
+            doc.text(`${fmtMoney(mov.saldoAcumulado)} ${mov.moneda}`, col.x, y, { width: col.w - 5, align: 'right' });
+          }
           y += ROW_H;
         }
 
+        // Saldo inicial y final, nunca sumados entre monedas: con varias monedas, cada uno
+        // va debajo de su columna; con una, una línea cada uno.
         y += 10;
-        if (y + 50 > PAGE_BOTTOM) {
+        if (y + 52 > PAGE_BOTTOM) {
           doc.addPage();
           y = MARGIN;
         }
-        doc.moveTo(COLS.debe.x, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#ccc').stroke();
+        doc.moveTo(layout.debe.x, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#ccc').stroke();
         y += 8;
         doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000');
-        doc.text('Saldo inicial', COLS.debe.x, y, { width: COLS.haber.w, align: 'right' });
-        doc.text(fmtMoney(reporte.saldoInicial), COLS.saldo.x, y, { width: COLS.saldo.w - 5, align: 'right' });
-        y += 16;
-        doc.text('Saldo final', COLS.debe.x, y, { width: COLS.haber.w, align: 'right' });
-        doc.text(fmtMoney(reporte.saldoFinal), COLS.saldo.x, y, { width: COLS.saldo.w - 5, align: 'right' });
+        for (const [label, saldos] of [
+          ['Saldo inicial', saldosIniciales],
+          ['Saldo final', saldosFinales],
+        ] as const) {
+          doc.text(label, layout.debe.x, y, { width: layout.debe.w + layout.haber.w - 5, align: 'right' });
+          if (multimoneda) {
+            for (const col of layout.saldos) {
+              const s = saldos.find((x) => x.moneda === col.moneda);
+              doc.text(fmtMoney(s?.saldo ?? 0), col.x, y, { width: col.w - 5, align: 'right' });
+            }
+          } else {
+            const s = saldos[0];
+            const col = layout.saldos[0];
+            doc.text(`${fmtMoney(s?.saldo ?? 0)}${s?.moneda ? ` ${s.moneda}` : ''}`, col.x, y, {
+              width: col.w - 5,
+              align: 'right',
+            });
+          }
+          y += 16;
+        }
 
         doc
           .font('Helvetica')
           .fontSize(7)
           .fillColor('#999')
-          .text(`Generado el ${fmtDate(new Date())} — Vialto`, MARGIN, doc.page.height - MARGIN - 15, {
+          .text(`Generado el ${fmtDate(new Date())}  | Vialto Software`, MARGIN, doc.page.height - MARGIN - 15, {
             width: CONTENT_WIDTH,
             align: 'center',
           });
@@ -342,13 +496,19 @@ export class EstadoCuentaPdfService {
     });
   }
 
-  private drawTableHeader(doc: PDFKit.PDFDocument, y: number): number {
+  private drawTableHeader(doc: PDFKit.PDFDocument, y: number, layout: LayoutEstadoCuenta): number {
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#555');
-    doc.text('Fecha', COLS.fecha.x, y, { width: COLS.fecha.w });
-    doc.text('Concepto', COLS.concepto.x, y, { width: COLS.concepto.w });
-    doc.text('Debe', COLS.debe.x, y, { width: COLS.debe.w - 5, align: 'right' });
-    doc.text('Haber', COLS.haber.x, y, { width: COLS.haber.w - 5, align: 'right' });
-    doc.text('Saldo acumulado', COLS.saldo.x, y, { width: COLS.saldo.w - 5, align: 'right' });
+    doc.text('Fecha', layout.fecha.x, y, { width: layout.fecha.w });
+    doc.text('Tipo', layout.tipo.x, y, { width: layout.tipo.w });
+    doc.text('Comprobante', layout.comprobante.x, y, { width: layout.comprobante.w });
+    doc.text('Debe', layout.debe.x, y, { width: layout.debe.w - 5, align: 'right' });
+    doc.text('Haber', layout.haber.x, y, { width: layout.haber.w - 5, align: 'right' });
+    for (const col of layout.saldos) {
+      doc.text(col.moneda ? `Saldo ${col.moneda}` : 'Saldo acumulado', col.x, y, {
+        width: col.w - 5,
+        align: 'right',
+      });
+    }
     y += 12;
     doc.moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#ccc').stroke();
     return y + 6;

@@ -9,6 +9,7 @@ import { FacturacionService } from '../facturacion/facturacion.service';
 import { ViajesService } from '../viajes/viajes.service';
 
 import { CreateMovimientoCcDto } from './dto/create-movimiento-cc.dto';
+import { ImportarAfipDto } from './dto/importar-afip.dto';
 import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
@@ -153,6 +154,18 @@ export class CuentaCorrienteService {
     return tipo === 'pago' ? 'PAGO' : 'COMPRA';
   }
 
+  /**
+   * El vencimiento de una venta/compra no puede ser anterior a su fecha. Se comparan días
+   * calendario de Argentina (`fechaCalendarioAr`), así una fecha con hora no corre el día.
+   */
+  private assertVencimientoNoAnterior(fecha: Date | string, vencimiento: Date | string | null | undefined) {
+    if (!vencimiento) return;
+    const dia = (d: Date | string) => fechaCalendarioAr(d instanceof Date ? d.toISOString() : d).getTime();
+    if (dia(vencimiento) < dia(fecha)) {
+      throw new BadRequestException('El vencimiento no puede ser anterior a la fecha del comprobante');
+    }
+  }
+
   private resolveFechaVencimiento(
     fecha: Date,
     condicionPagoDias: number | null,
@@ -212,7 +225,7 @@ export class CuentaCorrienteService {
       },
       include: {
         imputacionesComoCargo: { select: { importe: true } },
-        imputacionesComoPago: { select: { importe: true, cargoId: true } },
+        imputacionesComoPago: { select: { id: true, importe: true, cargoId: true } },
         // VTO-431: vínculo entre el movimiento anulado y su crédito de anulación, para mostrarlos juntos.
         anuladoPor: { select: { id: true, fecha: true } },
         anulaMovimiento: { select: { id: true, fecha: true, concepto: true } },
@@ -262,13 +275,13 @@ export class CuentaCorrienteService {
         // Cargos a los que está imputado un cobro/pago (para mostrar su comprobante y
         // abrir la factura/liquidación cobrada cuando es uno solo).
         cargosImputadosIds: [...new Set(imputacionesComoPago.map((i) => i.cargoId))],
-        // Cuánto de este cobro/pago se aplicó a cada cargo (detalle "Ver imputaciones").
-        imputacionesPorCargo: Object.entries(
-          imputacionesComoPago.reduce<Record<string, number>>((acc, i) => {
-            acc[i.cargoId] = (acc[i.cargoId] ?? 0) + i.importe;
-            return acc;
-          }, {}),
-        ).map(([cargoId, importe]) => ({ cargoId, importe: roundMoney2(importe) })),
+        // Cuánto de este cobro/pago se aplicó a cada cargo (detalle "Ver imputaciones"), con
+        // el id de la imputación para poder deshacerla (hay una sola por par pago/cargo).
+        imputacionesPorCargo: imputacionesComoPago.map((i) => ({
+          imputacionId: i.id,
+          cargoId: i.cargoId,
+          importe: roundMoney2(i.importe),
+        })),
         comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null, facturasConArca),
         vencimientoEditable: this.vencimientoEditable(m),
         facturaComprobantes: factura,
@@ -367,6 +380,7 @@ export class CuentaCorrienteService {
     if (dto.fechaVencimiento !== undefined && !this.vencimientoEditable(mov)) {
       throw new BadRequestException('El vencimiento de este movimiento no se puede editar.');
     }
+    if (dto.fechaVencimiento) this.assertVencimientoNoAnterior(mov.fecha, dto.fechaVencimiento);
     // El archivo vive en la factura/liquidación: una venta/compra manual no tiene dónde guardarlo.
     if (
       dto.comprobanteUrl !== undefined &&
@@ -500,22 +514,48 @@ export class CuentaCorrienteService {
     );
     const sinVencimiento = items.filter((i) => i.fechaVencimiento == null);
 
-    const totalesPorMoneda = (rows: typeof items) => {
-      const map = new Map<string, number>();
-      for (const r of rows) map.set(r.moneda, (map.get(r.moneda) ?? 0) + r.pendiente);
-      return Array.from(map.entries()).map(([moneda, total]) => ({ moneda, total }));
-    };
-    const { cobrar: todoCobrar, pagar: todoPagar } = porGrupo(items);
+    // Totales = suma de los saldos de las cuentas (mismo cálculo que `saldoContraparte`),
+    // así "Por cobrar" coincide con la suma de saldos de clientes y "Por pagar" con la de
+    // proveedores. A la fecha y sin el período ni el `take` de las listas: los cobros a
+    // cuenta (sin imputar) restan, igual que en el saldo de cada cliente.
+    const [porCobrarPendiente, porPagarPendiente] = await Promise.all([
+      this.saldosTotalesLado(tenantId, 'cliente'),
+      this.saldosTotalesLado(tenantId, 'proveedor'),
+    ]);
 
     return {
       vencidos: porGrupo(vencidos),
       proximosVencimientos: porGrupo(proximosVencimientos),
       sinVencimiento: porGrupo(sinVencimiento),
-      totales: {
-        porCobrarPendiente: totalesPorMoneda(todoCobrar),
-        porPagarPendiente: totalesPorMoneda(todoPagar),
-      },
+      totales: { porCobrarPendiente, porPagarPendiente },
     };
+  }
+
+  /**
+   * Suma de saldos de todas las cuentas de un lado (clientes o proveedores), por moneda:
+   * cargos − pagos sin lo anulado. Es exactamente la suma de `saldoContraparte` de cada
+   * cuenta de ese lado (mantener ambos con el mismo criterio).
+   */
+  private async saldosTotalesLado(tenantId: string, lado: 'cliente' | 'proveedor') {
+    const grouped = await this.prisma.movimientoCuentaCorriente.groupBy({
+      by: ['moneda', 'tipo'],
+      where: {
+        tenantId,
+        estadoDisponibilidad: { not: 'anulado' },
+        ...(lado === 'cliente' ? { clienteId: { not: null } } : { proveedorId: { not: null } }),
+      },
+      _sum: { importe: true },
+    });
+    const porMoneda = new Map<string, number>();
+    for (const row of grouped) {
+      const importe = row._sum.importe ?? 0;
+      if (row.tipo === 'cargo') porMoneda.set(row.moneda, (porMoneda.get(row.moneda) ?? 0) + importe);
+      else if (row.tipo === 'pago') porMoneda.set(row.moneda, (porMoneda.get(row.moneda) ?? 0) - importe);
+    }
+    return Array.from(porMoneda.entries()).map(([moneda, total]) => ({
+      moneda,
+      total: roundMoney2(total),
+    }));
   }
 
   async findOne(id: string, tenantId: string) {
@@ -555,6 +595,123 @@ export class CuentaCorrienteService {
     }
   }
 
+  /**
+   * Importa ventas (Excel "Mis Comprobantes Emitidos" de AFIP) o compras ("Recibidos"). El
+   * front interpreta el Excel; acá se resuelve la contraparte por CUIT (clientes o
+   * proveedores de la empresa), se descartan los ya cargados (mismo número, misma cuenta,
+   * no anulado) y cada fila se crea con `create` (mismas validaciones que la carga a mano).
+   * Con `simular` solo devuelve qué pasaría con cada fila, sin crear nada. Una fila que
+   * falla no corta las demás.
+   */
+  async importarAfip(tenantId: string, dto: ImportarAfipDto, userId?: string) {
+    const esCliente = dto.lado === 'cliente';
+    // Mismo bloqueo que "Nueva venta/compra": con Facturación/Liquidaciones no se cargan a mano.
+    await this.assertCargoManualPermitido(tenantId, {
+      tipo: 'cargo',
+      ...(esCliente ? { clienteId: '-' } : { proveedorId: '-' }),
+    } as CreateMovimientoCcDto);
+
+    const soloDigitos = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '');
+    const where = { tenantId, idFiscal: { not: null } };
+    const select = { id: true, nombre: true, idFiscal: true };
+    const contrapartes = esCliente
+      ? await this.prisma.cliente.findMany({ where, select })
+      : await this.prisma.transportista.findMany({ where, select });
+    const porCuit = new Map<string, { id: string; nombre: string }>();
+    for (const c of contrapartes) {
+      const cuit = soloDigitos(c.idFiscal);
+      if (cuit && !porCuit.has(cuit)) porCuit.set(cuit, { id: c.id, nombre: c.nombre });
+    }
+
+    // Comprobantes ya cargados en esas cuentas (para no duplicar si se importa dos veces).
+    const numeros = [...new Set(dto.filas.map((f) => f.numeroComprobante.trim()))];
+    const existentes = await this.prisma.movimientoCuentaCorriente.findMany({
+      where: {
+        tenantId,
+        tipo: 'cargo',
+        estadoDisponibilidad: { not: 'anulado' },
+        numeroComprobante: { in: numeros },
+        ...(esCliente ? { clienteId: { not: null } } : { proveedorId: { not: null } }),
+      },
+      select: { contraparteId: true, numeroComprobante: true },
+    });
+    const cargados = new Set(existentes.map((e) => `${e.contraparteId}|${e.numeroComprobante}`));
+
+    const lado = esCliente ? 'cliente' : 'proveedor';
+    const filas: {
+      fila: number;
+      numeroComprobante: string;
+      fecha: string;
+      cuit: string;
+      denominacion: string | null;
+      contraparteNombre: string | null;
+      moneda: string;
+      total: number | null;
+      estado: 'importar' | 'importado' | 'omitido';
+      motivo?: string;
+    }[] = [];
+    let creados = 0;
+
+    for (const f of dto.filas) {
+      const numero = f.numeroComprobante.trim();
+      const base = {
+        fila: f.fila,
+        numeroComprobante: numero,
+        fecha: f.fecha,
+        cuit: f.cuit,
+        denominacion: f.denominacion?.trim() || null,
+        moneda: f.moneda,
+      };
+      let total: number;
+      try {
+        total = this.calcularLineas('cargo', f.lineas).total;
+      } catch (e) {
+        filas.push({ ...base, contraparteNombre: null, total: null, estado: 'omitido', motivo: (e as Error).message });
+        continue;
+      }
+      const cp = porCuit.get(soloDigitos(f.cuit));
+      if (!cp) {
+        filas.push({
+          ...base,
+          contraparteNombre: null,
+          total,
+          estado: 'omitido',
+          motivo: `No hay ningún ${lado} con CUIT ${f.cuit}`,
+        });
+        continue;
+      }
+      const clave = `${cp.id}|${numero}`;
+      if (cargados.has(clave)) {
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'omitido', motivo: 'Ya está cargado' });
+        continue;
+      }
+      cargados.add(clave); // un mismo comprobante repetido en el archivo se importa una vez
+      if (dto.simular) {
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'importar' });
+        continue;
+      }
+      try {
+        await this.create(
+          tenantId,
+          {
+            tipo: 'cargo',
+            ...(esCliente ? { clienteId: cp.id } : { proveedorId: cp.id }),
+            numeroComprobante: numero,
+            fecha: f.fecha,
+            moneda: f.moneda,
+            lineas: f.lineas,
+          } as CreateMovimientoCcDto,
+          userId,
+        );
+        creados += 1;
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'importado' });
+      } catch (e) {
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'omitido', motivo: (e as Error).message });
+      }
+    }
+    return { creados, filas };
+  }
+
   async create(tenantId: string, dto: CreateMovimientoCcDto, userId?: string) {
     const { contraparteId, condicionPagoDias } = await this.assertContraparte(
       tenantId,
@@ -580,6 +737,7 @@ export class CuentaCorrienteService {
     // Siempre automático (VENTA/COMPRA/COBRO/PAGO): no se tipea a mano.
     const concepto = this.defaultConcepto(dto.tipo, !!dto.clienteId);
     const fecha = new Date(dto.fecha);
+    if (dto.tipo === 'cargo') this.assertVencimientoNoAnterior(dto.fecha, dto.fechaVencimiento);
     const moneda = dto.moneda?.trim() || 'ARS';
     const cargosAImputar =
       dto.tipo === 'pago' && dto.imputarACargoIds?.length
@@ -674,14 +832,16 @@ export class CuentaCorrienteService {
     this.assertEditableAMano(current, 'editar');
 
     const cambiaContraparte = dto.clienteId !== undefined || dto.proveedorId !== undefined;
-    const cambiaMonto =
-      dto.importe !== undefined ||
-      dto.lineas !== undefined ||
+    // El importe (o las líneas) se puede cambiar aunque haya imputaciones: después se ajustan
+    // (`ajustarImputacionesAlImporte`). Moneda, tipo y cuenta no: dejarían imputado un cobro
+    // en otra moneda o de otra cuenta.
+    const cambiaImporte = dto.importe !== undefined || dto.lineas !== undefined;
+    const cambiaEstructura =
       (dto.moneda !== undefined && dto.moneda !== current.moneda) ||
       (dto.tipo !== undefined && dto.tipo !== current.tipo) ||
       cambiaContraparte;
-    if (cambiaMonto) {
-      await this.assertSinImputaciones(current, 'cambiar el importe, la moneda o la cuenta de');
+    if (cambiaEstructura) {
+      await this.assertSinImputaciones(current, 'cambiar la moneda o la cuenta de');
     }
     if (dto.numeroComprobante !== undefined && !dto.numeroComprobante.trim()) {
       throw new BadRequestException('Ingresá el número de comprobante');
@@ -704,6 +864,13 @@ export class CuentaCorrienteService {
 
     const tipo = dto.tipo ?? current.tipo;
     const fecha = dto.fecha !== undefined ? new Date(dto.fecha) : current.fecha;
+    // Si cambia la fecha o el vencimiento, el vencimiento resultante no puede quedar antes.
+    if (tipo === 'cargo' && (dto.fecha !== undefined || dto.fechaVencimiento !== undefined)) {
+      this.assertVencimientoNoAnterior(
+        dto.fecha ?? current.fecha,
+        dto.fechaVencimiento !== undefined ? dto.fechaVencimiento : current.fechaVencimiento,
+      );
+    }
     // Venta/compra por líneas: mismo cálculo que al crearla (total = neto + IVA por alícuota).
     const porLineas = dto.lineas ? this.calcularLineas(tipo, dto.lineas) : null;
     const referencia =
@@ -711,7 +878,8 @@ export class CuentaCorrienteService {
         ? (dto.formaPago ?? dto.referencia)?.trim() || null
         : undefined;
 
-    return this.prisma.movimientoCuentaCorriente.update({
+    return this.prisma.$transaction(async (tx) => {
+      const actualizado = await tx.movimientoCuentaCorriente.update({
       where: { id },
       data: {
         clienteId,
@@ -748,7 +916,50 @@ export class CuentaCorrienteService {
         numeroComprobante: dto.numeroComprobante?.trim() || undefined,
         referencia,
       },
+      });
+      if (cambiaImporte) await this.ajustarImputacionesAlImporte(tx, tenantId, actualizado);
+      return tx.movimientoCuentaCorriente.findUniqueOrThrow({ where: { id } });
+    }, CC_INTERACTIVE_TX);
+  }
+
+  /**
+   * Después de cambiar el importe de una venta/compra (o cobro/pago) con imputaciones:
+   * - si lo imputado sigue entrando en el importe nuevo, solo se recalculan los estados
+   *   (ej. una venta "cancelada" pasa a "parcial" si se le sube el importe);
+   * - si lo imputado supera el importe nuevo, se recortan las imputaciones de la más nueva a
+   *   la más vieja hasta que entren. Recortar = deshacer y volver a imputar por menos
+   *   (`deshacerImputacionTx` + `aplicarImputacion`), así también se ajustan el `Pago` de
+   *   Facturación y el pago al transportista del viaje. Lo recortado vuelve a quedar
+   *   disponible en el cobro/pago (a cuenta) o pendiente en la venta/compra.
+   */
+  private async ajustarImputacionesAlImporte(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    mov: MovimientoCuentaCorriente,
+  ) {
+    const campo = mov.tipo === 'pago' ? 'pagoId' : 'cargoId';
+    const imputaciones = await tx.imputacionCuentaCorriente.findMany({
+      where: { tenantId, [campo]: mov.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+    let exceso = roundMoney2(imputaciones.reduce((s, i) => s + i.importe, 0) - mov.importe);
+    for (const imp of imputaciones) {
+      if (exceso <= EPS) {
+        await this.recalcularEstados(tx, imp.pagoId, imp.cargoId);
+        continue;
+      }
+      const recorte = Math.min(exceso, imp.importe);
+      const queda = roundMoney2(imp.importe - recorte);
+      exceso = roundMoney2(exceso - recorte);
+      await this.deshacerImputacionTx(tx, tenantId, imp);
+      if (queda > EPS) {
+        const [pago, cargo] = await Promise.all([
+          tx.movimientoCuentaCorriente.findFirstOrThrow({ where: { id: imp.pagoId, tenantId } }),
+          tx.movimientoCuentaCorriente.findFirstOrThrow({ where: { id: imp.cargoId, tenantId } }),
+        ]);
+        await this.aplicarImputacion(tx, tenantId, pago, cargo, queda, imp.createdBy ?? undefined);
+      }
+    }
   }
 
   /**
@@ -770,11 +981,27 @@ export class CuentaCorrienteService {
     }
   }
 
+  /**
+   * Elimina una venta/compra/cobro/pago manual, aunque esté imputado: primero deshace cada
+   * imputación (mismo camino que "deshacer imputación", así revierte los pagos espejados y
+   * recalcula los estados de la contraparte — un cobro vuelve a quedar sin imputar, una
+   * venta vuelve a quedar pendiente) y después lo borra. Todo en una transacción. Facturas,
+   * liquidaciones y anulaciones siguen sin poder borrarse desde acá (`assertEditableAMano`).
+   */
   async remove(id: string, tenantId: string) {
     const current = await this.findOne(id, tenantId);
     this.assertEditableAMano(current, 'eliminar');
-    await this.assertSinImputaciones(current, 'eliminar');
-    return this.prisma.movimientoCuentaCorriente.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      const imputaciones = await tx.imputacionCuentaCorriente.findMany({
+        where: { tenantId, OR: [{ pagoId: id }, { cargoId: id }] },
+      });
+      for (const imputacion of imputaciones) {
+        await this.deshacerImputacionTx(tx, tenantId, imputacion);
+      }
+      const { count } = await tx.movimientoCuentaCorriente.deleteMany({ where: { id, tenantId } });
+      if (count === 0) throw new NotFoundException('Movimiento no encontrado');
+    }, CC_INTERACTIVE_TX);
+    return { id };
   }
 
   async registrarPago(tenantId: string, dto: RegistrarPagoDto, userId?: string) {
@@ -835,7 +1062,10 @@ export class CuentaCorrienteService {
     };
   }
 
-  /** Suma de cargos − pagos − créditos (sin distinguir moneda), usado solo por exportarMovimientos para el running total. */
+  /**
+   * Saldo por moneda (cargos − pagos − créditos), usado solo por exportarMovimientos para el
+   * saldo inicial y el acumulado. Nunca suma pesos con dólares: un Map por moneda.
+   */
   private async calcSaldoAcumulado(
     tenantId: string,
     contraparteId: string,
@@ -855,17 +1085,19 @@ export class CuentaCorrienteService {
       ...(opts?.hasta ? { fecha: { lte: opts.hasta } } : {}),
       ...(opts?.before ? { fecha: { lt: opts.before } } : {}),
     };
-    const [cargos, haber] = await Promise.all([
-      this.prisma.movimientoCuentaCorriente.aggregate({
-        where: { ...baseWhere, tipo: 'cargo' },
-        _sum: { importe: true },
-      }),
-      this.prisma.movimientoCuentaCorriente.aggregate({
-        where: { ...baseWhere, tipo: { in: ['pago', 'credito'] } },
-        _sum: { importe: true },
-      }),
-    ]);
-    return (cargos._sum.importe ?? 0) - (haber._sum.importe ?? 0);
+    const grouped = await this.prisma.movimientoCuentaCorriente.groupBy({
+      by: ['moneda', 'tipo'],
+      where: { ...baseWhere, tipo: { in: ['cargo', 'pago', 'credito'] } },
+      _sum: { importe: true },
+    });
+    const porMoneda = new Map<string, number>();
+    for (const row of grouped) {
+      porMoneda.set(
+        row.moneda,
+        (porMoneda.get(row.moneda) ?? 0) + signoHistorialCc(row.tipo) * (row._sum.importe ?? 0),
+      );
+    }
+    return porMoneda;
   }
 
   async exportarMovimientos(tenantId: string, query: ExportarMovimientosQueryDto) {
@@ -894,12 +1126,15 @@ export class CuentaCorrienteService {
 
     // Mismo orden que el detalle en pantalla: el saldo acumulado se recorre en orden de
     // carga y la lista sale con el último cargado primero (PDF y Excel la usan tal cual).
-    let acumulado = saldoInicial;
+    // Se acumula POR MONEDA (igual que la grilla): cada fila muestra el saldo de su moneda.
+    const acumuladoPorMoneda = new Map(saldoInicial);
     const items = movimientos.map((mov) => {
       // Un cargo anulado se sigue listando (auditoría); suma solo si tiene su crédito de
       // anulación, que resta como un cobro.
+      let acumulado = acumuladoPorMoneda.get(mov.moneda) ?? 0;
       if (cuentaEnHistorialCc({ ...mov, compensado: !!mov.anuladoPor })) {
         acumulado += signoHistorialCc(mov.tipo) * mov.importe;
+        acumuladoPorMoneda.set(mov.moneda, acumulado);
       }
       return {
         id: mov.id,
@@ -913,16 +1148,21 @@ export class CuentaCorrienteService {
         importe: mov.importe,
         estadoDisponibilidad: mov.estadoDisponibilidad,
         estadoImputacion: mov.estadoImputacion,
-        saldoAcumulado: acumulado,
+        saldoAcumulado: roundMoney2(acumulado),
       };
     });
 
+    // Saldos inicial y final: uno por moneda que aparezca (en el inicial o en el período).
+    const monedas = [...new Set([...saldoInicial.keys(), ...acumuladoPorMoneda.keys()])].sort();
     return {
       clienteId: query.clienteId ?? null,
       proveedorId: query.proveedorId ?? null,
       periodo: { desde, hasta },
-      saldoInicial,
-      saldoFinal: acumulado,
+      saldoInicial: monedas.map((moneda) => ({ moneda, saldo: roundMoney2(saldoInicial.get(moneda) ?? 0) })),
+      saldoFinal: monedas.map((moneda) => ({
+        moneda,
+        saldo: roundMoney2(acumuladoPorMoneda.get(moneda) ?? 0),
+      })),
       movimientos: items.reverse(),
     };
   }
@@ -1057,7 +1297,7 @@ export class CuentaCorrienteService {
   }
 
   async crearImputacion(tenantId: string, dto: CreateImputacionCcDto, userId?: string) {
-    const importe = this.normalizeImporte(dto.importe);
+    const pedido = this.normalizeImporte(dto.importe);
     const [pago, cargo] = await Promise.all([
       this.prisma.movimientoCuentaCorriente.findFirst({
         where: { id: dto.pagoId, tenantId },
@@ -1075,12 +1315,18 @@ export class CuentaCorrienteService {
       this.sumaImputaciones('cargoId', cargo.id),
     ]);
 
-    if (imputadoDelPago + importe > pago.importe + EPS) {
-      throw new BadRequestException('El importe supera el saldo disponible del pago');
+    // Un importe mayor no se rechaza: se aplica hasta el saldo del comprobante y hasta lo
+    // disponible del cobro/pago. Lo que sobra del cobro queda sin imputar (a cuenta) y lo
+    // que falta del comprobante queda pendiente.
+    const pendienteCargo = roundMoney2(cargo.importe - imputadoDelCargo);
+    if (pendienteCargo <= EPS) {
+      throw new BadRequestException('El comprobante ya no tiene saldo pendiente');
     }
-    if (imputadoDelCargo + importe > cargo.importe + EPS) {
-      throw new BadRequestException('El importe supera el saldo pendiente del comprobante');
+    const disponiblePago = roundMoney2(pago.importe - imputadoDelPago);
+    if (disponiblePago <= EPS) {
+      throw new BadRequestException('El cobro/pago ya no tiene saldo disponible');
     }
+    const importe = roundMoney2(Math.min(pedido, pendienteCargo, disponiblePago));
 
     return this.prisma.$transaction(
       (tx) => this.aplicarImputacion(tx, tenantId, pago, cargo, importe, userId),
@@ -1152,33 +1398,47 @@ export class CuentaCorrienteService {
       where: { id, tenantId },
     });
     if (!imputacion) throw new NotFoundException('Imputación no encontrada');
-    await this.prisma.$transaction(async (tx) => {
-      await tx.imputacionCuentaCorriente.delete({ where: { id } });
-      await this.recalcularEstados(tx, imputacion.pagoId, imputacion.cargoId);
-      // Va al final a propósito: si el cargo tiene facturaId, esta sync recalcula
-      // estadoDisponibilidad desde TODOS los pagos de la factura (no solo los de
-      // CC) y debe tener la última palabra sobre `recalcularEstados`, que solo ve
-      // imputaciones de Cuenta Corriente — ver nota en
-      // FacturacionService.syncViajesEstadoTrasPago.
-      if (imputacion.pagoFacturacionId) {
-        await this.facturacion.eliminarPagoDesdeCuentaCorriente(
-          tenantId,
-          imputacion.pagoFacturacionId,
-          tx,
-        );
-      }
-      const cargo = await tx.movimientoCuentaCorriente.findUnique({
-        where: { id: imputacion.cargoId },
-      });
-      if (cargo?.proveedorId && cargo.viajeId) {
-        await this.viajes.eliminarPagoTransportistaDesdeCuentaCorriente(
-          tenantId,
-          cargo.viajeId,
-          imputacion.id,
-          tx,
-        );
-      }
-    }, CC_INTERACTIVE_TX);
+    await this.prisma.$transaction(
+      (tx) => this.deshacerImputacionTx(tx, tenantId, imputacion),
+      CC_INTERACTIVE_TX,
+    );
     return { id };
+  }
+
+  /**
+   * Deshace una imputación dentro de una transacción: la borra, recalcula los estados del
+   * cobro/pago y del cargo, y revierte el pago espejado en Facturación o en Viajes. Lo
+   * usan "deshacer imputación" y eliminar un movimiento imputado (`remove`).
+   */
+  private async deshacerImputacionTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    imputacion: { id: string; pagoId: string; cargoId: string; pagoFacturacionId: string | null },
+  ) {
+    await tx.imputacionCuentaCorriente.delete({ where: { id: imputacion.id } });
+    await this.recalcularEstados(tx, imputacion.pagoId, imputacion.cargoId);
+    // Va al final a propósito: si el cargo tiene facturaId, esta sync recalcula
+    // estadoDisponibilidad desde TODOS los pagos de la factura (no solo los de
+    // CC) y debe tener la última palabra sobre `recalcularEstados`, que solo ve
+    // imputaciones de Cuenta Corriente — ver nota en
+    // FacturacionService.syncViajesEstadoTrasPago.
+    if (imputacion.pagoFacturacionId) {
+      await this.facturacion.eliminarPagoDesdeCuentaCorriente(
+        tenantId,
+        imputacion.pagoFacturacionId,
+        tx,
+      );
+    }
+    const cargo = await tx.movimientoCuentaCorriente.findFirst({
+      where: { id: imputacion.cargoId, tenantId },
+    });
+    if (cargo?.proveedorId && cargo.viajeId) {
+      await this.viajes.eliminarPagoTransportistaDesdeCuentaCorriente(
+        tenantId,
+        cargo.viajeId,
+        imputacion.id,
+        tx,
+      );
+    }
   }
 }

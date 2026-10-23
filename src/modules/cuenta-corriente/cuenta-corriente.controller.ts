@@ -12,6 +12,7 @@ import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dt
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
 import { UpdateComprobanteCcDto } from './dto/update-comprobante-cc.dto';
+import { ImportarAfipDto } from './dto/importar-afip.dto';
 import { ClerkAuthGuard } from '../../core/auth/clerk-auth.guard';
 import { RolesGuard } from '../../core/auth/roles.guard';
 import { Roles } from '../../core/auth/roles.decorator';
@@ -96,18 +97,23 @@ export class CuentaCorrienteController {
     res.end(buffer);
   }
 
-  @ApiOperation({ summary: 'Descargar el listado completo de deudores (pendientes de cobro y de pago) en PDF' })
+  @ApiOperation({
+    summary:
+      'Descargar en PDF los pendientes de cobro (lado=cliente, default) o de pago (lado=proveedor)',
+  })
   @Get('listado-deudores/pdf')
   @Roles('admin', 'member', 'superadmin')
   async listadoDeudoresPdf(
     @CurrentAuth() auth: AuthPayload,
     @Query('diasProximos') diasProximos: string | undefined,
+    @Query('lado') lado: string | undefined,
     @Res() res: Response,
   ) {
     assertTenantId(auth.tenantId);
     const dias = diasProximos ? Number(diasProximos) : undefined;
     const { buffer, filename } = await this.pdfService.generateListadoDeudores(
       auth.tenantId,
+      lado === 'proveedor' ? 'proveedor' : 'cliente',
       Number.isFinite(dias) ? dias : undefined,
     );
     res.set({
@@ -132,6 +138,17 @@ export class CuentaCorrienteController {
   create(@Body() dto: CreateMovimientoCcDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.create(auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({
+    summary:
+      'Importar ventas (Excel "Mis Comprobantes Emitidos" de AFIP) o compras ("Recibidos"); con simular=true solo devuelve la vista previa',
+  })
+  @Post('movimientos/importar-afip')
+  @Roles('admin', 'superadmin')
+  importarAfip(@Body() dto: ImportarAfipDto, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.importarAfip(auth.tenantId, dto, auth.userId);
   }
 
   @ApiOperation({ summary: 'Registrar pago/cobranza (genera movimiento automáticamente)' })

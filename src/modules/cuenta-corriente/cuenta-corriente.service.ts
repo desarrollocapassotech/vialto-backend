@@ -154,6 +154,18 @@ export class CuentaCorrienteService {
     return tipo === 'pago' ? 'PAGO' : 'COMPRA';
   }
 
+  /**
+   * El vencimiento de una venta/compra no puede ser anterior a su fecha. Se comparan días
+   * calendario de Argentina (`fechaCalendarioAr`), así una fecha con hora no corre el día.
+   */
+  private assertVencimientoNoAnterior(fecha: Date | string, vencimiento: Date | string | null | undefined) {
+    if (!vencimiento) return;
+    const dia = (d: Date | string) => fechaCalendarioAr(d instanceof Date ? d.toISOString() : d).getTime();
+    if (dia(vencimiento) < dia(fecha)) {
+      throw new BadRequestException('El vencimiento no puede ser anterior a la fecha del comprobante');
+    }
+  }
+
   private resolveFechaVencimiento(
     fecha: Date,
     condicionPagoDias: number | null,
@@ -368,6 +380,7 @@ export class CuentaCorrienteService {
     if (dto.fechaVencimiento !== undefined && !this.vencimientoEditable(mov)) {
       throw new BadRequestException('El vencimiento de este movimiento no se puede editar.');
     }
+    if (dto.fechaVencimiento) this.assertVencimientoNoAnterior(mov.fecha, dto.fechaVencimiento);
     // El archivo vive en la factura/liquidación: una venta/compra manual no tiene dónde guardarlo.
     if (
       dto.comprobanteUrl !== undefined &&
@@ -724,6 +737,7 @@ export class CuentaCorrienteService {
     // Siempre automático (VENTA/COMPRA/COBRO/PAGO): no se tipea a mano.
     const concepto = this.defaultConcepto(dto.tipo, !!dto.clienteId);
     const fecha = new Date(dto.fecha);
+    if (dto.tipo === 'cargo') this.assertVencimientoNoAnterior(dto.fecha, dto.fechaVencimiento);
     const moneda = dto.moneda?.trim() || 'ARS';
     const cargosAImputar =
       dto.tipo === 'pago' && dto.imputarACargoIds?.length
@@ -848,6 +862,13 @@ export class CuentaCorrienteService {
 
     const tipo = dto.tipo ?? current.tipo;
     const fecha = dto.fecha !== undefined ? new Date(dto.fecha) : current.fecha;
+    // Si cambia la fecha o el vencimiento, el vencimiento resultante no puede quedar antes.
+    if (tipo === 'cargo' && (dto.fecha !== undefined || dto.fechaVencimiento !== undefined)) {
+      this.assertVencimientoNoAnterior(
+        dto.fecha ?? current.fecha,
+        dto.fechaVencimiento !== undefined ? dto.fechaVencimiento : current.fechaVencimiento,
+      );
+    }
     // Venta/compra por líneas: mismo cálculo que al crearla (total = neto + IVA por alícuota).
     const porLineas = dto.lineas ? this.calcularLineas(tipo, dto.lineas) : null;
     const referencia =

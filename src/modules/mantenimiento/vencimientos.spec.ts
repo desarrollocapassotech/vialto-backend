@@ -100,7 +100,8 @@ const asig = (o: Partial<AsignacionVencimiento> = {}): AsignacionVencimiento => 
   // ── Service ──
   type Row = Record<string, any>;
   const T = 'org_A';
-  function crearMock() {
+  /** `tenantsSinPlanes`: tenants con `mantenimientoPlanesHabilitados = false`. */
+  function crearMock(tenantsSinPlanes: string[] = []) {
     const asignaciones: Row[] = [
       { id: 'vp1', tenantId: T, activo: true, baseKm: 100_000, baseFecha: null, vehiculo: { id: 'v1', patente: 'AAA', tipo: 'tractor', activo: true }, plan: { ...service20k, activo: true } },
       { id: 'vp2', tenantId: T, activo: true, baseKm: null, baseFecha: d('2025-10-20'), vehiculo: { id: 'v1', patente: 'AAA', tipo: 'tractor', activo: true }, plan: { ...vtv, activo: true } },
@@ -116,6 +117,10 @@ const asig = (o: Partial<AsignacionVencimiento> = {}): AsignacionVencimiento => 
     ];
     const llamadas: Row[] = [];
     const prisma = {
+      // No se cuenta en `llamadas`: es el chequeo del switch, no parte del cálculo.
+      tenant: {
+        findUnique: async ({ where }: Row) => ({ mantenimientoPlanesHabilitados: !tenantsSinPlanes.includes(where.clerkOrgId) }),
+      },
       vehiculoPlan: {
         findMany: async ({ where }: Row) => {
           llamadas.push({ modelo: 'vehiculoPlan', where });
@@ -174,6 +179,13 @@ const asig = (o: Partial<AsignacionVencimiento> = {}): AsignacionVencimiento => 
     const { svc, llamadas } = crearMock();
     assert.deepEqual(await svc.calcular('org_vacio', {}, HOY), []);
     assert.equal(llamadas.length, 1);
+  });
+
+  await test('service: planes apagados por superadmin → vacío y resumen en cero, sin consultar nada más', async () => {
+    const { svc, llamadas } = crearMock([T]);
+    assert.deepEqual(await svc.calcular(T, {}, HOY), []);
+    assert.deepEqual(await svc.resumen(T, HOY), { vencido: 0, proximo: 0, sin_datos: 0, ok: 0, total: 0 });
+    assert.equal(llamadas.length, 0);
   });
 
   if (fallos > 0) {

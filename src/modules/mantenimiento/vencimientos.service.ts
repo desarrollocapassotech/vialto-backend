@@ -36,6 +36,14 @@ export class VencimientosService {
   ) {}
 
   async calcular(tenantId: string, filtros: FiltrosVencimientos = {}, hoy: Date = new Date()): Promise<FilaVencimiento[]> {
+    // Switch de superadmin: con los planes apagados no hay semáforo. Al cortar acá quedan en
+    // cero también el resumen, el bloque del dashboard y los avisos (todos usan `calcular`).
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { mantenimientoPlanesHabilitados: true },
+    });
+    if (tenant?.mantenimientoPlanesHabilitados === false) return [];
+
     const asignaciones = await this.prisma.vehiculoPlan.findMany({
       where: {
         tenantId,

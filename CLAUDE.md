@@ -913,6 +913,9 @@ model AsignacionVehiculo {
 ---
 
 ### `mantenimiento` — Flota y mantenimiento (Wichi Toledo)
+> ⚠️ Desactualizada: el módulo se reconstruyó (planes, asignaciones, talleres, órdenes de trabajo, vencimientos). Fuente de verdad hasta reescribir esta sección (MANT-05): `docs/mantenimiento-plan.md`.
+
+**Planes apagables por empresa (oct 2026)**: `Tenant.mantenimientoPlanesHabilitados` (default `true`, migración `20261023120000_tenant_mantenimiento_planes_habilitados`, switch en superadmin "Configuración por empresa" → General). Con `false`, `VencimientosService.calcular` devuelve `[]` antes de consultar nada: así quedan en cero el semáforo, `vencimientos/resumen`, el bloque `alertas.mantenimiento` del dashboard y los avisos por mail (todos pasan por `calcular`). Las rutas de planes/asignaciones no se bloquean y los datos no se borran: al volver a prender aparece todo como estaba.
 **Solo está implementado el lado Postgres** (CRUD simple de `Intervencion`). El checklist diario en tiempo real vía Firestore que describe este documento es la visión original del módulo, todavía **no implementada** — no asumir que existe.
 
 ```prisma

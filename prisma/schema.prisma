@@ -119,6 +119,13 @@ model Tenant {
    */
   marcarCobradaHabilitada         Boolean  @default(false)
   /**
+   * true (default) = Mantenimiento con planes, vencimientos y avisos. false = Mantenimiento
+   * queda solo para órdenes de trabajo e historial: `VencimientosService.calcular` devuelve
+   * vacío (sin semáforo, alertas ni mails) y el front oculta planes/vencimientos. Los planes
+   * cargados no se borran. Se configura solo desde superadmin ("Configuración por empresa" → General).
+   */
+  mantenimientoPlanesHabilitados  Boolean  @default(true)
+  /**
    * Opciones de proveedores / entidades configuradas para el encabezado del contrato comercial PDF
    * (ej: ["EMPRESA LOGÍSTICA S.A. (ARGENTINA)", "EMPRESA LOGÍSTICA S.A. (URUGUAY)"]).
    * Se configura desde superadmin ("Configuración por empresa" → General).

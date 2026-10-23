@@ -9,6 +9,7 @@ import { FacturacionService } from '../facturacion/facturacion.service';
 import { ViajesService } from '../viajes/viajes.service';
 
 import { CreateMovimientoCcDto } from './dto/create-movimiento-cc.dto';
+import { ImportarAfipDto } from './dto/importar-afip.dto';
 import { UpdateMovimientoCcDto } from './dto/update-movimiento-cc.dto';
 import { RegistrarPagoDto } from './dto/registrar-pago.dto';
 import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dto';
@@ -579,6 +580,123 @@ export class CuentaCorrienteService {
         'Tu empresa tiene Liquidaciones: las compras se registran al crear la liquidación.',
       );
     }
+  }
+
+  /**
+   * Importa ventas (Excel "Mis Comprobantes Emitidos" de AFIP) o compras ("Recibidos"). El
+   * front interpreta el Excel; acá se resuelve la contraparte por CUIT (clientes o
+   * proveedores de la empresa), se descartan los ya cargados (mismo número, misma cuenta,
+   * no anulado) y cada fila se crea con `create` (mismas validaciones que la carga a mano).
+   * Con `simular` solo devuelve qué pasaría con cada fila, sin crear nada. Una fila que
+   * falla no corta las demás.
+   */
+  async importarAfip(tenantId: string, dto: ImportarAfipDto, userId?: string) {
+    const esCliente = dto.lado === 'cliente';
+    // Mismo bloqueo que "Nueva venta/compra": con Facturación/Liquidaciones no se cargan a mano.
+    await this.assertCargoManualPermitido(tenantId, {
+      tipo: 'cargo',
+      ...(esCliente ? { clienteId: '-' } : { proveedorId: '-' }),
+    } as CreateMovimientoCcDto);
+
+    const soloDigitos = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '');
+    const where = { tenantId, idFiscal: { not: null } };
+    const select = { id: true, nombre: true, idFiscal: true };
+    const contrapartes = esCliente
+      ? await this.prisma.cliente.findMany({ where, select })
+      : await this.prisma.transportista.findMany({ where, select });
+    const porCuit = new Map<string, { id: string; nombre: string }>();
+    for (const c of contrapartes) {
+      const cuit = soloDigitos(c.idFiscal);
+      if (cuit && !porCuit.has(cuit)) porCuit.set(cuit, { id: c.id, nombre: c.nombre });
+    }
+
+    // Comprobantes ya cargados en esas cuentas (para no duplicar si se importa dos veces).
+    const numeros = [...new Set(dto.filas.map((f) => f.numeroComprobante.trim()))];
+    const existentes = await this.prisma.movimientoCuentaCorriente.findMany({
+      where: {
+        tenantId,
+        tipo: 'cargo',
+        estadoDisponibilidad: { not: 'anulado' },
+        numeroComprobante: { in: numeros },
+        ...(esCliente ? { clienteId: { not: null } } : { proveedorId: { not: null } }),
+      },
+      select: { contraparteId: true, numeroComprobante: true },
+    });
+    const cargados = new Set(existentes.map((e) => `${e.contraparteId}|${e.numeroComprobante}`));
+
+    const lado = esCliente ? 'cliente' : 'proveedor';
+    const filas: {
+      fila: number;
+      numeroComprobante: string;
+      fecha: string;
+      cuit: string;
+      denominacion: string | null;
+      contraparteNombre: string | null;
+      moneda: string;
+      total: number | null;
+      estado: 'importar' | 'importado' | 'omitido';
+      motivo?: string;
+    }[] = [];
+    let creados = 0;
+
+    for (const f of dto.filas) {
+      const numero = f.numeroComprobante.trim();
+      const base = {
+        fila: f.fila,
+        numeroComprobante: numero,
+        fecha: f.fecha,
+        cuit: f.cuit,
+        denominacion: f.denominacion?.trim() || null,
+        moneda: f.moneda,
+      };
+      let total: number;
+      try {
+        total = this.calcularLineas('cargo', f.lineas).total;
+      } catch (e) {
+        filas.push({ ...base, contraparteNombre: null, total: null, estado: 'omitido', motivo: (e as Error).message });
+        continue;
+      }
+      const cp = porCuit.get(soloDigitos(f.cuit));
+      if (!cp) {
+        filas.push({
+          ...base,
+          contraparteNombre: null,
+          total,
+          estado: 'omitido',
+          motivo: `No hay ningún ${lado} con CUIT ${f.cuit}`,
+        });
+        continue;
+      }
+      const clave = `${cp.id}|${numero}`;
+      if (cargados.has(clave)) {
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'omitido', motivo: 'Ya está cargado' });
+        continue;
+      }
+      cargados.add(clave); // un mismo comprobante repetido en el archivo se importa una vez
+      if (dto.simular) {
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'importar' });
+        continue;
+      }
+      try {
+        await this.create(
+          tenantId,
+          {
+            tipo: 'cargo',
+            ...(esCliente ? { clienteId: cp.id } : { proveedorId: cp.id }),
+            numeroComprobante: numero,
+            fecha: f.fecha,
+            moneda: f.moneda,
+            lineas: f.lineas,
+          } as CreateMovimientoCcDto,
+          userId,
+        );
+        creados += 1;
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'importado' });
+      } catch (e) {
+        filas.push({ ...base, contraparteNombre: cp.nombre, total, estado: 'omitido', motivo: (e as Error).message });
+      }
+    }
+    return { creados, filas };
   }
 
   async create(tenantId: string, dto: CreateMovimientoCcDto, userId?: string) {

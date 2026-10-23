@@ -770,11 +770,27 @@ export class CuentaCorrienteService {
     }
   }
 
+  /**
+   * Elimina una venta/compra/cobro/pago manual, aunque esté imputado: primero deshace cada
+   * imputación (mismo camino que "deshacer imputación", así revierte los pagos espejados y
+   * recalcula los estados de la contraparte — un cobro vuelve a quedar sin imputar, una
+   * venta vuelve a quedar pendiente) y después lo borra. Todo en una transacción. Facturas,
+   * liquidaciones y anulaciones siguen sin poder borrarse desde acá (`assertEditableAMano`).
+   */
   async remove(id: string, tenantId: string) {
     const current = await this.findOne(id, tenantId);
     this.assertEditableAMano(current, 'eliminar');
-    await this.assertSinImputaciones(current, 'eliminar');
-    return this.prisma.movimientoCuentaCorriente.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      const imputaciones = await tx.imputacionCuentaCorriente.findMany({
+        where: { tenantId, OR: [{ pagoId: id }, { cargoId: id }] },
+      });
+      for (const imputacion of imputaciones) {
+        await this.deshacerImputacionTx(tx, tenantId, imputacion);
+      }
+      const { count } = await tx.movimientoCuentaCorriente.deleteMany({ where: { id, tenantId } });
+      if (count === 0) throw new NotFoundException('Movimiento no encontrado');
+    }, CC_INTERACTIVE_TX);
+    return { id };
   }
 
   async registrarPago(tenantId: string, dto: RegistrarPagoDto, userId?: string) {
@@ -1158,33 +1174,47 @@ export class CuentaCorrienteService {
       where: { id, tenantId },
     });
     if (!imputacion) throw new NotFoundException('Imputación no encontrada');
-    await this.prisma.$transaction(async (tx) => {
-      await tx.imputacionCuentaCorriente.delete({ where: { id } });
-      await this.recalcularEstados(tx, imputacion.pagoId, imputacion.cargoId);
-      // Va al final a propósito: si el cargo tiene facturaId, esta sync recalcula
-      // estadoDisponibilidad desde TODOS los pagos de la factura (no solo los de
-      // CC) y debe tener la última palabra sobre `recalcularEstados`, que solo ve
-      // imputaciones de Cuenta Corriente — ver nota en
-      // FacturacionService.syncViajesEstadoTrasPago.
-      if (imputacion.pagoFacturacionId) {
-        await this.facturacion.eliminarPagoDesdeCuentaCorriente(
-          tenantId,
-          imputacion.pagoFacturacionId,
-          tx,
-        );
-      }
-      const cargo = await tx.movimientoCuentaCorriente.findUnique({
-        where: { id: imputacion.cargoId },
-      });
-      if (cargo?.proveedorId && cargo.viajeId) {
-        await this.viajes.eliminarPagoTransportistaDesdeCuentaCorriente(
-          tenantId,
-          cargo.viajeId,
-          imputacion.id,
-          tx,
-        );
-      }
-    }, CC_INTERACTIVE_TX);
+    await this.prisma.$transaction(
+      (tx) => this.deshacerImputacionTx(tx, tenantId, imputacion),
+      CC_INTERACTIVE_TX,
+    );
     return { id };
+  }
+
+  /**
+   * Deshace una imputación dentro de una transacción: la borra, recalcula los estados del
+   * cobro/pago y del cargo, y revierte el pago espejado en Facturación o en Viajes. Lo
+   * usan "deshacer imputación" y eliminar un movimiento imputado (`remove`).
+   */
+  private async deshacerImputacionTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    imputacion: { id: string; pagoId: string; cargoId: string; pagoFacturacionId: string | null },
+  ) {
+    await tx.imputacionCuentaCorriente.delete({ where: { id: imputacion.id } });
+    await this.recalcularEstados(tx, imputacion.pagoId, imputacion.cargoId);
+    // Va al final a propósito: si el cargo tiene facturaId, esta sync recalcula
+    // estadoDisponibilidad desde TODOS los pagos de la factura (no solo los de
+    // CC) y debe tener la última palabra sobre `recalcularEstados`, que solo ve
+    // imputaciones de Cuenta Corriente — ver nota en
+    // FacturacionService.syncViajesEstadoTrasPago.
+    if (imputacion.pagoFacturacionId) {
+      await this.facturacion.eliminarPagoDesdeCuentaCorriente(
+        tenantId,
+        imputacion.pagoFacturacionId,
+        tx,
+      );
+    }
+    const cargo = await tx.movimientoCuentaCorriente.findFirst({
+      where: { id: imputacion.cargoId, tenantId },
+    });
+    if (cargo?.proveedorId && cargo.viajeId) {
+      await this.viajes.eliminarPagoTransportistaDesdeCuentaCorriente(
+        tenantId,
+        cargo.viajeId,
+        imputacion.id,
+        tx,
+      );
+    }
   }
 }

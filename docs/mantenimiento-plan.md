@@ -27,7 +27,7 @@
 | MANT-04 | T3 — Pestaña Planes + asignación | 🟡 Implementado (2026-10-23), falta revisión en pantalla | `develop` (front, sin commitear) | Solo front. Pestaña Planes (listado con filtros categoría/estado, "Cargar planes sugeridos", nuevo/ver/editar, activar/desactivar, eliminar), `PlanModal` (vista con vehículos asignados: editar último service, desactivar, quitar), `AsignarVehiculosModal` (tabla con último service por vehículo, preselecciona los del tipo del plan; al crear un plan se abre solo). Extra pedido por Elias: "+ Asignar plan al vehículo" en el modal de OT (`AsignarPlanRapido`, sin base: la OT pasa a ser la referencia; queda tildado y suma sus tareas). Pendiente aparte: switch de superadmin para apagar planes por empresa. |
 | MANT-04 | T4 — Historial del vehículo + "Actualizar km" | 🔲 Pendiente | | |
 | MANT-04 | T5 — Upsell Combustible | 🔲 Pendiente | | |
-| MANT-04 | T6 — Dashboard | 🔲 Pendiente | | |
+| MANT-04 | T6 — Dashboard | 🟡 Implementado (2026-10-23), falta revisión en pantalla | `develop` (front, sin commitear) | Pestaña "Mantenimiento" en el panel del tenant (contadores por estado + 5 próximos vencimientos, fetch propio a `GET vencimientos`, no depende del período) y bloque en "Resumen de alertas" (`alertas.mantenimiento`, rojo si hay vencidos). `TenantHomePage` suma Mantenimiento (y `erroresChofer`, que faltaba) a la condición del panel de alertas. La métrica vieja "Intervenciones (mes)" estaba en código muerto (`useTenantDashboardMetrics.ts` + `TenantOverviewCards.tsx`, sin uso): se borraron; no había 404 en producción. |
 | MANT-05 | T1 — Documentación | 🔲 Pendiente | | |
 | MANT-05 | T2 — Recorrido end-to-end en QA | 🔲 Pendiente | | |
 

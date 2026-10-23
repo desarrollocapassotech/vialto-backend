@@ -1311,7 +1311,7 @@ export class FacturacionService {
     await this.prisma.$transaction(async (tx) => {
       await quitarCobroCcDeFactura(tx, tenantId, row);
       await tx.pago.delete({ where: { id } });
-      await this.syncViajesEstadoTrasPago(row.facturaId, tenantId, tx);
+      await this.syncViajesEstadoTrasPago(row.facturaId, tenantId, tx, { soloPagos: true });
     }, FACTURA_INTERACTIVE_TX);
     return row;
   }
@@ -1351,7 +1351,7 @@ export class FacturacionService {
     const row = await client.pago.findFirst({ where: { id: pagoId, tenantId } });
     if (!row) return;
     await client.pago.delete({ where: { id: pagoId } });
-    await this.syncViajesEstadoTrasPago(row.facturaId, tenantId, client);
+    await this.syncViajesEstadoTrasPago(row.facturaId, tenantId, client, { soloPagos: true });
   }
 
   /**
@@ -1409,11 +1409,18 @@ export class FacturacionService {
     return resultados;
   }
 
-  /** Alinea estado de viajes vinculados con cobro total o parcial de la factura. */
+  /**
+   * Alinea estado de viajes vinculados con cobro total o parcial de la factura.
+   * `soloPagos` (al borrar un pago): el cobro sale solo de los `Pago` que quedan. Sin
+   * eso, `computeEstadoFacturaLectura` también da por cobrada la factura si todos sus
+   * viajes ya están en `cobrado` (datos históricos sin `Pago`) — pero ese estado lo
+   * escribió este mismo sync al cobrarla, así que la factura nunca volvía a pendiente.
+   */
   private async syncViajesEstadoTrasPago(
     facturaId: string,
     tenantId: string,
     client: PrismaService | Prisma.TransactionClient = this.prisma,
+    opts: { soloPagos?: boolean } = {},
   ): Promise<void> {
     const factura = await client.factura.findFirst({
       where: { id: facturaId, tenantId },
@@ -1423,7 +1430,9 @@ export class FacturacionService {
 
     const tieneArca = await this.tieneArca(tenantId);
     const { cobrado } = computeEstadoFacturaLectura({
-      viajes: factura.viajes,
+      viajes: opts.soloPagos
+        ? factura.viajes.map((v) => ({ ...v, facturacionEstado: "facturado" }))
+        : factura.viajes,
       fechaVencimiento: factura.fechaVencimiento,
       importeGuardado: factura.importe,
       pagos: factura.pagos,

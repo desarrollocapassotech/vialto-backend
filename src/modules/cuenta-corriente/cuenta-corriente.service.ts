@@ -500,22 +500,48 @@ export class CuentaCorrienteService {
     );
     const sinVencimiento = items.filter((i) => i.fechaVencimiento == null);
 
-    const totalesPorMoneda = (rows: typeof items) => {
-      const map = new Map<string, number>();
-      for (const r of rows) map.set(r.moneda, (map.get(r.moneda) ?? 0) + r.pendiente);
-      return Array.from(map.entries()).map(([moneda, total]) => ({ moneda, total }));
-    };
-    const { cobrar: todoCobrar, pagar: todoPagar } = porGrupo(items);
+    // Totales = suma de los saldos de las cuentas (mismo cálculo que `saldoContraparte`),
+    // así "Por cobrar" coincide con la suma de saldos de clientes y "Por pagar" con la de
+    // proveedores. A la fecha y sin el período ni el `take` de las listas: los cobros a
+    // cuenta (sin imputar) restan, igual que en el saldo de cada cliente.
+    const [porCobrarPendiente, porPagarPendiente] = await Promise.all([
+      this.saldosTotalesLado(tenantId, 'cliente'),
+      this.saldosTotalesLado(tenantId, 'proveedor'),
+    ]);
 
     return {
       vencidos: porGrupo(vencidos),
       proximosVencimientos: porGrupo(proximosVencimientos),
       sinVencimiento: porGrupo(sinVencimiento),
-      totales: {
-        porCobrarPendiente: totalesPorMoneda(todoCobrar),
-        porPagarPendiente: totalesPorMoneda(todoPagar),
-      },
+      totales: { porCobrarPendiente, porPagarPendiente },
     };
+  }
+
+  /**
+   * Suma de saldos de todas las cuentas de un lado (clientes o proveedores), por moneda:
+   * cargos − pagos sin lo anulado. Es exactamente la suma de `saldoContraparte` de cada
+   * cuenta de ese lado (mantener ambos con el mismo criterio).
+   */
+  private async saldosTotalesLado(tenantId: string, lado: 'cliente' | 'proveedor') {
+    const grouped = await this.prisma.movimientoCuentaCorriente.groupBy({
+      by: ['moneda', 'tipo'],
+      where: {
+        tenantId,
+        estadoDisponibilidad: { not: 'anulado' },
+        ...(lado === 'cliente' ? { clienteId: { not: null } } : { proveedorId: { not: null } }),
+      },
+      _sum: { importe: true },
+    });
+    const porMoneda = new Map<string, number>();
+    for (const row of grouped) {
+      const importe = row._sum.importe ?? 0;
+      if (row.tipo === 'cargo') porMoneda.set(row.moneda, (porMoneda.get(row.moneda) ?? 0) + importe);
+      else if (row.tipo === 'pago') porMoneda.set(row.moneda, (porMoneda.get(row.moneda) ?? 0) - importe);
+    }
+    return Array.from(porMoneda.entries()).map(([moneda, total]) => ({
+      moneda,
+      total: roundMoney2(total),
+    }));
   }
 
   async findOne(id: string, tenantId: string) {

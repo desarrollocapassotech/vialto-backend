@@ -22,10 +22,7 @@ import { UpdateVehiculoDto } from "../vehiculos/dto/update-vehiculo.dto";
 import { CreateTransportistaDto } from "../transportistas/dto/create-transportista.dto";
 import { UpdateTransportistaDto } from "../transportistas/dto/update-transportista.dto";
 import { CreateViajeDto } from "../../modules/viajes/dto/create-viaje.dto";
-import {
-  VIAJE_INCLUDE_VEHICULOS,
-  type ViajeConVehiculosViaje,
-} from "../../modules/viajes/viaje-vehiculos.helper";
+import { type ViajeConVehiculosViaje } from "../../modules/viajes/viaje-vehiculos.helper";
 import { UpdateViajeDto } from "../../modules/viajes/dto/update-viaje.dto";
 import { AddGastoDto } from "../../modules/viajes/dto/add-gasto.dto";
 import { AddPagoTransportistaDto } from "../../modules/viajes/dto/add-pago-transportista.dto";
@@ -159,27 +156,24 @@ export class PlatformService {
       throw new BadRequestException("Transportista inválido para esta empresa");
   }
 
-  listViajes(tenantId?: string) {
+  /**
+   * Mismo listado que `GET /viajes` de la empresa (recientes + pendientes de facturar o
+   * liquidar + `incluirIds`): lo usan los modales de factura/liquidación embebidos en
+   * superadmin, que antes recibían solo los 500 más recientes y sin `clientesViaje`.
+   */
+  async listViajes(tenantId?: string, incluirIds: string[] = []) {
     if (!tenantId?.trim()) {
-      return Promise.resolve([]);
+      return [];
     }
     const id = tenantId.trim();
-    return this.prisma.viaje
-      .findMany({
-        where: { tenantId: id },
-        take: TAKE,
-        orderBy: { createdAt: "desc" },
-        include: {
-          tenant: { select: { name: true } },
-          ...VIAJE_INCLUDE_VEHICULOS,
-        },
-      })
-      .then((rows) =>
-        rows.map(({ tenant, ...rest }) => ({
-          ...rest,
-          empresaNombre: tenant.name,
-        })),
-      );
+    const [tenant, rows] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { clerkOrgId: id },
+        select: { name: true },
+      }),
+      this.viajesService.findAll(id, undefined, incluirIds),
+    ]);
+    return rows.map((r) => ({ ...r, empresaNombre: tenant?.name ?? "" }));
   }
 
   viajesPaginated(

@@ -36,6 +36,16 @@ function parseYyyyMmDdFinAr(s: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** `?incluir=id1,id2` → ids sin vacíos ni repetidos (máx. 500). */
+export function parseIdsCsv(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set(ids)].slice(0, 500);
+}
+
 export function parseTipoFechaQuery(
   raw?: string,
 ): "carga" | "descarga" | undefined {

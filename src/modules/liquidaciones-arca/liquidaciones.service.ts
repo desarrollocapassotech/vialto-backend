@@ -163,6 +163,7 @@ export class LiquidacionesService {
         orden: orden++,
         modoAplicacion: dto.modoAplicacion ?? 'GENERAL',
         viajeId: dto.viajeId ?? null,
+        detalle: dto.detalle?.trim() || null,
       });
     }
     return out;
@@ -179,6 +180,7 @@ export class LiquidacionesService {
       orden?: number;
       modoAplicacion?: string;
       viajeId?: string | null;
+      detalle?: string | null;
     }> | null | undefined,
   ): ConceptoLineaInput[] {
     return (rows ?? []).map((r) => ({
@@ -191,6 +193,7 @@ export class LiquidacionesService {
       orden: r.orden,
       modoAplicacion: r.modoAplicacion,
       viajeId: r.viajeId,
+      detalle: r.detalle ?? null,
     }));
   }
 
@@ -443,6 +446,7 @@ export class LiquidacionesService {
             orden: l.orden ?? 0,
             modoAplicacion: l.modoAplicacion ?? 'GENERAL',
             viajeId: l.viajeId ?? null,
+            detalle: l.detalle ?? null,
           })),
         });
       }
@@ -720,6 +724,7 @@ export class LiquidacionesService {
               orden: l.orden ?? 0,
               modoAplicacion: l.modoAplicacion ?? 'GENERAL',
               viajeId: l.viajeId ?? null,
+              detalle: l.detalle ?? null,
             })),
           });
         }

@@ -1,4 +1,5 @@
 import { round2 } from './arca-iva.util';
+import { nombreConDetalle } from './cvlp-conceptos.util';
 import { readStoredMicCrtExport } from '../viajes/mic-crt-export.util';
 
 export type LiquidacionContratoViajeInput = {
@@ -196,6 +197,7 @@ export function buildLiquidacionContratoTotales(args: {
     cantidad?: number | null;
     montoUnitario?: number | null;
     modoAplicacion?: string | null;
+    detalle?: string | null;
   }> | null;
   ivaPersistido?: number | null;
   liquidoPersistido?: number | null;
@@ -218,6 +220,7 @@ export function buildLiquidacionContratoTotales(args: {
       cantidad?: number | null;
       montoUnitario?: number | null;
       modoAplicacion?: string | null;
+      detalle?: string | null;
     }> | null;
   } | null;
 }): LiquidacionContratoTotales {
@@ -287,7 +290,7 @@ export function buildLiquidacionContratoTotales(args: {
         : null,
       linePct != null ? `IVA ${linePct}%` : null,
     ].filter(Boolean);
-    const label = `${nombre}${detalle.length ? ` (${detalle.join(', ')})` : ''}`;
+    const label = `${nombreConDetalle(nombre, l.detalle)}${detalle.length ? ` (${detalle.join(', ')})` : ''}`;
 
     conceptos.push({ label, monto: montoTotal, signo });
     conceptosLineasMapped.push({

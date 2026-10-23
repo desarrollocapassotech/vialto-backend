@@ -28,7 +28,11 @@ import {
   estadoCargoFactura,
   importeCargoFactura,
 } from "./cargo-factura.util";
-import { anularCargoFacturaCc } from "./factura-cuenta-corriente";
+import {
+  anularCargoFacturaCc,
+  quitarCobroCcDeFactura,
+  registrarCobroCcDesdeFactura,
+} from "./factura-cuenta-corriente";
 import { formatNumeroComprobante } from "../liquidaciones-arca/arca.util";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
 import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
@@ -1218,17 +1222,20 @@ export class FacturacionService {
 
   async createPago(tenantId: string, dto: CreatePagoDto) {
     await this.findFactura(dto.facturaId, tenantId);
-    const pago = await this.prisma.pago.create({
-      data: {
-        tenantId,
-        facturaId: dto.facturaId,
-        importe: dto.importe,
-        fecha: new Date(dto.fecha),
-        formaPago: dto.formaPago ?? null,
-      },
-    });
-    await this.syncViajesEstadoTrasPago(dto.facturaId, tenantId);
-    return pago;
+    return this.prisma.$transaction(async (tx) => {
+      const pago = await tx.pago.create({
+        data: {
+          tenantId,
+          facturaId: dto.facturaId,
+          importe: dto.importe,
+          fecha: new Date(dto.fecha),
+          formaPago: dto.formaPago ?? null,
+        },
+      });
+      await registrarCobroCcDesdeFactura(tx, tenantId, pago);
+      await this.syncViajesEstadoTrasPago(dto.facturaId, tenantId, tx);
+      return pago;
+    }, FACTURA_INTERACTIVE_TX);
   }
 
   /**
@@ -1277,16 +1284,19 @@ export class FacturacionService {
       return { yaCobrada: true, factura: await this.shapeConNombre(factura, tieneArca) };
     }
 
-    await this.prisma.pago.create({
-      data: {
-        tenantId,
-        facturaId: id,
-        importe: saldo,
-        fecha: new Date(),
-        formaPago: null,
-      },
-    });
-    await this.syncViajesEstadoTrasPago(id, tenantId);
+    await this.prisma.$transaction(async (tx) => {
+      const pago = await tx.pago.create({
+        data: {
+          tenantId,
+          facturaId: id,
+          importe: saldo,
+          fecha: new Date(),
+          formaPago: null,
+        },
+      });
+      await registrarCobroCcDesdeFactura(tx, tenantId, pago);
+      await this.syncViajesEstadoTrasPago(id, tenantId, tx);
+    }, FACTURA_INTERACTIVE_TX);
 
     const updated = await this.prisma.factura.findFirst({
       where: { id, tenantId },
@@ -1298,8 +1308,11 @@ export class FacturacionService {
   async removePago(id: string, tenantId: string) {
     const row = await this.prisma.pago.findFirst({ where: { id, tenantId } });
     if (!row) throw new NotFoundException("Pago no encontrado");
-    await this.prisma.pago.delete({ where: { id } });
-    await this.syncViajesEstadoTrasPago(row.facturaId, tenantId);
+    await this.prisma.$transaction(async (tx) => {
+      await quitarCobroCcDeFactura(tx, tenantId, row);
+      await tx.pago.delete({ where: { id } });
+      await this.syncViajesEstadoTrasPago(row.facturaId, tenantId, tx);
+    }, FACTURA_INTERACTIVE_TX);
     return row;
   }
 

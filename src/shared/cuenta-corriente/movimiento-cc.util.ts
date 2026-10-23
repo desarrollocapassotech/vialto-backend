@@ -56,7 +56,7 @@ export function signoHistorialCc(tipo: string): 1 | -1 {
   return tipo === "cargo" ? 1 : -1;
 }
 
-async function recalcularEstadoImputacionPago(tx: Tx, tenantId: string, pagoId: string) {
+export async function recalcularEstadoImputacionPago(tx: Tx, tenantId: string, pagoId: string) {
   const pago = await tx.movimientoCuentaCorriente.findFirst({ where: { id: pagoId, tenantId } });
   if (!pago) return;
   const suma = await tx.imputacionCuentaCorriente.aggregate({

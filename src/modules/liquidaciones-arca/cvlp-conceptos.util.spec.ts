@@ -3,7 +3,7 @@
  * Ejecutar: npx ts-node src/modules/liquidaciones-arca/cvlp-conceptos.util.spec.ts
  */
 import * as assert from 'node:assert/strict';
-import { computeLiquidacionTotales } from './cvlp-conceptos.util';
+import { buildCvlpConceptosList, computeLiquidacionTotales } from './cvlp-conceptos.util';
 
 function test(name: string, fn: () => void) {
   try {
@@ -72,6 +72,29 @@ test('computeLiquidacionTotales: gastos/seguro a 0% no reducen el IVA de flete+c
   assert.equal(montos.impNeto, 1_009_024);
   assert.equal(montos.impIva, 212_945.04);
   assert.equal(montos.liquido, 1_221_969.04);
+});
+
+test('buildCvlpConceptosList muestra el detalle del concepto solo si está cargado', () => {
+  const conceptos = buildCvlpConceptosList({
+    bruto: 1000,
+    comision: 0,
+    ivaPctDefault: 21,
+    lineas: [
+      {
+        nombreSnapshot: 'Faltante de Kg',
+        signo: 'contra',
+        ivaPct: 21,
+        monto: 100,
+        detalle: '  Faltante del viaje 10135713752 ',
+      },
+      { nombreSnapshot: 'Gastos administrativos', signo: 'contra', ivaPct: 21, monto: 50, detalle: '  ' },
+    ],
+  });
+  const descripciones = conceptos.map((c) => c.descripcion);
+  assert.ok(descripciones.includes('Faltante de Kg — Faltante del viaje 10135713752'));
+  assert.ok(descripciones.includes('Gastos administrativos'));
+  // El detalle no cambia los montos.
+  assert.equal(conceptos.find((c) => c.descripcion.startsWith('Faltante'))?.importe, -100);
 });
 
 console.log('cvlp-conceptos.util.spec.ts OK');

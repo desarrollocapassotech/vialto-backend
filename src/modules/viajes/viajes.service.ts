@@ -50,6 +50,7 @@ import {
   FACTURACION_ESTADOS_DISPONIBLES,
   FACTURACION_ESTADOS_PENDIENTES,
   LIQUIDACION_ESTADOS_DISPONIBLES,
+  LIQUIDACION_ESTADOS_PENDIENTES,
   type ViajeEtapa,
 } from "./viaje-estados";
 import { syncLiquidacionEstadoViaje } from "./viaje-estado-financiero";
@@ -767,21 +768,51 @@ export class ViajesService {
       );
   }
 
+  /**
+   * Los 200 viajes más recientes + todos los que siguen pendientes de facturar o de
+   * liquidar, sin importar su antigüedad. Lo usan los modales de factura/liquidación
+   * (Viajes, Facturación, Liquidaciones, Inicio) para ofrecer viajes y clientes: con el
+   * tope solo, un viaje viejo sin facturar quedaba afuera y su cliente no aparecía en
+   * "Nueva factura" (bug real LSF, oct 2026: 232 viajes, el pendiente era el n° 225).
+   */
   async findAll(tenantId: string, etapa?: string) {
     const ivaTransportistaHabilitado =
       await this.ivaTransportistaHabilitado(tenantId);
-    const rows = await this.prisma.viaje.findMany({
-      where: { tenantId, ...(etapa ? { etapa } : {}) },
+    const include = {
+      cliente: { select: { id: true, nombre: true } },
+      transportista: { select: { id: true, nombre: true } },
+      transportistaEfectivo: { select: { id: true, nombre: true } },
+      destinosViaje: viajeDestinosViajeInclude,
+      ...VIAJE_INCLUDE_FULL,
+    } as any;
+    const where = { tenantId, ...(etapa ? { etapa } : {}) };
+    const recientes = await this.prisma.viaje.findMany({
+      where,
       orderBy: { createdAt: "desc" },
       take: 200,
-      include: {
-        cliente: { select: { id: true, nombre: true } },
-        transportista: { select: { id: true, nombre: true } },
-        transportistaEfectivo: { select: { id: true, nombre: true } },
-        destinosViaje: viajeDestinosViajeInclude,
-        ...VIAJE_INCLUDE_FULL,
-      } as any,
+      include,
     });
+    const pendientes = await this.prisma.viaje.findMany({
+      where: {
+        ...where,
+        id: { notIn: recientes.map((r) => r.id) },
+        OR: [
+          { facturacionEstado: { in: [...FACTURACION_ESTADOS_PENDIENTES] } },
+          {
+            clientesViaje: {
+              some: {
+                tenantId,
+                facturacionEstado: { in: [...FACTURACION_ESTADOS_PENDIENTES] },
+              },
+            },
+          },
+          { liquidacionEstado: { in: [...LIQUIDACION_ESTADOS_PENDIENTES] } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      include,
+    });
+    const rows = [...recientes, ...pendientes];
     return rows.map((r) =>
       calcularMontosReales(
         this.zerarIvaTransportistaSiDeshabilitado(r, ivaTransportistaHabilitado),

@@ -832,14 +832,16 @@ export class CuentaCorrienteService {
     this.assertEditableAMano(current, 'editar');
 
     const cambiaContraparte = dto.clienteId !== undefined || dto.proveedorId !== undefined;
-    const cambiaMonto =
-      dto.importe !== undefined ||
-      dto.lineas !== undefined ||
+    // El importe (o las líneas) se puede cambiar aunque haya imputaciones: después se ajustan
+    // (`ajustarImputacionesAlImporte`). Moneda, tipo y cuenta no: dejarían imputado un cobro
+    // en otra moneda o de otra cuenta.
+    const cambiaImporte = dto.importe !== undefined || dto.lineas !== undefined;
+    const cambiaEstructura =
       (dto.moneda !== undefined && dto.moneda !== current.moneda) ||
       (dto.tipo !== undefined && dto.tipo !== current.tipo) ||
       cambiaContraparte;
-    if (cambiaMonto) {
-      await this.assertSinImputaciones(current, 'cambiar el importe, la moneda o la cuenta de');
+    if (cambiaEstructura) {
+      await this.assertSinImputaciones(current, 'cambiar la moneda o la cuenta de');
     }
     if (dto.numeroComprobante !== undefined && !dto.numeroComprobante.trim()) {
       throw new BadRequestException('Ingresá el número de comprobante');
@@ -876,7 +878,8 @@ export class CuentaCorrienteService {
         ? (dto.formaPago ?? dto.referencia)?.trim() || null
         : undefined;
 
-    return this.prisma.movimientoCuentaCorriente.update({
+    return this.prisma.$transaction(async (tx) => {
+      const actualizado = await tx.movimientoCuentaCorriente.update({
       where: { id },
       data: {
         clienteId,
@@ -913,7 +916,50 @@ export class CuentaCorrienteService {
         numeroComprobante: dto.numeroComprobante?.trim() || undefined,
         referencia,
       },
+      });
+      if (cambiaImporte) await this.ajustarImputacionesAlImporte(tx, tenantId, actualizado);
+      return tx.movimientoCuentaCorriente.findUniqueOrThrow({ where: { id } });
+    }, CC_INTERACTIVE_TX);
+  }
+
+  /**
+   * Después de cambiar el importe de una venta/compra (o cobro/pago) con imputaciones:
+   * - si lo imputado sigue entrando en el importe nuevo, solo se recalculan los estados
+   *   (ej. una venta "cancelada" pasa a "parcial" si se le sube el importe);
+   * - si lo imputado supera el importe nuevo, se recortan las imputaciones de la más nueva a
+   *   la más vieja hasta que entren. Recortar = deshacer y volver a imputar por menos
+   *   (`deshacerImputacionTx` + `aplicarImputacion`), así también se ajustan el `Pago` de
+   *   Facturación y el pago al transportista del viaje. Lo recortado vuelve a quedar
+   *   disponible en el cobro/pago (a cuenta) o pendiente en la venta/compra.
+   */
+  private async ajustarImputacionesAlImporte(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    mov: MovimientoCuentaCorriente,
+  ) {
+    const campo = mov.tipo === 'pago' ? 'pagoId' : 'cargoId';
+    const imputaciones = await tx.imputacionCuentaCorriente.findMany({
+      where: { tenantId, [campo]: mov.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+    let exceso = roundMoney2(imputaciones.reduce((s, i) => s + i.importe, 0) - mov.importe);
+    for (const imp of imputaciones) {
+      if (exceso <= EPS) {
+        await this.recalcularEstados(tx, imp.pagoId, imp.cargoId);
+        continue;
+      }
+      const recorte = Math.min(exceso, imp.importe);
+      const queda = roundMoney2(imp.importe - recorte);
+      exceso = roundMoney2(exceso - recorte);
+      await this.deshacerImputacionTx(tx, tenantId, imp);
+      if (queda > EPS) {
+        const [pago, cargo] = await Promise.all([
+          tx.movimientoCuentaCorriente.findFirstOrThrow({ where: { id: imp.pagoId, tenantId } }),
+          tx.movimientoCuentaCorriente.findFirstOrThrow({ where: { id: imp.cargoId, tenantId } }),
+        ]);
+        await this.aplicarImputacion(tx, tenantId, pago, cargo, queda, imp.createdBy ?? undefined);
+      }
+    }
   }
 
   /**

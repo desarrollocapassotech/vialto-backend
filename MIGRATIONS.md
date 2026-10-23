@@ -1,4 +1,4 @@
-# Guía de migraciones — Vialto (Neon: QA / producción)
+# Guía de migraciones  | Vialto Software (Neon: QA / producción)
 
 ## Concepto base
 

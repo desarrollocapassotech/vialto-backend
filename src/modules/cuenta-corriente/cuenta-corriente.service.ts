@@ -877,7 +877,10 @@ export class CuentaCorrienteService {
     };
   }
 
-  /** Suma de cargos − pagos − créditos (sin distinguir moneda), usado solo por exportarMovimientos para el running total. */
+  /**
+   * Saldo por moneda (cargos − pagos − créditos), usado solo por exportarMovimientos para el
+   * saldo inicial y el acumulado. Nunca suma pesos con dólares: un Map por moneda.
+   */
   private async calcSaldoAcumulado(
     tenantId: string,
     contraparteId: string,
@@ -897,17 +900,19 @@ export class CuentaCorrienteService {
       ...(opts?.hasta ? { fecha: { lte: opts.hasta } } : {}),
       ...(opts?.before ? { fecha: { lt: opts.before } } : {}),
     };
-    const [cargos, haber] = await Promise.all([
-      this.prisma.movimientoCuentaCorriente.aggregate({
-        where: { ...baseWhere, tipo: 'cargo' },
-        _sum: { importe: true },
-      }),
-      this.prisma.movimientoCuentaCorriente.aggregate({
-        where: { ...baseWhere, tipo: { in: ['pago', 'credito'] } },
-        _sum: { importe: true },
-      }),
-    ]);
-    return (cargos._sum.importe ?? 0) - (haber._sum.importe ?? 0);
+    const grouped = await this.prisma.movimientoCuentaCorriente.groupBy({
+      by: ['moneda', 'tipo'],
+      where: { ...baseWhere, tipo: { in: ['cargo', 'pago', 'credito'] } },
+      _sum: { importe: true },
+    });
+    const porMoneda = new Map<string, number>();
+    for (const row of grouped) {
+      porMoneda.set(
+        row.moneda,
+        (porMoneda.get(row.moneda) ?? 0) + signoHistorialCc(row.tipo) * (row._sum.importe ?? 0),
+      );
+    }
+    return porMoneda;
   }
 
   async exportarMovimientos(tenantId: string, query: ExportarMovimientosQueryDto) {
@@ -936,12 +941,15 @@ export class CuentaCorrienteService {
 
     // Mismo orden que el detalle en pantalla: el saldo acumulado se recorre en orden de
     // carga y la lista sale con el último cargado primero (PDF y Excel la usan tal cual).
-    let acumulado = saldoInicial;
+    // Se acumula POR MONEDA (igual que la grilla): cada fila muestra el saldo de su moneda.
+    const acumuladoPorMoneda = new Map(saldoInicial);
     const items = movimientos.map((mov) => {
       // Un cargo anulado se sigue listando (auditoría); suma solo si tiene su crédito de
       // anulación, que resta como un cobro.
+      let acumulado = acumuladoPorMoneda.get(mov.moneda) ?? 0;
       if (cuentaEnHistorialCc({ ...mov, compensado: !!mov.anuladoPor })) {
         acumulado += signoHistorialCc(mov.tipo) * mov.importe;
+        acumuladoPorMoneda.set(mov.moneda, acumulado);
       }
       return {
         id: mov.id,
@@ -955,16 +963,21 @@ export class CuentaCorrienteService {
         importe: mov.importe,
         estadoDisponibilidad: mov.estadoDisponibilidad,
         estadoImputacion: mov.estadoImputacion,
-        saldoAcumulado: acumulado,
+        saldoAcumulado: roundMoney2(acumulado),
       };
     });
 
+    // Saldos inicial y final: uno por moneda que aparezca (en el inicial o en el período).
+    const monedas = [...new Set([...saldoInicial.keys(), ...acumuladoPorMoneda.keys()])].sort();
     return {
       clienteId: query.clienteId ?? null,
       proveedorId: query.proveedorId ?? null,
       periodo: { desde, hasta },
-      saldoInicial,
-      saldoFinal: acumulado,
+      saldoInicial: monedas.map((moneda) => ({ moneda, saldo: roundMoney2(saldoInicial.get(moneda) ?? 0) })),
+      saldoFinal: monedas.map((moneda) => ({
+        moneda,
+        saldo: roundMoney2(acumuladoPorMoneda.get(moneda) ?? 0),
+      })),
       movimientos: items.reverse(),
     };
   }

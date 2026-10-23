@@ -146,16 +146,29 @@ export class PlanesService {
     return { id };
   }
 
+  /** Vista previa de las plantillas sugeridas: `yaCargada` si el tenant ya tiene un plan con ese nombre. */
+  async listarPlantillas(tenantId: string) {
+    const existentes = await this.prisma.planMantenimiento.findMany({ where: { tenantId }, select: { nombre: true } });
+    const nombres = new Set(existentes.map((p) => normalizarNombre(p.nombre)));
+    return PLANTILLAS_PLAN.map((t) => ({ ...t, tareas: [...t.tareas], yaCargada: nombres.has(normalizarNombre(t.nombre)) }));
+  }
+
   /**
    * Crea las plantillas sugeridas que el tenant todavía no tiene (por nombre, sin distinguir
    * mayúsculas, contando también los planes inactivos). Si el cliente renombró o borró una,
-   * se vuelve a crear con el nombre original.
+   * se vuelve a crear con el nombre original. Con `soloNombres`, solo esas (las demás se ignoran).
    */
-  async crearPlantillas(tenantId: string, userId: string) {
+  async crearPlantillas(tenantId: string, userId: string, soloNombres?: string[]) {
+    const elegidas = soloNombres ? new Set(soloNombres.map(normalizarNombre)) : null;
+    if (elegidas && !PLANTILLAS_PLAN.some((t) => elegidas.has(normalizarNombre(t.nombre)))) {
+      throw new BadRequestException('Ninguno de los planes elegidos está entre los sugeridos.');
+    }
     return this.prisma.$transaction(async (tx) => {
       const existentes = await tx.planMantenimiento.findMany({ where: { tenantId }, select: { nombre: true } });
       const nombres = new Set(existentes.map((p) => normalizarNombre(p.nombre)));
-      const faltantes = PLANTILLAS_PLAN.filter((t) => !nombres.has(normalizarNombre(t.nombre)));
+      const faltantes = PLANTILLAS_PLAN.filter(
+        (t) => !nombres.has(normalizarNombre(t.nombre)) && (!elegidas || elegidas.has(normalizarNombre(t.nombre))),
+      );
       if (faltantes.length > 0) {
         await tx.planMantenimiento.createMany({
           data: faltantes.map((t) => ({ ...t, tareas: [...t.tareas], tipoVehiculo: null, tenantId, createdBy: userId })),

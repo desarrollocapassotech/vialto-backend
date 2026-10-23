@@ -119,6 +119,22 @@ const planExistente = (o: Row = {}) => ({
     assert.deepEqual([r.creados.length, r.existentes, planes.length], [8, ['VTV/RTO'], 9]);
   });
 
+  await test('plantillas: vista previa marca las ya cargadas', async () => {
+    const { prisma } = crearPrisma([planExistente({ nombre: 'vtv/rto' })]);
+    const lista = await new PlanesService(prisma).listarPlantillas(T);
+    assert.equal(lista.length, 9);
+    assert.deepEqual(lista.filter((t) => t.yaCargada).map((t) => t.nombre), ['VTV/RTO']);
+  });
+
+  await test('plantillas: con nombres crea solo esas (sin repetir las cargadas)', async () => {
+    const { prisma, planes } = crearPrisma([planExistente({ nombre: 'VTV/RTO' })]);
+    const svc = new PlanesService(prisma);
+    const r = await svc.crearPlantillas(T, 'u1', ['vtv/rto', 'Póliza de seguro']);
+    assert.deepEqual(r.creados.map((p) => p.nombre), ['Póliza de seguro']);
+    assert.equal(planes.length, 2);
+    await assert.rejects(svc.crearPlantillas(T, 'u1', ['No existe']), BadRequestException);
+  });
+
   await test('plantillas: los planes de otro tenant no cuentan', async () => {
     const { prisma } = crearPrisma([planExistente({ tenantId: 'org_B' })]);
     const r = await new PlanesService(prisma).crearPlantillas(T, 'u1');

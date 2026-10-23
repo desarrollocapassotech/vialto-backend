@@ -16,6 +16,7 @@ import { PlanesService } from './planes.service';
 import { CreatePlanMantenimientoDto } from './dto/create-plan-mantenimiento.dto';
 import { UpdatePlanMantenimientoDto } from './dto/update-plan-mantenimiento.dto';
 import { PlanesQueryDto } from './dto/planes-query.dto';
+import { CrearPlantillasDto } from './dto/crear-plantillas.dto';
 import { AsignacionesService } from './asignaciones.service';
 import { AsignarVehiculosDto } from './dto/asignar-vehiculos.dto';
 import { UpdateVehiculoPlanDto } from './dto/update-vehiculo-plan.dto';
@@ -68,15 +69,29 @@ export class MantenimientoController {
   }
 
   @ApiOperation({
-    summary: 'Cargar las plantillas sugeridas que falten',
+    summary: 'Plantillas sugeridas (vista previa), con `yaCargada` si la empresa ya tiene un plan con ese nombre',
+  })
+  @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
+  @Get('planes/plantillas')
+  @Roles('admin', 'superadmin')
+  listarPlantillas(@CurrentAuth() auth: AuthPayload, @Query('tenantId') tenantId?: string) {
+    return this.planes.listarPlantillas(this.resolveTenantId(auth, tenantId));
+  }
+
+  @ApiOperation({
+    summary: 'Cargar las plantillas sugeridas que falten (todas o las de `nombres`)',
     description:
       'Idempotente por nombre (sin distinguir mayúsculas, incluye planes inactivos). Si una plantilla fue renombrada o borrada, se vuelve a crear con el nombre original.',
   })
   @ApiQuery({ name: 'tenantId', required: false, description: 'Solo superadmin' })
   @Post('planes/plantillas')
   @Roles('admin', 'superadmin')
-  crearPlantillas(@CurrentAuth() auth: AuthPayload, @Query('tenantId') tenantId?: string) {
-    return this.planes.crearPlantillas(this.resolveTenantId(auth, tenantId), auth.userId);
+  crearPlantillas(
+    @CurrentAuth() auth: AuthPayload,
+    @Body() dto: CrearPlantillasDto,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.planes.crearPlantillas(this.resolveTenantId(auth, tenantId), auth.userId, dto?.nombres);
   }
 
   @ApiOperation({ summary: 'Obtener un plan de mantenimiento' })

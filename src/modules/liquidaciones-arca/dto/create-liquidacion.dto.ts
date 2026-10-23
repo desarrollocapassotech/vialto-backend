@@ -56,6 +56,12 @@ export class LiquidacionConceptoLineaDto {
   @IsOptional()
   @IsString()
   viajeId?: string;
+
+  /** Aclaración libre opcional (ej. "Faltante del viaje 10135713752"). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  detalle?: string;
 }
 
 export class CreateLiquidacionDto {

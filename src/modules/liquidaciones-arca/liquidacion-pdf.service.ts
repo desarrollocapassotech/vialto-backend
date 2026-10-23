@@ -517,6 +517,7 @@ export class LiquidacionPdfService {
             orden?: number;
             modoAplicacion?: string;
             viajeId?: string | null;
+            detalle?: string | null;
           }) => ({
             nombreSnapshot: r.nombreSnapshot,
             signo: r.signo as "favor" | "contra",
@@ -527,6 +528,7 @@ export class LiquidacionPdfService {
             orden: r.orden,
             modoAplicacion: r.modoAplicacion,
             viajeId: r.viajeId,
+            detalle: r.detalle ?? null,
           }),
         ),
       });

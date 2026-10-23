@@ -14,7 +14,15 @@ export type ConceptoLineaInput = {
   orden?: number;
   modoAplicacion?: string;
   viajeId?: string | null;
+  /** Aclaración libre opcional; solo se muestra (no afecta montos). */
+  detalle?: string | null;
 };
+
+/** "Nombre — detalle" si la línea tiene detalle; si no, el nombre solo. */
+export function nombreConDetalle(nombre: string, detalle?: string | null): string {
+  const d = detalle?.trim();
+  return d ? `${nombre} — ${d}` : nombre;
+}
 
 export function signedImporte(signo: ConceptoSigno, monto: number): number {
   const abs = Math.abs(monto);
@@ -83,20 +91,21 @@ export function buildCvlpConceptosList(args: {
   }
   for (const l of args.lineas ?? []) {
     if (!l.monto || l.monto === 0) continue;
-    
+    const nombre = nombreConDetalle(l.nombreSnapshot, l.detalle);
+
     if (l.modoAplicacion === 'TODOS_LOS_VIAJES' && args.viajes && args.viajes.length > 0) {
       for (const v of args.viajes) {
         conceptos.push({
-          descripcion: `${l.nombreSnapshot} (Viaje #${v.numero})`,
+          descripcion: `${nombre} (Viaje #${v.numero})`,
           importe: signedImporte(l.signo, l.monto),
           ivaPct: l.ivaPct,
         });
       }
     } else {
-      let desc = l.nombreSnapshot;
+      let desc = nombre;
       if (l.modoAplicacion === 'VIAJE_PUNTUAL' && l.viajeId && args.viajes) {
         const viaje = args.viajes.find((v) => v.id === l.viajeId);
-        if (viaje) desc = `${l.nombreSnapshot} (Viaje #${viaje.numero})`;
+        if (viaje) desc = `${nombre} (Viaje #${viaje.numero})`;
       }
       // Cantidad × unitario solo para el PDF; el importe sigue siendo `monto`.
       const cantidad = l.cantidad && l.cantidad > 0 ? l.cantidad : 1;

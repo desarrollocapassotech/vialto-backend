@@ -96,18 +96,23 @@ export class CuentaCorrienteController {
     res.end(buffer);
   }
 
-  @ApiOperation({ summary: 'Descargar el listado completo de deudores (pendientes de cobro y de pago) en PDF' })
+  @ApiOperation({
+    summary:
+      'Descargar en PDF los pendientes de cobro (lado=cliente, default) o de pago (lado=proveedor)',
+  })
   @Get('listado-deudores/pdf')
   @Roles('admin', 'member', 'superadmin')
   async listadoDeudoresPdf(
     @CurrentAuth() auth: AuthPayload,
     @Query('diasProximos') diasProximos: string | undefined,
+    @Query('lado') lado: string | undefined,
     @Res() res: Response,
   ) {
     assertTenantId(auth.tenantId);
     const dias = diasProximos ? Number(diasProximos) : undefined;
     const { buffer, filename } = await this.pdfService.generateListadoDeudores(
       auth.tenantId,
+      lado === 'proveedor' ? 'proveedor' : 'cliente',
       Number.isFinite(dias) ? dias : undefined,
     );
     res.set({

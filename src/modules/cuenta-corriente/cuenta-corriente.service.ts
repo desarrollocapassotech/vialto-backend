@@ -1075,16 +1075,18 @@ export class CuentaCorrienteService {
       this.sumaImputaciones('cargoId', cargo.id),
     ]);
 
-    // Imputar más de lo que debe el comprobante no se rechaza: se aplica hasta su saldo
-    // y el resto del cobro/pago queda sin imputar (a cuenta).
+    // Un importe mayor no se rechaza: se aplica hasta el saldo del comprobante y hasta lo
+    // disponible del cobro/pago. Lo que sobra del cobro queda sin imputar (a cuenta) y lo
+    // que falta del comprobante queda pendiente.
     const pendienteCargo = roundMoney2(cargo.importe - imputadoDelCargo);
     if (pendienteCargo <= EPS) {
       throw new BadRequestException('El comprobante ya no tiene saldo pendiente');
     }
-    const importe = roundMoney2(Math.min(pedido, pendienteCargo));
-    if (imputadoDelPago + importe > pago.importe + EPS) {
-      throw new BadRequestException('El importe supera el saldo disponible del pago');
+    const disponiblePago = roundMoney2(pago.importe - imputadoDelPago);
+    if (disponiblePago <= EPS) {
+      throw new BadRequestException('El cobro/pago ya no tiene saldo disponible');
     }
+    const importe = roundMoney2(Math.min(pedido, pendienteCargo, disponiblePago));
 
     return this.prisma.$transaction(
       (tx) => this.aplicarImputacion(tx, tenantId, pago, cargo, importe, userId),

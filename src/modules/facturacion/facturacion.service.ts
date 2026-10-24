@@ -106,15 +106,21 @@ export class FacturacionService {
     tramos: FacturaTramoCobro[],
     facturarPorTramo: boolean,
     ivaPctCabecera: number | null | undefined,
-    tieneArca: boolean,
-  ): { importe: number; ivaMonto: number | null } {
+    _tieneArca?: boolean,
+  ): { importe: number; ivaMonto: number } {
     const importe = roundMoney2(this.computeImporte(viajes));
-    if (!facturarPorTramo || tieneArca || tramos.length === 0) {
-      return { importe, ivaMonto: null };
+    if (facturarPorTramo && tramos.length > 0) {
+      return {
+        importe,
+        ivaMonto: ivaMontoDeTramos(importe, tramos, ivaPctCabecera),
+      };
     }
+    const pct = Number(ivaPctCabecera);
+    const ivaPct = Number.isFinite(pct) ? pct : 0;
+    const ivaMonto = ivaPct > 0 ? roundMoney2((importe * ivaPct) / 100) : 0;
     return {
       importe,
-      ivaMonto: ivaMontoDeTramos(importe, tramos, ivaPctCabecera),
+      ivaMonto,
     };
   }
 
@@ -789,6 +795,9 @@ export class FacturacionService {
       numero: string | null;
       importe: number;
       ivaMonto?: number | null;
+      ivaPct?: number | null;
+      facturarPorTramo?: boolean;
+      tramos?: FacturaTramoCobro[];
       moneda: string;
       fechaEmision: Date;
       fechaVencimiento: Date | null;
@@ -908,7 +917,10 @@ export class FacturacionService {
         }
 
         // Después de vincular los viajes: el movimiento del viaje se transforma en el de la factura.
-        await this.upsertCargoFactura(tx, factura);
+        await this.upsertCargoFactura(tx, {
+          ...factura,
+          tramos: tramosValidos,
+        });
 
         const updated = await tx.factura.findFirst({
           where: { id: factura.id },

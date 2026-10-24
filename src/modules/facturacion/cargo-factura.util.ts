@@ -39,13 +39,33 @@ export function conceptoAnulacion(cbteTipoAnulacion?: number | null): string {
   return `${tipo}${letra ? ` ${letra}` : ""}`;
 }
 
+import {
+  FacturaTramoCobro,
+  importeTotalConIvaPorTramo,
+  roundMoney2,
+} from "../../shared/util/factura-estado-lectura";
+
 /**
- * Lo que el cliente debe por la factura: neto + IVA persistido. `ivaMonto` solo se
- * llena en facturas por tramo de tenants sin ARCA (cobro = neto + IVA); en el resto
- * es null y el cargo queda en el neto, igual que el cobro.
+ * Lo que el cliente debe por la factura: total real con IVA incluido (tanto con ARCA como sin ARCA).
+ * Si `ivaMonto` está persistido, suma neto + IVA. En facturas por tramo sin persistir, calcula tramo a tramo.
+ * En facturas estándar sin `ivaMonto` persistido, aplica la alícuota `ivaPct` (o 0 si es exenta).
  */
-export function importeCargoFactura(f: { importe: number; ivaMonto?: number | null }): number {
-  return Math.round((f.importe + (f.ivaMonto ?? 0)) * 100) / 100;
+export function importeCargoFactura(f: {
+  importe: number;
+  ivaMonto?: number | null;
+  ivaPct?: number | null;
+  facturarPorTramo?: boolean;
+  tramos?: FacturaTramoCobro[];
+}): number {
+  if (f.ivaMonto != null && Number.isFinite(f.ivaMonto)) {
+    return roundMoney2(f.importe + f.ivaMonto);
+  }
+  if (f.facturarPorTramo && f.tramos && f.tramos.length > 0) {
+    return importeTotalConIvaPorTramo(f.importe, f.tramos, f.ivaPct);
+  }
+  const pct = Number(f.ivaPct);
+  const iva = Number.isFinite(pct) && pct > 0 ? roundMoney2((f.importe * pct) / 100) : 0;
+  return roundMoney2(f.importe + iva);
 }
 
 /** Estado del cargo según el cobro que muestra Facturas (`computeEstadoFacturaLectura`). */

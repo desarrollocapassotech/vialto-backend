@@ -30,9 +30,14 @@ const tramosUru = [
   { viajeId: 'v2', monto: 1600, ivaPct: 0 },
 ];
 
-test('sin tramos: suma de viajes (o importe guardado si no hay viajes)', () => {
-  assert.equal(importeOperativoFactura(0, viajes3100), 3100);
-  assert.equal(importeOperativoFactura(99, []), 99);
+test('sin tramos y sin IVA: suma de viajes (o importe guardado si no hay viajes)', () => {
+  assert.equal(importeOperativoFactura(0, viajes3100, { ivaPctCabecera: 0 }), 3100);
+  assert.equal(importeOperativoFactura(99, [], { ivaPctCabecera: 0 }), 99);
+});
+
+test('sin tramos con IVA (ej. 21%): cobro = neto + IVA (3100 + 651 = 3751)', () => {
+  assert.equal(importeOperativoFactura(0, viajes3100, { ivaPctCabecera: 21 }), 3751);
+  assert.equal(importeOperativoFactura(0, viajes3100, { tieneArca: true, ivaPctCabecera: 21 }), 3751);
 });
 
 test('por tramo sin ARCA: cobro = neto + IVA de cada tramo (3100 + 154 = 3254)', () => {
@@ -52,15 +57,15 @@ test('por tramo sin ARCA: cobro = neto + IVA de cada tramo (3100 + 154 = 3254)',
   );
 });
 
-test('tenant ARCA: por tramo no cambia el cobro (sigue el neto)', () => {
+test('tenant ARCA: por tramo también incluye el IVA en el total a cobrar', () => {
   assert.equal(
     importeOperativoFactura(0, viajes3100, {
       tieneArca: true,
       facturarPorTramo: true,
       tramos: tramosUru,
-      ivaPctCabecera: 22,
+      ivaPctCabecera: 0,
     }),
-    3100,
+    3254,
   );
 });
 
@@ -128,7 +133,7 @@ test('ivaMonto guardado: el cobro usa el valor persistido, no recalcula', () => 
   );
 });
 
-test('sin tramo: pagos = neto alcanza (comportamiento actual)', () => {
+test('sin tramo con IVA: pagar solo el neto no la deja cobrada', () => {
   const { cobrado } = computeEstadoFacturaLectura({
     viajes: viajes3100,
     fechaVencimiento: null,
@@ -138,6 +143,34 @@ test('sin tramo: pagos = neto alcanza (comportamiento actual)', () => {
     tieneArca: false,
     facturarPorTramo: false,
     ivaPctCabecera: 21,
+  });
+  assert.equal(cobrado, false);
+});
+
+test('sin tramo con IVA: cobrada al cubrir el total con IVA', () => {
+  const { cobrado } = computeEstadoFacturaLectura({
+    viajes: viajes3100,
+    fechaVencimiento: null,
+    importeGuardado: 3100,
+    pagos: [{ importe: 3751 }],
+    arcaEstado: null,
+    tieneArca: false,
+    facturarPorTramo: false,
+    ivaPctCabecera: 21,
+  });
+  assert.equal(cobrado, true);
+});
+
+test('sin tramo exenta (0% IVA): pagar el neto la deja cobrada', () => {
+  const { cobrado } = computeEstadoFacturaLectura({
+    viajes: viajes3100,
+    fechaVencimiento: null,
+    importeGuardado: 3100,
+    pagos: [{ importe: 3100 }],
+    arcaEstado: null,
+    tieneArca: false,
+    facturarPorTramo: false,
+    ivaPctCabecera: 0,
   });
   assert.equal(cobrado, true);
 });

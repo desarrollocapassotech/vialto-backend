@@ -117,9 +117,11 @@ export function importeTotalConIvaPorTramo(
 }
 
 /**
- * Monto contra el que se mide el cobro.
- * Sin tramos / tenant ARCA: neto. Por tramo sin ARCA: neto + IVA persistido
- * (o recalculado si todavía no hay `ivaMonto` guardado).
+ * Monto contra el que se mide el cobro (total real con IVA incluido).
+ * Aplica tanto a empresas con ARCA como sin ARCA.
+ * Si es por tramos, suma el IVA de los tramos cargados y el resto con la alícuota de cabecera.
+ * Si no es por tramos, suma `ivaMontoGuardado` o calcula el IVA según `ivaPctCabecera`.
+ * En facturas exentas (0%), preserva el neto sin cambios.
  */
 export function importeOperativoFactura(
   importeGuardado: number,
@@ -127,17 +129,18 @@ export function importeOperativoFactura(
   opts?: FacturaCobroOpts,
 ): number {
   const neto = importeNetoFactura(importeGuardado, viajes, opts);
-  if (
-    opts?.tieneArca ||
-    !opts?.facturarPorTramo ||
-    !(opts.tramos && opts.tramos.length > 0)
-  ) {
-    return neto;
+  if (opts?.facturarPorTramo && opts.tramos && opts.tramos.length > 0) {
+    if (opts.ivaMontoGuardado != null && Number.isFinite(opts.ivaMontoGuardado)) {
+      return roundMoney2(neto + opts.ivaMontoGuardado);
+    }
+    return importeTotalConIvaPorTramo(neto, opts.tramos, opts.ivaPctCabecera);
   }
-  if (opts.ivaMontoGuardado != null && Number.isFinite(opts.ivaMontoGuardado)) {
+  if (opts?.ivaMontoGuardado != null && Number.isFinite(opts.ivaMontoGuardado)) {
     return roundMoney2(neto + opts.ivaMontoGuardado);
   }
-  return importeTotalConIvaPorTramo(neto, opts.tramos, opts.ivaPctCabecera);
+  const pct = Number(opts?.ivaPctCabecera);
+  const iva = Number.isFinite(pct) && pct > 0 ? roundMoney2((neto * pct) / 100) : 0;
+  return roundMoney2(neto + iva);
 }
 
 /** Ciclo de vida del comprobante — un solo valor a la vez, nunca "cobrado" (ver `cobrado` abajo). */
@@ -196,16 +199,12 @@ export function computeEstadoFacturaLectura(args: {
   );
   const totalPagado = args.pagos.reduce((s, p) => s + p.importe, 0);
   const cobradoPorPagos = importe > 0 && totalPagado + 0.005 >= importe;
+  // Fallback para datos históricos sin registros de Pago: si todos sus viajes ya estaban en cobrado
   const cobradoPorViajes =
+    args.pagos.length === 0 &&
     args.viajes.length > 0 &&
     args.viajes.every((v) => v.facturacionEstado === "cobrado");
-  const porTramoSinArca =
-    !args.tieneArca &&
-    Boolean(args.facturarPorTramo) &&
-    (args.tramos?.length ?? 0) > 0;
-  const cobrado = porTramoSinArca
-    ? cobradoPorPagos
-    : cobradoPorViajes || cobradoPorPagos;
+  const cobrado = cobradoPorPagos || cobradoPorViajes;
 
   let vencida = false;
   if (!cobrado && estado === "facturado" && args.fechaVencimiento != null) {

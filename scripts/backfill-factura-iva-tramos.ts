@@ -109,7 +109,7 @@ async function main() {
     const neto = importeNetoFactura(f.importe, f.viajes);
     const ivaNuevo =
       f.tramos.length > 0
-        ? ivaMontoDeTramos(neto, f.tramos, f.ivaPct)
+        ? ivaMontoDeTramos(neto, f.tramos, f.ivaPct, f.viajes)
         : null;
     const aCobrar = importeOperativoFactura(neto, f.viajes, {
       facturarPorTramo: true,
@@ -148,6 +148,16 @@ async function main() {
       await prisma.factura.update({
         where: { id: f.id },
         data: { importe: neto, ivaMonto: ivaNuevo },
+      });
+      await prisma.movimientoCuentaCorriente.updateMany({
+        where: {
+          facturaId: f.id,
+          tipo: 'cargo',
+          estadoDisponibilidad: { not: 'anulado' },
+        },
+        data: {
+          importe: roundMoney2(neto + (ivaNuevo ?? 0)),
+        },
       });
     }
   }

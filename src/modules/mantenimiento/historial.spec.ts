@@ -9,6 +9,7 @@ import { armarHistorial, type OrdenHistorial } from './historial.util';
 import type { LecturaKm } from '../../core/odometro/odometro.types';
 import type { OdometroService } from '../../core/odometro/odometro.service';
 import type { PrismaService } from '../../shared/prisma/prisma.service';
+import type { NombresUsuariosService } from '../../shared/usuarios/nombres-usuarios.service';
 
 let fallos = 0;
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -80,16 +81,38 @@ const resumen = (eventos: ReturnType<typeof armarHistorial>) =>
         findMany: async ({ where }: Row) => {
           llamadas.push({ where });
           return [
-            { ...ot('o1', '2026-09-10', '2026-09-10T12:00:00Z', { estado: 'anulada' }), planes: [], _count: { items: 2 } },
+            {
+              ...ot('o1', '2026-09-10', '2026-09-10T12:00:00Z', { estado: 'anulada' }),
+              planes: [],
+              _count: { items: 2 },
+              createdBy: 'user_admin',
+            },
             {
               ...ot('o2', '2026-09-12', '2026-09-12T12:00:00Z'),
               planes: [{ vehiculoPlanId: 'vp1', vehiculoPlan: { plan: { nombre: 'Service' } } }],
               _count: { items: 0 },
+              createdBy: 'chofer:ch1',
             },
           ];
         },
       },
+      cargaCombustible: {
+        findMany: async ({ where }: Row) => {
+          llamadas.push({ where });
+          return [{ id: 'carga-100000', createdBy: 'chofer-app', chofer: { nombre: 'Juan Pérez' } }];
+        },
+      },
+      vehiculoKmEdicion: { findMany: async () => [] },
+      chofer: {
+        findMany: async ({ where }: Row) => {
+          llamadas.push({ where });
+          return where.id.in.includes('ch1') ? [{ id: 'ch1', nombre: 'Rosa Gómez' }] : [];
+        },
+      },
     };
+    const nombres = {
+      nombres: async (ids: string[]) => new Map(ids.filter((i) => i === 'user_admin').map((i) => [i, 'Ana Admin'])),
+    } as unknown as NombresUsuariosService;
     const odometro = {
       getLecturas: async (tenantId: string, vehiculoId: string, rango: Row) => {
         llamadas.push({ odometro: { tenantId, vehiculoId, rango } });
@@ -97,7 +120,7 @@ const resumen = (eventos: ReturnType<typeof armarHistorial>) =>
       },
       getUltimaLectura: async () => lec(100_000, '2026-09-11T10:00:00Z'),
     } as unknown as OdometroService;
-    return { svc: new HistorialService(prisma as unknown as PrismaService, odometro), llamadas };
+    return { svc: new HistorialService(prisma as unknown as PrismaService, odometro, nombres), llamadas };
   }
 
   await test('service: unidad de otro tenant → 404', async () => {
@@ -115,6 +138,19 @@ const resumen = (eventos: ReturnType<typeof armarHistorial>) =>
     assert.ok(o1.tipo === 'orden' && o1.orden.estado === 'anulada' && o1.orden.cantidadItems === 2);
     assert.equal(h.odometro?.km, 100_000);
     assert.ok(llamadas.filter((l) => l.where).every((l) => l.where.tenantId === T));
+  });
+
+  await test('service: autor de cada evento (usuario, chofer que cargó la OT, chofer de la carga)', async () => {
+    const { svc } = crearMock();
+    const h = await svc.historial(T, 'v1');
+    assert.deepEqual(
+      h.eventos.map((e) => e.autor),
+      [
+        { nombre: 'Rosa Gómez', chofer: true }, // OT o2, cargada desde la app
+        { nombre: 'Juan Pérez', chofer: true }, // carga de combustible
+        { nombre: 'Ana Admin', chofer: false }, // OT o1, usuario de Vialto
+      ],
+    );
   });
 
   await test('service: desde/hasta llegan a OT y lecturas (hasta = fin del día)', async () => {

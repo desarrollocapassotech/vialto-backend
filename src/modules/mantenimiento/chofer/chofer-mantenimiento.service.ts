@@ -95,6 +95,34 @@ export class ChoferMantenimientoService {
     };
   }
 
+  /**
+   * Services que registró este chofer desde la app (los últimos 50, más reciente primero),
+   * con las tareas ya traducidas para mostrar. Incluye los anulados (con su estado).
+   */
+  async misServices(tenantId: string, choferId: string) {
+    const { habilitado } = await this.tenant(tenantId);
+    if (!habilitado) return [];
+    const ordenes = await this.prisma.ordenTrabajo.findMany({
+      where: { tenantId, createdBy: `chofer:${choferId}` },
+      orderBy: [{ fecha: 'desc' }, { createdAt: 'desc' }],
+      take: 50,
+      select: {
+        id: true, numero: true, fecha: true, km: true, estado: true, tareas: true, descripcion: true, adjuntos: true,
+        vehiculo: { select: { patente: true } },
+        taller: { select: { nombre: true } },
+        planes: { select: { vehiculoPlan: { select: { plan: { select: { nombre: true } } } } } },
+      },
+    });
+    const label = new Map(TAREAS_MANTENIMIENTO_GRUPOS.flatMap((g) => g.tareas.map((t) => [t.value as string, t.label])));
+    return ordenes.map(({ planes, tareas, vehiculo, taller, ...o }) => ({
+      ...o,
+      patente: vehiculo.patente,
+      taller: taller?.nombre ?? null,
+      planes: planes.map((p) => p.vehiculoPlan.plan.nombre),
+      tareas: tareas.map((t) => label.get(t) ?? t),
+    }));
+  }
+
   /** Sube una foto del service (solo imágenes) a la carpeta de adjuntos de Mantenimiento de la empresa. */
   async subirFoto(tenantId: string, file: Express.Multer.File | undefined) {
     const { habilitado } = await this.tenant(tenantId);

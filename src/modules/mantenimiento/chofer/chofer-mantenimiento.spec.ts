@@ -30,6 +30,7 @@ function crear(opts: { modules?: string[]; conPlanes?: boolean; asignado?: boole
   const { modules = ['combustible', 'mantenimiento'], conPlanes = true, asignado = true } = opts;
   const consultas: Row[] = [];
   const creadas: Row[] = [];
+  const ordenesWhere: Row[] = [];
   const prisma = {
     tenant: {
       findUnique: async ({ where }: Row) => (where.clerkOrgId === T ? { modules, mantenimientoPlanesHabilitados: conPlanes } : null),
@@ -51,6 +52,19 @@ function crear(opts: { modules?: string[]; conPlanes?: boolean; asignado?: boole
               { id: 'vp2', plan: { nombre: 'Engrase', tareas: ['engrasado_chasis', 'revision_filtros'] } },
             ]
           : [];
+      },
+    },
+    ordenTrabajo: {
+      findMany: async ({ where }: Row) => {
+        ordenesWhere.push(where);
+        return [
+          {
+            id: 'o1', numero: 3, fecha: new Date('2026-10-20'), km: 480_000, estado: 'cerrada',
+            tareas: ['cambio_aceite_motor', 'tarea_desconocida'], descripcion: null, adjuntos: [],
+            vehiculo: { patente: 'AA123BB' }, taller: { nombre: 'Lubricentro Norte' },
+            planes: [{ vehiculoPlan: { plan: { nombre: 'Service motor' } } }],
+          },
+        ];
       },
     },
     taller: {
@@ -78,7 +92,7 @@ function crear(opts: { modules?: string[]; conPlanes?: boolean; asignado?: boole
     },
     subirAdjunto: async (tenantId: string) => ({ url: `https://res.cloudinary.com/x/${tenantId}/foto.jpg` }),
   } as unknown as OrdenesService;
-  return { svc: new ChoferMantenimientoService(prisma, odometro, ordenes, talleresSvc), consultas, creadas, talleres };
+  return { svc: new ChoferMantenimientoService(prisma, odometro, ordenes, talleresSvc), consultas, creadas, talleres, ordenesWhere };
 }
 
 (async () => {
@@ -156,6 +170,15 @@ function crear(opts: { modules?: string[]; conPlanes?: boolean; asignado?: boole
     await svc.registrar(T, CHOFER, { fecha: '2026-10-23', descripcion: 'x' });
     assert.deepEqual(creadas.map((c) => c.dto.tallerId), ['t1', 't1', 't3', null]);
     assert.equal(talleres.find((t) => t.id === 't3')?.tenantId, T);
+  });
+
+  await test('mis services: solo los del chofer y su empresa, con tareas traducidas; sin módulo → vacío', async () => {
+    const { svc, ordenesWhere } = crear();
+    const r = await svc.misServices(T, CHOFER);
+    assert.deepEqual(ordenesWhere[0], { tenantId: T, createdBy: 'chofer:ch1' });
+    assert.deepEqual(r[0].tareas, ['Cambio de aceite de motor', 'tarea_desconocida']);
+    assert.deepEqual([r[0].patente, r[0].taller, r[0].planes], ['AA123BB', 'Lubricentro Norte', ['Service motor']]);
+    assert.deepEqual(await crear({ modules: ['combustible'] }).svc.misServices(T, CHOFER), []);
   });
 
   await test('fotos: solo imágenes y solo con el módulo; se mandan a la OT', async () => {

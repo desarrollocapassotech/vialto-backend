@@ -25,6 +25,13 @@ export class ChoferMantenimientoController {
     return this.service.contexto(tenantId, choferId);
   }
 
+  @ApiOperation({ summary: 'Services que registró el chofer desde la app (últimos 50, más reciente primero)' })
+  @Get('services')
+  misServices(@Req() req: ChoferAuthRequest) {
+    const { sub: choferId, tenantId } = req.choferAuth;
+    return this.service.misServices(tenantId, choferId);
+  }
+
   @ApiOperation({ summary: 'Subir una foto del service — devuelve la URL para mandar en `adjuntos`' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })

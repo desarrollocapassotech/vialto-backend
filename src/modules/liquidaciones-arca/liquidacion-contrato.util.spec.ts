@@ -17,6 +17,8 @@ import {
   buildLiquidacionContratoTotales,
   encabezadoContratoProveedor,
   resolverDocsViajeContrato,
+  resolverIdsPersonalizadosViaje,
+  resolverTenantIdConfig,
 } from './liquidacion-contrato.util';
 
 function test(name: string, fn: () => void) {
@@ -180,6 +182,111 @@ test('resolverDocsViajeContrato retorna null en todos los campos si no hay datos
   assert.equal(vacio.crt, null);
   assert.equal(vacio.mic, null);
   assert.equal(vacio.remito, null);
+});
+
+test('resolverTenantIdConfig aplica defaults cuando tenant es null o vacío', () => {
+  const def = resolverTenantIdConfig(null);
+  assert.equal(def.idPropio1Habilitado, true);
+  assert.equal(def.idPropio1Label, 'ID propio');
+  assert.equal(def.idPropio2Habilitado, false);
+  assert.equal(def.idPropio2Label, 'ID Propio 2');
+
+  const vacio = resolverTenantIdConfig({});
+  assert.equal(vacio.idPropio1Habilitado, true);
+  assert.equal(vacio.idPropio1Label, 'ID propio');
+  assert.equal(vacio.idPropio2Habilitado, false);
+  assert.equal(vacio.idPropio2Label, 'ID Propio 2');
+});
+
+test('resolverTenantIdConfig respeta labels personalizados y flags de tenant', () => {
+  const lsf = resolverTenantIdConfig({
+    idPropio1Habilitado: true,
+    labelIdentificacionPersonalizadaViajes: '  MIC / REMITO  ',
+    idPropio2Habilitado: true,
+    idPropio2Label: '  CRT / OP  ',
+  });
+  assert.equal(lsf.idPropio1Habilitado, true);
+  assert.equal(lsf.idPropio1Label, 'MIC / REMITO');
+  assert.equal(lsf.idPropio2Habilitado, true);
+  assert.equal(lsf.idPropio2Label, 'CRT / OP');
+});
+
+test('resolverIdsPersonalizadosViaje incluye ambos IDs con sus labels si tenant tiene ambos activos', () => {
+  const config = {
+    idPropio1Habilitado: true,
+    idPropio1Label: 'MIC / REMITO',
+    idPropio2Habilitado: true,
+    idPropio2Label: 'CRT / OP',
+  };
+  const viaje = {
+    numeroIdentificacionPersonalizado: 'MR-10293',
+    idPropio2: 'CO-4091',
+  };
+  const ids = resolverIdsPersonalizadosViaje(viaje, config);
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0].label, 'MIC / REMITO');
+  assert.equal(ids[0].valor, 'MR-10293');
+  assert.equal(ids[1].label, 'CRT / OP');
+  assert.equal(ids[1].valor, 'CO-4091');
+});
+
+test('resolverIdsPersonalizadosViaje incluye solo ID 1 si ID 2 está deshabilitado', () => {
+  const config = {
+    idPropio1Habilitado: true,
+    idPropio1Label: 'CTG',
+    idPropio2Habilitado: false,
+    idPropio2Label: 'ID Propio 2',
+  };
+  const viaje = {
+    numeroIdentificacionPersonalizado: '10130658234',
+    idPropio2: 'CP-999',
+  };
+  const ids = resolverIdsPersonalizadosViaje(viaje, config);
+  assert.equal(ids.length, 1);
+  assert.equal(ids[0].label, 'CTG');
+  assert.equal(ids[0].valor, '10130658234');
+});
+
+test('resolverIdsPersonalizadosViaje devuelve lista vacía si ambos IDs están deshabilitados', () => {
+  const config = {
+    idPropio1Habilitado: false,
+    idPropio1Label: 'ID propio',
+    idPropio2Habilitado: false,
+    idPropio2Label: 'ID Propio 2',
+  };
+  const viaje = {
+    numeroIdentificacionPersonalizado: '123',
+    idPropio2: '456',
+  };
+  const ids = resolverIdsPersonalizadosViaje(viaje, config);
+  assert.equal(ids.length, 0);
+});
+
+test('resolverIdsPersonalizadosViaje aplica trim y deja null si el viaje no tiene dato cargado', () => {
+  const config = {
+    idPropio1Habilitado: true,
+    idPropio1Label: 'MIC / REMITO',
+    idPropio2Habilitado: true,
+    idPropio2Label: 'CRT / OP',
+  };
+  const viajeEspaciado = {
+    numeroIdentificacionPersonalizado: '   VAL-1   ',
+    idPropio2: '   VAL-2   ',
+  };
+  const idsEspaciado = resolverIdsPersonalizadosViaje(viajeEspaciado, config);
+  assert.equal(idsEspaciado[0].valor, 'VAL-1');
+  assert.equal(idsEspaciado[1].valor, 'VAL-2');
+
+  const viajeSinDatos = {
+    numeroIdentificacionPersonalizado: '   ',
+    idPropio2: null,
+  };
+  const idsSinDatos = resolverIdsPersonalizadosViaje(viajeSinDatos, config);
+  assert.equal(idsSinDatos.length, 2);
+  assert.equal(idsSinDatos[0].label, 'MIC / REMITO');
+  assert.equal(idsSinDatos[0].valor, null);
+  assert.equal(idsSinDatos[1].label, 'CRT / OP');
+  assert.equal(idsSinDatos[1].valor, null);
 });
 
 test('buildLiquidacionContratoTotales descuenta comision de la base gravada e IVA sobre neto', () => {

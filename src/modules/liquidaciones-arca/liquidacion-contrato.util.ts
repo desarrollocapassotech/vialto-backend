@@ -14,9 +14,10 @@ export type LiquidacionContratoViajeInput = {
   fechaDescarga: Date | string | null;
   choferNombre: string | null;
   mercaderia: string | null;
-  crt: string | null;
-  mic: string | null;
-  remito: string | null;
+  idPropio2?: string | null;
+  crt?: string | null;
+  mic?: string | null;
+  remito?: string | null;
   toneladas: number | null;
   precioPorTn: number | null;
   subtotal: number;
@@ -136,11 +137,79 @@ export function crtMicRemitoDesdeDocumento(documentoAduanero: unknown): {
   };
 }
 
+export type TenantIdConfig = {
+  idPropio1Habilitado: boolean;
+  idPropio1Label: string;
+  idPropio2Habilitado: boolean;
+  idPropio2Label: string;
+};
+
+export type ViajeIdItem = {
+  label: string;
+  valor: string | null;
+};
+
+/**
+ * Resuelve la configuración de identificadores personalizados para el tenant emisor.
+ * Respeta los nombres asignados por cada empresa y sus flags de activación.
+ */
+export function resolverTenantIdConfig(tenant?: {
+  idPropio1Habilitado?: boolean | null;
+  labelIdentificacionPersonalizadaViajes?: string | null;
+  idPropio2Habilitado?: boolean | null;
+  idPropio2Label?: string | null;
+} | null): TenantIdConfig {
+  return {
+    idPropio1Habilitado: tenant?.idPropio1Habilitado ?? true,
+    idPropio1Label:
+      tenant?.labelIdentificacionPersonalizadaViajes?.trim() || 'ID propio',
+    idPropio2Habilitado: Boolean(tenant?.idPropio2Habilitado),
+    idPropio2Label: tenant?.idPropio2Label?.trim() || 'ID Propio 2',
+  };
+}
+
+/**
+ * Resuelve los campos de identificación personalizados para el viaje según
+ * la configuración activa de la empresa.
+ * - Solo se incluye una columna/campo por cada ID que la empresa tenga habilitado.
+ * - Si no está activado, no se muestra.
+ * - Si el viaje no lo tiene cargado, el valor se resuelve como null.
+ */
+export function resolverIdsPersonalizadosViaje(
+  viaje: {
+    numeroIdentificacionPersonalizado?: string | null;
+    idPropio2?: string | null;
+  } | null | undefined,
+  config: TenantIdConfig,
+): ViajeIdItem[] {
+  const items: ViajeIdItem[] = [];
+  if (config.idPropio1Habilitado) {
+    const v1 =
+      typeof viaje?.numeroIdentificacionPersonalizado === 'string' &&
+      viaje.numeroIdentificacionPersonalizado.trim()
+        ? viaje.numeroIdentificacionPersonalizado.trim()
+        : null;
+    items.push({
+      label: config.idPropio1Label,
+      valor: v1,
+    });
+  }
+  if (config.idPropio2Habilitado) {
+    const v2 =
+      typeof viaje?.idPropio2 === 'string' && viaje.idPropio2.trim()
+        ? viaje.idPropio2.trim()
+        : null;
+    items.push({
+      label: config.idPropio2Label,
+      valor: v2,
+    });
+  }
+  return items;
+}
+
 /**
  * Resuelve los identificadores documentales (CRT, MIC y Remito) para el contrato comercial PDF:
- * - MIC: Se mapea con prioridad desde ID Personalizado 1 (numeroIdentificacionPersonalizado). Fallback a nóminas si no está definido.
- * - Remito: Se mapea con prioridad desde ID Personalizado 2 (idPropio2). Fallback a nóminas si no está definido.
- * - CRT: Se extrae del documento aduanero / nómina (o null si no está cargado).
+ * Conservado por retrocompatibilidad.
  */
 export function resolverDocsViajeContrato(viaje?: {
   documentoAduanero?: unknown;

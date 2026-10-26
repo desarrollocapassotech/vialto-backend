@@ -99,6 +99,7 @@ export class FacturacionService {
    */
   private montosParaGuardar(
     viajes: Array<{
+      id?: string;
       monto: number | null;
       cantidadFactura?: number | null;
       precioUnitarioFactura?: number | null;
@@ -112,7 +113,7 @@ export class FacturacionService {
     if (facturarPorTramo && tramos.length > 0) {
       return {
         importe,
-        ivaMonto: ivaMontoDeTramos(importe, tramos, ivaPctCabecera),
+        ivaMonto: ivaMontoDeTramos(importe, tramos, ivaPctCabecera, viajes),
       };
     }
     const pct = Number(ivaPctCabecera);

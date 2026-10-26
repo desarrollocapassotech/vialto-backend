@@ -85,24 +85,40 @@ export function importeNetoFactura(
 }
 
 /**
- * IVA de una factura por tramo: suma el IVA de cada tramo cargado, y la
- * parte del neto no cubierta por tramos usa el IVA de cabecera.
+ * IVA de una factura por tramo: suma el IVA de cada tramo cargado.
+ * Si se pasan viajes vinculados, los viajes que no tienen ningún tramo cargado
+ * usan el IVA de cabecera; el remanente no cubierto de viajes con tramo
+ * corresponde al componente exento/internacional y no devenga IVA (0%).
  */
 export function ivaMontoDeTramos(
   importeNeto: number,
   tramos: FacturaTramoCobro[],
   ivaPctCabecera?: number | null,
+  viajes?: ViajeCobro[],
 ): number {
-  const sumaTramos = roundMoney2(tramos.reduce((s, t) => s + t.monto, 0));
-  const undivided = Math.max(0, roundMoney2(importeNeto - sumaTramos));
+  if (tramos.length === 0) {
+    return roundMoney2((importeNeto * (Number(ivaPctCabecera) || 0)) / 100);
+  }
   const ivaTramos = tramos.reduce(
     (s, t) => roundMoney2(s + roundMoney2((t.monto * t.ivaPct) / 100)),
     0,
   );
-  const ivaUndivided = roundMoney2(
-    (undivided * (Number(ivaPctCabecera) || 0)) / 100,
-  );
-  return roundMoney2(ivaTramos + ivaUndivided);
+  if (viajes && viajes.length > 0) {
+    const viajeIdsConTramo = new Set(
+      tramos.map((t) => t.viajeId).filter(Boolean),
+    );
+    const viajesSinTramo = viajes.filter(
+      (v) => v.id && !viajeIdsConTramo.has(v.id),
+    );
+    const sumaViajesSinTramo = roundMoney2(
+      viajesSinTramo.reduce((s, v) => s + importeNetoViaje(v), 0),
+    );
+    const ivaViajesSinTramo = roundMoney2(
+      (sumaViajesSinTramo * (Number(ivaPctCabecera) || 0)) / 100,
+    );
+    return roundMoney2(ivaTramos + ivaViajesSinTramo);
+  }
+  return roundMoney2(ivaTramos);
 }
 
 /** Total con IVA de una factura por tramo. */
@@ -110,9 +126,10 @@ export function importeTotalConIvaPorTramo(
   importeNeto: number,
   tramos: FacturaTramoCobro[],
   ivaPctCabecera?: number | null,
+  viajes?: ViajeCobro[],
 ): number {
   return roundMoney2(
-    importeNeto + ivaMontoDeTramos(importeNeto, tramos, ivaPctCabecera),
+    importeNeto + ivaMontoDeTramos(importeNeto, tramos, ivaPctCabecera, viajes),
   );
 }
 
@@ -137,7 +154,7 @@ export function importeOperativoFactura(
   if (opts.ivaMontoGuardado != null && Number.isFinite(opts.ivaMontoGuardado)) {
     return roundMoney2(neto + opts.ivaMontoGuardado);
   }
-  return importeTotalConIvaPorTramo(neto, opts.tramos, opts.ivaPctCabecera);
+  return importeTotalConIvaPorTramo(neto, opts.tramos, opts.ivaPctCabecera, viajes);
 }
 
 /** Ciclo de vida del comprobante — un solo valor a la vez, nunca "cobrado" (ver `cobrado` abajo). */

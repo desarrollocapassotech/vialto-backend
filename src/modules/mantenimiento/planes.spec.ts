@@ -33,8 +33,9 @@ function coincide(r: Row, where: Row): boolean {
     return r[k] === v;
   });
 }
-function crearPrisma(planesIniciales: Row[] = [], asignaciones: Row[] = []) {
+function crearPrisma(planesIniciales: Row[] = [], asignacionesIniciales: Row[] = [], otPlanes: Row[] = []) {
   const planes = [...planesIniciales];
+  const asignaciones = [...asignacionesIniciales];
   let n = 0;
   const conCount = (p: Row) => ({ ...p, _count: { vehiculos: asignaciones.filter((a) => a.planId === p.id && a.activo).length } });
   const client: Row = {
@@ -64,10 +65,19 @@ function crearPrisma(planesIniciales: Row[] = [], asignaciones: Row[] = []) {
         return { count: antes - planes.length };
       },
     },
-    vehiculoPlan: { count: async ({ where }: Row) => asignaciones.filter((a) => coincide(a, where)).length },
+    vehiculoPlan: {
+      count: async ({ where }: Row) => asignaciones.filter((a) => coincide(a, where)).length,
+      findMany: async ({ where }: Row) => asignaciones.filter((a) => coincide(a, where)),
+      deleteMany: async ({ where }: Row) => {
+        const antes = asignaciones.length;
+        for (let i = asignaciones.length - 1; i >= 0; i--) if (coincide(asignaciones[i], where)) asignaciones.splice(i, 1);
+        return { count: antes - asignaciones.length };
+      },
+    },
+    ordenTrabajoPlan: { count: async ({ where }: Row) => otPlanes.filter((o) => coincide(o, where)).length },
   };
   client.$transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(client);
-  return { prisma: client as unknown as PrismaService, planes };
+  return { prisma: client as unknown as PrismaService, planes, asignaciones };
 }
 
 const T = 'org_A';
@@ -117,6 +127,22 @@ const planExistente = (o: Row = {}) => ({
     const { prisma, planes } = crearPrisma([planExistente({ nombre: 'vtv/rto', activo: false })]);
     const r = await new PlanesService(prisma).crearPlantillas(T, 'u1');
     assert.deepEqual([r.creados.length, r.existentes, planes.length], [8, ['VTV/RTO'], 9]);
+  });
+
+  await test('plantillas: vista previa marca las ya cargadas', async () => {
+    const { prisma } = crearPrisma([planExistente({ nombre: 'vtv/rto' })]);
+    const lista = await new PlanesService(prisma).listarPlantillas(T);
+    assert.equal(lista.length, 9);
+    assert.deepEqual(lista.filter((t) => t.yaCargada).map((t) => t.nombre), ['VTV/RTO']);
+  });
+
+  await test('plantillas: con nombres crea solo esas (sin repetir las cargadas)', async () => {
+    const { prisma, planes } = crearPrisma([planExistente({ nombre: 'VTV/RTO' })]);
+    const svc = new PlanesService(prisma);
+    const r = await svc.crearPlantillas(T, 'u1', ['vtv/rto', 'Póliza de seguro']);
+    assert.deepEqual(r.creados.map((p) => p.nombre), ['Póliza de seguro']);
+    assert.equal(planes.length, 2);
+    await assert.rejects(svc.crearPlantillas(T, 'u1', ['No existe']), BadRequestException);
   });
 
   await test('plantillas: los planes de otro tenant no cuentan', async () => {
@@ -177,15 +203,31 @@ const planExistente = (o: Row = {}) => ({
     await assert.rejects(svc.remove(T, 'px'), NotFoundException);
   });
 
-  await test('delete: con unidades asignadas → 409; sin asignaciones → borra', async () => {
-    const { prisma, planes } = crearPrisma(
+  await test('delete: con historial (OT que cumplió una asignación) → 409 y no toca nada', async () => {
+    const { prisma, planes, asignaciones } = crearPrisma(
+      [planExistente()],
+      [{ id: 'vp1', tenantId: T, planId: 'px', activo: false }],
+      [{ tenantId: T, vehiculoPlanId: 'vp1', ordenId: 'o1' }],
+    );
+    await assert.rejects(new PlanesService(prisma).remove(T, 'px'), ConflictException);
+    assert.deepEqual([planes.length, asignaciones.length], [1, 1]);
+  });
+
+  await test('delete: con vehículos pero sin historial → los desvincula y borra; sin asignaciones → borra', async () => {
+    const { prisma, planes, asignaciones } = crearPrisma(
       [planExistente(), planExistente({ id: 'py', nombre: 'RUTA' })],
-      [{ tenantId: T, planId: 'px', activo: false }],
+      [
+        { id: 'vp1', tenantId: T, planId: 'px', activo: true },
+        { id: 'vp2', tenantId: T, planId: 'px', activo: false },
+        { id: 'vp3', tenantId: 'org_B', planId: 'px', activo: true },
+      ],
+      [{ tenantId: T, vehiculoPlanId: 'otra', ordenId: 'o1' }],
     );
     const svc = new PlanesService(prisma);
-    await assert.rejects(svc.remove(T, 'px'), ConflictException);
-    await svc.remove(T, 'py');
-    assert.deepEqual(planes.map((p) => p.id), ['px']);
+    assert.deepEqual(await svc.remove(T, 'px'), { id: 'px', desvinculados: 2 });
+    assert.deepEqual(asignaciones.map((a) => a.id), ['vp3'], 'solo las del tenant');
+    assert.deepEqual(await svc.remove(T, 'py'), { id: 'py', desvinculados: 0 });
+    assert.equal(planes.length, 0);
   });
 
   await test('findAll filtra por tenant, categoría y activo', async () => {

@@ -130,32 +130,52 @@ export class PlanesService {
   }
 
   /**
-   * Solo se borra un plan sin unidades asignadas: borrarlo arrastraría en cascada las
-   * asignaciones y el vínculo con las OT que lo cumplieron. Si tiene, se desactiva.
+   * Borra el plan y lo desvincula de sus vehículos, salvo que tenga historial (alguna OT
+   * cumplió una de sus asignaciones): ese vínculo se perdería, así que en ese caso se desactiva.
    */
   async remove(tenantId: string, id: string) {
     await this.findOne(tenantId, id);
-    const asignaciones = await this.prisma.vehiculoPlan.count({ where: { tenantId, planId: id } });
-    if (asignaciones > 0) {
-      throw new ConflictException(
-        'El plan tiene unidades asignadas (con su historial). Desactivalo en vez de borrarlo.',
-      );
-    }
-    const { count } = await this.prisma.planMantenimiento.deleteMany({ where: { id, tenantId } });
-    if (count === 0) throw new NotFoundException('Plan de mantenimiento no encontrado');
-    return { id };
+    return this.prisma.$transaction(async (tx) => {
+      const asignaciones = await tx.vehiculoPlan.findMany({ where: { tenantId, planId: id }, select: { id: true } });
+      const ids = asignaciones.map((a) => a.id);
+      if (ids.length > 0) {
+        const conHistorial = await tx.ordenTrabajoPlan.count({ where: { tenantId, vehiculoPlanId: { in: ids } } });
+        if (conHistorial > 0) {
+          throw new ConflictException(
+            'El plan tiene órdenes de trabajo registradas (historial). Desactivalo en vez de borrarlo.',
+          );
+        }
+        await tx.vehiculoPlan.deleteMany({ where: { tenantId, planId: id } });
+      }
+      const { count } = await tx.planMantenimiento.deleteMany({ where: { id, tenantId } });
+      if (count === 0) throw new NotFoundException('Plan de mantenimiento no encontrado');
+      return { id, desvinculados: ids.length };
+    });
+  }
+
+  /** Vista previa de las plantillas sugeridas: `yaCargada` si el tenant ya tiene un plan con ese nombre. */
+  async listarPlantillas(tenantId: string) {
+    const existentes = await this.prisma.planMantenimiento.findMany({ where: { tenantId }, select: { nombre: true } });
+    const nombres = new Set(existentes.map((p) => normalizarNombre(p.nombre)));
+    return PLANTILLAS_PLAN.map((t) => ({ ...t, tareas: [...t.tareas], yaCargada: nombres.has(normalizarNombre(t.nombre)) }));
   }
 
   /**
    * Crea las plantillas sugeridas que el tenant todavía no tiene (por nombre, sin distinguir
    * mayúsculas, contando también los planes inactivos). Si el cliente renombró o borró una,
-   * se vuelve a crear con el nombre original.
+   * se vuelve a crear con el nombre original. Con `soloNombres`, solo esas (las demás se ignoran).
    */
-  async crearPlantillas(tenantId: string, userId: string) {
+  async crearPlantillas(tenantId: string, userId: string, soloNombres?: string[]) {
+    const elegidas = soloNombres ? new Set(soloNombres.map(normalizarNombre)) : null;
+    if (elegidas && !PLANTILLAS_PLAN.some((t) => elegidas.has(normalizarNombre(t.nombre)))) {
+      throw new BadRequestException('Ninguno de los planes elegidos está entre los sugeridos.');
+    }
     return this.prisma.$transaction(async (tx) => {
       const existentes = await tx.planMantenimiento.findMany({ where: { tenantId }, select: { nombre: true } });
       const nombres = new Set(existentes.map((p) => normalizarNombre(p.nombre)));
-      const faltantes = PLANTILLAS_PLAN.filter((t) => !nombres.has(normalizarNombre(t.nombre)));
+      const faltantes = PLANTILLAS_PLAN.filter(
+        (t) => !nombres.has(normalizarNombre(t.nombre)) && (!elegidas || elegidas.has(normalizarNombre(t.nombre))),
+      );
       if (faltantes.length > 0) {
         await tx.planMantenimiento.createMany({
           data: faltantes.map((t) => ({ ...t, tareas: [...t.tareas], tipoVehiculo: null, tenantId, createdBy: userId })),

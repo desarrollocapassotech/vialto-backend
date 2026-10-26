@@ -8,7 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
-import { PaginationQueryDto } from '../../shared/dto/pagination-query.dto';
+import { ClientesPaginatedQueryDto } from './dto/clientes-paginated-query.dto';
 import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
 
 @Injectable()
@@ -22,13 +22,24 @@ export class ClientesService {
     });
   }
 
-  async findAllPaginated(tenantId: string, query: PaginationQueryDto) {
+  async findAllPaginated(tenantId: string, query: ClientesPaginatedQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
+    const where: Prisma.ClienteWhereInput = { tenantId };
+
+    const nombre = query.nombre?.trim();
+    if (nombre) where.nombre = { contains: nombre, mode: 'insensitive' };
+
+    const idFiscal = query.idFiscal?.trim();
+    if (idFiscal) where.idFiscal = { contains: idFiscal, mode: 'insensitive' };
+
+    const pais = query.pais?.trim();
+    if (pais) where.pais = { equals: pais, mode: 'insensitive' };
+
     const [total, items] = await this.prisma.$transaction([
-      this.prisma.cliente.count({ where: { tenantId } }),
+      this.prisma.cliente.count({ where }),
       this.prisma.cliente.findMany({
-        where: { tenantId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,

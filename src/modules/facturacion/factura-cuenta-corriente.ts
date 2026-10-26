@@ -38,7 +38,8 @@ export async function anularCargoFacturaCc(
  * corriente el mismo cobro que si se hubiera registrado allá — un "COBRO" imputado a la
  * venta de la factura, con la imputación apuntando a este `Pago` (`pagoFacturacionId`),
  * así no se vuelve a crear otro `Pago` y "Ver imputación" lo muestra. Lo que el pago
- * supere del saldo de la venta queda a cuenta. Sin venta en CC (o anulada) no hace nada.
+ * supere del saldo de la venta queda a cuenta. Sin venta en CC (anulada o ya saldada)
+ * no hace nada.
  * El estado de la venta lo sigue fijando `actualizarEstadoCargoFactura` desde los `Pago`.
  */
 export async function registrarCobroCcDesdeFactura(
@@ -55,6 +56,12 @@ export async function registrarCobroCcDesdeFactura(
     },
   });
   if (!cargo) return null;
+  const pendiente = roundMoney2(cargo.importe - (await totalImputadoCargo(tx, tenantId, cargo.id)));
+  const importe = roundMoney2(Math.min(pago.importe, pendiente));
+  // Venta ya saldada en CC: un cobro sin imputación quedaría sin vínculo con este pago
+  // (no lo borraría `quitarCobroCcDeFactura` y el backfill lo volvería a crear). El
+  // sobrepago queda solo en Facturas, donde se ve y se corrige.
+  if (importe <= EPS) return null;
 
   const cobro = await tx.movimientoCuentaCorriente.create({
     data: {
@@ -71,19 +78,15 @@ export async function registrarCobroCcDesdeFactura(
       referencia: pago.formaPago?.trim() || null,
     },
   });
-  const pendiente = roundMoney2(cargo.importe - (await totalImputadoCargo(tx, tenantId, cargo.id)));
-  const importe = roundMoney2(Math.min(pago.importe, pendiente));
-  if (importe > EPS) {
-    await tx.imputacionCuentaCorriente.create({
-      data: {
-        tenantId,
-        pagoId: cobro.id,
-        cargoId: cargo.id,
-        importe,
-        pagoFacturacionId: pago.id,
-      },
-    });
-  }
+  await tx.imputacionCuentaCorriente.create({
+    data: {
+      tenantId,
+      pagoId: cobro.id,
+      cargoId: cargo.id,
+      importe,
+      pagoFacturacionId: pago.id,
+    },
+  });
   await recalcularEstadoImputacionPago(tx, tenantId, cobro.id);
   return cobro;
 }

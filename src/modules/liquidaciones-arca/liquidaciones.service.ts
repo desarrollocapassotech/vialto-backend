@@ -2335,17 +2335,19 @@ export class LiquidacionesService {
           ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           importe: comprobanteFinal.impNeto,
+          ivaMonto: comprobanteFinal.impIva,
         },
       });
       await syncFacturacionEstadoViajes(this.db, tenantId, viajeIdsFactura);
 
       // El cargo de cuenta corriente se creó con la factura, antes de emitirla: se le
-      // completa ahora la letra del comprobante y el número que asignó AFIP.
+      // completa ahora la letra del comprobante, el número que asignó AFIP y el total con IVA autorizado.
       await this.db.movimientoCuentaCorriente.updateMany({
         where: { tenantId, facturaId, tipo: 'cargo', estadoDisponibilidad: { not: 'anulado' } },
         data: {
           concepto: conceptoCargoFactura(cbteTipoFinal),
           ...(numeroAfip ? { numeroComprobante: numeroAfip } : {}),
+          importe: comprobanteFinal.impTotal,
         },
       });
 

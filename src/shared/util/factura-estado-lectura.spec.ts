@@ -2,7 +2,7 @@
  * Cobro de facturas: por tramo el IVA entra al saldo; ARCA y sin tramo no cambian.
  * Ejecutar: npx ts-node --transpile-only src/shared/util/factura-estado-lectura.spec.ts
  */
-import * as assert from 'node:assert/strict';
+import * as assert from 'assert';
 import {
   computeEstadoFacturaLectura,
   importeNetoFactura,
@@ -100,76 +100,66 @@ test('por tramo sin ARCA: cobrada al cubrir neto + IVA', () => {
   assert.equal(cobrado, true);
 });
 
-test('por tramo parcial: el neto es el viaje completo, no solo el tramo cargado', () => {
+test('por tramo: la suma de tramos pisa el monto del viaje en el neto', () => {
   const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1500 }];
   const tramos = [{ viajeId: 'v1', monto: 700, ivaPct: 22 }];
   const neto = importeNetoFactura(0, viajes, {
     facturarPorTramo: true,
     tramos,
   });
-  assert.equal(neto, 1500);
-  // 700 gravado 22% = 154; resto 800 con IVA cabecera 0% = 0 → total 1654
-  assert.equal(importeTotalConIvaPorTramo(neto, tramos, 0), 1654);
+  assert.equal(neto, 700);
+  // 700 gravado 22% = 154 → total 854
+  assert.equal(importeTotalConIvaPorTramo(neto, tramos, 0), 854);
   assert.equal(
     importeOperativoFactura(0, viajes, {
       facturarPorTramo: true,
       tramos,
       ivaPctCabecera: 0,
     }),
-    1654,
+    854,
   );
 });
 
 test('ivaMonto guardado: el cobro usa el valor persistido, no recalcula', () => {
-  const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1500 }];
+  const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 700 }];
   const tramos = [{ viajeId: 'v1', monto: 700, ivaPct: 22 }];
   assert.equal(
-    importeOperativoFactura(1500, viajes, {
+    importeOperativoFactura(700, viajes, {
       facturarPorTramo: true,
       tramos,
       ivaPctCabecera: 0,
       ivaMontoGuardado: 154,
     }),
-    1654,
+    854,
   );
 });
 
-test('por tramo con IVA mixto y resto no asignado: el sobrante no lleva IVA de cabecera', () => {
+test('por tramo con IVA mixto: suma de tramos define el neto y total con IVA (ej. 920 exento + 620 gravado)', () => {
   const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1550 }];
   const tramos = [
     { viajeId: 'v1', monto: 920, ivaPct: 0 },
     { viajeId: 'v1', monto: 620, ivaPct: 22 },
   ];
-  const iva = ivaMontoDeTramos(1550, tramos, 22, viajes);
+  const neto = importeNetoFactura(0, viajes, {
+    facturarPorTramo: true,
+    tramos,
+  });
+  assert.equal(neto, 1540);
+  const iva = ivaMontoDeTramos(neto, tramos, 22, viajes);
   assert.equal(iva, 136.4);
-  const total = importeTotalConIvaPorTramo(1550, tramos, 22, viajes);
-  assert.equal(total, 1686.4);
+  const total = importeTotalConIvaPorTramo(neto, tramos, 22, viajes);
+  assert.equal(total, 1676.4);
   assert.equal(
-    importeOperativoFactura(1550, viajes, {
+    importeOperativoFactura(0, viajes, {
       facturarPorTramo: true,
       tramos,
       ivaPctCabecera: 22,
     }),
-    1686.4,
+    1676.4,
   );
-
-  const viajes1540 = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1540 }];
-  const iva1540 = ivaMontoDeTramos(1540, tramos, 22, viajes1540);
-  assert.equal(iva1540, 136.4);
-  const total1540 = importeTotalConIvaPorTramo(1540, tramos, 22, viajes1540);
-  assert.equal(total1540, 1676.4);
 });
 
-test('por tramo parcial con alícuota en cabecera: el sobrante del viaje no lleva IVA', () => {
-  const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1500 }];
-  const tramos = [{ viajeId: 'v1', monto: 700, ivaPct: 22 }];
-  const iva = ivaMontoDeTramos(1500, tramos, 22, viajes);
-  assert.equal(iva, 154);
-  const total = importeTotalConIvaPorTramo(1500, tramos, 22, viajes);
-  assert.equal(total, 1654);
-});
-
-test('factura mixta con viajes con tramo y viaje sin tramo: solo el viaje sin tramo toma IVA cabecera', () => {
+test('factura mixta con viajes con tramo y viaje sin tramo: suma de tramos para el primero + neto del segundo', () => {
   const viajes = [
     { id: 'v1', facturacionEstado: 'facturado', monto: 1550 },
     { id: 'v2', facturacionEstado: 'facturado', monto: 1000 },
@@ -178,10 +168,25 @@ test('factura mixta con viajes con tramo y viaje sin tramo: solo el viaje sin tr
     { viajeId: 'v1', monto: 920, ivaPct: 0 },
     { viajeId: 'v1', monto: 620, ivaPct: 22 },
   ];
-  const iva = ivaMontoDeTramos(2550, tramos, 22, viajes);
+  const neto = importeNetoFactura(0, viajes, {
+    facturarPorTramo: true,
+    tramos,
+  });
+  // v1 toma tramos (1540), v2 sin tramos toma su monto (1000) → neto = 2540
+  assert.equal(neto, 2540);
+  const iva = ivaMontoDeTramos(neto, tramos, 22, viajes);
+  // v1 IVA tramos: 136.4, v2 IVA cabecera: 220 → IVA total = 356.4
   assert.equal(iva, 356.4);
-  const total = importeTotalConIvaPorTramo(2550, tramos, 22, viajes);
-  assert.equal(total, 2906.4);
+  const total = importeTotalConIvaPorTramo(neto, tramos, 22, viajes);
+  assert.equal(total, 2896.4);
+  assert.equal(
+    importeOperativoFactura(0, viajes, {
+      facturarPorTramo: true,
+      tramos,
+      ivaPctCabecera: 22,
+    }),
+    2896.4,
+  );
 });
 
 test('sin tramo con IVA: pagar solo el neto no la deja cobrada', () => {

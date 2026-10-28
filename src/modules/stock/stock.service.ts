@@ -1686,14 +1686,90 @@ export class StockService {
       include: stockItemRelations,
     });
 
-    // Agregamos el kg calculado a cada fila
+    const vencimientos = await this.proximosVencimientosPorItem(tenantId, {
+      clienteId,
+      productoId,
+      depositoId,
+    });
+
+    // Agregamos el kg calculado y el vencimiento más próximo (aviso en la fila del Inventario)
     return items.map((item) => {
       const pesoUnitarioKg = item.producto.pesoUnitarioKg ?? 0;
       const unidadesPorBulto = item.presentacion?.unidadesPorBulto ?? 0;
       const kg = calcularKg(item.cantidad1, item.cantidad2, unidadesPorBulto, pesoUnitarioKg);
+      const proximoVencimiento =
+        vencimientos.get(
+          this.claveStockItem(item.productoId, item.presentacionId, item.clienteId, item.depositoId),
+        ) ?? null;
 
-      return { ...item, kg };
+      return { ...item, kg, proximoVencimiento: proximoVencimiento?.toISOString() ?? null };
     });
+  }
+
+  private claveStockItem(
+    productoId: string,
+    presentacionId: string | null,
+    clienteId: string,
+    depositoId: string,
+  ) {
+    return `${productoId}|${presentacionId ?? ''}|${clienteId}|${depositoId}`;
+  }
+
+  /**
+   * Vencimiento más próximo entre los lotes con saldo de cada fila de stock
+   * (producto + presentación + cliente + depósito). Mismo cálculo que `getLotesDisponibles`,
+   * pero con una sola consulta para todo el inventario.
+   */
+  private async proximosVencimientosPorItem(
+    tenantId: string,
+    filtros: { clienteId?: string; productoId?: string; depositoId?: string },
+  ): Promise<Map<string, Date>> {
+    const rows = await this.prisma.movimientoStock.findMany({
+      where: {
+        tenantId,
+        lote: { not: null },
+        ...(filtros.productoId ? { productoId: filtros.productoId } : {}),
+        operacion: {
+          tenantId,
+          ...(filtros.clienteId ? { clienteId: filtros.clienteId } : {}),
+          ...(filtros.depositoId ? { depositoId: filtros.depositoId } : {}),
+        },
+      },
+      select: {
+        productoId: true,
+        presentacionId: true,
+        lote: true,
+        bultos: true,
+        unidades: true,
+        fechaVencimiento: true,
+        fecha: true,
+        operacion: { select: { tipo: true, clienteId: true, depositoId: true } },
+      },
+    });
+
+    const porItem = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const clave = this.claveStockItem(
+        row.productoId,
+        row.presentacionId,
+        row.operacion.clienteId,
+        row.operacion.depositoId,
+      );
+      const grupo = porItem.get(clave);
+      if (grupo) grupo.push(row);
+      else porItem.set(clave, [row]);
+    }
+
+    const resultado = new Map<string, Date>();
+    for (const [clave, grupo] of porItem) {
+      const { lotes } = this.buildSaldosPorLote(grupo);
+      for (const saldo of lotes.values()) {
+        if ((saldo.bultos <= 0 && saldo.sueltas <= 0) || !saldo.fechaVencimiento) continue;
+        const actual = resultado.get(clave);
+        if (!actual || saldo.fechaVencimiento < actual) resultado.set(clave, saldo.fechaVencimiento);
+      }
+    }
+    return resultado;
   }
 
   async listStockAgrupadoPorProducto(

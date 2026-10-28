@@ -106,7 +106,10 @@ async function main() {
   const conSaldo: Row[] = [];
 
   for (const f of facturas) {
-    const neto = importeNetoFactura(f.importe, f.viajes);
+    const neto = importeNetoFactura(f.importe, f.viajes, {
+      facturarPorTramo: true,
+      tramos: f.tramos,
+    });
     const ivaNuevo =
       f.tramos.length > 0
         ? ivaMontoDeTramos(neto, f.tramos, f.ivaPct, f.viajes)
@@ -159,6 +162,32 @@ async function main() {
           importe: roundMoney2(neto + (ivaNuevo ?? 0)),
         },
       });
+      if (f.tramos.length > 0) {
+        const tramosPorViaje = new Map<string, number>();
+        for (const t of f.tramos) {
+          if (t.viajeId) {
+            tramosPorViaje.set(
+              t.viajeId,
+              roundMoney2((tramosPorViaje.get(t.viajeId) ?? 0) + (t.monto ?? 0)),
+            );
+          }
+        }
+        for (const [viajeId, suma] of tramosPorViaje) {
+          const vActual = f.viajes.find((v) => v.id === viajeId);
+          if (!vActual || Math.abs((vActual.monto ?? 0) - suma) > 0.005) {
+            await prisma.viaje.update({
+              where: { id: viajeId },
+              data: { monto: suma },
+            });
+          }
+          if (f.clienteId) {
+            await prisma.viajeCliente.updateMany({
+              where: { tenantId: f.tenantId, viajeId, clienteId: f.clienteId },
+              data: { monto: suma },
+            });
+          }
+        }
+      }
     }
   }
 

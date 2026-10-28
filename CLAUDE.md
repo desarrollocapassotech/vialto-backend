@@ -285,6 +285,17 @@ Historia: oct 2026, Bressan reportó una carga de combustible con 14/10 en el li
 
 ---
 
+## Listados: orden por columna (oct 2026)
+
+Las grillas ordenan con click en el título de cada columna (regla completa y estado por grilla en `vialto-frontend/CLAUDE.md`, "Grillas: ordenar con click en el título de la columna"). Del lado backend, en un listado paginado:
+
+- `sortBy` validado contra una lista de campos permitidos (ej. `VIAJES_SORT_FIELDS`, `FACTURAS_SORT_FIELDS`, `COMBUSTIBLE_SORT_FIELDS_COLUMNA`) y `sortDir` `asc|desc`.
+- Se ordena **sobre todo lo filtrado**, no sobre la página: `select` mínimo con id + claves (siempre con el `where` del tenant), `ordenarPorClaves` de `shared/util/orden-listado.util.ts`, cortar la página y traer solo esos registros completos. Ver `ViajesService.findAllPaginatedOrdenTexto`, `CombustibleService.findPaginaOrdenColumna`, `FacturacionService.ordenarFacturas`.
+- El criterio de comparación (sin mayúsculas ni acentos, números como números, vacíos al final) vive solo en `orden-listado.util.ts`, espejo de `lib/ordenListado.ts` del front. No ordenar texto con `orderBy` de Prisma: la collation de la base no ignora acentos ni mayúsculas, y el front y el back darían órdenes distintos.
+- Las claves son lo que muestra la celda (nombre, no id) y los estados van en orden del circuito.
+
+---
+
 ## Arquitectura del backend (NestJS)
 
 ### Estructura de carpetas

@@ -18,6 +18,17 @@ function firstQueryString(val: unknown): string | undefined {
   return t.length > 0 ? t : undefined;
 }
 
+/** Columnas de la grilla de Facturas que se pueden ordenar (espejo del front). */
+export const FACTURAS_SORT_FIELDS = [
+  'numero',
+  'cliente',
+  'emision',
+  'vencimiento',
+  'estado',
+  'importe',
+] as const;
+export type FacturasSortField = (typeof FACTURAS_SORT_FIELDS)[number];
+
 /** Query GET /facturacion/facturas/paginated */
 export class FacturasPaginatedQueryDto {
   @IsOptional()
@@ -97,4 +108,15 @@ export class FacturasPaginatedQueryDto {
   @Transform(({ value }) => firstQueryString(value))
   @IsIn(['sin_cobrar', 'vencida'])
   cobro?: 'sin_cobrar' | 'vencida';
+
+  /** Orden por columna de la grilla (click en el título). Sin valor: emisión, más nueva primero. */
+  @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
+  @IsIn([...FACTURAS_SORT_FIELDS])
+  sortBy?: FacturasSortField;
+
+  @IsOptional()
+  @Transform(({ value }) => firstQueryString(value))
+  @IsIn(['asc', 'desc'])
+  sortDir?: 'asc' | 'desc';
 }

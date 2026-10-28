@@ -11,7 +11,15 @@ import { CreateFacturaDto } from "./dto/create-factura.dto";
 import { UpdateFacturaDto } from "./dto/update-factura.dto";
 import { FacturaTramoDto } from "./dto/factura-tramo.dto";
 import { CreatePagoDto } from "./dto/create-pago.dto";
-import { FacturasPaginatedQueryDto } from "./dto/facturas-paginated-query.dto";
+import {
+  FacturasPaginatedQueryDto,
+  type FacturasSortField,
+} from "./dto/facturas-paginated-query.dto";
+import {
+  ordenarPorClaves,
+  type OrdenDir,
+  type ValorOrden,
+} from "../../shared/util/orden-listado.util";
 import {
   cobroOptsDeFactura,
   computeEstadoFacturaLectura,
@@ -94,8 +102,8 @@ export class FacturacionService {
   }
 
   /**
-   * Neto = suma completa de viajes. IVA persistido solo en por-tramo sin ARCA.
-   * La parte no cubierta por tramos usa el IVA de cabecera (0% = exento).
+   * Neto = suma de tramos (para viajes con tramo) + viajes sin tramo.
+   * IVA persistido solo en por-tramo sin ARCA.
    */
   private montosParaGuardar(
     viajes: Array<{
@@ -109,7 +117,11 @@ export class FacturacionService {
     ivaPctCabecera: number | null | undefined,
     _tieneArca?: boolean,
   ): { importe: number; ivaMonto: number } {
-    const importe = roundMoney2(this.computeImporte(viajes));
+    const importe = roundMoney2(
+      facturarPorTramo && tramos.length > 0
+        ? importeNetoFactura(0, viajes, { facturarPorTramo, tramos })
+        : this.computeImporte(viajes),
+    );
     if (facturarPorTramo && tramos.length > 0) {
       return {
         importe,
@@ -180,6 +192,70 @@ export class FacturacionService {
         orden: i,
       })),
     });
+  }
+
+  /**
+   * Al facturar por tramo, la suma de los tramos pisa el monto del viaje.
+   * Si la factura es para un cliente secundario (`ViajeCliente`), se actualiza su monto;
+   * de lo contrario se actualiza `Viaje.monto` (y `ViajeCliente.monto` si existe).
+   */
+  private async actualizarMontosViajesPorTramos(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    tramos: FacturaTramoCobro[],
+    clienteId?: string | null,
+  ): Promise<void> {
+    if (tramos.length === 0) return;
+    const tramosPorViaje = new Map<string, number>();
+    for (const t of tramos) {
+      if (t.viajeId) {
+        tramosPorViaje.set(
+          t.viajeId,
+          roundMoney2((tramosPorViaje.get(t.viajeId) ?? 0) + (t.monto ?? 0)),
+        );
+      }
+    }
+    for (const [viajeId, suma] of tramosPorViaje) {
+      const viaje = await tx.viaje.findFirst({
+        where: { id: viajeId, tenantId },
+        select: { monto: true, clienteId: true },
+      });
+      if (!viaje) continue;
+
+      if (clienteId && viaje.clienteId !== clienteId) {
+        const vc = await tx.viajeCliente.findFirst({
+          where: { tenantId, viajeId, clienteId },
+          select: { monto: true },
+        });
+        if (vc && Math.abs((vc.monto ?? 0) - suma) > 0.005) {
+          await tx.viajeCliente.updateMany({
+            where: { tenantId, viajeId, clienteId },
+            data: { monto: suma },
+          });
+        }
+        continue;
+      }
+
+      if (Math.abs((viaje.monto ?? 0) - suma) > 0.005) {
+        await tx.viaje.update({
+          where: { id: viajeId },
+          data: { monto: suma },
+        });
+      }
+
+      if (clienteId) {
+        const vc = await tx.viajeCliente.findFirst({
+          where: { tenantId, viajeId, clienteId },
+          select: { monto: true },
+        });
+        if (vc && Math.abs((vc.monto ?? 0) - suma) > 0.005) {
+          await tx.viajeCliente.updateMany({
+            where: { tenantId, viajeId, clienteId },
+            data: { monto: suma },
+          });
+        }
+      }
+    }
   }
 
   private async tieneArca(tenantId: string): Promise<boolean> {
@@ -713,14 +789,16 @@ export class FacturacionService {
     const tieneArca = await this.tieneArca(tenantId);
     const include = this.FACTURA_INCLUDE;
 
-    if (query.estado || query.cobro) {
+    // Estado/cobro se calculan al leer y el orden por columna compara sin acentos:
+    // en esos casos se trae todo lo filtrado y se resuelve en memoria.
+    if (query.estado || query.cobro || query.sortBy) {
       const rows = await this.prisma.factura.findMany({
         where,
         orderBy: this.FACTURAS_ORDER_BY,
         include,
       });
       const shaped = await this.shapeManyConNombre(rows, tieneArca);
-      const filtered = shaped.filter((f) => {
+      const filtrados = shaped.filter((f) => {
         // Sin cobrar: con saldo pendiente y vigente (una anulada ya no se cobra).
         if (query.cobro === "sin_cobrar" && (f.cobrado || f.estado === "anulado")) return false;
         if (query.cobro === "vencida" && !f.vencida) return false;
@@ -729,6 +807,14 @@ export class FacturacionService {
         if (query.estado === "vencida") return f.vencida;
         return f.estado === query.estado;
       });
+      const filtered = query.sortBy
+        ? await this.ordenarFacturas(
+            tenantId,
+            filtrados,
+            query.sortBy,
+            query.sortDir ?? "asc",
+          )
+        : filtrados;
       const total = filtered.length;
       return {
         items: filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -751,6 +837,64 @@ export class FacturacionService {
       items: await this.shapeManyConNombre(rows, tieneArca),
       meta: this.paginatedMeta(page, pageSize, total),
     };
+  }
+
+  /**
+   * Orden por columna de la grilla. Misma lectura que la celda: número, nombre del
+   * cliente, fechas, estado en orden del circuito (dentro de cada uno, sin cobrar
+   * primero) e importe a cobrar.
+   */
+  private async ordenarFacturas<
+    T extends {
+      id: string;
+      numero: string | null;
+      clienteId: string | null;
+      fechaEmision: Date | null;
+      fechaVencimiento: Date | null;
+      estado: string;
+      cobrado: boolean;
+      importe: number;
+      importeACobrar?: number | null;
+    },
+  >(tenantId: string, facturas: T[], sortBy: FacturasSortField, sortDir: OrdenDir) {
+    const nombres =
+      sortBy === "cliente"
+        ? new Map(
+            (
+              await this.prisma.cliente.findMany({
+                where: { tenantId },
+                select: { id: true, nombre: true },
+              })
+            ).map((c) => [c.id, c.nombre]),
+          )
+        : null;
+    const ESTADO_ORDEN: Record<string, number> = {
+      borrador: 1,
+      esperando_afip: 2,
+      facturado: 3,
+      error_afip: 4,
+      anulado: 5,
+    };
+    return ordenarPorClaves(
+      facturas,
+      (f): ValorOrden[] => {
+        switch (sortBy) {
+          case "numero":
+            return [f.numero];
+          case "cliente":
+            return [f.clienteId ? nombres?.get(f.clienteId) : null];
+          case "emision":
+            return [f.fechaEmision?.getTime()];
+          case "vencimiento":
+            return [f.fechaVencimiento?.getTime()];
+          case "estado":
+            return [ESTADO_ORDEN[f.estado] ?? 9, f.cobrado ? 1 : 0];
+          case "importe":
+            return [f.importeACobrar ?? f.importe];
+        }
+      },
+      sortDir,
+    );
   }
 
   /** Conteos de los filtros rápidos de cobro (mismo criterio que `cobro` del paginado). */
@@ -915,6 +1059,12 @@ export class FacturacionService {
 
         if (facturarPorTramo) {
           await this.replaceTramos(tx, tenantId, factura.id, tramosValidos);
+          await this.actualizarMontosViajesPorTramos(
+            tx,
+            tenantId,
+            tramosValidos,
+            dto.clienteId,
+          );
         }
 
         // Después de vincular los viajes: el movimiento del viaje se transforma en el de la factura.
@@ -1142,6 +1292,12 @@ export class FacturacionService {
           }
           tramosForImporte = filtrados;
         }
+        await this.actualizarMontosViajesPorTramos(
+          tx,
+          tenantId,
+          tramosForImporte,
+          dto.clienteId ?? existing.clienteId,
+        );
       } else {
         await this.replaceTramos(tx, tenantId, id, []);
       }

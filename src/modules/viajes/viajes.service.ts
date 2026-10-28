@@ -73,11 +73,15 @@ import {
 import {
   buildViajesPaginatedWhere,
   buildViajesPrismaOrderBy,
+  claveOrdenEtapa,
   compareViajesFechaAr,
   compareViajesOrdenNullable,
+  esViajesSortTexto,
   resolveViajesSort,
   type ViajesSortDir,
+  type ViajesSortFieldTexto,
 } from "./viajes-paginated-query.util";
+import { ordenarPorClaves } from "../../shared/util/orden-listado.util";
 
 /** Documentos por viaje: máximo 3 y 10 MB entre todos. */
 const MAX_ADJUNTOS_VIAJE = 3;
@@ -994,6 +998,17 @@ export class ViajesService {
       );
     }
 
+    if (esViajesSortTexto(sortBy)) {
+      return this.findAllPaginatedOrdenTexto(
+        where,
+        page,
+        pageSize,
+        sortBy,
+        sortDir,
+        ivaTransportistaHabilitado,
+      );
+    }
+
     if (sortBy === "monto") {
       return this.findAllPaginatedOrdenMonto(
         where,
@@ -1063,6 +1078,97 @@ export class ViajesService {
         ),
       )
       .map((row) => row.id);
+
+    return this.findAllPaginatedPageFromSortedIds(
+      where,
+      sortedIds,
+      total,
+      page,
+      pageSize,
+      ivaTransportistaHabilitado,
+    );
+  }
+
+  /**
+   * Orden por una columna de texto de la grilla (click en el encabezado). Se ordena en
+   * memoria, como las fechas, para comparar sin mayúsculas ni acentos y con números
+   * como números; la base no lo hace con su collation.
+   */
+  private async findAllPaginatedOrdenTexto(
+    where: Prisma.ViajeWhereInput,
+    page: number,
+    pageSize: number,
+    sortBy: ViajesSortFieldTexto,
+    sortDir: ViajesSortDir,
+    ivaTransportistaHabilitado: boolean,
+  ) {
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.viaje.count({ where }),
+      this.prisma.viaje.findMany({
+        where,
+        select: {
+          id: true,
+          numero: true,
+          numeroIdentificacionPersonalizado: true,
+          idPropio2: true,
+          etapa: true,
+          origen: true,
+          destino: true,
+          observaciones: true,
+          transportistaId: true,
+          cliente: { select: { nombre: true } },
+          transportista: { select: { nombre: true } },
+          chofer: { select: { nombre: true } },
+          destinosViaje: {
+            orderBy: { orden: "asc" },
+            take: 1,
+            select: { etiqueta: true },
+          },
+          productosViaje: {
+            orderBy: { orden: "asc" },
+            take: 1,
+            select: { producto: { select: { nombre: true } } },
+          },
+        },
+      }),
+    ]);
+
+    // Misma lectura que la grilla: lo que se ve en la celda es lo que ordena.
+    const claves = (row: (typeof rows)[number]): (string | null)[] => {
+      switch (sortBy) {
+        case "id_sistema":
+          return [row.numero];
+        case "id_propio_1":
+          return [row.numeroIdentificacionPersonalizado];
+        case "id_propio_2":
+          return [row.idPropio2];
+        case "cliente":
+          return [row.cliente?.nombre ?? null];
+        case "transporte":
+          return [
+            row.transportistaId
+              ? (row.transportista?.nombre ?? null)
+              : "Flota propia",
+          ];
+        case "chofer":
+          return [row.chofer?.nombre ?? null];
+        case "origen_destino":
+          return [
+            row.origen,
+            row.destino ?? row.destinosViaje[0]?.etiqueta ?? null,
+          ];
+        case "productos":
+          return [row.productosViaje[0]?.producto?.nombre ?? null];
+        case "etapa":
+          return [claveOrdenEtapa(row.etapa)];
+        case "observaciones":
+          return [row.observaciones];
+      }
+    };
+
+    const sortedIds = ordenarPorClaves(rows, claves, sortDir).map(
+      (row) => row.id,
+    );
 
     return this.findAllPaginatedPageFromSortedIds(
       where,

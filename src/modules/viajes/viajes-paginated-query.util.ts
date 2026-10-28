@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
+import type { ViajesPaginatedQueryDto } from "./dto/viajes-paginated-query.dto";
 import {
   FACTURACION_ESTADOS_PENDIENTES,
   LIQUIDACION_ESTADOS_PENDIENTES,
@@ -95,10 +95,58 @@ export const VIAJES_SORT_FIELDS = [
   "fecha_descarga",
   "monto",
   "ganancia_bruta",
+  // Orden por columna de la grilla (click en el encabezado).
+  "id_sistema",
+  "id_propio_1",
+  "id_propio_2",
+  "cliente",
+  "transporte",
+  "chofer",
+  "origen_destino",
+  "productos",
+  "etapa",
+  "observaciones",
 ] as const;
 
 export type ViajesSortField = (typeof VIAJES_SORT_FIELDS)[number];
 export type ViajesSortDir = "asc" | "desc";
+
+/** Campos que se ordenan por texto (alfabético, números como números). */
+export const VIAJES_SORT_FIELDS_TEXTO = [
+  "id_sistema",
+  "id_propio_1",
+  "id_propio_2",
+  "cliente",
+  "transporte",
+  "chofer",
+  "origen_destino",
+  "productos",
+  "etapa",
+  "observaciones",
+] as const satisfies readonly ViajesSortField[];
+
+export type ViajesSortFieldTexto = (typeof VIAJES_SORT_FIELDS_TEXTO)[number];
+
+export function esViajesSortTexto(
+  sortBy: ViajesSortField,
+): sortBy is ViajesSortFieldTexto {
+  return (VIAJES_SORT_FIELDS_TEXTO as readonly string[]).includes(sortBy);
+}
+
+/** Etapa en orden del circuito, no alfabético. */
+const ETAPA_ORDEN: Record<string, string> = {
+  pendiente: "1",
+  en_curso: "2",
+  finalizado: "3",
+  cancelado: "4",
+};
+
+export function claveOrdenEtapa(etapa: string | null | undefined): string | null {
+  const e = etapa?.trim().toLowerCase();
+  if (!e) return null;
+  return ETAPA_ORDEN[e] ?? `9${e}`;
+}
+
 
 export function compareViajesOrdenNullable(
   a: number | null,
@@ -118,14 +166,10 @@ export function parseViajesSortParams(
   sortBy?: string,
   sortDir?: string,
 ): { sortBy: ViajesSortField; sortDir: ViajesSortDir } {
-  const by =
-    sortBy?.trim() === "fecha_creacion" ||
-    sortBy?.trim() === "fecha_carga" ||
-    sortBy?.trim() === "fecha_descarga" ||
-    sortBy?.trim() === "monto" ||
-    sortBy?.trim() === "ganancia_bruta"
-      ? (sortBy.trim() as ViajesSortField)
-      : undefined;
+  const rawBy = sortBy?.trim();
+  const by = VIAJES_SORT_FIELDS.includes(rawBy as ViajesSortField)
+    ? (rawBy as ViajesSortField)
+    : undefined;
   const dirRaw = sortDir?.trim();
   const dir: ViajesSortDir | undefined =
     dirRaw === "asc" || dirRaw === "desc" ? dirRaw : undefined;

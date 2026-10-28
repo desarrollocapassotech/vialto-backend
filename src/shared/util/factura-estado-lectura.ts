@@ -70,16 +70,29 @@ type ViajeCobro = {
 };
 
 /**
- * Neto sin IVA. Siempre es la suma de los viajes (cantidad×precio si hay).
- * Los tramos NO reemplazan el monto del viaje: si un viaje tiene tramos
- * parciales, el resto queda en el neto y se trata como tramo implícito
- * con el IVA de cabecera (0% en LSF = parte exenta).
+ * Neto sin IVA.
+ * Al facturar por tramo, la suma de los tramos pisa el monto del viaje.
+ * Para viajes sin tramo cargado, se mantiene el importe neto del viaje.
  */
 export function importeNetoFactura(
   importeGuardado: number,
   viajes: ViajeCobro[],
-  _opts?: Pick<FacturaCobroOpts, "facturarPorTramo" | "tramos">,
+  opts?: Pick<FacturaCobroOpts, "facturarPorTramo" | "tramos">,
 ): number {
+  if (opts?.facturarPorTramo && opts.tramos && opts.tramos.length > 0) {
+    const viajeIdsConTramo = new Set(
+      opts.tramos.map((t) => t.viajeId).filter(Boolean),
+    );
+    const sumaTramos = roundMoney2(
+      opts.tramos.reduce((s, t) => s + (t.monto ?? 0), 0),
+    );
+    const sumaViajesSinTramo = roundMoney2(
+      viajes
+        .filter((v) => !v.id || !viajeIdsConTramo.has(v.id))
+        .reduce((s, v) => s + importeNetoViaje(v), 0),
+    );
+    return roundMoney2(sumaTramos + sumaViajesSinTramo);
+  }
   if (viajes.length === 0) return importeGuardado;
   return roundMoney2(viajes.reduce((s, v) => s + importeNetoViaje(v), 0));
 }

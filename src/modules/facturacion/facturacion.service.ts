@@ -94,8 +94,8 @@ export class FacturacionService {
   }
 
   /**
-   * Neto = suma completa de viajes. IVA persistido solo en por-tramo sin ARCA.
-   * La parte no cubierta por tramos usa el IVA de cabecera (0% = exento).
+   * Neto = suma de tramos (para viajes con tramo) + viajes sin tramo.
+   * IVA persistido solo en por-tramo sin ARCA.
    */
   private montosParaGuardar(
     viajes: Array<{
@@ -109,7 +109,11 @@ export class FacturacionService {
     ivaPctCabecera: number | null | undefined,
     _tieneArca?: boolean,
   ): { importe: number; ivaMonto: number } {
-    const importe = roundMoney2(this.computeImporte(viajes));
+    const importe = roundMoney2(
+      facturarPorTramo && tramos.length > 0
+        ? importeNetoFactura(0, viajes, { facturarPorTramo, tramos })
+        : this.computeImporte(viajes),
+    );
     if (facturarPorTramo && tramos.length > 0) {
       return {
         importe,
@@ -180,6 +184,70 @@ export class FacturacionService {
         orden: i,
       })),
     });
+  }
+
+  /**
+   * Al facturar por tramo, la suma de los tramos pisa el monto del viaje.
+   * Si la factura es para un cliente secundario (`ViajeCliente`), se actualiza su monto;
+   * de lo contrario se actualiza `Viaje.monto` (y `ViajeCliente.monto` si existe).
+   */
+  private async actualizarMontosViajesPorTramos(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    tramos: FacturaTramoCobro[],
+    clienteId?: string | null,
+  ): Promise<void> {
+    if (tramos.length === 0) return;
+    const tramosPorViaje = new Map<string, number>();
+    for (const t of tramos) {
+      if (t.viajeId) {
+        tramosPorViaje.set(
+          t.viajeId,
+          roundMoney2((tramosPorViaje.get(t.viajeId) ?? 0) + (t.monto ?? 0)),
+        );
+      }
+    }
+    for (const [viajeId, suma] of tramosPorViaje) {
+      const viaje = await tx.viaje.findFirst({
+        where: { id: viajeId, tenantId },
+        select: { monto: true, clienteId: true },
+      });
+      if (!viaje) continue;
+
+      if (clienteId && viaje.clienteId !== clienteId) {
+        const vc = await tx.viajeCliente.findFirst({
+          where: { tenantId, viajeId, clienteId },
+          select: { monto: true },
+        });
+        if (vc && Math.abs((vc.monto ?? 0) - suma) > 0.005) {
+          await tx.viajeCliente.updateMany({
+            where: { tenantId, viajeId, clienteId },
+            data: { monto: suma },
+          });
+        }
+        continue;
+      }
+
+      if (Math.abs((viaje.monto ?? 0) - suma) > 0.005) {
+        await tx.viaje.update({
+          where: { id: viajeId },
+          data: { monto: suma },
+        });
+      }
+
+      if (clienteId) {
+        const vc = await tx.viajeCliente.findFirst({
+          where: { tenantId, viajeId, clienteId },
+          select: { monto: true },
+        });
+        if (vc && Math.abs((vc.monto ?? 0) - suma) > 0.005) {
+          await tx.viajeCliente.updateMany({
+            where: { tenantId, viajeId, clienteId },
+            data: { monto: suma },
+          });
+        }
+      }
+    }
   }
 
   private async tieneArca(tenantId: string): Promise<boolean> {
@@ -915,6 +983,12 @@ export class FacturacionService {
 
         if (facturarPorTramo) {
           await this.replaceTramos(tx, tenantId, factura.id, tramosValidos);
+          await this.actualizarMontosViajesPorTramos(
+            tx,
+            tenantId,
+            tramosValidos,
+            dto.clienteId,
+          );
         }
 
         // Después de vincular los viajes: el movimiento del viaje se transforma en el de la factura.
@@ -1142,6 +1216,12 @@ export class FacturacionService {
           }
           tramosForImporte = filtrados;
         }
+        await this.actualizarMontosViajesPorTramos(
+          tx,
+          tenantId,
+          tramosForImporte,
+          dto.clienteId ?? existing.clienteId,
+        );
       } else {
         await this.replaceTramos(tx, tenantId, id, []);
       }

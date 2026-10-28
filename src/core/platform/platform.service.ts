@@ -1291,6 +1291,8 @@ export class PlatformService {
     fechaHasta?: string,
     createdBy?: string,
     lote?: string,
+    loteBuscar?: string,
+    remito?: string,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     return this.stockService.listOperacionesPaginated(
@@ -1305,6 +1307,8 @@ export class PlatformService {
         fechaHasta,
         createdBy,
         lote,
+        loteBuscar,
+        remito,
       },
     );
   }

@@ -13,6 +13,12 @@ import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { KM_DELTA_PLAUSIBLE_MAX } from "../../shared/util/combustible-km.constants";
 import { evaluarLitrosImporteFase1 } from "../../shared/util/combustible-fase1.util";
 import { fechaCalendarioAr } from "../../shared/util/fecha-ar.util";
+import {
+  ordenarPorClaves,
+  type OrdenDir,
+  type ValorOrden,
+} from "../../shared/util/orden-listado.util";
+import type { Prisma } from "@prisma/client";
 
 import { CreateCargaDto } from "./dto/create-carga.dto";
 import { UpdateCargaDto } from "./dto/update-carga.dto";
@@ -32,6 +38,20 @@ interface CombustibleAuth {
 const OUTLIER_PCT_CATEGORIA = 0.3; // +30% de litros sobre el promedio de su categoría (tipo de vehículo)
 const SEMAFORO_AMARILLO_PCT = 0.15; // costo/km +15% sobre el promedio de su categoría
 const SEMAFORO_ROJO_PCT = 0.5; // costo/km +50% sobre el promedio de su categoría
+
+/**
+ * Orden por columna de la grilla de cargas (click en el título), además de
+ * `fecha_creacion`/`fecha_carga`. Espejo de `COMBUSTIBLE_SORT_FIELDS_COLUMNA` del front.
+ */
+export const COMBUSTIBLE_SORT_FIELDS_COLUMNA = [
+  "chofer",
+  "vehiculo",
+  "estacion",
+  "forma_pago",
+  "litros",
+  "importe",
+] as const;
+type CombustibleSortColumna = (typeof COMBUSTIBLE_SORT_FIELDS_COLUMNA)[number];
 
 /** Períodos del filtro rápido "Cargas sospechosas" del listado. */
 export const PERIODOS_SOSPECHOSAS = ["todas", "este_mes", "mes_anterior", "ultimos_3_meses"] as const;
@@ -447,19 +467,30 @@ export class CombustibleService {
       return { ...where, sospechoso: true, ...(rango && { AND: [{ fecha: rango }] }) };
     };
     const whereListado = periodoSospechosas ? whereSospechosas(periodoSospechosas) : where;
+    const include = {
+      vehiculo: { select: { patente: true } },
+      chofer: { select: { nombre: true } },
+    };
+    const ordenColumna = COMBUSTIBLE_SORT_FIELDS_COLUMNA.find((f) => f === sortBy);
 
     const [total, cargas, sospechosas] = await Promise.all([
       this.prisma.cargaCombustible.count({ where: whereListado }),
-      this.prisma.cargaCombustible.findMany({
-        where: whereListado,
-        orderBy: dynamicOrderBy,
-        skip: (safePage - 1) * safeLimit,
-        take: safeLimit,
-        include: {
-          vehiculo: { select: { patente: true } },
-          chofer: { select: { nombre: true } },
-        },
-      }),
+      ordenColumna
+        ? this.findPaginaOrdenColumna(
+            whereListado,
+            ordenColumna,
+            sortDir ?? "asc",
+            safePage,
+            safeLimit,
+            include,
+          )
+        : this.prisma.cargaCombustible.findMany({
+            where: whereListado,
+            orderBy: dynamicOrderBy,
+            skip: (safePage - 1) * safeLimit,
+            take: safeLimit,
+            include,
+          }),
       Promise.all(
         PERIODOS_SOSPECHOSAS.map((p) =>
           this.prisma.cargaCombustible.count({ where: whereSospechosas(p) }),
@@ -474,6 +505,59 @@ export class CombustibleService {
     ]);
 
     return { cargas, total, sospechosas, page: safePage, limit: safeLimit };
+  }
+
+  /**
+   * Página del listado ordenado por una columna de texto o número. Se ordena en
+   * memoria (sin mayúsculas ni acentos, vacíos al final, ver `orden-listado.util`) y
+   * después se trae solo la página. `where` ya viene acotado por tenant.
+   */
+  private async findPaginaOrdenColumna<I extends Prisma.CargaCombustibleInclude>(
+    where: Prisma.CargaCombustibleWhereInput,
+    sortBy: CombustibleSortColumna,
+    sortDir: OrdenDir,
+    page: number,
+    limit: number,
+    include: I,
+  ) {
+    const rows = await this.prisma.cargaCombustible.findMany({
+      where,
+      select: {
+        id: true,
+        estacion: true,
+        formaPago: true,
+        litros: true,
+        importe: true,
+        vehiculo: { select: { patente: true } },
+        chofer: { select: { nombre: true } },
+      },
+    });
+    const claves = (r: (typeof rows)[number]): ValorOrden[] => {
+      switch (sortBy) {
+        case "chofer":
+          return [r.chofer?.nombre];
+        case "vehiculo":
+          return [r.vehiculo?.patente];
+        case "estacion":
+          return [r.estacion];
+        case "forma_pago":
+          return [r.formaPago];
+        case "litros":
+          return [r.litros];
+        case "importe":
+          return [r.importe];
+      }
+    };
+    const pageIds = ordenarPorClaves(rows, claves, sortDir)
+      .slice((page - 1) * limit, page * limit)
+      .map((r) => r.id);
+    if (pageIds.length === 0) return [];
+    const items = await this.prisma.cargaCombustible.findMany({
+      where: { ...where, id: { in: pageIds } },
+      include,
+    });
+    const porId = new Map(items.map((c) => [c.id, c]));
+    return pageIds.map((id) => porId.get(id)).filter((c) => c != null);
   }
 
   /** Estaciones distintas entre las cargas existentes, para poblar el filtro del listado. */

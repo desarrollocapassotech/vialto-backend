@@ -10,6 +10,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  VIAJES_SORT_FIELDS,
+  type ViajesSortField,
+} from '../viajes-paginated-query.util';
 
 /** Express puede entregar `string | string[]` en query; nos quedamos con el primer valor. */
 function firstQueryString(val: unknown): string | undefined {
@@ -143,18 +147,9 @@ export class ViajesPaginatedQueryDto {
   @IsOptional()
   @Transform(({ value }) => {
     const s = firstQueryString(value);
-    if (
-      s === 'fecha_creacion' ||
-      s === 'fecha_carga' ||
-      s === 'fecha_descarga' ||
-      s === 'monto' ||
-      s === 'ganancia_bruta'
-    ) {
-      return s;
-    }
-    return undefined;
+    return VIAJES_SORT_FIELDS.includes(s as ViajesSortField) ? s : undefined;
   })
-  sortBy?: 'fecha_creacion' | 'fecha_carga' | 'fecha_descarga' | 'monto' | 'ganancia_bruta';
+  sortBy?: ViajesSortField;
 
   @IsOptional()
   @Transform(({ value }) => {

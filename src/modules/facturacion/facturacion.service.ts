@@ -11,7 +11,15 @@ import { CreateFacturaDto } from "./dto/create-factura.dto";
 import { UpdateFacturaDto } from "./dto/update-factura.dto";
 import { FacturaTramoDto } from "./dto/factura-tramo.dto";
 import { CreatePagoDto } from "./dto/create-pago.dto";
-import { FacturasPaginatedQueryDto } from "./dto/facturas-paginated-query.dto";
+import {
+  FacturasPaginatedQueryDto,
+  type FacturasSortField,
+} from "./dto/facturas-paginated-query.dto";
+import {
+  ordenarPorClaves,
+  type OrdenDir,
+  type ValorOrden,
+} from "../../shared/util/orden-listado.util";
 import {
   cobroOptsDeFactura,
   computeEstadoFacturaLectura,
@@ -781,14 +789,16 @@ export class FacturacionService {
     const tieneArca = await this.tieneArca(tenantId);
     const include = this.FACTURA_INCLUDE;
 
-    if (query.estado || query.cobro) {
+    // Estado/cobro se calculan al leer y el orden por columna compara sin acentos:
+    // en esos casos se trae todo lo filtrado y se resuelve en memoria.
+    if (query.estado || query.cobro || query.sortBy) {
       const rows = await this.prisma.factura.findMany({
         where,
         orderBy: this.FACTURAS_ORDER_BY,
         include,
       });
       const shaped = await this.shapeManyConNombre(rows, tieneArca);
-      const filtered = shaped.filter((f) => {
+      const filtrados = shaped.filter((f) => {
         // Sin cobrar: con saldo pendiente y vigente (una anulada ya no se cobra).
         if (query.cobro === "sin_cobrar" && (f.cobrado || f.estado === "anulado")) return false;
         if (query.cobro === "vencida" && !f.vencida) return false;
@@ -797,6 +807,14 @@ export class FacturacionService {
         if (query.estado === "vencida") return f.vencida;
         return f.estado === query.estado;
       });
+      const filtered = query.sortBy
+        ? await this.ordenarFacturas(
+            tenantId,
+            filtrados,
+            query.sortBy,
+            query.sortDir ?? "asc",
+          )
+        : filtrados;
       const total = filtered.length;
       return {
         items: filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -819,6 +837,64 @@ export class FacturacionService {
       items: await this.shapeManyConNombre(rows, tieneArca),
       meta: this.paginatedMeta(page, pageSize, total),
     };
+  }
+
+  /**
+   * Orden por columna de la grilla. Misma lectura que la celda: número, nombre del
+   * cliente, fechas, estado en orden del circuito (dentro de cada uno, sin cobrar
+   * primero) e importe a cobrar.
+   */
+  private async ordenarFacturas<
+    T extends {
+      id: string;
+      numero: string | null;
+      clienteId: string | null;
+      fechaEmision: Date | null;
+      fechaVencimiento: Date | null;
+      estado: string;
+      cobrado: boolean;
+      importe: number;
+      importeACobrar?: number | null;
+    },
+  >(tenantId: string, facturas: T[], sortBy: FacturasSortField, sortDir: OrdenDir) {
+    const nombres =
+      sortBy === "cliente"
+        ? new Map(
+            (
+              await this.prisma.cliente.findMany({
+                where: { tenantId },
+                select: { id: true, nombre: true },
+              })
+            ).map((c) => [c.id, c.nombre]),
+          )
+        : null;
+    const ESTADO_ORDEN: Record<string, number> = {
+      borrador: 1,
+      esperando_afip: 2,
+      facturado: 3,
+      error_afip: 4,
+      anulado: 5,
+    };
+    return ordenarPorClaves(
+      facturas,
+      (f): ValorOrden[] => {
+        switch (sortBy) {
+          case "numero":
+            return [f.numero];
+          case "cliente":
+            return [f.clienteId ? nombres?.get(f.clienteId) : null];
+          case "emision":
+            return [f.fechaEmision?.getTime()];
+          case "vencimiento":
+            return [f.fechaVencimiento?.getTime()];
+          case "estado":
+            return [ESTADO_ORDEN[f.estado] ?? 9, f.cobrado ? 1 : 0];
+          case "importe":
+            return [f.importeACobrar ?? f.importe];
+        }
+      },
+      sortDir,
+    );
   }
 
   /** Conteos de los filtros rápidos de cobro (mismo criterio que `cobro` del paginado). */

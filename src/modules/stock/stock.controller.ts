@@ -229,6 +229,8 @@ export class StockController {
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
     @Query('createdBy') createdBy?: string,
+    @Query('loteBuscar') loteBuscar?: string,
+    @Query('remito') remito?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listOperacionesPaginated(auth.tenantId, query, productoId, clienteId, {
@@ -237,6 +239,8 @@ export class StockController {
       fechaDesde,
       fechaHasta,
       createdBy,
+      loteBuscar,
+      remito,
     });
   }
 
@@ -262,6 +266,8 @@ export class StockController {
     @Query('fechaHasta') fechaHasta?: string,
     @Query('createdBy') createdBy?: string,
     @Query('lote') lote?: string,
+    @Query('loteBuscar') loteBuscar?: string,
+    @Query('remito') remito?: string,
   ) {
     assertTenantId(auth.tenantId);
     return this.service.listOperacionesPaginated(auth.tenantId, query, productoId, clienteId, {
@@ -271,6 +277,8 @@ export class StockController {
       fechaHasta,
       createdBy,
       lote,
+      loteBuscar,
+      remito,
     });
   }
 

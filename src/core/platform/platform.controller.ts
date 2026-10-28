@@ -1088,6 +1088,8 @@ export class PlatformController {
     @Query("fechaHasta") fechaHasta?: string,
     @Query("createdBy") createdBy?: string,
     @Query("lote") lote?: string,
+    @Query("loteBuscar") loteBuscar?: string,
+    @Query("remito") remito?: string,
   ) {
     return this.service.listOperacionesStockPaginated(
       tenantId,
@@ -1100,6 +1102,8 @@ export class PlatformController {
       fechaHasta,
       createdBy,
       lote,
+      loteBuscar,
+      remito,
     );
   }
 

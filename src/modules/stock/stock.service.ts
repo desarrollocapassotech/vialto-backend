@@ -30,6 +30,7 @@ import { resolverLoteIngreso } from './stock-lote.util';
 import { paginate, buildPaginatedResult } from '../../shared/util/pagination.util';
 import { calcularKg } from './stock-kg.util';
 import { RemitoInternoPdfService } from './remito-interno-pdf.service';
+import { NombresUsuariosService } from '../../shared/usuarios/nombres-usuarios.service';
 import { PaginationQueryDto } from 'shared/dto/pagination-query.dto';
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -108,6 +109,7 @@ export class StockService {
     private readonly clerkUsers: ClerkVialtoRoleService,
     private readonly cloudinary: CloudinaryService,
     private readonly remitoInternoPdf: RemitoInternoPdfService,
+    private readonly nombresUsuarios: NombresUsuariosService,
   ) {}
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ PRODUCTOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -757,9 +759,15 @@ export class StockService {
       createdBy?: string;
       /** Filtro por lote (`__sin_lote__` = stock sin lote asignado). */
       lote?: string;
+      /** Texto libre: lote que contenga el texto (sin mayúsculas). */
+      loteBuscar?: string;
+      /** Texto libre: n° de remito interno que contenga el texto (sin mayúsculas). */
+      remito?: string;
     },
   ) {
     const { depositoId, tipo, fechaDesde, fechaHasta, createdBy, lote } = options ?? {};
+    const loteBuscar = options?.loteBuscar?.trim();
+    const remito = options?.remito?.trim();
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const desde = fechaDesde ? parseYyyyMmDdInicioAr(fechaDesde) : null;
@@ -774,17 +782,22 @@ export class StockService {
           : loteTrim;
 
     const movimientoSome =
-      productoId || filtroLote !== undefined
+      productoId || filtroLote !== undefined || loteBuscar
         ? {
             some: {
               ...(productoId ? { productoId } : {}),
-              ...(filtroLote !== undefined ? { lote: filtroLote } : {}),
+              ...(filtroLote !== undefined
+                ? { lote: filtroLote }
+                : loteBuscar
+                  ? { lote: { contains: loteBuscar, mode: 'insensitive' as const } }
+                  : {}),
             },
           }
         : undefined;
 
     const where = {
       tenantId,
+      ...(remito ? { numeroRemito: { contains: remito, mode: 'insensitive' as const } } : {}),
       ...(clienteId ? { clienteId } : {}),
       ...(depositoId ? { depositoId } : {}),
       ...(tipo ? { tipo } : {}),
@@ -812,7 +825,13 @@ export class StockService {
     ]);
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const items = rows.map((op) => this.mapOperacionRowForApi(op));
+    // Nombre del usuario que cargó la operación, resuelto en Clerk: el front solo conoce
+    // a los miembros actuales de la empresa y mostraba el id (`user_…`) de los demás.
+    const nombres = await this.nombresUsuarios.nombres(rows.map((op) => op.createdBy));
+    const items = rows.map((op) => ({
+      ...this.mapOperacionRowForApi(op),
+      createdByNombre: nombres.get(op.createdBy) ?? null,
+    }));
 
     return {
       items,

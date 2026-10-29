@@ -13,6 +13,8 @@ import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
+import { generarTxtLibroIva, validarRangoLibroIva } from '../../shared/util/libro-iva.util';
+import { libroIvaCompras } from './libro-iva-compras';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
@@ -2007,6 +2009,17 @@ export class LiquidacionesService {
       return String(fromReq).slice(0, 8);
     }
     return formatFechaCbte(fechaEmision);
+  }
+
+  /** Libro IVA Compras del rango (Excel para conciliar). Ver `libro-iva-compras.ts`. */
+  libroIvaCompras(tenantId: string, desde?: string, hasta?: string) {
+    const rango = validarRangoLibroIva(desde, hasta);
+    return libroIvaCompras(this.prisma, tenantId, rango.desde, rango.hasta);
+  }
+
+  /** Libro IVA Compras en los TXT del Libro IVA Digital (cabecera + alícuotas). */
+  async libroIvaComprasTxt(tenantId: string, desde?: string, hasta?: string) {
+    return generarTxtLibroIva(await this.libroIvaCompras(tenantId, desde, hasta));
   }
 
   async getConfig(tenantId: string) {

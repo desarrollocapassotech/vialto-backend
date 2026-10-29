@@ -44,6 +44,11 @@ import {
 import { formatNumeroComprobante } from "../liquidaciones-arca/arca.util";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
 import { resolverComprobanteManual } from "../../shared/util/comprobante-manual.util";
+import {
+  generarTxtLibroIva,
+  validarRangoLibroIva,
+} from "../../shared/util/libro-iva.util";
+import { libroIvaVentas } from "./libro-iva-ventas";
 import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
 
 /** Transacciones con varios writes + Neon pueden superar el default de 5s de Prisma. */
@@ -902,6 +907,17 @@ export class FacturacionService {
   }
 
   /** Conteos de los filtros rápidos de cobro (mismo criterio que `cobro` del paginado). */
+  /** Libro IVA Ventas del rango (Excel para conciliar). Ver `libro-iva-ventas.ts`. */
+  libroIvaVentas(tenantId: string, desde?: string, hasta?: string) {
+    const rango = validarRangoLibroIva(desde, hasta);
+    return libroIvaVentas(this.prisma, tenantId, rango.desde, rango.hasta);
+  }
+
+  /** Libro IVA Ventas en los TXT del Libro IVA Digital (cabecera + alícuotas). */
+  async libroIvaVentasTxt(tenantId: string, desde?: string, hasta?: string) {
+    return generarTxtLibroIva(await this.libroIvaVentas(tenantId, desde, hasta));
+  }
+
   async resumenCobro(tenantId: string) {
     const tieneArca = await this.tieneArca(tenantId);
     const rows = await this.prisma.factura.findMany({

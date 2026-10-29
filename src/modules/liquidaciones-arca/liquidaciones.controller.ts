@@ -130,6 +130,41 @@ export class LiquidacionesController {
     return this.service.findAll(auth.tenantId, estado);
   }
 
+  // ── Libro IVA Compras (liquidaciones OR emision-liquido-producto-arca) ─────
+
+  @ApiOperation({ summary: "Libro IVA Compras del rango (comprobantes con IVA por alícuota)" })
+  @Get("libro-iva/compras")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
+  @Roles("admin", "member", "superadmin")
+  libroIvaCompras(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("desde") desde?: string,
+    @Query("hasta") hasta?: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    return this.service.libroIvaCompras(this.resolveTenantId(auth, tenantId), desde, hasta);
+  }
+
+  @ApiOperation({ summary: "Libro IVA Compras en TXT del Libro IVA Digital (RG 4597)" })
+  @Get("libro-iva/compras/txt")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
+  @Roles("admin", "member", "superadmin")
+  libroIvaComprasTxt(
+    @CurrentAuth() auth: AuthPayload,
+    @Query("desde") desde?: string,
+    @Query("hasta") hasta?: string,
+    @Query("tenantId") tenantId?: string,
+  ) {
+    return this.service.libroIvaComprasTxt(this.resolveTenantId(auth, tenantId), desde, hasta);
+  }
+
+  /** Override de empresa solo para superadmin (pantallas embebidas); el resto usa el token. */
+  private resolveTenantId(auth: AuthPayload, override?: string): string {
+    const tenantId = auth.role === "superadmin" && override ? override : auth.tenantId;
+    assertTenantId(tenantId);
+    return tenantId;
+  }
+
   // ── Conceptos de liquidación (catálogo tenant) ─────────────────────────────
 
   @ApiOperation({ summary: "Listar conceptos de liquidación del tenant" })

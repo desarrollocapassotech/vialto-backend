@@ -58,6 +58,37 @@ export class FacturacionController {
     return this.service.resumenCobro(auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Libro IVA Ventas del rango (comprobantes con IVA por alícuota)' })
+  @Get('libro-iva/ventas')
+  @Roles('admin', 'member', 'superadmin')
+  libroIvaVentas(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.libroIvaVentas(this.resolveTenantId(auth, tenantId), desde, hasta);
+  }
+
+  @ApiOperation({ summary: 'Libro IVA Ventas en TXT del Libro IVA Digital (RG 4597)' })
+  @Get('libro-iva/ventas/txt')
+  @Roles('admin', 'member', 'superadmin')
+  libroIvaVentasTxt(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.service.libroIvaVentasTxt(this.resolveTenantId(auth, tenantId), desde, hasta);
+  }
+
+  /** Override de empresa solo para superadmin (pantallas embebidas); el resto usa el token. */
+  private resolveTenantId(auth: AuthPayload, override?: string): string {
+    const tenantId = auth.role === 'superadmin' && override ? override : auth.tenantId;
+    assertTenantId(tenantId);
+    return tenantId;
+  }
+
   @ApiOperation({ summary: 'Obtener factura por ID' })
   @Get('facturas/:id')
   @Roles('admin', 'member', 'superadmin')

@@ -2120,6 +2120,11 @@ export class LiquidacionesService {
     if (!facturaRaw || facturaRaw.tenantId !== tenantId) {
       throw new NotFoundException('Factura no encontrada');
     }
+    if (facturaRaw.manual) {
+      throw new BadRequestException(
+        'Esta factura se hizo por fuera del sistema: no se emite en ARCA.',
+      );
+    }
 
     const facturaExt = facturaRaw as typeof facturaRaw & {
       arcaEstado?: string | null;

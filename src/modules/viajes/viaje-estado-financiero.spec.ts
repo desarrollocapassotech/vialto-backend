@@ -35,6 +35,11 @@ test('tenant con ARCA: factura sin emitir pero con número manual (ej. previa a 
   assert.equal(mapFacturacionEstado({ arcaEstado: null, numero: 'A-1327' }, true, true), 'cobrado');
 });
 
+test('tenant con ARCA: factura manual (hecha por fuera del sistema) cuenta como facturada', () => {
+  assert.equal(mapFacturacionEstado({ arcaEstado: null, manual: true }, false, true), 'facturado');
+  assert.equal(mapFacturacionEstado({ arcaEstado: null, manual: true }, true, true), 'cobrado');
+});
+
 test('tenant con ARCA: estados intermedios de emisión', () => {
   assert.equal(mapFacturacionEstado({ arcaEstado: 'pendiente_cae' }, false, true), 'esperando_afip');
   assert.equal(mapFacturacionEstado({ arcaEstado: 'error' }, false, true), 'error_afip');

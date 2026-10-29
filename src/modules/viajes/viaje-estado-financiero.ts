@@ -13,14 +13,15 @@ type Tx = Prisma.TransactionClient;
  * de emisión. Excepción: si tiene `numero` cargado es un comprobante MANUAL (ej. cargado
  * antes de que el tenant activara ARCA) → cuenta como facturado. Con ARCA el número no
  * se carga a mano: lo asigna AFIP al autorizar (y para entonces `arcaEstado` ya no es null).
+ * Una factura `manual` (hecha por fuera del sistema) se trata como en una empresa sin ARCA.
  */
 export function mapFacturacionEstado(
-  factura: { arcaEstado: string | null; numero?: string | null } | null,
+  factura: { arcaEstado: string | null; numero?: string | null; manual?: boolean | null } | null,
   cobrado: boolean,
   tieneArca: boolean,
 ): ViajeFacturacionEstado {
   if (!factura) return 'sin_facturar';
-  if (tieneArca) {
+  if (tieneArca && !factura.manual) {
     if (factura.arcaEstado === 'pendiente_cae') return 'esperando_afip';
     if (factura.arcaEstado === 'error') return 'error_afip';
     if (factura.arcaEstado === 'anulado') return 'anulado';
@@ -75,14 +76,14 @@ export async function syncFacturacionEstadoViaje(
       etapa: true,
       facturacionEstado: true,
       facturaId: true,
-      factura: { select: { arcaEstado: true, numero: true } },
+      factura: { select: { arcaEstado: true, numero: true, manual: true } },
       tenant: { select: { modules: true } },
       clientesViaje: {
         select: {
           id: true,
           facturaId: true,
           facturacionEstado: true,
-          factura: { select: { arcaEstado: true, numero: true } },
+          factura: { select: { arcaEstado: true, numero: true, manual: true } },
         },
       },
     },

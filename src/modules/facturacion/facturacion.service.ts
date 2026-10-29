@@ -280,6 +280,7 @@ export class FacturacionService {
       fechaVencimiento: Date | null;
       estado: string;
       arcaEstado: string | null;
+      manual?: boolean;
       ambiente: string | null;
       anuladoPor: string | null;
       diferencia: number | null;
@@ -302,7 +303,7 @@ export class FacturacionService {
         tramos,
         ivaMonto: f.ivaMonto,
       },
-      tieneArca,
+      tieneArca && !f.manual,
     );
     const importe = importeNetoFactura(f.importe, viajes, cobroOpts);
     const importeACobrar = importeOperativoFactura(f.importe, viajes, cobroOpts);
@@ -314,6 +315,7 @@ export class FacturacionService {
       pagos,
       arcaEstado: f.arcaEstado,
       tieneArca,
+      manual: f.manual,
       facturarPorTramo: cobroOpts.facturarPorTramo,
       tramos,
       ivaPctCabecera: f.ivaPct,
@@ -322,6 +324,7 @@ export class FacturacionService {
     const tramosOrdenados = [...tramos].sort((a, b) => a.orden - b.orden);
     return {
       ...f,
+      manual: f.manual ?? false,
       facturarPorTramo: f.facturarPorTramo ?? false,
       ivaMonto: f.ivaMonto ?? null,
       viajeIds: viajes.map((v) => v.id),
@@ -384,13 +387,13 @@ export class FacturacionService {
     return attachAnuladoPorNombres(this.clerkUsers, shaped);
   }
 
-  /** Recalcula viajes de facturas por tramo (sin ARCA) según pagos vs. total con IVA. */
+  /** Recalcula viajes de facturas por tramo (sin ARCA o manuales) según pagos vs. total con IVA. */
   private async alignViajesCobroPorTramo(
     row: Parameters<FacturacionService["toShape"]>[0],
     tieneArca: boolean,
     cobrado: boolean,
   ): Promise<void> {
-    if (tieneArca || !row.facturarPorTramo || (row.tramos?.length ?? 0) === 0) {
+    if ((tieneArca && !row.manual) || !row.facturarPorTramo || (row.tramos?.length ?? 0) === 0) {
       return;
     }
     const allCobrado =
@@ -983,6 +986,10 @@ export class FacturacionService {
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 
     const tieneArca = await this.tieneArca(tenantId);
+    // Factura hecha por fuera del sistema (empresa con ARCA): no se emite y lleva su
+    // número y comprobante, igual que en una empresa sin ARCA.
+    const manual = tieneArca && dto.manual === true;
+    const conArca = tieneArca && !manual;
 
     // Tenants con ARCA: el número NO se carga a mano — lo asigna AFIP al emitir
     // (cbteTipo/ptoVenta/cbteNro → `numero`), así que se ignora lo que venga.
@@ -993,8 +1000,8 @@ export class FacturacionService {
     // Normalizamos acá (no solo confiar en el frontend) para que un string
     // vacío/solo-espacios nunca llegue a guardarse como numero="" — eso
     // rompería la unicidad real (NULL sí admite múltiples filas, "" no).
-    const numero = tieneArca ? null : dto.numero?.trim() || null;
-    if (!tieneArca && !numero) {
+    const numero = conArca ? null : dto.numero?.trim() || null;
+    if (!conArca && !numero) {
       throw new BadRequestException('Ingresá el número de comprobante de la factura.');
     }
     if (numero) {
@@ -1042,6 +1049,7 @@ export class FacturacionService {
             ivaPct,
             facturarPorTramo,
             comprobanteUrl: dto.comprobanteUrl ?? null,
+            manual,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as any,
         });
@@ -1122,7 +1130,14 @@ export class FacturacionService {
   async updateFactura(id: string, tenantId: string, dto: UpdateFacturaDto) {
     const existing = await this.prisma.factura.findFirst({
       where: { id, tenantId },
-      select: { facturarPorTramo: true, clienteId: true, ivaPct: true },
+      select: {
+        facturarPorTramo: true,
+        clienteId: true,
+        ivaPct: true,
+        manual: true,
+        arcaEstado: true,
+        numero: true,
+      },
     });
     if (!existing) throw new NotFoundException("Factura no encontrada");
 
@@ -1149,9 +1164,16 @@ export class FacturacionService {
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 
     const tieneArca = await this.tieneArca(tenantId);
+    // Un borrador con ARCA se puede pasar a factura hecha por fuera del sistema (manual).
+    const pasaAManual =
+      tieneArca && dto.manual === true && !existing.manual && existing.arcaEstado == null;
+    const conArca = tieneArca && !existing.manual && !pasaAManual;
     // Tenants con ARCA: el número lo asigna AFIP al emitir, nunca se edita a mano
-    // (mismo criterio que `createFactura`).
-    const numeroDto = tieneArca ? undefined : dto.numero;
+    // (mismo criterio que `createFactura`). Una factura manual sí lleva número.
+    const numeroDto = conArca ? undefined : dto.numero;
+    if (pasaAManual && !(numeroDto ?? existing.numero)?.trim()) {
+      throw new BadRequestException('Ingresá el número de comprobante de la factura.');
+    }
     if (numeroDto) {
       await this.assertNumeroFacturaUnico(tenantId, numeroDto, id);
     }
@@ -1208,6 +1230,7 @@ export class FacturacionService {
           ...(dto.facturarPorTramo !== undefined
             ? { facturarPorTramo }
             : {}),
+          ...(pasaAManual ? { manual: true } : {}),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });
@@ -1253,7 +1276,11 @@ export class FacturacionService {
         select: { id: true },
       });
       const viajeIdsActuales = viajeIdsActualesRows.map((v) => v.id);
-      
+      // Al pasar a manual, sus viajes dejan de estar en "borrador" y pasan a facturados.
+      if (pasaAManual && dto.viajeIds === undefined) {
+        await syncFacturacionEstadoViajes(tx, tenantId, viajeIdsActuales);
+      }
+
       const viajes = await this.resolveViajes(tenantId, viajeIdsActuales, dto.clienteId ?? existing.clienteId ?? undefined);
 
       let tramosForImporte: FacturaTramoCobro[] = [];
@@ -1330,6 +1357,7 @@ export class FacturacionService {
           pagos: updated.pagos,
           arcaEstado: updated.arcaEstado,
           tieneArca,
+          manual: updated.manual,
           facturarPorTramo: updated.facturarPorTramo,
           tramos: updated.tramos,
           ivaPctCabecera: updated.ivaPct,
@@ -1607,6 +1635,7 @@ export class FacturacionService {
       pagos: factura.pagos,
       arcaEstado: factura.arcaEstado,
       tieneArca,
+      manual: factura.manual,
       facturarPorTramo: factura.facturarPorTramo,
       tramos: factura.tramos,
       ivaPctCabecera: factura.ivaPct,

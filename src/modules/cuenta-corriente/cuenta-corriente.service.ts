@@ -236,6 +236,7 @@ export class CuentaCorrienteService {
             cae: true,
             comprobanteUrl: true,
             arcaEstado: true,
+            manual: true,
             anulacionCae: true,
             notaCreditoUrl: true,
           },
@@ -282,7 +283,11 @@ export class CuentaCorrienteService {
           cargoId: i.cargoId,
           importe: roundMoney2(i.importe),
         })),
-        comprobanteEditable: this.comprobanteEditable(m, liquidacion?.cbteNro ?? null, facturasConArca),
+        comprobanteEditable: this.comprobanteEditable(
+          m,
+          liquidacion?.cbteNro ?? null,
+          facturasConArca && !factura?.manual,
+        ),
         vencimientoEditable: this.vencimientoEditable(m),
         facturaComprobantes: factura,
         liquidacionComprobantes: liquidacion,
@@ -362,8 +367,20 @@ export class CuentaCorrienteService {
           select: { id: true, cbteNro: true },
         })
       : null;
+    // Una factura manual (hecha por fuera del sistema) se trata como sin ARCA.
+    const facturaManual =
+      mov.origen === 'factura' && mov.facturaId
+        ? (
+            await this.prisma.factura.findFirst({
+              where: { id: mov.facturaId, tenantId },
+              select: { manual: true },
+            })
+          )?.manual === true
+        : false;
     const facturasConArca =
-      mov.origen === 'factura' ? await this.tieneEmisionFacturasArca(tenantId) : false;
+      mov.origen === 'factura' && !facturaManual
+        ? await this.tieneEmisionFacturasArca(tenantId)
+        : false;
 
     if (
       dto.numeroComprobante !== undefined &&

@@ -200,6 +200,8 @@ export function computeEstadoFacturaLectura(args: {
   pagos: { importe: number }[];
   arcaEstado: string | null;
   tieneArca: boolean;
+  /** `Factura.manual`: hecha por fuera del sistema, se lee como en una empresa sin ARCA. */
+  manual?: boolean | null;
   facturarPorTramo?: boolean;
   tramos?: FacturaTramoCobro[];
   ivaPctCabecera?: number | null;
@@ -208,7 +210,7 @@ export function computeEstadoFacturaLectura(args: {
   hoyReferencia?: Date | string | null;
 }): FacturaEstadoResult {
   let estado: FacturaEstadoLectura = "facturado";
-  if (args.tieneArca) {
+  if (args.tieneArca && !args.manual) {
     if (args.arcaEstado == null) estado = "borrador";
     else if (args.arcaEstado === "pendiente_cae") estado = "esperando_afip";
     else if (args.arcaEstado === "error") estado = "error_afip";
@@ -216,7 +218,7 @@ export function computeEstadoFacturaLectura(args: {
   }
 
   const cobroOpts: FacturaCobroOpts = {
-    tieneArca: args.tieneArca,
+    tieneArca: args.tieneArca && !args.manual,
     facturarPorTramo: args.facturarPorTramo,
     tramos: args.tramos,
     ivaPctCabecera: args.ivaPctCabecera,

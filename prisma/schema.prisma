@@ -719,6 +719,11 @@ model Factura {
    */
   facturarPorTramo Boolean        @default(false)
   comprobanteUrl   String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
+  /**
+   * Factura hecha por fuera del sistema en una empresa con `emision-facturas-arca`: no se
+   * emite en ARCA, lleva número y comprobante adjunto, y se trata como en una empresa sin ARCA.
+   */
+  manual           Boolean        @default(false)
   // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
   cbteTipo         Int? // 1=Factura A, 6=Factura B
   cbteNro          Int?

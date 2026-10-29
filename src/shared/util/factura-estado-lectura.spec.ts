@@ -70,6 +70,19 @@ test('tenant ARCA: por tramo también incluye el IVA en el total a cobrar', () =
   );
 });
 
+test('factura manual con ARCA: sin emitir se lee como facturada, no como borrador', () => {
+  const base = {
+    viajes: viajes3100,
+    fechaVencimiento: null,
+    importeGuardado: 3100,
+    pagos: [],
+    arcaEstado: null,
+    tieneArca: true,
+  };
+  assert.equal(computeEstadoFacturaLectura(base).estado, 'borrador');
+  assert.equal(computeEstadoFacturaLectura({ ...base, manual: true }).estado, 'facturado');
+});
+
 test('por tramo sin ARCA: pagar solo el neto no la deja cobrada', () => {
   const { cobrado } = computeEstadoFacturaLectura({
     viajes: viajes3100,

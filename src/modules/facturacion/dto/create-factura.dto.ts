@@ -25,6 +25,11 @@ export class CreateFacturaDto {
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
   @IsOptional() @IsNumber() @Type(() => Number) ivaPct?: number;
   @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
+  /**
+   * Empresa con ARCA: factura hecha por fuera del sistema (no se emite; número obligatorio
+   * y comprobante adjunto). En un borrador, pasarla a true la convierte; no se puede volver atrás.
+   */
+  @IsOptional() @IsBoolean() manual?: boolean;
   /** Si true, el importe se arma con tramos (+ viajes no divididos). */
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()

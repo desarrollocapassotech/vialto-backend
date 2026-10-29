@@ -24,6 +24,8 @@ export class UpdateFacturaDto {
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
   @IsOptional() @IsNumber() @Type(() => Number) ivaPct?: number;
   @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
+  /** Ver `CreateFacturaDto.manual`: solo pasa un borrador a manual (true); false se ignora. */
+  @IsOptional() @IsBoolean() manual?: boolean;
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()
   @IsArray()

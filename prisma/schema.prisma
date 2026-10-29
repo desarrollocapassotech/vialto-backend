@@ -724,6 +724,14 @@ model Factura {
    * emite en ARCA, lleva número y comprobante adjunto, y se trata como en una empresa sin ARCA.
    */
   manual           Boolean        @default(false)
+  /**
+   * Comprobante de una factura manual (solo empresas con ARCA), por separado para el Libro IVA:
+   * tipo AFIP (1=A, 6=B, 11=C…), punto de venta y número. `numero` se arma con estos tres.
+   * Null en facturas emitidas en ARCA, de empresas sin ARCA y manuales anteriores al campo.
+   */
+  manualCbteTipo   Int?
+  manualPtoVenta   Int?
+  manualCbteNro    Int?
   // Campos ARCA — nulos para tenants sin módulo liquidaciones-arca
   cbteTipo         Int? // 1=Factura A, 6=Factura B
   cbteNro          Int?
@@ -1655,6 +1663,16 @@ model Liquidacion {
    * Se decide al crear (y al editar un borrador) según `esTransportistaMonotributo`.
    */
   manual Boolean @default(false)
+
+  /**
+   * Factura del transportista en una liquidación manual (solo empresas con ARCA), por separado
+   * para el Libro IVA: tipo AFIP (11=C…), punto de venta, número y fecha (medianoche UTC).
+   * `numeroComprobanteProveedor` se arma con tipo + punto de venta + número.
+   */
+  proveedorCbteTipo  Int?
+  proveedorPtoVenta  Int?
+  proveedorCbteNro   Int?
+  proveedorCbteFecha DateTime?
 
   createdAt DateTime @default(now())
   createdBy String

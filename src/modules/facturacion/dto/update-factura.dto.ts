@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -26,6 +27,10 @@ export class UpdateFacturaDto {
   @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
   /** Ver `CreateFacturaDto.manual`: solo pasa un borrador a manual (true); false se ignora. */
   @IsOptional() @IsBoolean() manual?: boolean;
+  /** Ver `CreateFacturaDto.manualCbteTipo`. */
+  @IsOptional() @IsInt() @Type(() => Number) manualCbteTipo?: number;
+  @IsOptional() @IsInt() @Type(() => Number) manualPtoVenta?: number;
+  @IsOptional() @IsInt() @Type(() => Number) manualCbteNro?: number;
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()
   @IsArray()

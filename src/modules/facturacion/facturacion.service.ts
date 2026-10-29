@@ -43,6 +43,7 @@ import {
 } from "./factura-cuenta-corriente";
 import { formatNumeroComprobante } from "../liquidaciones-arca/arca.util";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
+import { resolverComprobanteManual } from "../../shared/util/comprobante-manual.util";
 import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
 
 /** Transacciones con varios writes + Neon pueden superar el default de 5s de Prisma. */
@@ -1000,7 +1001,17 @@ export class FacturacionService {
     // Normalizamos acá (no solo confiar en el frontend) para que un string
     // vacío/solo-espacios nunca llegue a guardarse como numero="" — eso
     // rompería la unicidad real (NULL sí admite múltiples filas, "" no).
-    const numero = conArca ? null : dto.numero?.trim() || null;
+    // Factura manual: tipo + punto de venta + número por separado (Libro IVA), y `numero` se
+    // arma con ellos.
+    const cbteManual = manual
+      ? resolverComprobanteManual({
+          cbteTipo: dto.manualCbteTipo,
+          ptoVenta: dto.manualPtoVenta,
+          cbteNro: dto.manualCbteNro,
+          numero: dto.numero,
+        })
+      : null;
+    const numero = conArca ? null : cbteManual?.numero ?? (dto.numero?.trim() || null);
     if (!conArca && !numero) {
       throw new BadRequestException('Ingresá el número de comprobante de la factura.');
     }
@@ -1050,6 +1061,9 @@ export class FacturacionService {
             facturarPorTramo,
             comprobanteUrl: dto.comprobanteUrl ?? null,
             manual,
+            manualCbteTipo: cbteManual?.cbteTipo ?? null,
+            manualPtoVenta: cbteManual?.ptoVenta ?? null,
+            manualCbteNro: cbteManual?.cbteNro ?? null,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as any,
         });
@@ -1170,10 +1184,23 @@ export class FacturacionService {
     const conArca = tieneArca && !existing.manual && !pasaAManual;
     // Tenants con ARCA: el número lo asigna AFIP al emitir, nunca se edita a mano
     // (mismo criterio que `createFactura`). Una factura manual sí lleva número.
-    const numeroDto = conArca ? undefined : dto.numero;
-    if (pasaAManual && !(numeroDto ?? existing.numero)?.trim()) {
-      throw new BadRequestException('Ingresá el número de comprobante de la factura.');
-    }
+    // Factura manual con ARCA: tipo + punto de venta + número obligatorios (Libro IVA) y
+    // `numero` se arma con ellos. Si solo llega el texto (Cuenta corriente), se interpreta.
+    const tocaComprobante =
+      dto.numero !== undefined ||
+      dto.manualCbteTipo !== undefined ||
+      dto.manualPtoVenta !== undefined ||
+      dto.manualCbteNro !== undefined;
+    const cbteManual =
+      tieneArca && (existing.manual || pasaAManual) && (tocaComprobante || pasaAManual)
+        ? resolverComprobanteManual({
+            cbteTipo: dto.manualCbteTipo,
+            ptoVenta: dto.manualPtoVenta,
+            cbteNro: dto.manualCbteNro,
+            numero: dto.numero ?? existing.numero,
+          })
+        : null;
+    const numeroDto = conArca ? undefined : cbteManual?.numero ?? dto.numero;
     if (numeroDto) {
       await this.assertNumeroFacturaUnico(tenantId, numeroDto, id);
     }
@@ -1231,6 +1258,13 @@ export class FacturacionService {
             ? { facturarPorTramo }
             : {}),
           ...(pasaAManual ? { manual: true } : {}),
+          ...(cbteManual
+            ? {
+                manualCbteTipo: cbteManual.cbteTipo,
+                manualPtoVenta: cbteManual.ptoVenta,
+                manualCbteNro: cbteManual.cbteNro,
+              }
+            : {}),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       });

@@ -22,6 +22,7 @@ import {
   signoHistorialCc,
 } from '../../shared/cuenta-corriente/movimiento-cc.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
+import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
 import {
   importeTotalConIvaPorTramo,
   ivaMontoDeTramos,
@@ -364,7 +365,7 @@ export class CuentaCorrienteService {
     const liquidacion = mov.liquidacionId
       ? await this.prisma.liquidacion.findFirst({
           where: { id: mov.liquidacionId, tenantId },
-          select: { id: true, cbteNro: true },
+          select: { id: true, cbteNro: true, manual: true },
         })
       : null;
     // Una factura manual (hecha por fuera del sistema) se trata como sin ARCA.
@@ -440,9 +441,22 @@ export class CuentaCorrienteService {
         throw new BadRequestException('Ingresá el número de comprobante');
       }
       if (liquidacion) {
+        // Liquidación manual (ARCA): el número es obligatorio y se guarda también por separado
+        // (tipo / punto de venta / número) para el Libro IVA.
+        const cbte = liquidacion.manual ? resolverComprobanteManual({ numero: valor }) : null;
         await this.prisma.liquidacion.update({
           where: { id: liquidacion.id },
-          data: { numeroComprobanteProveedor: valor, updatedAt: new Date() },
+          data: {
+            numeroComprobanteProveedor: cbte?.numero ?? valor,
+            ...(cbte
+              ? {
+                  proveedorCbteTipo: cbte.cbteTipo,
+                  proveedorPtoVenta: cbte.ptoVenta,
+                  proveedorCbteNro: cbte.cbteNro,
+                }
+              : {}),
+            updatedAt: new Date(),
+          },
         });
         await sincronizarCargoLiquidacionCc(this.prisma, tenantId, liquidacion.id);
       } else {

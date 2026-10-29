@@ -11,6 +11,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
+import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
+import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
@@ -309,6 +311,18 @@ export class LiquidacionesService {
     // Monotributista en empresa con ARCA: liquidación manual, no se emite Líquido Producto.
     const manual =
       tieneLiquidoProductoArca && esCondicionIvaMonotributo(transportista.condicionIva);
+    // Factura del transportista por separado (Libro IVA): obligatoria en la liquidación manual.
+    const cbteProveedor = manual
+      ? resolverComprobanteManual({
+          cbteTipo: dto.proveedorCbteTipo,
+          ptoVenta: dto.proveedorPtoVenta,
+          cbteNro: dto.proveedorCbteNro,
+          numero: dto.numeroComprobanteProveedor,
+        })
+      : null;
+    if (manual && !dto.proveedorCbteFecha) {
+      throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+    }
     if (tieneLiquidoProductoArca && !manual && moneda === 'USD') {
       throw new BadRequestException(
         'Las liquidaciones emitidas con ARCA (Líquido Producto) deben ser en ARS.',
@@ -418,7 +432,15 @@ export class LiquidacionesService {
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
           proveedorContrato: dto.proveedorContrato?.trim() || null,
-          numeroComprobanteProveedor: dto.numeroComprobanteProveedor?.trim() || null,
+          numeroComprobanteProveedor:
+            cbteProveedor?.numero ?? (dto.numeroComprobanteProveedor?.trim() || null),
+          proveedorCbteTipo: cbteProveedor?.cbteTipo ?? null,
+          proveedorPtoVenta: cbteProveedor?.ptoVenta ?? null,
+          proveedorCbteNro: cbteProveedor?.cbteNro ?? null,
+          proveedorCbteFecha:
+            cbteProveedor && dto.proveedorCbteFecha
+              ? fechaCalendarioAr(dto.proveedorCbteFecha)
+              : null,
           createdBy: userId,
           updatedAt: new Date(),
           viajes: {
@@ -748,6 +770,39 @@ export class LiquidacionesService {
         esCondicionIvaMonotributo(t?.condicionIva) &&
         (await this.tieneModulo(tenantId, 'emision-liquido-producto-arca'));
       if (pasaAManual) data.manual = true;
+    }
+
+    // Liquidación manual: la factura del transportista va por separado (Libro IVA) y es
+    // obligatoria; no se puede borrar. Si solo llega el texto ("Adjuntar comprobante"), se
+    // interpreta. La fecha se conserva si no viene. Un borrador viejo que recién pasa a manual
+    // no la exige en este guardado (la edición todavía no muestra esos campos).
+    const tocaCbteProveedor =
+      dto.numeroComprobanteProveedor !== undefined ||
+      dto.proveedorCbteTipo !== undefined ||
+      dto.proveedorPtoVenta !== undefined ||
+      dto.proveedorCbteNro !== undefined ||
+      dto.proveedorCbteFecha !== undefined;
+    if ((liq.manual || pasaAManual) && tocaCbteProveedor) {
+      const cbte = resolverComprobanteManual({
+        cbteTipo: dto.proveedorCbteTipo,
+        ptoVenta: dto.proveedorPtoVenta,
+        cbteNro: dto.proveedorCbteNro,
+        numero:
+          dto.numeroComprobanteProveedor === undefined
+            ? liq.numeroComprobanteProveedor
+            : dto.numeroComprobanteProveedor,
+      });
+      const fecha = dto.proveedorCbteFecha ?? liq.proveedorCbteFecha?.toISOString();
+      if (!fecha) {
+        throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+      }
+      Object.assign(data, {
+        numeroComprobanteProveedor: cbte.numero,
+        proveedorCbteTipo: cbte.cbteTipo,
+        proveedorPtoVenta: cbte.ptoVenta,
+        proveedorCbteNro: cbte.cbteNro,
+        proveedorCbteFecha: fechaCalendarioAr(fecha),
+      });
     }
 
     await this.prisma.liquidacion.update({ where: { id }, data });

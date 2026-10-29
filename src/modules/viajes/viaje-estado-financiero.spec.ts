@@ -75,3 +75,8 @@ test('liquidación sin ARCA: registro manual (borrador permanente) cuenta como l
   assert.equal(mapLiquidacionEstado('error', false), 'liquidado');
   assert.equal(mapLiquidacionEstado('anulado', false), 'anulado');
 });
+
+test('liquidación manual con ARCA (monotributista): borrador cuenta como liquidado', () => {
+  assert.equal(mapLiquidacionEstado('borrador', true, true), 'liquidado');
+  assert.equal(mapLiquidacionEstado('anulado', true, true), 'anulado');
+});

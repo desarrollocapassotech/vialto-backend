@@ -1642,6 +1642,15 @@ model Liquidacion {
    */
   numeroComprobanteProveedor String?
 
+  /**
+   * true = liquidación manual en una empresa CON emisión de Líquido Producto ARCA: no se emite
+   * ni se anula en ARCA (transportista monotributista, que factura él mismo). Se comporta como
+   * la liquidación de una empresa sin ARCA: queda en `borrador`, cuenta como liquidada y lleva
+   * la factura del transportista adjunta (`comprobanteUrl` + `numeroComprobanteProveedor`).
+   * Se decide al crear (y al editar un borrador) según `esTransportistaMonotributo`.
+   */
+  manual Boolean @default(false)
+
   createdAt DateTime @default(now())
   createdBy String
   updatedAt DateTime @updatedAt

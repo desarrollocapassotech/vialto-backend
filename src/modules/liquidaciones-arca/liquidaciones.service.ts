@@ -32,6 +32,7 @@ import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import {
   assertFechaCbteHomologacionEnVentana,
   assertCondicionFiscalTransportista,
+  esCondicionIvaMonotributo,
   getCbteTipoCvlp,
   getCbteTipoAnulacionCvlp,
   getCbteTipoAnulacionFactura,
@@ -305,7 +306,10 @@ export class LiquidacionesService {
       tenantId,
       'emision-liquido-producto-arca',
     );
-    if (tieneLiquidoProductoArca && moneda === 'USD') {
+    // Monotributista en empresa con ARCA: liquidación manual, no se emite Líquido Producto.
+    const manual =
+      tieneLiquidoProductoArca && esCondicionIvaMonotributo(transportista.condicionIva);
+    if (tieneLiquidoProductoArca && !manual && moneda === 'USD') {
       throw new BadRequestException(
         'Las liquidaciones emitidas con ARCA (Líquido Producto) deben ser en ARS.',
       );
@@ -409,6 +413,7 @@ export class LiquidacionesService {
           gastosAdminIva,
           liquido,
           estado: 'borrador',
+          manual,
           cbteTipo: getCbteTipoCvlp(transportista.condicionIva, transportista.pais),
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
@@ -731,9 +736,23 @@ export class LiquidacionesService {
       }
     }
 
+    // Borrador viejo de un monotributista (anterior a `manual`): al guardarlo pasa a manual,
+    // así no queda trabado sin poder emitirse.
+    let pasaAManual = false;
+    if (liq.estado === 'borrador' && !liq.manual) {
+      const t = await this.prisma.transportista.findFirst({
+        where: { id: liq.transportistaId, tenantId },
+        select: { condicionIva: true },
+      });
+      pasaAManual =
+        esCondicionIvaMonotributo(t?.condicionIva) &&
+        (await this.tieneModulo(tenantId, 'emision-liquido-producto-arca'));
+      if (pasaAManual) data.manual = true;
+    }
+
     await this.prisma.liquidacion.update({ where: { id }, data });
 
-    if (dto.viajeIds !== undefined) {
+    if (dto.viajeIds !== undefined || pasaAManual) {
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsParaSync);
     }
     // Montos o viajes pudieron cambiar: el movimiento de la liquidación se actualiza.
@@ -806,6 +825,11 @@ export class LiquidacionesService {
     }
     if (liquidacion.estado === 'pendiente_anulacion') {
       throw new BadRequestException('La liquidación está pendiente de anulación');
+    }
+    if (liquidacion.manual || esCondicionIvaMonotributo(liquidacion.transportista?.condicionIva)) {
+      throw new BadRequestException(
+        'A un transportista monotributista no se le emite Líquido Producto: la liquidación queda manual, con la factura del transportista adjunta.',
+      );
     }
     if (liquidacion.moneda === 'USD') {
       throw new BadRequestException(
@@ -1118,6 +1142,7 @@ export class LiquidacionesService {
       tipoAnulacion ??
         (config as { anulacionTipoComprobante?: 'nota_credito' | 'nota_debito' })
           .anulacionTipoComprobante,
+      liquidacion.cbteTipo,
     );
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
 

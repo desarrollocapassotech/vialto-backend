@@ -35,15 +35,17 @@ export function mapFacturacionEstado(
  * `pendiente_cae`/`autorizado`/`error` — queda en `borrador` para siempre, ver
  * `CrearLiquidacionManualModal` con `hasArca=false`), así que un `borrador` ahí
  * significa "ya se cargó", no "esperando AFIP". Tenant con ARCA: se usa el ciclo de
- * vida completo del comprobante.
+ * vida completo del comprobante. Excepción: una liquidación `manual` (monotributista en
+ * empresa con ARCA) no se emite, así que se trata igual que en una empresa sin ARCA.
  */
 export function mapLiquidacionEstado(
   estado: string | null,
   tieneArca: boolean,
+  manual = false,
 ): ViajeLiquidacionEstado {
   if (estado == null) return 'sin_liquidar';
   if (estado === 'anulado') return 'anulado';
-  if (!tieneArca) return 'liquidado';
+  if (!tieneArca || manual) return 'liquidado';
   if (estado === 'borrador') return 'borrador';
   if (estado === 'pendiente_cae') return 'esperando_afip';
   // pendiente_anulacion (método manual, ver Tenant.liquidacionAnulacionMetodo): la
@@ -151,7 +153,7 @@ export async function syncLiquidacionEstadoViaje(
       transportistaId: true,
       liquidacionEstado: true,
       liquidacionesViaje: {
-        select: { liquidacion: { select: { estado: true, updatedAt: true } } },
+        select: { liquidacion: { select: { estado: true, manual: true, updatedAt: true } } },
       },
       tenant: { select: { modules: true } },
     },
@@ -176,7 +178,7 @@ export async function syncLiquidacionEstadoViaje(
     .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
 
   const elegida = activa ?? masReciente;
-  const next = mapLiquidacionEstado(elegida?.estado ?? null, tieneArca);
+  const next = mapLiquidacionEstado(elegida?.estado ?? null, tieneArca, elegida?.manual);
   if (next !== viaje.liquidacionEstado) {
     await tx.viaje.update({ where: { id: viajeId }, data: { liquidacionEstado: next } });
   }

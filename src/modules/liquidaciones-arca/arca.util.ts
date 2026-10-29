@@ -85,11 +85,36 @@ export const CBTE_TIPO_NC_CVLP = 65;
 export type TipoAnulacionCvlp = 'nota_credito' | 'nota_debito';
 
 /**
+ * Condiciones IVA del receptor que AFIP acepta en comprobantes clase A
+ * (FEParamGetCondicionIvaReceptor, ClaseCmp 'A'): RI, Monotributo, Monotributista
+ * Social y Monotributo Trabajador Independiente Promovido. Un monotributista recibe
+ * clase A: con clase B AFIP rechaza con 10243 (verificado en homologación, oct 2026).
+ */
+const CONDICIONES_IVA_CLASE_A = new Set([1, 6, 13, 16]);
+
+export function esCondicionIvaClaseA(condicionIva?: number | null): boolean {
+  return condicionIva != null && CONDICIONES_IVA_CLASE_A.has(condicionIva);
+}
+
+/** Monotributo, Monotributista Social y Monotributo Trabajador Independiente Promovido. */
+const CONDICIONES_IVA_MONOTRIBUTO = new Set([6, 13, 16]);
+
+/**
+ * Transportista monotributista: no se le emite Líquido Producto. Factura él mismo y la
+ * liquidación queda manual (`Liquidacion.manual`), con su factura adjunta — pedido de NyM,
+ * oct 2026. Espejo en el front: `esCondicionIvaMonotributo` de `lib/arcaCbteTipo.ts`.
+ */
+export function esCondicionIvaMonotributo(condicionIva?: number | null): boolean {
+  return condicionIva != null && CONDICIONES_IVA_MONOTRIBUTO.has(condicionIva);
+}
+
+/**
  * Tipo de comprobante para anular un CVLP autorizado.
  * AFIP no acepta el 065 ni importes negativos por web service, así que el CVLP se
  * anula con un comprobante ESTÁNDAR asociado (CbtesAsoc) al 060/061 original.
  * El comprobante (Nota de Crédito o Nota de Débito) es configurable por tenant;
- * la clase A/B se deriva de la condición frente al IVA del transportista.
+ * la clase A/B es la del CVLP original (060 → A, 061 → B) y, si no se conoce, la
+ * de la condición frente al IVA del transportista (`esCondicionIvaClaseA`).
  * Verificado contra AFIP (homologación): los 4 tipos son aceptados y devuelven CAE.
  *   - Nota de Crédito:  clase A → tipo 3,  clase B → tipo 8.
  *   - Nota de Débito:   clase A → tipo 2,  clase B → tipo 7.
@@ -97,13 +122,18 @@ export type TipoAnulacionCvlp = 'nota_credito' | 'nota_debito';
 export function getCbteTipoAnulacionCvlp(
   condicionIva?: number | null,
   tipoAnulacion: TipoAnulacionCvlp = 'nota_credito',
+  cbteTipoOriginal?: number | null,
 ): number {
-  if (condicionIva == null) {
+  let claseA: boolean;
+  if (cbteTipoOriginal === 60 || cbteTipoOriginal === 61) {
+    claseA = cbteTipoOriginal === 60;
+  } else if (condicionIva == null) {
     throw new BadRequestException(
       'El transportista no tiene configurada su condición frente al IVA.',
     );
+  } else {
+    claseA = esCondicionIvaClaseA(condicionIva);
   }
-  const claseA = condicionIva === 1;
   if (tipoAnulacion === 'nota_debito') {
     return claseA ? 2 : 7; // Nota de Débito A / B
   }

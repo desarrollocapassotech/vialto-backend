@@ -18,6 +18,10 @@ import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { normalizeUnidadCantidad } from './cantidad-unidad.util';
 import { productoLabels } from '../../shared/util/producto-label.util';
+import {
+  nombreArchivoComprobante,
+  tipoComprobanteLegible,
+} from '../../shared/util/nombre-archivo-comprobante.util';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -27,6 +31,14 @@ const CONDICION_IVA_LABEL: Record<number, string> = {
   4: 'IVA SUJETO EXENTO',
   5: 'CONSUMIDOR FINAL',
   6: 'RESP. MONOTRIBUTO',
+};
+
+/** Condición IVA del receptor como la escribe ARCA en el comprobante. */
+const CONDICION_IVA_RECEPTOR_LABEL: Record<number, string> = {
+  1: 'IVA Responsable Inscripto',
+  4: 'IVA Sujeto Exento',
+  5: 'Consumidor Final',
+  6: 'Responsable Monotributo',
 };
 
 const LETRA_POR_TIPO: Record<number, string> = {
@@ -67,6 +79,7 @@ type ViajeParaDetalle = {
   idPropio2: string | null;
   origen?: string | null;
   destino?: string | null;
+  observaciones?: string | null;
   productosViaje?: Array<{ producto: { nombre: string } }>;
 };
 
@@ -143,6 +156,9 @@ function buildDetalleFlete(
   if (producto) {
     detalle += ` - ${productoLabels(tenantPdfConfig).singular.toUpperCase()}: ${producto}`;
   }
+  // Observaciones del viaje en un renglón aparte, debajo del detalle (pedido NyM, oct 2026).
+  const obs = viaje.observaciones?.trim();
+  if (obs) detalle += `\nOBS.: ${obs}`;
   return detalle;
 }
 
@@ -185,21 +201,6 @@ function numeroALetras(n: number): string {
   if (miles > 0) partes.push(`${miles === 1 ? 'MIL' : `${tresDigitos(miles)} MIL`}`);
   if (resto > 0) partes.push(tresDigitos(resto));
   return `${partes.join(' ')} CON ${centavosStr} CENTAVO(S)`;
-}
-
-function slugify(text: string): string {
-  const withoutDiacritics = text
-    .normalize('NFD')
-    .split('')
-    .filter((ch) => {
-      const code = ch.codePointAt(0) ?? 0;
-      return code < 0x0300 || code > 0x036f;
-    })
-    .join('');
-  const clean = withoutDiacritics
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return clean.slice(0, 60) || 'factura';
 }
 
 const PAGE_W = 595.28;
@@ -262,6 +263,7 @@ export class FacturaPdfService {
             origen: true,
             destino: true,
             fechaCarga: true,
+            observaciones: true,
             productosViaje: {
               select: { producto: { select: { nombre: true } } },
             },
@@ -415,14 +417,12 @@ export class FacturaPdfService {
       tenantPdfConfig,
     );
 
-    const cbteNroStr =
-      drawCbteNro && drawPtoVenta
-        ? `${String(drawPtoVenta).padStart(4, '0')}-${String(drawCbteNro).padStart(8, '0')}`
-        : factura.numero.slice(0, 20);
-    const clienteSlug = slugify(factura.cliente?.nombre ?? 'cliente');
-    const letra = LETRA_POR_TIPO[drawCbteTipo] ?? 'B';
-    const prefix = kind === 'nc' ? 'NC' : 'Factura';
-    const filename = `${prefix}_${letra}_${cbteNroStr}_${clienteSlug}.pdf`;
+    const filename = nombreArchivoComprobante(
+      tipoComprobanteLegible(drawCbteTipo),
+      drawPtoVenta,
+      drawCbteNro,
+      String(factura.numero ?? '').slice(0, 20) || 'borrador',
+    );
 
     return { buffer, filename };
   }
@@ -760,13 +760,13 @@ export class FacturaPdfService {
     y += hdrH + 2;
 
     {
+      // Datos del receptor con el formato del comprobante de ARCA (pedido NyM, oct 2026), igual
+      // en clase A y B: CUIT / condición IVA / condición de venta a la izquierda y razón social /
+      // domicilio a la derecha, con la etiqueta en negrita.
       const c = factura.cliente;
       const condLabel = c?.condicionIva
-        ? (CONDICION_IVA_LABEL[c.condicionIva] ?? String(c.condicionIva))
+        ? (CONDICION_IVA_RECEPTOR_LABEL[c.condicionIva] ?? String(c.condicionIva))
         : '';
-      const colW = CW / 2 - 8;
-      const nameText = `Sr.(es): ${c?.nombre ?? ''}`;
-      const domText = `Domicilio: ${c?.direccion ?? ''}`;
 
       // Condición de venta: días de vencimiento de la propia factura (fecha de vencimiento −
       // emisión, ambas a medianoche UTC) o, si no tiene, la condición de pago del cliente.
@@ -777,62 +777,81 @@ export class FacturaPdfService {
           )
         : (c?.condicionPagoDias ?? null);
       const condicionVenta = diasVto != null && diasVto > 0
-        ? `Cta Cte – Vto ${diasVto} días`
-        : 'Cta Cte';
+        ? `Cuenta Corriente – Vto. ${diasVto} días`
+        : 'Cuenta Corriente';
       // Leyenda libre de la empresa (ArcaConfig.leyendaFactura, ej. intereses por mora), en
-      // letra chica debajo de la condición de venta. Solo en facturas, no en notas de crédito.
+      // letra chica al pie del recuadro. Solo en facturas, no en notas de crédito.
       const leyenda = kind === 'factura' ? String(config?.leyendaFactura ?? '').trim() : '';
-      const LEYENDA_FONT = 6;
-      doc.fontSize(LEYENDA_FONT).font('Helvetica');
-      const leyendaH = leyenda ? doc.heightOfString(leyenda, { width: colW }) + 3 : 0;
-      doc.fontSize(7.5);
-
-      const nameH = doc.heightOfString(nameText, { width: colW });
-      const domH = doc.heightOfString(domText, { width: colW });
-      const leftTotalH = 5 + nameH + 2 + domH + 2 + 10 + 2 + 10 + 5;
-      const rightTotalH = kind === 'nc' ? (5 + 12 * 4) : (5 + 12 + leyendaH + 12 + 5);
-      const rcpH = Math.max(leftTotalH, rightTotalH, 48);
-
-      doc.rect(M, y, CW, rcpH).stroke(col.linea('#aaa'));
-      doc.moveTo(M + CW / 2, y).lineTo(M + CW / 2, y + rcpH).stroke(col.linea('#aaa'));
-
-      let ly = y + 5;
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')
-        .text(nameText, M + 4, ly, { width: colW });
-      ly += nameH + 2;
-
-      doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-        .text(domText, M + 4, ly, { width: colW });
-      ly += domH + 2;
-
-      doc.text(`Cond. IVA: ${condLabel}`, M + 4, ly, { width: colW });
-      ly += 12;
-
-      doc.text(`C.U.I.T.: ${c?.idFiscal ?? ''}`, M + 4, ly, { width: colW });
-
-      const rx = M + CW / 2 + 4;
-      doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-        .text(`Condición de Venta: ${condicionVenta}`, rx, y + 5, { width: colW });
-      if (leyenda) {
-        doc.fontSize(LEYENDA_FONT).font('Helvetica').fillColor('#555')
-          .text(leyenda, rx, y + 16, { width: colW });
-      }
-      doc.fontSize(7.5).font('Helvetica').fillColor('#333')
-        .text('Moneda: Pesos', rx, y + 17 + leyendaH, { width: colW });
-
+      const extras: string[] = [];
       if (kind === 'nc') {
         const refCbteNro = facturaExt.cbteNro && facturaExt.ptoVenta
-          ? `${String(facturaExt.ptoVenta).padStart(4, '0')}-${String(facturaExt.cbteNro).padStart(8, '0')}`
+          ? `${String(facturaExt.ptoVenta).padStart(5, '0')}-${String(facturaExt.cbteNro).padStart(8, '0')}`
           : factura.numero;
-        doc.text(`Factura Orig.: ${refCbteNro || ''}`, rx, y + 29, { width: colW });
-        doc.text(`Motivo: ${factura.motivoAnulacion || 'Anulación de comprobante'}`, rx, y + 41, { width: colW });
+        extras.push(`Factura Orig.: ${refCbteNro || ''}`);
+        extras.push(`Motivo: ${factura.motivoAnulacion || 'Anulación de comprobante'}`);
+      }
+
+      const FONT = 8;
+      const labelRight = M + 321; // fin de las etiquetas de la columna derecha
+      const valorX = labelRight + 3;
+      const valorW = M + CW - 6 - valorX;
+      doc.fontSize(FONT).font('Helvetica');
+      const razonH = doc.heightOfString(c?.nombre ?? '', { width: valorW });
+      const domH = doc.heightOfString(c?.direccion ?? '', { width: valorW });
+
+      const y1 = y + 7;
+      const y2 = Math.max(y + 23, y1 + razonH + 2);
+      const y3 = Math.max(y + 42, y2 + domH + 4);
+      let yFin = y3 + FONT + 2;
+
+      const LEYENDA_FONT = 6;
+      doc.fontSize(LEYENDA_FONT).font('Helvetica');
+      const leyendaH = leyenda ? doc.heightOfString(leyenda, { width: CW - 12 }) : 0;
+      const extrasH = extras.length * (FONT + 4);
+      if (extras.length) yFin += 4 + extrasH;
+      if (leyenda) yFin += 4 + leyendaH;
+      const rcpH = Math.max(59, yFin - y + 8);
+
+      doc.rect(M, y, CW, rcpH).stroke(col.linea('#000'));
+
+      const etiqueta = (label: string, x: number, top: number, opts: PDFKit.Mixins.TextOptions = {}) =>
+        doc.fontSize(FONT).font('Helvetica-Bold').fillColor('#000').text(label, x, top, opts);
+      const valor = (texto: string, x: number, top: number, opts: PDFKit.Mixins.TextOptions = {}) =>
+        doc.fontSize(FONT).font('Helvetica').fillColor('#000').text(texto, x, top, opts);
+
+      // Izquierda
+      etiqueta('CUIT: ', M + 6, y1, { continued: true });
+      doc.font('Helvetica').text(String(c?.idFiscal ?? ''));
+      etiqueta('Condición frente al IVA:', M + 6, y2, { lineBreak: false });
+      valor(condLabel, M + 110, y2, { width: 140, lineBreak: false });
+      etiqueta('Condición de venta:', M + 6, y3, { lineBreak: false });
+      valor(condicionVenta, M + 94, y3, { lineBreak: false });
+
+      // Derecha
+      etiqueta('Apellido y Nombre / Razón Social:', M, y1, { width: labelRight - M, align: 'right' });
+      valor(c?.nombre ?? '', valorX, y1, { width: valorW });
+      etiqueta('Domicilio:', M, y2, { width: labelRight - M, align: 'right' });
+      valor(c?.direccion ?? '', valorX, y2, { width: valorW });
+
+      let ey = y3 + FONT + 6;
+      for (const extra of extras) {
+        valor(extra, M + 6, ey, { width: CW - 12 });
+        ey += FONT + 4;
+      }
+      if (leyenda) {
+        doc.fontSize(LEYENDA_FONT).font('Helvetica').fillColor('#555')
+          .text(leyenda, M + 6, ey, { width: CW - 12 });
       }
 
       y += rcpH + 2;
     }
 
+    // Clase B (factura y NC): como el comprobante de ARCA, el IVA no se discrimina — precios
+    // con IVA incluido y el IVA contenido en una leyenda al pie (Ley 27.743).
+    const esClaseB = letra === 'B';
+
     // Sin columna "Producto" (absorbida por "Detalle"): su ancho pasa a esa columna.
-    const colWidths = [257.28, 40, 65, 65, 42, 70];
+    const colWidths = esClaseB ? [319.28, 60, 80, 80] : [257.28, 40, 65, 65, 42, 70];
     const colX: number[] = [];
     let cx = M;
     for (const w of colWidths) { colX.push(cx); cx += w; }
@@ -842,7 +861,9 @@ export class FacturaPdfService {
     const cellPadX = 2;
 
     // "Cantidad" genérico: la unidad (TN/UD) va solo en las líneas de viaje.
-    const tHeaders = ['Detalle', 'Cantidad', 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
+    const tHeaders = esClaseB
+      ? ['Detalle', 'Cantidad', 'Precio Unit.', 'Subtotal']
+      : ['Detalle', 'Cantidad', 'Tarifa', 'SubTotal', 'IVA %', 'SubTotal c/IVA'];
     doc.rect(M, y, tableW, headerRowH).fill(col.fondoEncabezadoTabla('#e8e8e8')).stroke('#aaa');
     tHeaders.forEach((h, i) => {
       doc.fontSize(6.5).font('Helvetica-Bold').fillColor(col.textoEncabezadoTabla('#000'))
@@ -856,22 +877,37 @@ export class FacturaPdfService {
     for (const item of comprobante.items) {
       const detalleDraw = buildDetalleFlete(item, factura.viajes, tenantPdfConfig);
       const esLineaViaje = matchViajeItem(item, factura.viajes) != null;
-      const cells = [
-        { v: detalleDraw.toUpperCase(), align: 'left' as const },
-        {
-          v:
-            item.cantidad != null
-              ? esLineaViaje
-                ? `${fmtNum(item.cantidad)} ${normalizeUnidadCantidad(tenantPdfConfig?.unidadCantidadViajes)}`
-                : fmtNum(item.cantidad)
-              : '1,00',
-          align: 'right' as const,
-        },
-        { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },
-        { v: fmtNum(item.importeBase), align: 'right' as const },
-        { v: fmtNum(item.ivaPct), align: 'right' as const },
-        { v: fmtNum(item.subtotal), align: 'right' as const },
-      ];
+      const celdaDetalle = { v: detalleDraw.toUpperCase(), align: 'left' as const };
+      const celdaCantidad = {
+        v:
+          item.cantidad != null
+            ? esLineaViaje
+              ? `${fmtNum(item.cantidad)} ${normalizeUnidadCantidad(tenantPdfConfig?.unidadCantidadViajes)}`
+              : fmtNum(item.cantidad)
+            : '1,00',
+        align: 'right' as const,
+      };
+      const cells = esClaseB
+        ? [
+            celdaDetalle,
+            celdaCantidad,
+            {
+              // Unitario con IVA: sale del subtotal con IVA para que cantidad × precio cierre.
+              v: fmtNum(
+                item.cantidad ? round2(item.subtotal / item.cantidad) : item.subtotal,
+              ),
+              align: 'right' as const,
+            },
+            { v: fmtNum(item.subtotal), align: 'right' as const },
+          ]
+        : [
+            celdaDetalle,
+            celdaCantidad,
+            { v: fmtNum(item.precioUnitario ?? item.importeBase), align: 'right' as const },
+            { v: fmtNum(item.importeBase), align: 'right' as const },
+            { v: fmtNum(item.ivaPct), align: 'right' as const },
+            { v: fmtNum(item.subtotal), align: 'right' as const },
+          ];
 
       // Altura dinámica: descripciones largas (ej. viaje con origen/destino) wrappean
       // y no deben solaparse con "Comprobantes asociados" debajo.
@@ -910,9 +946,6 @@ export class FacturaPdfService {
       }
     }
 
-    const footerY = PAGE_H - MARGIN - 90;
-    doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke(col.linea('#aaa'));
-
     const pie = cvlpPdfPieFinanciero(
       {
         bruto: comprobante.impNeto,
@@ -923,59 +956,173 @@ export class FacturaPdfService {
       comprobante,
     );
     const impTotal = pie.total;
-    doc.fontSize(7).font('Helvetica').fillColor('#333')
-      .text(`Son: ${numeroALetras(impTotal).toLowerCase()}`, M, footerY, { width: CW });
 
-    const footerBoxY = footerY + 12;
-    const footerBoxH = 70;
-    doc.rect(M, footerBoxY, CW, footerBoxH).stroke(col.linea('#aaa'));
-
-    if (qrBuffer) {
-      doc.image(qrBuffer, M + 4, footerBoxY + 4, { width: 62, height: 62 });
-    }
-
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
-      .text('ARCA', M + 72, footerBoxY + 14, { width: 150 });
-    doc.fontSize(6).font('Helvetica').fillColor('#555')
-      .text('AGENCIA DE RECAUDACIÓN', M + 72, footerBoxY + 27, { width: 150 })
-      .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 150 });
-
-    const totX = M + CW - 200;
-    const labelW = 120;
-    const valW = 70;
-    doc.fontSize(7.5).font('Helvetica').fillColor('#000');
-    const totRows: [string, string][] = [
-      ['Importe Neto Gravado: $', fmtNum(pie.netoGravado)],
-      ['Importe Otros Tributos: $', fmtNum(pie.otrosTributos)],
-      ['IVA: $', fmtNum(pie.iva)],
-      ['Importe Total: $', fmtNum(impTotal)],
-    ];
-
-    let currentY = footerBoxY + 6;
-    totRows.forEach(([label, val]) => {
-      const labelHeight = doc.heightOfString(label, { width: labelW });
-      const valHeight = doc.heightOfString(val, { width: valW });
-      const rowHeight = Math.max(labelHeight, valHeight, 10);
-      doc.text(label, totX, currentY, { width: labelW, align: 'left', lineBreak: true });
-      doc.font('Helvetica-Bold').text(val, totX + labelW, currentY, { width: valW, align: 'right' });
-      doc.font('Helvetica');
-      currentY += rowHeight + 1.5;
-    });
-
-    currentY = Math.max(currentY, footerBoxY + 52);
-
-    if (facturaExt.cae) {
-      doc.fontSize(7.5).font('Helvetica').fillColor('#000')
-        .text(`CAE N°: ${facturaExt.cae}`, totX, currentY, { width: 190 })
-        .text(`Vto CAE: ${fmtDate(facturaExt.caeFechaVto)}`, totX, currentY + 10, { width: 190 });
+    if (esClaseB) {
+      this.drawPieClaseB(doc, {
+        subtotal: round2(impTotal - pie.otrosTributos),
+        otrosTributos: pie.otrosTributos,
+        total: impTotal,
+        ivaContenido: pie.iva,
+        qrBuffer,
+        cae: facturaExt.cae ?? null,
+        caeFechaVto: facturaExt.caeFechaVto ?? null,
+        lineaColor: col.linea('#000'),
+      });
     } else {
-      doc.fontSize(7.5).font('Helvetica').fillColor('#999')
-        .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });
+      const footerY = PAGE_H - MARGIN - 90;
+      doc.moveTo(M, footerY - 4).lineTo(M + CW, footerY - 4).stroke(col.linea('#aaa'));
+
+      doc.fontSize(7).font('Helvetica').fillColor('#333')
+        .text(`Son: ${numeroALetras(impTotal).toLowerCase()}`, M, footerY, { width: CW });
+
+      const footerBoxY = footerY + 12;
+      const footerBoxH = 70;
+      doc.rect(M, footerBoxY, CW, footerBoxH).stroke(col.linea('#aaa'));
+
+      if (qrBuffer) {
+        doc.image(qrBuffer, M + 4, footerBoxY + 4, { width: 62, height: 62 });
+      }
+
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
+        .text('ARCA', M + 72, footerBoxY + 14, { width: 150 });
+      doc.fontSize(6).font('Helvetica').fillColor('#555')
+        .text('AGENCIA DE RECAUDACIÓN', M + 72, footerBoxY + 27, { width: 150 })
+        .text('Y CONTROL ADUANERO', M + 72, footerBoxY + 34, { width: 150 });
+
+      const totX = M + CW - 200;
+      const labelW = 120;
+      const valW = 70;
+      doc.fontSize(7.5).font('Helvetica').fillColor('#000');
+      const totRows: [string, string][] = [
+        ['Importe Neto Gravado: $', fmtNum(pie.netoGravado)],
+        ['Importe Otros Tributos: $', fmtNum(pie.otrosTributos)],
+        ['IVA: $', fmtNum(pie.iva)],
+        ['Importe Total: $', fmtNum(impTotal)],
+      ];
+
+      let currentY = footerBoxY + 6;
+      totRows.forEach(([label, val]) => {
+        const labelHeight = doc.heightOfString(label, { width: labelW });
+        const valHeight = doc.heightOfString(val, { width: valW });
+        const rowHeight = Math.max(labelHeight, valHeight, 10);
+        doc.text(label, totX, currentY, { width: labelW, align: 'left', lineBreak: true });
+        doc.font('Helvetica-Bold').text(val, totX + labelW, currentY, { width: valW, align: 'right' });
+        doc.font('Helvetica');
+        currentY += rowHeight + 1.5;
+      });
+
+      currentY = Math.max(currentY, footerBoxY + 52);
+
+      if (facturaExt.cae) {
+        doc.fontSize(7.5).font('Helvetica').fillColor('#000')
+          .text(`CAE N°: ${facturaExt.cae}`, totX, currentY, { width: 190 })
+          .text(`Vto CAE: ${fmtDate(facturaExt.caeFechaVto)}`, totX, currentY + 10, { width: 190 });
+      } else {
+        doc.fontSize(7.5).font('Helvetica').fillColor('#999')
+          .text('Pendiente de emisión (sin CAE)', totX, currentY, { width: 190 });
+      }
     }
 
     // Al final de la página: encima del contenido, sin taparlo (opacity).
     if (showTestWatermark) {
       drawHomologacionWatermark(doc);
+    }
+  }
+  /**
+   * Pie de la Factura / NC clase B, copiado del comprobante que emite ARCA (pedido NyM, oct 2026):
+   * recuadro con Subtotal / Otros tributos / Total y, debajo de una línea, la leyenda del Régimen
+   * de Transparencia Fiscal (Ley 27.743) con el IVA contenido; afuera, QR, ARCA, página y CAE.
+   * Los importes van sin separador de miles, como en ARCA.
+   */
+  private drawPieClaseB(
+    doc: PDFKit.PDFDocument,
+    d: {
+      subtotal: number;
+      otrosTributos: number;
+      total: number;
+      ivaContenido: number;
+      qrBuffer: Buffer | null;
+      cae: string | null;
+      caeFechaVto: Date | string | null;
+      lineaColor: string;
+    },
+  ) {
+    const M = MARGIN;
+    const CW = COL_W;
+    const fmtArca = (n: number) => round2(n).toFixed(2).replace('.', ',');
+    const BOX_H = 145;
+    const boxY = PAGE_H - MARGIN - 235;
+
+    doc.lineWidth(1).rect(M, boxY, CW, BOX_H).stroke(d.lineaColor);
+
+    // Totales: etiqueta alineada a la derecha y el importe en su propia columna.
+    const labelRight = M + 453;
+    const valueRight = M + CW - 8;
+    const fila = (label: string, valor: string, top: number, size: number) => {
+      doc.fontSize(size).font('Helvetica-Bold').fillColor('#000');
+      doc.text(label, M, top, { width: labelRight - M, align: 'right' });
+      doc.text(valor, labelRight, top, { width: valueRight - labelRight, align: 'right' });
+    };
+    fila('Subtotal: $', fmtArca(d.subtotal), boxY + 32, 9);
+    fila('Importe Otros Tributos: $', fmtArca(d.otrosTributos), boxY + 48, 9);
+    fila('Importe Total: $', fmtArca(d.total), boxY + 63, 11);
+
+    const divY = boxY + 89;
+    doc.moveTo(M, divY).lineTo(M + CW, divY).stroke(d.lineaColor);
+
+    const leyenda = 'Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)';
+    doc.fontSize(9).font('Helvetica-BoldOblique').fillColor('#000')
+      .text(leyenda, M + 2, divY + 6, { lineBreak: false });
+    const leyendaW = doc.widthOfString(leyenda) + 6;
+    doc.moveTo(M, divY + 18).lineTo(M + leyendaW, divY + 18).stroke(d.lineaColor);
+
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#000');
+    doc.text('IVA Contenido: $', M, divY + 26, { width: 192, align: 'right' });
+    doc.text(fmtArca(d.ivaContenido), M + 192, divY + 26, { width: 72, align: 'right' });
+
+    // Debajo del recuadro: QR, ARCA, página y CAE.
+    const bajoY = boxY + BOX_H;
+    if (d.qrBuffer) {
+      doc.image(d.qrBuffer, M + 10, bajoY + 12, { width: 66, height: 66 });
+    }
+
+    const arcaX = M + 92;
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#333');
+    const arcaW = doc.widthOfString('ARCA');
+    doc.text('ARCA', arcaX, bajoY + 16, { lineBreak: false });
+    doc.fontSize(4.5).font('Helvetica').fillColor('#555')
+      .text('AGENCIA DE RECAUDACIÓN', arcaX, bajoY + 37, { width: arcaW, align: 'center' })
+      .text('Y CONTROL ADUANERO', arcaX, bajoY + 42, { width: arcaW, align: 'center' });
+
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
+      .text('Pág. 1/1', M + 270, bajoY + 14, { lineBreak: false });
+
+    const caeLabelRight = M + 436;
+    if (d.cae) {
+      const caeFila = (label: string, valor: string, top: number) => {
+        doc.fontSize(10.5).font('Helvetica-Bold').fillColor('#000')
+          .text(label, M, top, { width: caeLabelRight - M, align: 'right' });
+        doc.fontSize(10.5).font('Helvetica').fillColor('#000')
+          .text(valor, caeLabelRight + 4, top, { lineBreak: false });
+      };
+      caeFila('CAE N°:', d.cae, bajoY + 14);
+      caeFila('Fecha de Vto. de CAE:', fmtDate(d.caeFechaVto), bajoY + 30);
+
+      doc.fontSize(10).font('Helvetica-BoldOblique').fillColor('#000')
+        .text('Comprobante Autorizado', arcaX, bajoY + 52, { lineBreak: false });
+      doc.fontSize(6).font('Helvetica-BoldOblique').fillColor('#000')
+        .text(
+          'Esta Agencia no se responsabiliza por los datos ingresados en el detalle de la operación',
+          arcaX,
+          bajoY + 72,
+          { lineBreak: false },
+        );
+    } else {
+      doc.fontSize(9).font('Helvetica').fillColor('#999')
+        .text('Pendiente de emisión (sin CAE)', M, bajoY + 14, {
+          width: caeLabelRight - M,
+          align: 'right',
+        });
     }
   }
 }

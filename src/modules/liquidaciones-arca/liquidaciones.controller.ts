@@ -47,6 +47,7 @@ import {
 } from "./dto/concepto-liquidacion.dto";
 import { ConceptosLiquidacionService } from "./conceptos-liquidacion.service";
 import { ReceptorPadronService } from "./receptor-padron.service";
+import { contentDispositionAdjunto } from "../../shared/util/nombre-archivo-comprobante.util";
 
 // ── RUTAS REGULARES (USUARIOS) ──────────────────────────────────────────────
 
@@ -289,7 +290,7 @@ export class LiquidacionesController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -329,7 +330,7 @@ export class LiquidacionesController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -369,7 +370,7 @@ export class LiquidacionesController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -532,7 +533,7 @@ export class LiquidacionesController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -572,7 +573,7 @@ export class LiquidacionesController {
         );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -722,7 +723,7 @@ export class LiquidacionesPlatformController {
       const { buffer, filename } = await this.pdfService.generate(tid, id);
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -756,7 +757,7 @@ export class LiquidacionesPlatformController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -812,7 +813,7 @@ export class LiquidacionesPlatformController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -894,7 +895,7 @@ export class LiquidacionesPlatformController {
       const { buffer, filename } = await this.facturaPdfService.generate(tid, facturaId);
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);

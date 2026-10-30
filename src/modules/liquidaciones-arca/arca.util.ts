@@ -320,6 +320,22 @@ function sumarDiasYmd(ymd: string, dias: number): string {
   return formatFechaCbteUtc(d);
 }
 
+/** Último día del mes de una fecha yyyymmdd. */
+function finDeMesYmd(ymd: string): string {
+  const d = new Date(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)), 0));
+  return formatFechaCbteUtc(d);
+}
+
+/**
+ * Último CbteFch que AFIP admite para Concepto 1: hoy + 5 días, pero sin pasar
+ * al mes siguiente (error 10152: "CbteFch no podrá exceder el mes de la fecha N").
+ */
+function fechaMaximaCbteYmd(hoyYmd: string, diasMax = FACTURA_FECHA_DIAS_ADELANTE): string {
+  const hasta = sumarDiasYmd(hoyYmd, diasMax);
+  const finMes = finDeMesYmd(hoyYmd);
+  return hasta < finMes ? hasta : finMes;
+}
+
 function ymdLegible(ymd: string): string {
   return `${ymd.slice(6, 8)}/${ymd.slice(4, 6)}/${ymd.slice(0, 4)}`;
 }
@@ -346,7 +362,7 @@ export function resolveFechaCbteFactura(
 ): string {
   const fecha = fechaEmisionFacturaYmd(fechaEmision);
   const desde = sumarDiasYmd(hoyYmd, -FACTURA_FECHA_DIAS_ATRAS);
-  const hasta = sumarDiasYmd(hoyYmd, FACTURA_FECHA_DIAS_ADELANTE);
+  const hasta = fechaMaximaCbteYmd(hoyYmd);
   if (fecha < desde || fecha > hasta) {
     throw new BadRequestException(
       `La fecha de emisión ${ymdLegible(fecha)} está fuera del rango que admite ARCA: tiene que estar entre el ${ymdLegible(desde)} y el ${ymdLegible(hasta)}.`,
@@ -386,7 +402,7 @@ export function assertFechaCbteHomologacionEnVentana(fechaYmd: string): void {
   if (fechaCbteDentroDeVentanaAfip(fechaYmd)) return;
   const display = `${fechaYmd.slice(6, 8)}/${fechaYmd.slice(4, 6)}/${fechaYmd.slice(0, 4)}`;
   throw new BadRequestException(
-    `El punto de venta de pruebas está bloqueado porque el último comprobante autorizado tiene fecha ${display} (supera el límite de 5 días desde hoy). El CUIT de homologación de AFIP es compartido; intentá de nuevo más tarde o contactá a soporte.`,
+    `El punto de venta de pruebas está bloqueado porque el último comprobante autorizado tiene fecha ${display} (supera el límite de 5 días desde hoy o cae en el mes siguiente). El CUIT de homologación de AFIP es compartido; intentá de nuevo más tarde o contactá a soporte.`,
   );
 }
 
@@ -398,11 +414,16 @@ export function assertFechaCbteHomologacionEnVentana(fechaYmd: string): void {
  * dejar el último comprobante con fecha futura (ej. un servicio, que admite
  * hasta N+10) — y como el CbteFch nunca puede ser anterior al último, ese PV
  * queda bloqueado hasta que pase esa fecha.
+ * Tampoco admite un CbteFch del mes siguiente (10152): bug real QA (30/10/2026),
+ * la NC B de anulación tomaba la fecha de noviembre del último comprobante del
+ * PV compartido — dentro de los 5 días, pero en otro mes — y AFIP la rechazaba.
  */
-export function fechaCbteDentroDeVentanaAfip(fechaYmd: string, diasMax = 5): boolean {
-  const limite = new Date();
-  limite.setUTCDate(limite.getUTCDate() + diasMax);
-  return fechaYmd <= formatFechaCbteArgentina(limite);
+export function fechaCbteDentroDeVentanaAfip(
+  fechaYmd: string,
+  diasMax = FACTURA_FECHA_DIAS_ADELANTE,
+  hoyYmd: string = formatFechaCbteArgentina(new Date()),
+): boolean {
+  return fechaYmd <= fechaMaximaCbteYmd(hoyYmd, diasMax);
 }
 
 /** Formato estándar PV-número para facturas/comprobantes (ej. 0001-00000045). */

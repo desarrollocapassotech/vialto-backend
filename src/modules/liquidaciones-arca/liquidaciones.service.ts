@@ -42,6 +42,7 @@ import {
   getCbteTipoAnulacionFactura,
   getCbteTipoFactura,
   fechaCbteDentroDeVentanaAfip,
+  formatFechaCbteArgentina,
   formatNumeroComprobante,
   parseNumeroFactura,
   resolveFechaCbteEmision,
@@ -1656,7 +1657,9 @@ export class LiquidacionesService {
           config.keyPem,
         );
         cbteNro = ultimoCbte + 1;
-        fechaNc = formatFechaCbte(new Date());
+        // Día de la anulación en hora de Argentina: el server corre en UTC y
+        // desde las 21 h ya sería mañana (el último día del mes, otro mes → 10152).
+        fechaNc = formatFechaCbteArgentina(new Date());
       }
 
       const docNroReal = facturaRaw.cliente.idFiscal

@@ -1,5 +1,5 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsDateString, IsInt, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export class ConfirmarAnulacionManualDto {
   /** Motivo de anulación (texto libre obligatorio). */
@@ -14,4 +14,21 @@ export class ConfirmarAnulacionManualDto {
   @IsString()
   @MinLength(1, { message: 'El comprobante de anulación es obligatorio.' })
   comprobanteUrl: string;
+
+  /**
+   * Comprobante pre-impreso (CVLP 060 con importes en negativo) para el Libro IVA Compras:
+   * punto de venta, número y fecha. Se guardan en `anulacionPtoVenta/CbteNro/Fecha`.
+   */
+  @IsInt({ message: 'Indicá el punto de venta del comprobante de anulación.' })
+  @Min(1, { message: 'Indicá el punto de venta del comprobante de anulación.' })
+  @Type(() => Number)
+  ptoVenta: number;
+
+  @IsInt({ message: 'Indicá el número del comprobante de anulación.' })
+  @Min(1, { message: 'Indicá el número del comprobante de anulación.' })
+  @Type(() => Number)
+  cbteNro: number;
+
+  @IsDateString({}, { message: 'Indicá la fecha del comprobante de anulación.' })
+  fecha: string;
 }

@@ -148,6 +148,37 @@ test('TXT: excluye comprobantes incompletos y codifica en Latin-1', () => {
   assert.equal(contenido.toString('latin1').includes('Ñandú'), true);
 });
 
+test('TXT compras: anulación de CVLP con 060 en negativo va con signo', () => {
+  const c = comprobante({
+    cbteTipo: 60,
+    origenTipo: 'liquidacion',
+    anulacion: true,
+    negativoEnTxt: true,
+    comision: 200,
+    ivaComision: 42,
+  });
+  const txt = generarTxtLibroIva({
+    tipo: 'compras',
+    desde: '2026-10-01',
+    hasta: '2026-10-31',
+    esPrueba: false,
+    informante,
+    comprobantes: [c],
+  });
+  assert.equal(txt.excluidos.length, 0);
+  const cbte = Buffer.from(txt.archivos[0].contenidoBase64, 'base64').toString('latin1');
+  const alic = Buffer.from(txt.archivos[1].contenidoBase64, 'base64').toString('latin1');
+  assert.equal(cbte.length, 325 + 2);
+  assert.equal(cbte.slice(104, 119), campoImporte(-c.total));
+  assert.equal(cbte.slice(239, 254), campoImporte(-210)); // crédito fiscal computable
+  assert.equal(cbte.slice(310, 325), campoImporte(-42)); // IVA comisión
+  assert.equal(alic.length, 84 + 2);
+  assert.equal(alic.slice(50, 65), campoImporte(-1000)); // neto gravado
+  // La NC/ND de ARCA sigue en positivo.
+  const nc = lineaComprasCbte(comprobante({ cbteTipo: 3, anulacion: true }), informante);
+  assert.equal(nc.slice(104, 119), campoImporte(c.total));
+});
+
 test('agrupa alícuotas por % y descarta vacías', () => {
   assert.deepEqual(
     agruparAlicuotas([

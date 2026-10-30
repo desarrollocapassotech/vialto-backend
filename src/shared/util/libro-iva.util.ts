@@ -7,7 +7,8 @@ import { BadRequestException } from '@nestjs/common';
  *
  * Reglas del diseño oficial que se aplican acá:
  * - Importes en positivo, 13 enteros + 2 decimales sin punto (una nota de crédito se informa
- *   con su tipo, no con signo). El signo negativo solo existe en el Excel para conciliar.
+ *   con su tipo, no con signo). El signo negativo existe en el Excel para conciliar y, en el
+ *   TXT, solo en la anulación de un CVLP con un 060 en negativo (`negativoEnTxt`).
  * - Numéricos con ceros a la izquierda, alfanuméricos con blancos a la derecha.
  * - Archivo ANSI (Windows-1252 / ISO 8859-1), mismo orden en cabecera y alícuotas.
  * - Compras B o C: 0 alícuotas y ningún registro de alícuotas.
@@ -52,6 +53,11 @@ export interface LibroIvaComprobante {
   origen: 'arca' | 'manual';
   /** Nota de crédito/débito que anula otro comprobante: en el Excel va en negativo. */
   anulacion: boolean;
+  /**
+   * Anulación con el mismo tipo que el original y los importes en negativo (CVLP 060 anulado
+   * con un pre-impreso, criterio de ARCA para NyM): en el TXT también va con signo.
+   */
+  negativoEnTxt?: boolean;
   /** Emitido en homologación (sin validez fiscal): solo con la config ARCA en homologación. */
   prueba: boolean;
   /** Solo compras (CVLP 060): comisión e IVA de la comisión. */
@@ -552,6 +558,21 @@ export function lineasComprasAlicuotas(c: LibroIvaComprobante): string[] {
   );
 }
 
+/** Mismo comprobante con todos los importes en negativo (para `negativoEnTxt`). */
+function conImportesNegativos(c: LibroIvaComprobante): LibroIvaComprobante {
+  const neg = (n: number) => -Math.abs(n);
+  return {
+    ...c,
+    alicuotas: c.alicuotas.map((a) => ({ ...a, neto: neg(a.neto), iva: neg(a.iva) })),
+    noGravado: neg(c.noGravado),
+    exento: neg(c.exento),
+    otrosTributos: neg(c.otrosTributos),
+    total: neg(c.total),
+    comision: c.comision != null ? neg(c.comision) : null,
+    ivaComision: c.ivaComision != null ? neg(c.ivaComision) : null,
+  };
+}
+
 function describir(c: LibroIvaComprobante): string {
   return `${labelTipoComprobante(c.cbteTipo)} ${c.numeroTexto || '(sin número)'} — ${c.contraparte}`;
 }
@@ -561,7 +582,8 @@ export function generarTxtLibroIva(resultado: LibroIvaResultado): LibroIvaTxt {
   const cbte: string[] = [];
   const alic: string[] = [];
   const excluidos: LibroIvaTxt['excluidos'] = [];
-  for (const c of resultado.comprobantes) {
+  for (const original of resultado.comprobantes) {
+    const c = original.negativoEnTxt ? conImportesNegativos(original) : original;
     const motivo = motivoNoTxt(c);
     if (motivo) {
       excluidos.push({ comprobante: describir(c), motivo });

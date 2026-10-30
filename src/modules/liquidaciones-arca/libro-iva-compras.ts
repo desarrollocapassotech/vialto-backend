@@ -9,6 +9,7 @@ import {
   fechaConMargen,
   logAutorizadoPorCae,
   monedaAfip,
+  numeroAfipTexto,
   round2,
   ymdDeFecha,
   type LibroIvaAlicuota,
@@ -21,7 +22,8 @@ import { parsearNumeroComprobante } from '../../shared/util/comprobante-manual.u
  * Libro IVA Compras: liquidaciones del período. Ver `shared/util/libro-iva.util.ts`.
  * - CVLP (060) emitido en ARCA (producción): completo, con los montos que autorizó AFIP
  *   (`ArcaLog` por CAE), la comisión y su IVA. Su NC/ND de anulación va aparte, por la fecha
- *   de la nota. Una anulación manual (comprobante pre-impreso) no se incluye: queda el aviso.
+ *   de la nota. La anulación manual (pre-impreso: el mismo 060 en negativo) va como anulación
+ *   por su fecha, con los montos del original en negativo (también en el TXT).
  * - Liquidación manual (monotributista) o de empresa sin ARCA: la factura del transportista
  *   (`proveedorCbte*`, o interpretando `numeroComprobanteProveedor`), por la fecha de esa factura.
  * - Liquidaciones con ARCA sin emitir y comprobantes de homologación quedan afuera.
@@ -55,6 +57,7 @@ export async function libroIvaCompras(
       OR: [
         { createdAt: { gte: fechaConMargen(desde, -120), lte: fechaConMargen(hasta, 7) } },
         { anulacionFecha: { gte: fechaConMargen(desde, -2), lte: fechaConMargen(hasta, 2) } },
+        { anuladoAt: { gte: fechaConMargen(desde, -2), lte: fechaConMargen(hasta, 2) } },
         { proveedorCbteFecha: { gte: fechaConMargen(desde, 0), lte: fechaConMargen(hasta, 0) } },
       ],
     },
@@ -78,6 +81,7 @@ export async function libroIvaCompras(
       anulacionCae: true,
       anulacionFecha: true,
       anulacionMetodo: true,
+      anuladoAt: true,
       numeroComprobanteProveedor: true,
       proveedorCbteTipo: true,
       proveedorPtoVenta: true,
@@ -129,11 +133,7 @@ export async function libroIvaCompras(
         moneda,
       });
       const observaciones = [...(prueba ? [AVISO_PRUEBA] : []), ...datos.observaciones];
-      if (l.estado === 'anulado' && l.anulacionMetodo === 'manual') {
-        observaciones.push(
-          'Anulada manualmente con comprobante pre-impreso: la anulación no está en el sistema y no se incluye.',
-        );
-      } else if (l.estado === 'pendiente_anulacion') {
+      if (l.estado === 'pendiente_anulacion') {
         observaciones.push('Pendiente de anulación manual.');
       }
       const fila: LibroIvaComprobante = {
@@ -184,6 +184,32 @@ export async function libroIvaCompras(
           incompleto: null,
         };
         if (enRango(filaNc.fecha, desde, hasta)) comprobantes.push(filaNc);
+      } else if (l.estado === 'anulado' && l.anulacionMetodo === 'manual') {
+        // Pre-impreso: el mismo 060 con todos los importes en negativo (así lo indicó ARCA a
+        // NyM). Mismos montos que el original; en el TXT también con signo.
+        const fecha = ymdDeFecha(l.anulacionFecha) ?? ymdDeFecha(l.anuladoAt) ?? fila.fecha;
+        const filaAnulacion: LibroIvaComprobante = {
+          ...fila,
+          fecha,
+          cbteTipo: l.anulacionCbteTipo ?? fila.cbteTipo,
+          ptoVenta: l.anulacionPtoVenta,
+          cbteNro: l.anulacionCbteNro,
+          numeroTexto: numeroAfipTexto(l.anulacionPtoVenta, l.anulacionCbteNro),
+          cae: null,
+          origen: 'manual',
+          anulacion: true,
+          negativoEnTxt: true,
+          observaciones: [
+            ...(prueba ? [AVISO_PRUEBA] : []),
+            `Anulación manual con comprobante pre-impreso del Líquido Producto ${fila.numeroTexto}.`,
+            ...(l.anulacionFecha ? [] : ['Sin fecha del pre-impreso: se usa la fecha de la anulación en el sistema.']),
+          ],
+          incompleto:
+            l.anulacionPtoVenta == null || l.anulacionCbteNro == null
+              ? 'Falta el punto de venta y número del comprobante pre-impreso de anulación.'
+              : null,
+        };
+        if (enRango(filaAnulacion.fecha, desde, hasta)) comprobantes.push(filaAnulacion);
       }
       continue;
     }

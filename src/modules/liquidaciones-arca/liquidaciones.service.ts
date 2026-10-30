@@ -1476,6 +1476,11 @@ export class LiquidacionesService {
         estado: 'anulado',
         anulacionMetodo: 'manual',
         anulacionManualComprobanteUrl: comprobanteUrl,
+        // El pre-impreso es el mismo tipo que el original (060 en negativo): va al Libro IVA.
+        anulacionCbteTipo: liquidacion.cbteTipo,
+        anulacionPtoVenta: dto.ptoVenta,
+        anulacionCbteNro: dto.cbteNro,
+        anulacionFecha: fechaCalendarioAr(dto.fecha),
         motivoAnulacion: motivo,
         anuladoPor: userId,
         anuladoAt,

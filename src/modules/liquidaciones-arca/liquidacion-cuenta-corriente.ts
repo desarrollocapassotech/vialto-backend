@@ -66,8 +66,9 @@ export function conceptoCargoLiquidacion(liq: Pick<LiquidacionCc, "cbteNro">): s
 function conceptoAnulacionLiquidacion(
   liq: Pick<LiquidacionCc, "anulacionCbteNro" | "anulacionCbteTipo" | "anulacionMetodo">,
 ): string {
-  if (liq.anulacionCbteNro) return conceptoAnulacion(liq.anulacionCbteTipo);
+  // La manual también guarda número (el del pre-impreso), pero no es una NC/ND.
   if (liq.anulacionMetodo === "manual") return "ANULACION MANUAL";
+  if (liq.anulacionCbteNro) return conceptoAnulacion(liq.anulacionCbteTipo);
   return conceptoAnulacion();
 }
 

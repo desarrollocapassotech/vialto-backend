@@ -13,14 +13,15 @@ type Tx = Prisma.TransactionClient;
  * de emisión. Excepción: si tiene `numero` cargado es un comprobante MANUAL (ej. cargado
  * antes de que el tenant activara ARCA) → cuenta como facturado. Con ARCA el número no
  * se carga a mano: lo asigna AFIP al autorizar (y para entonces `arcaEstado` ya no es null).
+ * Una factura `manual` (hecha por fuera del sistema) se trata como en una empresa sin ARCA.
  */
 export function mapFacturacionEstado(
-  factura: { arcaEstado: string | null; numero?: string | null } | null,
+  factura: { arcaEstado: string | null; numero?: string | null; manual?: boolean | null } | null,
   cobrado: boolean,
   tieneArca: boolean,
 ): ViajeFacturacionEstado {
   if (!factura) return 'sin_facturar';
-  if (tieneArca) {
+  if (tieneArca && !factura.manual) {
     if (factura.arcaEstado === 'pendiente_cae') return 'esperando_afip';
     if (factura.arcaEstado === 'error') return 'error_afip';
     if (factura.arcaEstado === 'anulado') return 'anulado';
@@ -35,15 +36,17 @@ export function mapFacturacionEstado(
  * `pendiente_cae`/`autorizado`/`error` — queda en `borrador` para siempre, ver
  * `CrearLiquidacionManualModal` con `hasArca=false`), así que un `borrador` ahí
  * significa "ya se cargó", no "esperando AFIP". Tenant con ARCA: se usa el ciclo de
- * vida completo del comprobante.
+ * vida completo del comprobante. Excepción: una liquidación `manual` (monotributista en
+ * empresa con ARCA) no se emite, así que se trata igual que en una empresa sin ARCA.
  */
 export function mapLiquidacionEstado(
   estado: string | null,
   tieneArca: boolean,
+  manual = false,
 ): ViajeLiquidacionEstado {
   if (estado == null) return 'sin_liquidar';
   if (estado === 'anulado') return 'anulado';
-  if (!tieneArca) return 'liquidado';
+  if (!tieneArca || manual) return 'liquidado';
   if (estado === 'borrador') return 'borrador';
   if (estado === 'pendiente_cae') return 'esperando_afip';
   // pendiente_anulacion (método manual, ver Tenant.liquidacionAnulacionMetodo): la
@@ -73,14 +76,14 @@ export async function syncFacturacionEstadoViaje(
       etapa: true,
       facturacionEstado: true,
       facturaId: true,
-      factura: { select: { arcaEstado: true, numero: true } },
+      factura: { select: { arcaEstado: true, numero: true, manual: true } },
       tenant: { select: { modules: true } },
       clientesViaje: {
         select: {
           id: true,
           facturaId: true,
           facturacionEstado: true,
-          factura: { select: { arcaEstado: true, numero: true } },
+          factura: { select: { arcaEstado: true, numero: true, manual: true } },
         },
       },
     },
@@ -151,7 +154,7 @@ export async function syncLiquidacionEstadoViaje(
       transportistaId: true,
       liquidacionEstado: true,
       liquidacionesViaje: {
-        select: { liquidacion: { select: { estado: true, updatedAt: true } } },
+        select: { liquidacion: { select: { estado: true, manual: true, updatedAt: true } } },
       },
       tenant: { select: { modules: true } },
     },
@@ -176,7 +179,7 @@ export async function syncLiquidacionEstadoViaje(
     .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
 
   const elegida = activa ?? masReciente;
-  const next = mapLiquidacionEstado(elegida?.estado ?? null, tieneArca);
+  const next = mapLiquidacionEstado(elegida?.estado ?? null, tieneArca, elegida?.manual);
   if (next !== viaje.liquidacionEstado) {
     await tx.viaje.update({ where: { id: viajeId }, data: { liquidacionEstado: next } });
   }

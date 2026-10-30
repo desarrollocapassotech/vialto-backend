@@ -75,6 +75,7 @@ import { AnularLiquidacionDto } from "../../modules/liquidaciones-arca/dto/anula
 import { PaginationQueryDto } from "shared/dto/pagination-query.dto";
 import { GetFieldConfigDto } from "../tenant-field-config/dto/get-field-config.dto";
 import { ToggleFieldConfigDto } from "../tenant-field-config/dto/toggle-field-config.dto";
+import { contentDispositionAdjunto } from "../../shared/util/nombre-archivo-comprobante.util";
 
 /**
  * Datos por tenant (query `tenantId` = clerkOrgId) — solo superadmin.
@@ -1321,7 +1322,7 @@ export class PlatformController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -1357,7 +1358,7 @@ export class PlatformController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -1391,7 +1392,7 @@ export class PlatformController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);
@@ -1459,7 +1460,7 @@ export class PlatformController {
       );
       res.set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": contentDispositionAdjunto(filename),
         "Content-Length": String(buffer.length),
       });
       res.end(buffer);

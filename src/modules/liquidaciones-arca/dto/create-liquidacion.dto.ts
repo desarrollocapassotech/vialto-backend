@@ -2,6 +2,7 @@ import {
   IsString,
   IsArray,
   IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   ArrayMinSize,
@@ -133,4 +134,14 @@ export class CreateLiquidacionDto {
   @IsString()
   @MaxLength(64)
   numeroComprobanteProveedor?: string;
+
+  /**
+   * Liquidación manual (transportista monotributista en empresa con ARCA): factura del
+   * transportista por separado para el Libro IVA — tipo AFIP (11=C…), punto de venta, número y
+   * fecha, obligatorios. Con tipo + punto de venta + número se arma `numeroComprobanteProveedor`.
+   */
+  @IsOptional() @IsInt() @Type(() => Number) proveedorCbteTipo?: number;
+  @IsOptional() @IsInt() @Type(() => Number) proveedorPtoVenta?: number;
+  @IsOptional() @IsInt() @Type(() => Number) proveedorCbteNro?: number;
+  @IsOptional() @IsDateString() proveedorCbteFecha?: string;
 }

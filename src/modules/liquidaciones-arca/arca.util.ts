@@ -85,11 +85,36 @@ export const CBTE_TIPO_NC_CVLP = 65;
 export type TipoAnulacionCvlp = 'nota_credito' | 'nota_debito';
 
 /**
+ * Condiciones IVA del receptor que AFIP acepta en comprobantes clase A
+ * (FEParamGetCondicionIvaReceptor, ClaseCmp 'A'): RI, Monotributo, Monotributista
+ * Social y Monotributo Trabajador Independiente Promovido. Un monotributista recibe
+ * clase A: con clase B AFIP rechaza con 10243 (verificado en homologación, oct 2026).
+ */
+const CONDICIONES_IVA_CLASE_A = new Set([1, 6, 13, 16]);
+
+export function esCondicionIvaClaseA(condicionIva?: number | null): boolean {
+  return condicionIva != null && CONDICIONES_IVA_CLASE_A.has(condicionIva);
+}
+
+/** Monotributo, Monotributista Social y Monotributo Trabajador Independiente Promovido. */
+const CONDICIONES_IVA_MONOTRIBUTO = new Set([6, 13, 16]);
+
+/**
+ * Transportista monotributista: no se le emite Líquido Producto. Factura él mismo y la
+ * liquidación queda manual (`Liquidacion.manual`), con su factura adjunta — pedido de NyM,
+ * oct 2026. Espejo en el front: `esCondicionIvaMonotributo` de `lib/arcaCbteTipo.ts`.
+ */
+export function esCondicionIvaMonotributo(condicionIva?: number | null): boolean {
+  return condicionIva != null && CONDICIONES_IVA_MONOTRIBUTO.has(condicionIva);
+}
+
+/**
  * Tipo de comprobante para anular un CVLP autorizado.
  * AFIP no acepta el 065 ni importes negativos por web service, así que el CVLP se
  * anula con un comprobante ESTÁNDAR asociado (CbtesAsoc) al 060/061 original.
  * El comprobante (Nota de Crédito o Nota de Débito) es configurable por tenant;
- * la clase A/B se deriva de la condición frente al IVA del transportista.
+ * la clase A/B es la del CVLP original (060 → A, 061 → B) y, si no se conoce, la
+ * de la condición frente al IVA del transportista (`esCondicionIvaClaseA`).
  * Verificado contra AFIP (homologación): los 4 tipos son aceptados y devuelven CAE.
  *   - Nota de Crédito:  clase A → tipo 3,  clase B → tipo 8.
  *   - Nota de Débito:   clase A → tipo 2,  clase B → tipo 7.
@@ -97,13 +122,18 @@ export type TipoAnulacionCvlp = 'nota_credito' | 'nota_debito';
 export function getCbteTipoAnulacionCvlp(
   condicionIva?: number | null,
   tipoAnulacion: TipoAnulacionCvlp = 'nota_credito',
+  cbteTipoOriginal?: number | null,
 ): number {
-  if (condicionIva == null) {
+  let claseA: boolean;
+  if (cbteTipoOriginal === 60 || cbteTipoOriginal === 61) {
+    claseA = cbteTipoOriginal === 60;
+  } else if (condicionIva == null) {
     throw new BadRequestException(
       'El transportista no tiene configurada su condición frente al IVA.',
     );
+  } else {
+    claseA = esCondicionIvaClaseA(condicionIva);
   }
-  const claseA = condicionIva === 1;
   if (tipoAnulacion === 'nota_debito') {
     return claseA ? 2 : 7; // Nota de Débito A / B
   }
@@ -290,6 +320,22 @@ function sumarDiasYmd(ymd: string, dias: number): string {
   return formatFechaCbteUtc(d);
 }
 
+/** Último día del mes de una fecha yyyymmdd. */
+function finDeMesYmd(ymd: string): string {
+  const d = new Date(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)), 0));
+  return formatFechaCbteUtc(d);
+}
+
+/**
+ * Último CbteFch que AFIP admite para Concepto 1: hoy + 5 días, pero sin pasar
+ * al mes siguiente (error 10152: "CbteFch no podrá exceder el mes de la fecha N").
+ */
+function fechaMaximaCbteYmd(hoyYmd: string, diasMax = FACTURA_FECHA_DIAS_ADELANTE): string {
+  const hasta = sumarDiasYmd(hoyYmd, diasMax);
+  const finMes = finDeMesYmd(hoyYmd);
+  return hasta < finMes ? hasta : finMes;
+}
+
 function ymdLegible(ymd: string): string {
   return `${ymd.slice(6, 8)}/${ymd.slice(4, 6)}/${ymd.slice(0, 4)}`;
 }
@@ -316,7 +362,7 @@ export function resolveFechaCbteFactura(
 ): string {
   const fecha = fechaEmisionFacturaYmd(fechaEmision);
   const desde = sumarDiasYmd(hoyYmd, -FACTURA_FECHA_DIAS_ATRAS);
-  const hasta = sumarDiasYmd(hoyYmd, FACTURA_FECHA_DIAS_ADELANTE);
+  const hasta = fechaMaximaCbteYmd(hoyYmd);
   if (fecha < desde || fecha > hasta) {
     throw new BadRequestException(
       `La fecha de emisión ${ymdLegible(fecha)} está fuera del rango que admite ARCA: tiene que estar entre el ${ymdLegible(desde)} y el ${ymdLegible(hasta)}.`,
@@ -356,7 +402,7 @@ export function assertFechaCbteHomologacionEnVentana(fechaYmd: string): void {
   if (fechaCbteDentroDeVentanaAfip(fechaYmd)) return;
   const display = `${fechaYmd.slice(6, 8)}/${fechaYmd.slice(4, 6)}/${fechaYmd.slice(0, 4)}`;
   throw new BadRequestException(
-    `El punto de venta de pruebas está bloqueado porque el último comprobante autorizado tiene fecha ${display} (supera el límite de 5 días desde hoy). El CUIT de homologación de AFIP es compartido; intentá de nuevo más tarde o contactá a soporte.`,
+    `El punto de venta de pruebas está bloqueado porque el último comprobante autorizado tiene fecha ${display} (supera el límite de 5 días desde hoy o cae en el mes siguiente). El CUIT de homologación de AFIP es compartido; intentá de nuevo más tarde o contactá a soporte.`,
   );
 }
 
@@ -368,11 +414,16 @@ export function assertFechaCbteHomologacionEnVentana(fechaYmd: string): void {
  * dejar el último comprobante con fecha futura (ej. un servicio, que admite
  * hasta N+10) — y como el CbteFch nunca puede ser anterior al último, ese PV
  * queda bloqueado hasta que pase esa fecha.
+ * Tampoco admite un CbteFch del mes siguiente (10152): bug real QA (30/10/2026),
+ * la NC B de anulación tomaba la fecha de noviembre del último comprobante del
+ * PV compartido — dentro de los 5 días, pero en otro mes — y AFIP la rechazaba.
  */
-export function fechaCbteDentroDeVentanaAfip(fechaYmd: string, diasMax = 5): boolean {
-  const limite = new Date();
-  limite.setUTCDate(limite.getUTCDate() + diasMax);
-  return fechaYmd <= formatFechaCbteArgentina(limite);
+export function fechaCbteDentroDeVentanaAfip(
+  fechaYmd: string,
+  diasMax = FACTURA_FECHA_DIAS_ADELANTE,
+  hoyYmd: string = formatFechaCbteArgentina(new Date()),
+): boolean {
+  return fechaYmd <= fechaMaximaCbteYmd(hoyYmd, diasMax);
 }
 
 /** Formato estándar PV-número para facturas/comprobantes (ej. 0001-00000045). */

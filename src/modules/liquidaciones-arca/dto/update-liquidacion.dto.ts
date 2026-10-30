@@ -2,6 +2,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -79,4 +80,10 @@ export class UpdateLiquidacionDto {
   @IsString()
   @MaxLength(64)
   numeroComprobanteProveedor?: string | null;
+
+  /** Ver `CreateLiquidacionDto.proveedorCbteTipo` (solo liquidaciones manuales). */
+  @IsOptional() @IsInt() @Type(() => Number) proveedorCbteTipo?: number;
+  @IsOptional() @IsInt() @Type(() => Number) proveedorPtoVenta?: number;
+  @IsOptional() @IsInt() @Type(() => Number) proveedorCbteNro?: number;
+  @IsOptional() @IsDateString() proveedorCbteFecha?: string;
 }

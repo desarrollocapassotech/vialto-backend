@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -25,6 +26,18 @@ export class CreateFacturaDto {
   @IsOptional() @IsNumber() @Type(() => Number) diferencia?: number;
   @IsOptional() @IsNumber() @Type(() => Number) ivaPct?: number;
   @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
+  /**
+   * Empresa con ARCA: factura hecha por fuera del sistema (no se emite; número obligatorio
+   * y comprobante adjunto). En un borrador, pasarla a true la convierte; no se puede volver atrás.
+   */
+  @IsOptional() @IsBoolean() manual?: boolean;
+  /**
+   * Factura manual: tipo AFIP (1=A, 6=B…), punto de venta y número, obligatorios. Con estos se
+   * arma `numero` (se ignora el que venga). Ver `resolverComprobanteManual`.
+   */
+  @IsOptional() @IsInt() @Type(() => Number) manualCbteTipo?: number;
+  @IsOptional() @IsInt() @Type(() => Number) manualPtoVenta?: number;
+  @IsOptional() @IsInt() @Type(() => Number) manualCbteNro?: number;
   /** Si true, el importe se arma con tramos (+ viajes no divididos). */
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()

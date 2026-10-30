@@ -20,6 +20,10 @@ import { pdfColoresComprobante } from "./pdf-color-comprobante";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
 import { normalizeUnidadCantidad } from "./cantidad-unidad.util";
 import { ymdAr } from "../../shared/util/fecha-ar.util";
+import {
+  nombreArchivoComprobante,
+  tipoComprobanteLegible,
+} from "../../shared/util/nombre-archivo-comprobante.util";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PrismaAny = any;
@@ -91,6 +95,7 @@ type ViajeDetalleCvlp = {
   origen?: string | null;
   destino?: string | null;
   chofer?: { nombre?: string | null } | null;
+  observaciones?: string | null;
   productosViaje?: Array<{ producto?: { nombre?: string | null } | null }>;
 };
 
@@ -119,9 +124,12 @@ function detalleViajeCvlp(v: ViajeDetalleCvlp, tenant: TenantPdfConfig): string 
     .map((p) => p.producto?.nombre?.trim())
     .filter(Boolean)
     .join(", ");
-  return [v.chofer?.nombre?.trim(), refViajeCvlp(v, tenant), ruta, productos]
+  const detalle = [v.chofer?.nombre?.trim(), refViajeCvlp(v, tenant), ruta, productos]
     .filter(Boolean)
     .join(" — ");
+  // Observaciones del viaje en un renglón aparte, debajo del detalle (pedido NyM, oct 2026).
+  const obs = v.observaciones?.trim();
+  return obs ? `${detalle}\nObs.: ${obs}` : detalle;
 }
 
 // ── Helpers numéricos ─────────────────────────────────────────────────────────
@@ -245,22 +253,6 @@ function numeroALetras(n: number): string {
   return `${letras} CON ${centavosStr} CENTAVO(S)`;
 }
 
-/** Nombre de archivo legible: quita acentos y caracteres no válidos para un filesystem. */
-function slugify(text: string): string {
-  const withoutDiacritics = text
-    .normalize("NFD")
-    .split("")
-    .filter((ch) => {
-      const code = ch.codePointAt(0) ?? 0;
-      return code < 0x0300 || code > 0x036f;
-    })
-    .join("");
-  const clean = withoutDiacritics
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return clean.slice(0, 60) || "liquidacion";
-}
-
 // ── PDF builder ───────────────────────────────────────────────────────────────
 
 const PAGE_W = 595.28;
@@ -335,6 +327,7 @@ export class LiquidacionPdfService {
                   },
                 },
                 chofer: { select: { nombre: true } },
+                observaciones: true,
                 numeroIdentificacionPersonalizado: true,
                 idPropio2: true,
                 productosViaje: {
@@ -588,28 +581,13 @@ export class LiquidacionPdfService {
       tenantIdPropio2,
     );
 
-    const cbteNroStr = drawOpts.cbteNro
-      ? `${String(drawOpts.ptoVenta).padStart(4, "0")}-${String(drawOpts.cbteNro).padStart(8, "0")}`
-      : liquidacionId.slice(0, 8);
-    const transportistaSlug = slugify(liq.transportista?.nombre ?? "");
-    const anulPrefix = (() => {
-      switch (drawOpts.cbteTipo) {
-        case 3:
-          return "NC_A";
-        case 8:
-          return "NC_B";
-        case 2:
-          return "ND_A";
-        case 7:
-          return "ND_B";
-        default:
-          return `Comp${String(drawOpts.cbteTipo).padStart(3, "0")}`;
-      }
-    })();
-    const filename =
-      kind === "nc"
-        ? `${anulPrefix}_${cbteNroStr}_${transportistaSlug}.pdf`
-        : `CVLP_${cbteNroStr}_${transportistaSlug}.pdf`;
+    // Con NC/ND (`kind === "nc"`) `drawOpts.cbteTipo` ya es el de la anulación (2/3/7/8).
+    const filename = nombreArchivoComprobante(
+      tipoComprobanteLegible(drawOpts.cbteTipo),
+      drawOpts.ptoVenta,
+      drawOpts.cbteNro,
+      liquidacionId.slice(0, 8),
+    );
 
     return { buffer, filename };
   }

@@ -11,6 +11,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
+import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
+import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
+import { generarTxtLibroIva, validarRangoLibroIva } from '../../shared/util/libro-iva.util';
+import { libroIvaCompras } from './libro-iva-compras';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
 import { ArcaException, ARCA_ERROR_CODES } from './types/arca.types';
@@ -32,11 +36,13 @@ import { EmitirFacturaArcaDto } from './dto/emitir-factura-arca.dto';
 import {
   assertFechaCbteHomologacionEnVentana,
   assertCondicionFiscalTransportista,
+  esCondicionIvaMonotributo,
   getCbteTipoCvlp,
   getCbteTipoAnulacionCvlp,
   getCbteTipoAnulacionFactura,
   getCbteTipoFactura,
   fechaCbteDentroDeVentanaAfip,
+  formatFechaCbteArgentina,
   formatNumeroComprobante,
   parseNumeroFactura,
   resolveFechaCbteEmision,
@@ -305,7 +311,22 @@ export class LiquidacionesService {
       tenantId,
       'emision-liquido-producto-arca',
     );
-    if (tieneLiquidoProductoArca && moneda === 'USD') {
+    // Monotributista en empresa con ARCA: liquidación manual, no se emite Líquido Producto.
+    const manual =
+      tieneLiquidoProductoArca && esCondicionIvaMonotributo(transportista.condicionIva);
+    // Factura del transportista por separado (Libro IVA): obligatoria en la liquidación manual.
+    const cbteProveedor = manual
+      ? resolverComprobanteManual({
+          cbteTipo: dto.proveedorCbteTipo,
+          ptoVenta: dto.proveedorPtoVenta,
+          cbteNro: dto.proveedorCbteNro,
+          numero: dto.numeroComprobanteProveedor,
+        })
+      : null;
+    if (manual && !dto.proveedorCbteFecha) {
+      throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+    }
+    if (tieneLiquidoProductoArca && !manual && moneda === 'USD') {
       throw new BadRequestException(
         'Las liquidaciones emitidas con ARCA (Líquido Producto) deben ser en ARS.',
       );
@@ -409,11 +430,20 @@ export class LiquidacionesService {
           gastosAdminIva,
           liquido,
           estado: 'borrador',
+          manual,
           cbteTipo: getCbteTipoCvlp(transportista.condicionIva, transportista.pais),
           ptoVenta: config?.ptoVentaCvlp ?? 0,
           comprobanteUrl: dto.comprobanteUrl ?? null,
           proveedorContrato: dto.proveedorContrato?.trim() || null,
-          numeroComprobanteProveedor: dto.numeroComprobanteProveedor?.trim() || null,
+          numeroComprobanteProveedor:
+            cbteProveedor?.numero ?? (dto.numeroComprobanteProveedor?.trim() || null),
+          proveedorCbteTipo: cbteProveedor?.cbteTipo ?? null,
+          proveedorPtoVenta: cbteProveedor?.ptoVenta ?? null,
+          proveedorCbteNro: cbteProveedor?.cbteNro ?? null,
+          proveedorCbteFecha:
+            cbteProveedor && dto.proveedorCbteFecha
+              ? fechaCalendarioAr(dto.proveedorCbteFecha)
+              : null,
           createdBy: userId,
           updatedAt: new Date(),
           viajes: {
@@ -731,9 +761,56 @@ export class LiquidacionesService {
       }
     }
 
+    // Borrador viejo de un monotributista (anterior a `manual`): al guardarlo pasa a manual,
+    // así no queda trabado sin poder emitirse.
+    let pasaAManual = false;
+    if (liq.estado === 'borrador' && !liq.manual) {
+      const t = await this.prisma.transportista.findFirst({
+        where: { id: liq.transportistaId, tenantId },
+        select: { condicionIva: true },
+      });
+      pasaAManual =
+        esCondicionIvaMonotributo(t?.condicionIva) &&
+        (await this.tieneModulo(tenantId, 'emision-liquido-producto-arca'));
+      if (pasaAManual) data.manual = true;
+    }
+
+    // Liquidación manual: la factura del transportista va por separado (Libro IVA) y es
+    // obligatoria; no se puede borrar. Si solo llega el texto ("Adjuntar comprobante"), se
+    // interpreta. La fecha se conserva si no viene. Un borrador viejo que recién pasa a manual
+    // no la exige en este guardado (la edición todavía no muestra esos campos).
+    const tocaCbteProveedor =
+      dto.numeroComprobanteProveedor !== undefined ||
+      dto.proveedorCbteTipo !== undefined ||
+      dto.proveedorPtoVenta !== undefined ||
+      dto.proveedorCbteNro !== undefined ||
+      dto.proveedorCbteFecha !== undefined;
+    if ((liq.manual || pasaAManual) && tocaCbteProveedor) {
+      const cbte = resolverComprobanteManual({
+        cbteTipo: dto.proveedorCbteTipo,
+        ptoVenta: dto.proveedorPtoVenta,
+        cbteNro: dto.proveedorCbteNro,
+        numero:
+          dto.numeroComprobanteProveedor === undefined
+            ? liq.numeroComprobanteProveedor
+            : dto.numeroComprobanteProveedor,
+      });
+      const fecha = dto.proveedorCbteFecha ?? liq.proveedorCbteFecha?.toISOString();
+      if (!fecha) {
+        throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+      }
+      Object.assign(data, {
+        numeroComprobanteProveedor: cbte.numero,
+        proveedorCbteTipo: cbte.cbteTipo,
+        proveedorPtoVenta: cbte.ptoVenta,
+        proveedorCbteNro: cbte.cbteNro,
+        proveedorCbteFecha: fechaCalendarioAr(fecha),
+      });
+    }
+
     await this.prisma.liquidacion.update({ where: { id }, data });
 
-    if (dto.viajeIds !== undefined) {
+    if (dto.viajeIds !== undefined || pasaAManual) {
       await syncLiquidacionEstadoViajes(this.db, tenantId, viajeIdsParaSync);
     }
     // Montos o viajes pudieron cambiar: el movimiento de la liquidación se actualiza.
@@ -806,6 +883,11 @@ export class LiquidacionesService {
     }
     if (liquidacion.estado === 'pendiente_anulacion') {
       throw new BadRequestException('La liquidación está pendiente de anulación');
+    }
+    if (liquidacion.manual || esCondicionIvaMonotributo(liquidacion.transportista?.condicionIva)) {
+      throw new BadRequestException(
+        'A un transportista monotributista no se le emite Líquido Producto: la liquidación queda manual, con la factura del transportista adjunta.',
+      );
     }
     if (liquidacion.moneda === 'USD') {
       throw new BadRequestException(
@@ -1118,6 +1200,7 @@ export class LiquidacionesService {
       tipoAnulacion ??
         (config as { anulacionTipoComprobante?: 'nota_credito' | 'nota_debito' })
           .anulacionTipoComprobante,
+      liquidacion.cbteTipo,
     );
     const viajeIds = liquidacion.viajes.map((v) => v.viajeId);
 
@@ -1393,6 +1476,11 @@ export class LiquidacionesService {
         estado: 'anulado',
         anulacionMetodo: 'manual',
         anulacionManualComprobanteUrl: comprobanteUrl,
+        // El pre-impreso es el mismo tipo que el original (060 en negativo): va al Libro IVA.
+        anulacionCbteTipo: liquidacion.cbteTipo,
+        anulacionPtoVenta: dto.ptoVenta,
+        anulacionCbteNro: dto.cbteNro,
+        anulacionFecha: fechaCalendarioAr(dto.fecha),
         motivoAnulacion: motivo,
         anuladoPor: userId,
         anuladoAt,
@@ -1574,7 +1662,9 @@ export class LiquidacionesService {
           config.keyPem,
         );
         cbteNro = ultimoCbte + 1;
-        fechaNc = formatFechaCbte(new Date());
+        // Día de la anulación en hora de Argentina: el server corre en UTC y
+        // desde las 21 h ya sería mañana (el último día del mes, otro mes → 10152).
+        fechaNc = formatFechaCbteArgentina(new Date());
       }
 
       const docNroReal = facturaRaw.cliente.idFiscal
@@ -1929,6 +2019,17 @@ export class LiquidacionesService {
     return formatFechaCbte(fechaEmision);
   }
 
+  /** Libro IVA Compras del rango (Excel para conciliar). Ver `libro-iva-compras.ts`. */
+  libroIvaCompras(tenantId: string, desde?: string, hasta?: string) {
+    const rango = validarRangoLibroIva(desde, hasta);
+    return libroIvaCompras(this.prisma, tenantId, rango.desde, rango.hasta);
+  }
+
+  /** Libro IVA Compras en los TXT del Libro IVA Digital (cabecera + alícuotas). */
+  async libroIvaComprasTxt(tenantId: string, desde?: string, hasta?: string) {
+    return generarTxtLibroIva(await this.libroIvaCompras(tenantId, desde, hasta));
+  }
+
   async getConfig(tenantId: string) {
     return this.arcaConfig.findPublic(tenantId);
   }
@@ -2094,6 +2195,11 @@ export class LiquidacionesService {
 
     if (!facturaRaw || facturaRaw.tenantId !== tenantId) {
       throw new NotFoundException('Factura no encontrada');
+    }
+    if (facturaRaw.manual) {
+      throw new BadRequestException(
+        'Esta factura se hizo por fuera del sistema: no se emite en ARCA.',
+      );
     }
 
     const facturaExt = facturaRaw as typeof facturaRaw & {

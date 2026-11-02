@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * Recalcula neto + IVA persistido en facturas por tramo de tenants sin
  * `emision-facturas-arca` (caso LSF / Uruguay).
@@ -24,6 +25,7 @@ import {
   importeOperativoFactura,
   ivaMontoDeTramos,
   roundMoney2,
+  viajeReemplazaMontoPorTramos,
 } from '../src/shared/util/factura-estado-lectura';
 
 const prisma = new PrismaClient();
@@ -163,17 +165,25 @@ async function main() {
         },
       });
       if (f.tramos.length > 0) {
-        const tramosPorViaje = new Map<string, number>();
+        const tramosPorViaje = new Map<string, Array<{ monto: number }>>();
         for (const t of f.tramos) {
           if (t.viajeId) {
-            tramosPorViaje.set(
-              t.viajeId,
-              roundMoney2((tramosPorViaje.get(t.viajeId) ?? 0) + (t.monto ?? 0)),
-            );
+            const list = tramosPorViaje.get(t.viajeId);
+            if (list) list.push(t);
+            else tramosPorViaje.set(t.viajeId, [t]);
           }
         }
-        for (const [viajeId, suma] of tramosPorViaje) {
+        for (const [viajeId, tramosDelViaje] of tramosPorViaje) {
+          const suma = roundMoney2(
+            tramosDelViaje.reduce((s, t) => s + (t.monto ?? 0), 0),
+          );
           const vActual = f.viajes.find((v) => v.id === viajeId);
+          if (
+            vActual &&
+            !viajeReemplazaMontoPorTramos(vActual.monto ?? 0, tramosDelViaje)
+          ) {
+            continue;
+          }
           if (!vActual || Math.abs((vActual.monto ?? 0) - suma) > 0.005) {
             await prisma.viaje.update({
               where: { id: viajeId },

@@ -708,6 +708,17 @@ export class ValidatorService {
             continue;
           }
 
+          // "Fava Diego" en el Excel y "FAVA DIEGO ABEL" ya cargado son la misma
+          // persona: se vincula al existente en vez de crear un duplicado sin CUIT.
+          const similarId =
+            model === "clientes" || model === "transportistas" || model === "choferes"
+              ? this.nombreSimilarUnico(original, records)
+              : null;
+          if (similarId) {
+            (caches[`${model}:${primaryField}`] ??= {})[lower] = similarId;
+            continue;
+          }
+
           if (readOnly) {
             (created[model] ??= []).push(original);
             (caches[`${model}:${primaryField}`] ??= {})[lower] =
@@ -724,6 +735,37 @@ export class ValidatorService {
     }
 
     return { caches, created };
+  }
+
+  /**
+   * Id del único registro cuyo nombre contiene todas las palabras de `nombre` (o al
+   * revés): "Peralta Marcos" ↔ "PERALTA MARCOS ALEJANDRO". Pide al menos dos palabras
+   * del lado corto y que el candidato sea uno solo — con dos "Peralta Marcos …"
+   * distintos no se puede saber cuál es, y se crea como antes.
+   */
+  private nombreSimilarUnico(
+    nombre: string,
+    records: Record<string, unknown>[],
+  ): string | null {
+    const palabras = (v: unknown) =>
+      new Set(
+        this.claveLookup(String(v ?? "").replace(/[.,]/g, " "))
+          .split(" ")
+          .filter((p) => p.length > 1),
+      );
+    const contiene = (a: Set<string>, b: Set<string>) =>
+      b.size >= 2 && [...b].every((p) => a.has(p));
+
+    const buscadas = palabras(nombre);
+    const ids = new Set<string>();
+    for (const r of records) {
+      if (typeof r.nombre !== "string") continue;
+      const propias = palabras(r.nombre);
+      if (contiene(propias, buscadas) || contiene(buscadas, propias)) {
+        ids.add(r.id as string);
+      }
+    }
+    return ids.size === 1 ? [...ids][0] : null;
   }
 
   /**
@@ -812,6 +854,10 @@ export class ValidatorService {
   ): Promise<Record<string, unknown>[]> {
     const select: Record<string, boolean> = { id: true };
     for (const f of fields) select[f] = true;
+    // Para `nombreSimilarUnico`, aunque la columna busque solo por CUIT/DNI.
+    if (model === "clientes" || model === "transportistas" || model === "choferes") {
+      select.nombre = true;
+    }
 
     switch (model) {
       case "clientes":

@@ -10,6 +10,7 @@ import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { ClientesPaginatedQueryDto } from './dto/clientes-paginated-query.dto';
 import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
+import { normalizarIdFiscal } from '../../shared/util/documento-unico.util';
 
 @Injectable()
 export class ClientesService {
@@ -30,7 +31,7 @@ export class ClientesService {
     const nombre = query.nombre?.trim();
     if (nombre) where.nombre = { contains: nombre, mode: 'insensitive' };
 
-    const idFiscal = query.idFiscal?.trim();
+    const idFiscal = normalizarIdFiscal(query.idFiscal);
     if (idFiscal) where.idFiscal = { contains: idFiscal, mode: 'insensitive' };
 
     const pais = query.pais?.trim();
@@ -96,18 +97,20 @@ export class ClientesService {
     if (!idFiscal) return;
     const existente = await this.prisma.cliente.findFirst({
       where: { tenantId, idFiscal, ...(excludeId ? { id: { not: excludeId } } : {}) },
-      select: { id: true },
+      select: { id: true, nombre: true },
     });
     if (existente) {
-      throw new ConflictException('Ya existe un cliente con ese ID Fiscal');
+      throw new ConflictException(
+        `Ya existe un cliente con ese ID Fiscal: ${existente.nombre}`,
+      );
     }
   }
 
   async create(tenantId: string, dto: CreateClienteDto) {
     this.assertClienteRequiredFields(dto, dto.confirmarSinDatosFiscales);
     const pais = dto.pais?.trim() || null;
-    const idFiscal = dto.idFiscal?.trim() || null;
-    validarIdFiscal(pais, idFiscal);
+    validarIdFiscal(pais, dto.idFiscal?.trim() || null);
+    const idFiscal = normalizarIdFiscal(dto.idFiscal);
     await this.assertIdFiscalDisponible(tenantId, idFiscal);
     try {
       return await this.prisma.cliente.create({
@@ -148,6 +151,7 @@ export class ClientesService {
     };
     this.assertClienteRequiredFields(next, dto.confirmarSinDatosFiscales);
     validarIdFiscal(next.pais, next.idFiscal);
+    next.idFiscal = normalizarIdFiscal(next.idFiscal);
     await this.assertIdFiscalDisponible(tenantId, next.idFiscal, id);
     try {
       return await this.prisma.cliente.update({

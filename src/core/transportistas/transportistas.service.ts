@@ -10,6 +10,7 @@ import { CreateTransportistaDto } from './dto/create-transportista.dto';
 import { UpdateTransportistaDto } from './dto/update-transportista.dto';
 import { TransportistasPaginatedQueryDto } from './dto/transportistas-paginated-query.dto';
 import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
+import { normalizarIdFiscal } from '../../shared/util/documento-unico.util';
 
 @Injectable()
 export class TransportistasService {
@@ -30,7 +31,7 @@ export class TransportistasService {
     const nombre = query.nombre?.trim();
     if (nombre) where.nombre = { contains: nombre, mode: 'insensitive' };
 
-    const idFiscal = query.idFiscal?.trim();
+    const idFiscal = normalizarIdFiscal(query.idFiscal);
     if (idFiscal) where.idFiscal = { contains: idFiscal, mode: 'insensitive' };
 
     const [total, items] = await this.prisma.$transaction([
@@ -102,18 +103,20 @@ export class TransportistasService {
     if (!idFiscal) return;
     const existente = await this.prisma.transportista.findFirst({
       where: { tenantId, idFiscal, ...(excludeId ? { id: { not: excludeId } } : {}) },
-      select: { id: true },
+      select: { id: true, nombre: true },
     });
     if (existente) {
-      throw new ConflictException('Ya existe un transportista con ese ID Fiscal');
+      throw new ConflictException(
+        `Ya existe un transportista con ese ID Fiscal: ${existente.nombre}`,
+      );
     }
   }
 
   async create(tenantId: string, dto: CreateTransportistaDto) {
     this.assertTransportistaRequiredFields(dto, dto.confirmarSinDatosFiscales);
     const pais = dto.pais?.trim() || null;
-    const idFiscal = dto.idFiscal?.trim() || null;
-    validarIdFiscal(pais, idFiscal);
+    validarIdFiscal(pais, dto.idFiscal?.trim() || null);
+    const idFiscal = normalizarIdFiscal(dto.idFiscal);
     await this.assertIdFiscalDisponible(tenantId, idFiscal);
     try {
       return await this.prisma.transportista.create({
@@ -177,6 +180,7 @@ export class TransportistasService {
     };
     this.assertTransportistaRequiredFields(next, dto.confirmarSinDatosFiscales);
     validarIdFiscal(next.pais, next.idFiscal);
+    next.idFiscal = normalizarIdFiscal(next.idFiscal);
     await this.assertIdFiscalDisponible(tenantId, next.idFiscal, id);
     try {
       return await this.prisma.transportista.update({

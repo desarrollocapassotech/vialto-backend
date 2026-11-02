@@ -4,6 +4,10 @@ import { PrismaService } from "../../../shared/prisma/prisma.service";
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { CampoUnicoConflicto, ValidatedRow } from "../types/import.types";
 import { scalarDataFromRow } from "../prisma-import-fields";
+import {
+  buscarChoferMismoDocumento,
+  claveDniChofer,
+} from "../../../shared/util/documento-unico.util";
 
 @Injectable()
 export class ChoferesProcessor implements IImportProcessor {
@@ -19,6 +23,7 @@ export class ChoferesProcessor implements IImportProcessor {
       throw new Error("El nombre del chofer es obligatorio.");
     }
     const dni = (row.dni as string | null)?.toString().trim() || undefined;
+    const cuit = (row.cuit as string | null)?.toString().trim() || undefined;
 
     // El usuario ya eligió "actualizar" este chofer puntual desde el
     // preview (conflicto de DNI resuelto en ImportacionesService.confirm) —
@@ -41,23 +46,23 @@ export class ChoferesProcessor implements IImportProcessor {
     });
 
     // Mismo criterio que el alta/edición manual (ChoferesService): un DNI no
-    // puede pertenecer a dos choferes distintos del mismo tenant. El preview
-    // ya detecta este caso (`detectarCampoUnicoDuplicado`) y le hace elegir
-    // al usuario ignorar/actualizar antes de confirmar — esto es la red de
-    // seguridad final para lo que se cuele sin pasar por esa decisión (ej.
-    // dos filas del mismo Excel con igual DNI nuevo).
-    if (dni) {
-      const duplicado = await this.prisma.chofer.findFirst({
-        where: {
-          tenantId,
-          dni,
-          ...(existing ? { id: { not: existing.id } } : {}),
-        },
-        select: { id: true },
-      });
-      if (duplicado) {
-        throw new BadRequestException(`Ya existe otro chofer con el DNI "${dni}"`);
-      }
+    // puede pertenecer a dos choferes distintos del mismo tenant, esté cargado
+    // como DNI o dentro del CUIT. El preview ya detecta este caso
+    // (`detectarCampoUnicoDuplicado`) y le hace elegir al usuario
+    // ignorar/actualizar antes de confirmar — esto es la red de seguridad final
+    // para lo que se cuele sin pasar por esa decisión (ej. dos filas del mismo
+    // Excel con igual CUIT nuevo y el nombre escrito distinto).
+    const duplicado = await buscarChoferMismoDocumento(
+      this.prisma,
+      tenantId,
+      dni,
+      cuit,
+      existing?.id,
+    );
+    if (duplicado) {
+      throw new BadRequestException(
+        `Ya existe otro chofer con el DNI/CUIT "${dni ?? cuit}": ${duplicado.nombre}`,
+      );
     }
 
     const data = scalarDataFromRow(row, "Chofer", { skip: ["nombre"] });
@@ -85,36 +90,41 @@ export class ChoferesProcessor implements IImportProcessor {
   }
 
   /**
-   * Filas cuyo DNI ya pertenece a OTRO chofer existente (nombre distinto) —
-   * mismo criterio que `ClientesProcessor.detectarCampoUnicoDuplicado`.
+   * Filas cuyo DNI (cargado como DNI o dentro del CUIT) ya pertenece a OTRO
+   * chofer existente (nombre distinto) — mismo criterio que
+   * `ClientesProcessor.detectarCampoUnicoDuplicado`.
    */
   async detectarCampoUnicoDuplicado(
     rows: ValidatedRow[],
     tenantId: string,
   ): Promise<CampoUnicoConflicto[]> {
-    const candidatas = rows.filter(
-      (r) => typeof r.dni === "string" && r.dni.trim(),
+    const texto = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const candidatas = rows.filter((r) =>
+      claveDniChofer(texto(r.dni), texto(r.cuit)),
     );
     if (candidatas.length === 0) return [];
 
-    const dnis = [...new Set(candidatas.map((r) => String(r.dni).trim()))];
     const existentes = await this.prisma.chofer.findMany({
-      where: { tenantId, dni: { in: dnis } },
-      select: { id: true, nombre: true, dni: true },
+      where: { tenantId, OR: [{ dni: { not: null } }, { cuit: { not: null } }] },
+      select: { id: true, nombre: true, dni: true, cuit: true },
     });
-    const porDni = new Map(existentes.map((e) => [e.dni as string, e]));
+    const porClave = new Map<string, (typeof existentes)[number]>();
+    for (const e of existentes) {
+      const clave = claveDniChofer(e.dni, e.cuit);
+      if (clave && !porClave.has(clave)) porClave.set(clave, e);
+    }
 
     const conflictos: CampoUnicoConflicto[] = [];
     for (const row of candidatas) {
-      const dni = String(row.dni).trim();
-      const match = porDni.get(dni);
+      const dni = texto(row.dni);
+      const match = porClave.get(claveDniChofer(dni, texto(row.cuit)) as string);
       if (!match) continue;
       const nombreFila = String(row.nombre ?? "").trim().toLowerCase();
       if (match.nombre.trim().toLowerCase() === nombreFila) continue;
       conflictos.push({
         fila: row._rowNum,
-        campoLabel: "DNI",
-        valor: dni,
+        campoLabel: dni ? "DNI" : "CUIT",
+        valor: dni || texto(row.cuit),
         entidadExistenteId: match.id,
         entidadExistenteNombre: match.nombre,
       });

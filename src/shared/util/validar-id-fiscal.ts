@@ -71,8 +71,9 @@ export function validarIdFiscal(
   }
 
   if (pais === 'CL') {
+    // Guion opcional: se guarda sin separadores (normalizarIdFiscal) y se re-valida al editar.
     const normalized = idFiscal.replace(/[.\s]/g, '').toUpperCase();
-    if (!/^\d{7,8}-[\dK]$/.test(normalized))
+    if (!/^\d{7,8}-?[\dK]$/.test(normalized))
       throw new BadRequestException('RUT debe tener el formato 12.345.678-9 (7 u 8 dígitos más dígito verificador).');
   }
 

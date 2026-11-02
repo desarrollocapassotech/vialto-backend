@@ -10,6 +10,10 @@ import { CreateChoferDto } from './dto/create-chofer.dto';
 import { UpdateChoferDto } from './dto/update-chofer.dto';
 import { ChoferesPaginatedQueryDto } from './dto/choferes-paginated-query.dto';
 import { hashPin } from '../../shared/util/pin-hash';
+import {
+  buscarChoferMismoDocumento,
+  normalizarIdFiscal,
+} from '../../shared/util/documento-unico.util';
 
 /** Nunca devolver el hash del PIN en respuestas de API; exponer solo si está configurado. */
 function sanitize<T extends { pin?: string | null }>(
@@ -87,32 +91,39 @@ export class ChoferesService {
     }
   }
 
-  private async assertDniDisponible(
+  /** Mismo DNI = misma persona, aunque uno lo tenga cargado como DNI y otro dentro del CUIT. */
+  private async assertDocumentoDisponible(
     tenantId: string,
-    dni: string | null,
+    dni: string | null | undefined,
+    cuit: string | null | undefined,
     excludeId?: string,
   ) {
-    if (!dni) return;
-    const existente = await this.prisma.chofer.findFirst({
-      where: { tenantId, dni, ...(excludeId ? { id: { not: excludeId } } : {}) },
-      select: { id: true },
-    });
+    const existente = await buscarChoferMismoDocumento(
+      this.prisma,
+      tenantId,
+      dni,
+      cuit,
+      excludeId,
+    );
     if (existente) {
-      throw new ConflictException('Ya existe un chofer con ese DNI');
+      throw new ConflictException(
+        `Ya existe un chofer con ese DNI/CUIT: ${existente.nombre}`,
+      );
     }
   }
 
   async create(tenantId: string, dto: CreateChoferDto) {
     await this.assertTransportista(tenantId, dto.transportistaId);
     const dni = dto.dni ?? null;
-    await this.assertDniDisponible(tenantId, dni);
+    const cuit = normalizarIdFiscal(dto.cuit);
+    await this.assertDocumentoDisponible(tenantId, dni, cuit);
     try {
       const row = await this.prisma.chofer.create({
         data: {
           tenantId,
           nombre: dto.nombre,
           dni,
-          cuit: dto.cuit?.trim() || null,
+          cuit,
           licencia: dto.licencia ?? null,
           licenciaVence: dto.licenciaVence ? new Date(dto.licenciaVence) : null,
           telefono: dto.telefono ?? null,
@@ -130,12 +141,18 @@ export class ChoferesService {
   }
 
   async update(id: string, tenantId: string, dto: UpdateChoferDto) {
-    await this.findOne(id, tenantId);
+    const current = await this.findOne(id, tenantId);
     if (dto.transportistaId !== undefined) {
       await this.assertTransportista(tenantId, dto.transportistaId ?? undefined);
     }
-    if (dto.dni !== undefined) {
-      await this.assertDniDisponible(tenantId, dto.dni ?? null, id);
+    const cuit = dto.cuit === undefined ? undefined : normalizarIdFiscal(dto.cuit);
+    if (dto.dni !== undefined || dto.cuit !== undefined) {
+      await this.assertDocumentoDisponible(
+        tenantId,
+        dto.dni !== undefined ? dto.dni : current.dni,
+        cuit !== undefined ? cuit : current.cuit,
+        id,
+      );
     }
     try {
       const row = await this.prisma.chofer.update({
@@ -143,7 +160,7 @@ export class ChoferesService {
         data: {
           nombre: dto.nombre,
           dni: dto.dni,
-          cuit: dto.cuit === undefined ? undefined : dto.cuit?.trim() || null,
+          cuit,
           licencia: dto.licencia,
           telefono: dto.telefono,
           transportistaId:

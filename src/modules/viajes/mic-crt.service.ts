@@ -35,6 +35,7 @@ import {
   todayIsoDateLocal,
 } from './mic-crt-export.util';
 import { numeroVisibleViaje } from './viaje-numero-visible.util';
+import { formatCuit } from '../../shared/util/cuit';
 
 type MissingGroup = { fields: string[]; entityId?: string };
 
@@ -185,7 +186,7 @@ export class MicCrtService {
   private actorFromParty(p: ReturnType<typeof partyFromEntity>): MicCrtActorDto {
     return {
       razonSocial: p.razonSocial ?? '',
-      idFiscal: p.idFiscal ?? '',
+      idFiscal: formatCuit(p.idFiscal),
       calle: p.calle ?? '',
       numero: p.numero ?? '',
       ciudad: p.ciudad ?? '',
@@ -856,7 +857,7 @@ export class MicCrtService {
       f2h,
       '2',
       'Rol de contribuyente / Cadastro geral de contribuintes',
-      v.transportista?.idFiscal ?? '',
+      formatCuit(v.transportista?.idFiscal),
     );
     const hojaw = Math.round(col2w * 0.35);
     this.cell(doc, x0 + col1w, y, hojaw, f2h, '5', 'Hoja / Folha', '1 / 1');
@@ -914,7 +915,7 @@ export class MicCrtService {
     const remolqueFs = rowFs;
     const campo15Fs = rowFs;
     const campo10Fs = rowFs;
-    const rolContribuyente = v.transportista?.idFiscal?.trim() ?? '';
+    const rolContribuyente = formatCuit(v.transportista?.idFiscal?.trim());
     const propietarioText = this.propietarioCamionBlock(v, dto);
     const remolqueText = this.remolqueTransporteBlock(semi, dto);
     const semiExtra =

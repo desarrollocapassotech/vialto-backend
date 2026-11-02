@@ -27,6 +27,12 @@ export type NotificacionCatalogoItem = {
   cronPropio?: boolean;
   /** Ruta relativa (con query params) a la que apunta el botón del email — default: home. */
   urlDestino?: string;
+  /**
+   * Tabla de la entidad del aviso (id = `entidadId` hasta el primer ":"). Si la entidad se borra,
+   * el aviso deja de mostrarse en la campana (`NotificacionesFeedService.purgarHuerfanas`).
+   * Sin valor = el aviso no apunta a un registro estable y se conserva siempre.
+   */
+  entidadTabla?: string;
 };
 
 export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
@@ -39,6 +45,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     defaultActivo: true,
     requiereModulo: 'facturacion',
     frecuencia: 'diaria',
+    entidadTabla: 'facturas',
   },
   {
     tipo: 'facturacion.facturaVencida',
@@ -49,6 +56,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     defaultActivo: true,
     requiereModulo: 'facturacion',
     frecuencia: 'diaria',
+    entidadTabla: 'facturas',
   },
   {
     tipo: 'cuenta-corriente.vencimiento',
@@ -60,6 +68,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     requiereModulo: 'cuenta-corriente',
     frecuencia: 'diaria',
     urlDestino: '/cuenta-corriente',
+    entidadTabla: 'movimientos_cuenta_corriente',
   },
   {
     tipo: 'combustible.cargaSospechosa',
@@ -72,6 +81,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     frecuencia: 'semanal',
     cronPropio: true,
     urlDestino: '/?combustibleTab=alertas',
+    entidadTabla: 'cargas_combustible',
   },
   {
     tipo: 'combustible.errorChofer',
@@ -94,6 +104,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     requiereModulo: 'emision-liquido-producto-arca',
     frecuencia: 'semanal',
     urlDestino: '/liquidaciones?estado=pendiente_anulacion',
+    entidadTabla: 'liquidaciones',
   },
   // Mantenimiento: los evaluators viven en modules/mantenimiento y se registran con
   // NotificacionesCronService.registrarEvaluator (reusan el cálculo de vencimientos).
@@ -107,6 +118,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     requiereModulo: 'mantenimiento',
     frecuencia: 'diaria',
     urlDestino: '/mantenimiento',
+    entidadTabla: 'vehiculos_planes',
   },
   {
     tipo: 'mantenimiento.vencido',
@@ -118,6 +130,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     requiereModulo: 'mantenimiento',
     frecuencia: 'diaria',
     urlDestino: '/mantenimiento',
+    entidadTabla: 'vehiculos_planes',
   },
 ];
 

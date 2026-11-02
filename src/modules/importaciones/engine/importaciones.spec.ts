@@ -89,6 +89,32 @@ const templateBase: TemplateConfig = {
     assert.equal(res.valid[0].transportistaId, "new-t");
   });
 
+  await test("Validator: nombre abreviado de un transportista existente -> se vincula, no se duplica", async () => {
+    const validatorNombres = new ValidatorService(
+      {
+        transportista: {
+          findMany: async () => [
+            { id: "fava", nombre: "FAVA DIEGO ABEL", idFiscal: "20263972202" },
+            { id: "p1", nombre: "Peralta Marcos Alejandro", idFiscal: "20346837153" },
+            { id: "p2", nombre: "Peralta Marcos Luis", idFiscal: "20111111112" },
+          ],
+          create: async (data: any) => ({ id: "new-t", ...data.data }),
+        },
+      } as any,
+      mockStock,
+    );
+    const validar = async (valor: string) => {
+      const { rows } = parser.parse(createDummyExcel(["Transporte"], [valor]), templateBase);
+      return (await validatorNombres.validate(rows, templateBase.columns, "tenant-1", "")).valid[0]
+        .transportistaId;
+    };
+    assert.equal(await validar("Fava Diego"), "fava");
+    // Dos "Peralta Marcos …": no se puede saber cuál es → se crea como antes.
+    assert.equal(await validar("Peralta Marcos"), "new-t");
+    // Una sola palabra no alcanza para vincular.
+    assert.equal(await validar("Fava"), "new-t");
+  });
+
   await test("Validator: Transportista inexistente + CUIT/DNI -> falla", async () => {
     const { rows } = parser.parse(createDummyExcel(["Transporte"], ["20-11111111-9"]), templateBase);
     // Se reporta como error de fila (no excepción), para que el resto del archivo se pueda revisar.

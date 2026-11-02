@@ -70,9 +70,53 @@ type ViajeCobro = {
 };
 
 /**
+ * Determina si los tramos cargados para un viaje reemplazan su monto original.
+ * - Con 2 o más tramos cargados para el viaje: el desglose está completo y la suma reemplaza al monto del viaje.
+ * - Con 1 solo tramo cargado: si es menor al monto del viaje, se calcula el "resto" automáticamente (no reemplaza);
+ *   solo reemplaza si el único tramo supera al monto del viaje.
+ */
+export function viajeReemplazaMontoPorTramos(
+  montoViaje: number,
+  tramosDelViaje: Array<{ monto?: number | null }>,
+): boolean {
+  if (tramosDelViaje.length === 0) return false;
+  if (tramosDelViaje.length >= 2) return true;
+  const sumaTramos = roundMoney2(
+    tramosDelViaje.reduce((s, t) => s + (t.monto ?? 0), 0),
+  );
+  return sumaTramos > roundMoney2(montoViaje) + 0.005;
+}
+
+export function restoSinTramoDeViaje(
+  v: ViajeCobro,
+  tramosDelViaje: Array<{ monto?: number | null }>,
+): number {
+  const montoViaje = importeNetoViaje(v);
+  if (viajeReemplazaMontoPorTramos(montoViaje, tramosDelViaje)) return 0;
+  const sumaTramos = roundMoney2(
+    tramosDelViaje.reduce((s, t) => s + (t.monto ?? 0), 0),
+  );
+  return Math.max(0, roundMoney2(montoViaje - sumaTramos));
+}
+
+function agruparTramosPorViaje<T extends { viajeId?: string }>(
+  tramos: T[],
+): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const t of tramos) {
+    if (!t.viajeId) continue;
+    const list = map.get(t.viajeId);
+    if (list) list.push(t);
+    else map.set(t.viajeId, [t]);
+  }
+  return map;
+}
+
+/**
  * Neto sin IVA.
- * Al facturar por tramo, la suma de los tramos pisa el monto del viaje.
- * Para viajes sin tramo cargado, se mantiene el importe neto del viaje.
+ * Al facturar por tramo:
+ * - Si un viaje tiene 2 o más tramos cargados (o 1 tramo que supera su monto), la suma de sus tramos pisa el monto del viaje.
+ * - Si un viaje tiene 1 solo tramo menor al monto del viaje o no tiene tramos, mantiene el monto del viaje (tramo + resto).
  */
 export function importeNetoFactura(
   importeGuardado: number,
@@ -80,28 +124,32 @@ export function importeNetoFactura(
   opts?: Pick<FacturaCobroOpts, "facturarPorTramo" | "tramos">,
 ): number {
   if (opts?.facturarPorTramo && opts.tramos && opts.tramos.length > 0) {
-    const viajeIdsConTramo = new Set(
-      opts.tramos.map((t) => t.viajeId).filter(Boolean),
-    );
     const sumaTramos = roundMoney2(
       opts.tramos.reduce((s, t) => s + (t.monto ?? 0), 0),
     );
-    const sumaViajesSinTramo = roundMoney2(
-      viajes
-        .filter((v) => !v.id || !viajeIdsConTramo.has(v.id))
-        .reduce((s, v) => s + importeNetoViaje(v), 0),
+    if (viajes.length === 0) {
+      return opts.tramos.length >= 2
+        ? sumaTramos
+        : Math.max(roundMoney2(importeGuardado), sumaTramos);
+    }
+    const porViaje = agruparTramosPorViaje(opts.tramos);
+    const sumaRestos = roundMoney2(
+      viajes.reduce(
+        (s, v) =>
+          s + restoSinTramoDeViaje(v, v.id ? (porViaje.get(v.id) ?? []) : []),
+        0,
+      ),
     );
-    return roundMoney2(sumaTramos + sumaViajesSinTramo);
+    return roundMoney2(sumaTramos + sumaRestos);
   }
   if (viajes.length === 0) return importeGuardado;
   return roundMoney2(viajes.reduce((s, v) => s + importeNetoViaje(v), 0));
 }
 
 /**
- * IVA de una factura por tramo: suma el IVA de cada tramo cargado.
- * Si se pasan viajes vinculados, los viajes que no tienen ningún tramo cargado
- * usan el IVA de cabecera; el remanente no cubierto de viajes con tramo
- * corresponde al componente exento/internacional y no devenga IVA (0%).
+ * IVA de una factura por tramo: suma el IVA de cada tramo cargado más el IVA de cabecera
+ * sobre el resto no cubierto (viajes sin tramos o viajes con 1 solo tramo parcial).
+ * Cuando un viaje tiene 2 o más tramos cargados, su desglose está completo y no genera resto.
  */
 export function ivaMontoDeTramos(
   importeNeto: number,
@@ -116,22 +164,24 @@ export function ivaMontoDeTramos(
     (s, t) => roundMoney2(s + roundMoney2((t.monto * t.ivaPct) / 100)),
     0,
   );
+  let baseResto: number;
   if (viajes && viajes.length > 0) {
-    const viajeIdsConTramo = new Set(
-      tramos.map((t) => t.viajeId).filter(Boolean),
+    const porViaje = agruparTramosPorViaje(tramos);
+    baseResto = roundMoney2(
+      viajes.reduce(
+        (s, v) =>
+          s + restoSinTramoDeViaje(v, v.id ? (porViaje.get(v.id) ?? []) : []),
+        0,
+      ),
     );
-    const viajesSinTramo = viajes.filter(
-      (v) => v.id && !viajeIdsConTramo.has(v.id),
-    );
-    const sumaViajesSinTramo = roundMoney2(
-      viajesSinTramo.reduce((s, v) => s + importeNetoViaje(v), 0),
-    );
-    const ivaViajesSinTramo = roundMoney2(
-      (sumaViajesSinTramo * (Number(ivaPctCabecera) || 0)) / 100,
-    );
-    return roundMoney2(ivaTramos + ivaViajesSinTramo);
+  } else {
+    const sumaTramos = roundMoney2(tramos.reduce((s, t) => s + t.monto, 0));
+    baseResto = Math.max(0, roundMoney2(importeNeto - sumaTramos));
   }
-  return roundMoney2(ivaTramos);
+  const ivaResto = roundMoney2(
+    (baseResto * (Number(ivaPctCabecera) || 0)) / 100,
+  );
+  return roundMoney2(ivaTramos + ivaResto);
 }
 
 /** Total con IVA de una factura por tramo. */

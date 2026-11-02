@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../../shared/prisma/prisma.service";
+import { normalizarIdFiscal } from "../../shared/util/documento-unico.util";
 import { CreateClienteDto } from "../clientes/dto/create-cliente.dto";
 import { UpdateClienteDto } from "../clientes/dto/update-cliente.dto";
 import { ChoferesService } from "../choferes/choferes.service";
@@ -301,6 +303,26 @@ export class PlatformService {
     return this.viajesService.remove(id, scopedTenantId, force);
   }
 
+  /** Mismo criterio que ClientesService/TransportistasService: un ID fiscal, un registro por empresa. */
+  private async assertIdFiscalLibre(
+    entidad: "cliente" | "transportista",
+    tenantId: string,
+    idFiscal: string | null,
+    excludeId?: string,
+  ) {
+    if (!idFiscal) return;
+    const where = { tenantId, idFiscal, ...(excludeId ? { id: { not: excludeId } } : {}) };
+    const existente =
+      entidad === "cliente"
+        ? await this.prisma.cliente.findFirst({ where, select: { nombre: true } })
+        : await this.prisma.transportista.findFirst({ where, select: { nombre: true } });
+    if (existente) {
+      throw new ConflictException(
+        `Ya existe un ${entidad} con ese ID Fiscal: ${existente.nombre}`,
+      );
+    }
+  }
+
   listClientes(tenantId?: string) {
     if (!tenantId?.trim()) {
       return Promise.resolve([]);
@@ -333,11 +355,13 @@ export class PlatformService {
   async createCliente(tenantId: string | undefined, dto: CreateClienteDto) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
+    const idFiscal = normalizarIdFiscal(dto.idFiscal);
+    await this.assertIdFiscalLibre("cliente", scopedTenantId, idFiscal);
     return this.prisma.cliente.create({
       data: {
         tenantId: scopedTenantId,
         nombre: dto.nombre,
-        idFiscal: dto.idFiscal ?? null,
+        idFiscal,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
         direccion: dto.direccion ?? null,
@@ -353,9 +377,12 @@ export class PlatformService {
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.getClienteById(scopedTenantId, id);
+    const idFiscal =
+      dto.idFiscal === undefined ? undefined : normalizarIdFiscal(dto.idFiscal);
+    if (idFiscal) await this.assertIdFiscalLibre("cliente", scopedTenantId, idFiscal, id);
     return this.prisma.cliente.update({
       where: { id },
-      data: dto,
+      data: { ...dto, idFiscal },
     });
   }
 
@@ -652,12 +679,14 @@ export class PlatformService {
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
+    const idFiscal = normalizarIdFiscal(dto.idFiscal);
+    await this.assertIdFiscalLibre("transportista", scopedTenantId, idFiscal);
     return this.prisma.transportista.create({
       data: {
         tenantId: scopedTenantId,
         nombre: dto.nombre,
         pais: dto.pais ?? null,
-        idFiscal: dto.idFiscal ?? null,
+        idFiscal,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
         domicilio: dto.domicilio ?? null,
@@ -679,12 +708,17 @@ export class PlatformService {
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTransportistaExists(scopedTenantId, id);
+    const idFiscal =
+      dto.idFiscal === undefined ? undefined : normalizarIdFiscal(dto.idFiscal);
+    if (idFiscal) {
+      await this.assertIdFiscalLibre("transportista", scopedTenantId, idFiscal, id);
+    }
     return this.prisma.transportista.update({
       where: { id },
       data: {
         nombre: dto.nombre,
         pais: dto.pais,
-        idFiscal: dto.idFiscal,
+        idFiscal,
         email: dto.email,
         telefono: dto.telefono,
         domicilio: dto.domicilio,

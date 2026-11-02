@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import * as PDFDocument from 'pdfkit';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ArcaConfigService } from './arca-config.service';
+import { formatCuit } from '../../shared/util/cuit';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import {
   adelantoDesdePagos,
@@ -301,7 +302,7 @@ export class LiquidacionContratoPdfService {
     const t = liq.transportista;
     y = this.grid(doc, y, [
       ['Nombre', dash(t?.nombre)],
-      ['CUIT / RUT', dash(t?.idFiscal)],
+      ['CUIT / RUT', dash(t?.idFiscal ? formatCuit(t.idFiscal) : null)],
       ['Domicilio', dash(t?.domicilio)],
       ['Lugar', dash(t?.pais)],
     ]);

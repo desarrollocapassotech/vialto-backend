@@ -58,7 +58,8 @@
     "test:mant-chofer": "ts-node src/modules/mantenimiento/chofer/chofer-mantenimiento.spec.ts",
     "test:dashboard-alertas": "ts-node src/modules/dashboard/dashboard-alertas.spec.ts",
     "test:notif-liq-pendiente-anulacion": "ts-node src/modules/notificaciones/evaluators/liquidacion-pendiente-anulacion.spec.ts",
-    "test:producto-label": "ts-node src/shared/util/producto-label.util.spec.ts"
+    "test:producto-label": "ts-node src/shared/util/producto-label.util.spec.ts",
+    "test:documento-unico": "ts-node src/shared/util/documento-unico.util.spec.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

@@ -18,6 +18,7 @@ import { ArcaComprobanteCvlp } from './types/arca.types';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { normalizeUnidadCantidad } from './cantidad-unidad.util';
 import { productoLabels } from '../../shared/util/producto-label.util';
+import { formatCuit } from '../../shared/util/cuit';
 import {
   nombreArchivoComprobante,
   tipoComprobanteLegible,
@@ -821,7 +822,7 @@ export class FacturaPdfService {
 
       // Izquierda
       etiqueta('CUIT: ', M + 6, y1, { continued: true });
-      doc.font('Helvetica').text(String(c?.idFiscal ?? ''));
+      doc.font('Helvetica').text(formatCuit(c?.idFiscal));
       etiqueta('Condición frente al IVA:', M + 6, y2, { lineBreak: false });
       valor(condLabel, M + 110, y2, { width: 140, lineBreak: false });
       etiqueta('Condición de venta:', M + 6, y3, { lineBreak: false });

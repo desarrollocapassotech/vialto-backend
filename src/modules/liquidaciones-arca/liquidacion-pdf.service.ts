@@ -20,6 +20,7 @@ import { pdfColoresComprobante } from "./pdf-color-comprobante";
 import { ArcaComprobanteCvlp } from "./types/arca.types";
 import { normalizeUnidadCantidad } from "./cantidad-unidad.util";
 import { ymdAr } from "../../shared/util/fecha-ar.util";
+import { formatCuit } from "../../shared/util/cuit";
 import {
   nombreArchivoComprobante,
   tipoComprobanteLegible,
@@ -80,12 +81,6 @@ const CONDICION_IVA_TEXTO: Record<number, string> = {
 function condicionIvaTexto(v: number | string | null | undefined): string {
   if (v == null || v === "") return "";
   return CONDICION_IVA_TEXTO[Number(v)] ?? String(v);
-}
-
-/** "30716741792" → "30-71674179-2"; cualquier otro formato se muestra tal cual. */
-function formatCuit(v: string | null | undefined): string {
-  const d = String(v ?? "").replace(/\D/g, "");
-  return d.length === 11 ? `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}` : String(v ?? "");
 }
 
 type ViajeDetalleCvlp = {

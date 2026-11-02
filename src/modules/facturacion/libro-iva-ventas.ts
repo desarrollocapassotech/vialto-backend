@@ -16,7 +16,10 @@ import {
   type LibroIvaResultado,
 } from '../../shared/util/libro-iva.util';
 import { parsearNumeroComprobante } from '../../shared/util/comprobante-manual.util';
-import { importeNetoFactura } from '../../shared/util/factura-estado-lectura';
+import {
+  importeNetoFactura,
+  restoSinTramoDeViaje,
+} from '../../shared/util/factura-estado-lectura';
 
 /**
  * Libro IVA Ventas: facturas a clientes del período (por fecha del comprobante) + sus notas
@@ -264,12 +267,20 @@ function montosDesdeFactura(f: FacturaMontos): { alicuotas: LibroIvaAlicuota[]; 
   const ivaCabecera = f.ivaPct ?? 0;
   let items: Array<{ base: number; pct: number; iva?: number }>;
   if (f.facturarPorTramo && f.tramos.length > 0) {
-    const conTramo = new Set(f.tramos.map((t) => t.viajeId));
+    const porViaje = new Map<string, Array<{ monto: number }>>();
+    for (const t of f.tramos) {
+      const list = porViaje.get(t.viajeId);
+      if (list) list.push(t);
+      else porViaje.set(t.viajeId, [t]);
+    }
     items = [
       ...f.tramos.map((t) => ({ base: t.monto, pct: t.ivaPct })),
       ...f.viajes
-        .filter((v) => !conTramo.has(v.id))
-        .map((v) => ({ base: importeNetoFactura(0, [v]), pct: ivaCabecera })),
+        .map((v) => ({
+          base: restoSinTramoDeViaje(v, porViaje.get(v.id) ?? []),
+          pct: ivaCabecera,
+        }))
+        .filter((it) => it.base > 0),
     ];
   } else {
     const neto = importeNetoFactura(f.importe, f.viajes);

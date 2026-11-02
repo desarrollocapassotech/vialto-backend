@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { ValidatedRow } from "./types/import.types";
+import { normalizarIdFiscal } from "../../shared/util/documento-unico.util";
 
 export type PrismaScalarField = {
   name: string;
@@ -35,6 +36,13 @@ export const PRISMA_IMPORT_EXCLUDE: Record<string, ReadonlySet<string>> = {
     "pagosTransportista",
     "documentoAduanero",
   ]),
+};
+
+/** Se guardan sin guiones ni puntos (ver `normalizarIdFiscal`), igual que en el alta manual. */
+const CAMPOS_ID_FISCAL: Record<string, ReadonlySet<string>> = {
+  Cliente: new Set(["idFiscal"]),
+  Transportista: new Set(["idFiscal"]),
+  Chofer: new Set(["cuit"]),
 };
 
 export function prismaScalarFields(modelName: string): PrismaScalarField[] {
@@ -119,7 +127,10 @@ export function scalarDataFromRow(
   for (const [key, raw] of Object.entries(row)) {
     if (key.startsWith("_")) continue;
     if (!allowed.has(key) || skip.has(key) || exclude.has(key)) continue;
-    const value = valorParaPrisma(raw, types.get(key));
+    let value = valorParaPrisma(raw, types.get(key));
+    if (value !== undefined && CAMPOS_ID_FISCAL[modelName]?.has(key)) {
+      value = normalizarIdFiscal(String(value)) ?? undefined;
+    }
     if (value === undefined) continue;
     data[key] = value;
   }

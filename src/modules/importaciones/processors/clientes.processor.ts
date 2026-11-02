@@ -5,6 +5,7 @@ import { labelIdFiscalPorPais, validarIdFiscal } from '../../../shared/util/vali
 import type { IImportProcessor, InsertResult } from './import-processor.interface';
 import type { CampoUnicoConflicto, ValidatedRow } from '../types/import.types';
 import { scalarDataFromRow } from '../prisma-import-fields';
+import { normalizarIdFiscal } from '../../../shared/util/documento-unico.util';
 
 @Injectable()
 export class ClientesProcessor implements IImportProcessor {
@@ -60,7 +61,7 @@ export class ClientesProcessor implements IImportProcessor {
       const duplicado = await this.prisma.cliente.findFirst({
         where: {
           tenantId,
-          idFiscal,
+          idFiscal: normalizarIdFiscal(idFiscal),
           ...(existing ? { id: { not: existing.id } } : {}),
         },
         select: { id: true },
@@ -110,7 +111,7 @@ export class ClientesProcessor implements IImportProcessor {
     if (candidatas.length === 0) return [];
 
     const idFiscales = [
-      ...new Set(candidatas.map((r) => String(r.idFiscal).trim())),
+      ...new Set(candidatas.map((r) => normalizarIdFiscal(String(r.idFiscal)) as string)),
     ];
     const existentes = await this.prisma.cliente.findMany({
       where: { tenantId, idFiscal: { in: idFiscales } },
@@ -123,7 +124,7 @@ export class ClientesProcessor implements IImportProcessor {
     const conflictos: CampoUnicoConflicto[] = [];
     for (const row of candidatas) {
       const idFiscal = String(row.idFiscal).trim();
-      const match = porIdFiscal.get(idFiscal);
+      const match = porIdFiscal.get(normalizarIdFiscal(idFiscal) as string);
       if (!match) continue;
       const nombreFila = String(row.nombre ?? '').trim().toLowerCase();
       if (match.nombre.trim().toLowerCase() === nombreFila) continue;

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { NOTIFICACIONES_CATALOG } from './notificaciones-catalog';
 
@@ -44,6 +45,7 @@ export class NotificacionesFeedService {
     tipo?: string,
     offset = 0,
   ): Promise<NotificacionFeed> {
+    await this.purgarHuerfanas(tenantId);
     const where = { tenantId, ...(tipo ? { tipo } : {}) };
     const [envios, noLeidas] = await Promise.all([
       this.prisma.notificacionEnvio.findMany({
@@ -70,6 +72,7 @@ export class NotificacionesFeedService {
     userId: string,
     porTipo: number,
   ): Promise<NotificacionFeedGrupo[]> {
+    await this.purgarHuerfanas(tenantId);
     const [totales, noLeidos] = await Promise.all([
       this.prisma.notificacionEnvio.groupBy({
         by: ['tipo'],
@@ -105,6 +108,30 @@ export class NotificacionesFeedService {
         }),
     );
     return grupos;
+  }
+
+  /**
+   * Borra los avisos cuya entidad ya no existe (liquidación, factura, carga… eliminada desde la
+   * app, en cascada o a mano). El feed muestra el snapshot del envío, así que sin esto seguía
+   * apareciendo un aviso de algo borrado. Se resuelve acá, al leer, y no en cada camino de borrado.
+   * Qué tabla mira cada tipo lo dice `entidadTabla` del catálogo (valor fijo, no del request).
+   */
+  private async purgarHuerfanas(tenantId: string): Promise<void> {
+    const condiciones = NOTIFICACIONES_CATALOG.filter((c) => c.entidadTabla).map(
+      (c) => Prisma.sql`(
+        e."tipo" = ${c.tipo}
+        AND NOT EXISTS (
+          SELECT 1 FROM ${Prisma.raw(`"${c.entidadTabla}"`)} x
+          WHERE x."id" = split_part(e."entidadId", ':', 1) AND x."tenantId" = ${tenantId}
+        )
+      )`,
+    );
+    if (condiciones.length === 0) return;
+    await this.prisma.$executeRaw`
+      DELETE FROM "notificacion_envios" e
+      WHERE e."tenantId" = ${tenantId}
+        AND (${Prisma.join(condiciones, ' OR ')})
+    `;
   }
 
   private toItem(

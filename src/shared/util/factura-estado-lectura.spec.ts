@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * Cobro de facturas: por tramo el IVA entra al saldo; ARCA y sin tramo no cambian.
  * Ejecutar: npx ts-node --transpile-only src/shared/util/factura-estado-lectura.spec.ts
@@ -113,23 +114,46 @@ test('por tramo sin ARCA: cobrada al cubrir neto + IVA', () => {
   assert.equal(cobrado, true);
 });
 
-test('por tramo: la suma de tramos pisa el monto del viaje en el neto', () => {
+test('por tramo parcial (un solo tramo cargado) con cabecera 0%: el resto del viaje queda en el neto sin IVA', () => {
   const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1500 }];
   const tramos = [{ viajeId: 'v1', monto: 700, ivaPct: 22 }];
   const neto = importeNetoFactura(0, viajes, {
     facturarPorTramo: true,
     tramos,
   });
-  assert.equal(neto, 700);
-  // 700 gravado 22% = 154 → total 854
-  assert.equal(importeTotalConIvaPorTramo(neto, tramos, 0), 854);
+  assert.equal(neto, 1500);
+  // 700 gravado 22% = 154, resto 800 al 0% = 0 → total 1654
+  assert.equal(importeTotalConIvaPorTramo(neto, tramos, 0, viajes), 1654);
   assert.equal(
     importeOperativoFactura(0, viajes, {
       facturarPorTramo: true,
       tramos,
       ivaPctCabecera: 0,
     }),
-    854,
+    1654,
+  );
+});
+
+test('por tramo parcial (un solo tramo cargado) con IVA en cabecera: el resto toma el IVA de cabecera', () => {
+  const viajes = [{ id: 'v1', facturacionEstado: 'facturado', monto: 1550 }];
+  const tramos = [{ viajeId: 'v1', monto: 620, ivaPct: 22 }];
+  const neto = importeNetoFactura(0, viajes, {
+    facturarPorTramo: true,
+    tramos,
+  });
+  assert.equal(neto, 1550);
+  // Tramo: 620 * 22% = 136.40; Resto: (1550 - 620 = 930) * 21% = 195.30 → IVA = 331.70, Total = 1881.70
+  const iva = ivaMontoDeTramos(neto, tramos, 21, viajes);
+  assert.equal(iva, 331.7);
+  const total = importeTotalConIvaPorTramo(neto, tramos, 21, viajes);
+  assert.equal(total, 1881.7);
+  assert.equal(
+    importeOperativoFactura(0, viajes, {
+      facturarPorTramo: true,
+      tramos,
+      ivaPctCabecera: 21,
+    }),
+    1881.7,
   );
 });
 

@@ -9,6 +9,8 @@ export {
   importeNetoFactura,
   importeOperativoFactura,
   ivaMontoDeTramos,
+  restoSinTramoDeViaje,
   roundMoney2,
+  viajeReemplazaMontoPorTramos,
 } from '../../shared/util/factura-estado-lectura';
 

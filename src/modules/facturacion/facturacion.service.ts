@@ -28,6 +28,7 @@ import {
   importeOperativoFactura,
   ivaMontoDeTramos,
   roundMoney2,
+  viajeReemplazaMontoPorTramos,
 } from "./factura-estado-lectura";
 import { syncFacturacionEstadoViajes } from "../viajes/viaje-estado-financiero";
 import {
@@ -201,7 +202,9 @@ export class FacturacionService {
   }
 
   /**
-   * Al facturar por tramo, la suma de los tramos pisa el monto del viaje.
+   * Al facturar por tramo, cuando un viaje tiene 2 o más tramos cargados (o 1 tramo que supera su monto),
+   * la suma de los tramos pisa el monto del viaje. Con 1 solo tramo menor al monto del viaje,
+   * la diferencia se toma como "resto" y el monto del viaje no se modifica.
    * Si la factura es para un cliente secundario (`ViajeCliente`), se actualiza su monto;
    * de lo contrario se actualiza `Viaje.monto` (y `ViajeCliente.monto` si existe).
    */
@@ -212,16 +215,18 @@ export class FacturacionService {
     clienteId?: string | null,
   ): Promise<void> {
     if (tramos.length === 0) return;
-    const tramosPorViaje = new Map<string, number>();
+    const tramosPorViaje = new Map<string, FacturaTramoCobro[]>();
     for (const t of tramos) {
       if (t.viajeId) {
-        tramosPorViaje.set(
-          t.viajeId,
-          roundMoney2((tramosPorViaje.get(t.viajeId) ?? 0) + (t.monto ?? 0)),
-        );
+        const list = tramosPorViaje.get(t.viajeId);
+        if (list) list.push(t);
+        else tramosPorViaje.set(t.viajeId, [t]);
       }
     }
-    for (const [viajeId, suma] of tramosPorViaje) {
+    for (const [viajeId, tramosDelViaje] of tramosPorViaje) {
+      const suma = roundMoney2(
+        tramosDelViaje.reduce((s, t) => s + (t.monto ?? 0), 0),
+      );
       const viaje = await tx.viaje.findFirst({
         where: { id: viajeId, tenantId },
         select: { monto: true, clienteId: true },
@@ -233,12 +238,20 @@ export class FacturacionService {
           where: { tenantId, viajeId, clienteId },
           select: { monto: true },
         });
-        if (vc && Math.abs((vc.monto ?? 0) - suma) > 0.005) {
+        if (
+          vc &&
+          viajeReemplazaMontoPorTramos(vc.monto ?? 0, tramosDelViaje) &&
+          Math.abs((vc.monto ?? 0) - suma) > 0.005
+        ) {
           await tx.viajeCliente.updateMany({
             where: { tenantId, viajeId, clienteId },
             data: { monto: suma },
           });
         }
+        continue;
+      }
+
+      if (!viajeReemplazaMontoPorTramos(viaje.monto ?? 0, tramosDelViaje)) {
         continue;
       }
 

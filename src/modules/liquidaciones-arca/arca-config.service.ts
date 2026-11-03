@@ -2,10 +2,12 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
+import { ArcaClientService } from './arca-client.service';
 import { UpsertArcaConfigDto } from './dto/upsert-arca-config.dto';
 import { encryptField, decryptField, validateKeyConfigured } from '../../shared/util/arca-crypto';
 import { CUIT_TEST_HOMOLOGACION, normalizeArcaAmbiente } from './arca.util';
@@ -41,11 +43,20 @@ export type UpsertArcaConfigOptions = {
   allowAmbienteChange?: boolean;
 };
 
+/** Resultado del ajuste automático de puntos de venta al cambiar de ambiente. */
+export type AjustePuntosVenta = { ok: boolean; mensaje: string };
+
+/** Punto de venta con el que AFIP SDK emite en homologación (CUIT de prueba). */
+const PTO_VENTA_HOMOLOGACION = 1;
+
 @Injectable()
 export class ArcaConfigService {
+  private readonly logger = new Logger(ArcaConfigService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly arcaClient: ArcaClientService,
   ) {
     validateKeyConfigured();
   }
@@ -72,7 +83,7 @@ export class ArcaConfigService {
     const allowAmbienteChange = opts.allowAmbienteChange === true;
     const existing = await this.db.arcaConfig.findUnique({
       where: { tenantId },
-      select: { ambiente: true },
+      select: { ambiente: true, certPemProduccion: true, keyPemProduccion: true },
     });
 
     const requestedAmbiente = normalizeArcaAmbiente(dto.ambiente);
@@ -126,12 +137,82 @@ export class ArcaConfigService {
       data.keyPemProduccion = encryptField(dto.keyPemProduccion.trim());
     }
 
+    // Al cambiar de ambiente, los puntos de venta se ajustan solos: el que sirve en
+    // homologación no existe en producción y viceversa (caso real NyM, nov 2026:
+    // quedó PV 1 de homologación en producción y AFIP rechazó con 11002).
+    let ajustePuntosVenta: AjustePuntosVenta | null = null;
+    const cambiaAmbiente = existing
+      ? normalizeArcaAmbiente(existing.ambiente) !== ambiente
+      : ambiente === 'produccion';
+    if (cambiaAmbiente) {
+      ajustePuntosVenta = await this.ajustarPuntosVenta(data, {
+        certPem: data.certPemProduccion ?? existing?.certPemProduccion ?? null,
+        keyPem: data.keyPemProduccion ?? existing?.keyPemProduccion ?? null,
+      });
+    }
+
     await this.db.arcaConfig.upsert({
       where: { tenantId },
       create: { tenantId, ...data },
       update: data,
     });
-    return this.findPublic(tenantId);
+    const config = await this.findPublic(tenantId);
+    return ajustePuntosVenta ? { ...config, ajustePuntosVenta } : config;
+  }
+
+  /**
+   * Setea `data.ptoVentaFactura`/`ptoVentaCvlp` según el ambiente de `data`.
+   * Homologación: PV 1 (el del CUIT de prueba). Producción: consulta a AFIP los
+   * PV habilitados para Web Services con el certificado del tenant; si el PV
+   * configurado está habilitado lo respeta, si no usa el primero habilitado.
+   * Si la consulta falla, deja los valores enviados y avisa (no bloquea el cambio).
+   */
+  private async ajustarPuntosVenta(
+    data: PrismaAny,
+    cred: { certPem: string | null; keyPem: string | null },
+  ): Promise<AjustePuntosVenta> {
+    if (data.ambiente !== 'produccion') {
+      data.ptoVentaFactura = PTO_VENTA_HOMOLOGACION;
+      data.ptoVentaCvlp = PTO_VENTA_HOMOLOGACION;
+      return {
+        ok: true,
+        mensaje: `Puntos de venta ajustados a homologación: ${PTO_VENTA_HOMOLOGACION}.`,
+      };
+    }
+
+    let habilitados: number[];
+    try {
+      habilitados = await this.arcaClient.getPuntosVentaWs(
+        this.getApiKey(),
+        data.cuitEmisor,
+        cred.certPem,
+        cred.keyPem,
+      );
+    } catch (err) {
+      const detalle = (err as { message?: string })?.message ?? String(err);
+      this.logger.warn(`No se pudieron consultar los PV de producción: ${detalle}`);
+      return {
+        ok: false,
+        mensaje: `No se pudieron consultar en AFIP los puntos de venta de producción (${detalle}). Revisalos a mano en "Puntos de venta".`,
+      };
+    }
+
+    if (!habilitados.length) {
+      return {
+        ok: false,
+        mensaje:
+          'AFIP no informa ningún punto de venta habilitado para Web Services en este CUIT. Dalo de alta en AFIP y cargalo en "Puntos de venta".',
+      };
+    }
+
+    const elegir = (actual: number) =>
+      habilitados.includes(actual) ? actual : habilitados[0];
+    data.ptoVentaFactura = elegir(data.ptoVentaFactura);
+    data.ptoVentaCvlp = elegir(data.ptoVentaCvlp);
+    return {
+      ok: true,
+      mensaje: `Puntos de venta de producción tomados de AFIP: Factura A/B ${data.ptoVentaFactura}, CVLP ${data.ptoVentaCvlp}.`,
+    };
   }
 
   async uploadLogo(

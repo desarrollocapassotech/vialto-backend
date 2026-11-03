@@ -1278,7 +1278,7 @@ export class PlatformController {
     @Body()
     dto?: import("../../modules/liquidaciones-arca/dto/emitir-liquidacion.dto").EmitirLiquidacionDto,
   ) {
-    return this.service.emitirLiquidacion(tenantId, id, dto?.ptoVenta);
+    return this.service.emitirLiquidacion(tenantId, id, dto?.ptoVenta, dto?.fechaEmision);
   }
 
   @ApiOperation({

@@ -1439,12 +1439,14 @@ export class PlatformService {
     tenantId: string | undefined,
     liquidacionId: string,
     ptoVenta?: number,
+    fechaEmision?: string,
   ) {
     const id = this.requiredTenantId(tenantId);
     return this.liquidacionesService.emitirLiquidacion(
       id,
       liquidacionId,
       ptoVenta,
+      fechaEmision,
     );
   }
 

@@ -40,7 +40,7 @@ export async function assertVehiculosDelViaje(
     const bad = rows.some((r) => !!r.transportistaId?.trim());
     if (bad) {
       throw new BadRequestException(
-        "Solo se permiten vehículos de flota propia (sin transportista externo en su ficha).",
+        "Solo se permiten vehículos de flota propia (sin transporte / porteador en su ficha).",
       );
     }
   }

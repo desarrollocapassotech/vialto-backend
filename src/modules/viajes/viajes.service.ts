@@ -505,7 +505,7 @@ export class ViajesService {
 
     if (!params.transportistaId) {
       throw new BadRequestException(
-        "Este viaje no tiene transportista externo asignado.",
+        "Este viaje no tiene transporte / porteador asignado.",
       );
     }
 
@@ -2208,7 +2208,7 @@ export class ViajesService {
     }
     if (!viaje.transportistaId) {
       throw new BadRequestException(
-        "Este viaje no tiene transportista externo asignado.",
+        "Este viaje no tiene transporte / porteador asignado.",
       );
     }
 
@@ -2292,7 +2292,7 @@ export class ViajesService {
     }
     if (!viaje.transportistaId) {
       throw new BadRequestException(
-        "Este viaje no tiene transportista externo asignado.",
+        "Este viaje no tiene transporte / porteador asignado.",
       );
     }
 

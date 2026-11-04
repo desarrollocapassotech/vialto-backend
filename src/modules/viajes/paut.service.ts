@@ -152,7 +152,7 @@ export class PautService {
     ) {
       throw new BadRequestException({
         message:
-          "El PAUT solo aplica a viajes con transportista externo (no a flota propia).",
+          "El PAUT solo aplica a viajes con transporte / porteador (no a flota propia).",
         code: "PAUT_NOT_APPLICABLE",
         modalidadOperacion: "flota_propia",
       });

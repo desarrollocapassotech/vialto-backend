@@ -423,7 +423,7 @@ export class ViajesProcessor implements IImportProcessor {
       }
       if (tipoFlota === "PROPIA" && transportistaId)
         throw new Error(
-          "Flota PROPIA con transportista externo asignado: datos incoherentes.",
+          "Flota PROPIA con transporte / porteador asignado: datos incoherentes.",
         );
 
       const hoy = new Date();

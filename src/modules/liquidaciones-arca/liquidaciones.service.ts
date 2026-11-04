@@ -831,6 +831,8 @@ export class LiquidacionesService {
     tenantId: string,
     liquidacionId: string,
     ptoVenta?: number,
+    /** `YYYY-MM-DD` elegido por el usuario; sin valor, la fecha es hoy. */
+    fechaEmision?: string,
   ) {
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
@@ -900,6 +902,12 @@ export class LiquidacionesService {
         'No se puede emitir una liquidación con monto $0. Revisá los viajes y sus importes.',
       );
     }
+
+    // Fecha de emisión elegida (ej. liquidaciones del mes anterior hechas los primeros
+    // días del mes). Fail-fast: fuera de la ventana de AFIP se rechaza antes de marcar
+    // la liquidación como pendiente; el chequeo contra el último comprobante va más abajo.
+    const fechaEmisionElegida = fechaEmision ? fechaCalendarioAr(fechaEmision) : null;
+    if (fechaEmisionElegida) resolveFechaCbteFactura(fechaEmisionElegida);
 
     const config = await this.arcaConfig.findWithApiKey(tenantId);
     // Punto de venta editable por operación; si no se envía, se usa el de ArcaConfig.
@@ -985,7 +993,27 @@ export class LiquidacionesService {
       // Valida que el número local coincida con el esperado por AFIP (protege contra desfasajes).
       this.validarCorrelatividad(liquidacion.cbteNro, cbteNro, 'Liquidación');
 
-      const fechaCbte = formatFechaCbte(new Date());
+      let fechaCbte: string;
+      if (fechaEmisionElegida) {
+        // Se informa la fecha elegida tal cual (mismo criterio que la factura): AFIP exige
+        // fechas no decrecientes por punto de venta, así que se valida contra el último.
+        const ultimoFecha =
+          ultimoCbte > 0
+            ? await this.arcaClient.getFechaComprobanteAutorizado(
+                config.apiKey,
+                config.cuitEmisor,
+                config.ambiente as 'homologacion' | 'produccion',
+                ptoVentaFinal,
+                cbteTipoFinal,
+                ultimoCbte,
+                config.certPem,
+                config.keyPem,
+              )
+            : null;
+        fechaCbte = resolveFechaCbteFactura(fechaEmisionElegida, ultimoFecha);
+      } else {
+        fechaCbte = formatFechaCbte(new Date());
+      }
       const docNroReal = liquidacion.transportista?.idFiscal
         ? Number(liquidacion.transportista.idFiscal.replace(/-/g, ''))
         : 0;
@@ -1088,6 +1116,7 @@ export class LiquidacionesService {
           ptoVenta: ptoVentaFinal,
           cae: response.CAE,
           caeFechaVto: parseAfipDate(response.CAEFchVto),
+          fechaEmision: parseAfipDate(fechaCbte), // CbteFch autorizado (medianoche UTC)
           ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           gastosAdmin: 0,

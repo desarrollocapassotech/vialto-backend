@@ -1601,6 +1601,10 @@ model Liquidacion {
   ptoVenta    Int?
   cae         String?
   caeFechaVto DateTime?
+  // Fecha del CVLP informada a AFIP (CbteFch), medianoche UTC. La elige el usuario al
+  // emitir (ej. liquidaciones del mes anterior hechas los primeros días del mes).
+  // null = liquidación emitida antes de existir el campo (la fecha vive en ArcaLog).
+  fechaEmision DateTime?
   // Ambiente ARCA con el que se emitió: 'produccion' | 'homologacion'
   ambiente    String?
 

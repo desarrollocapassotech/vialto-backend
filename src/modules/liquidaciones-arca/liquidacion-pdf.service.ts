@@ -396,7 +396,12 @@ export class LiquidacionPdfService {
             ptoVenta: liq.ptoVenta,
             cae: liq.cae,
             caeFechaVto: liq.caeFechaVto,
-            fecha: liq.createdAt,
+            // Fecha informada a AFIP. `fechaEmision` es medianoche UTC: se corre al
+            // mediodía para que `ymdAr` (casillas) y `toISOString` (QR) den el mismo día.
+            // Liquidaciones emitidas antes del campo siguen con la fecha de creación.
+            fecha: liq.fechaEmision
+              ? new Date(liq.fechaEmision.getTime() + 12 * 60 * 60 * 1000)
+              : liq.createdAt,
           };
 
     const config = await this.arcaConfig.findParaComprobante(tenantId);

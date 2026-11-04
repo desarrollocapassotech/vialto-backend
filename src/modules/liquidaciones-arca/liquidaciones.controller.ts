@@ -403,7 +403,12 @@ export class LiquidacionesController {
     @Body() dto: EmitirLiquidacionDto,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.emitirLiquidacion(auth.tenantId, id, dto.ptoVenta);
+    return this.service.emitirLiquidacion(
+      auth.tenantId,
+      id,
+      dto.ptoVenta,
+      dto.fechaEmision,
+    );
   }
 
   @ApiOperation({
@@ -785,7 +790,7 @@ export class LiquidacionesPlatformController {
     @Body() dto: EmitirLiquidacionDto,
   ) {
     const tid = this.requiredTenantId(tenantId);
-    return this.service.emitirLiquidacion(tid, id, dto?.ptoVenta);
+    return this.service.emitirLiquidacion(tid, id, dto?.ptoVenta, dto?.fechaEmision);
   }
 
   @Get("receptor-padron/:entidad/:id")

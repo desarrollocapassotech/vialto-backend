@@ -175,6 +175,39 @@ export class ArcaClientService {
   }
 
   /**
+   * Puntos de venta habilitados para Web Services (FEParamGetPtosVenta) en
+   * producción: activos (sin bloqueo ni baja) y de emisión CAE (no CAEA).
+   * Ordenados de menor a mayor. Solo lectura, no emite nada.
+   */
+  async getPuntosVentaWs(
+    apiKey: string,
+    cuit: string,
+    certPem?: string | null,
+    keyPem?: string | null,
+  ): Promise<number[]> {
+    const { afip } = await this.getAfipClientAndToken(
+      apiKey,
+      normalizeCuit(cuit),
+      'produccion',
+      certPem,
+      keyPem,
+    );
+    const lista = (await afip.ElectronicBilling.getSalesPoints()) as
+      | Array<{ Nro: number | string; EmisionTipo?: string; Bloqueado?: string; FchBaja?: string }>
+      | null;
+    return (lista ?? [])
+      .filter(
+        (pv) =>
+          String(pv.Bloqueado ?? 'N').toUpperCase() === 'N' &&
+          (!pv.FchBaja || String(pv.FchBaja).toUpperCase() === 'NULL') &&
+          !/CAEA/i.test(String(pv.EmisionTipo ?? '')),
+      )
+      .map((pv) => Number(pv.Nro))
+      .filter((n) => Number.isInteger(n) && n > 0)
+      .sort((a, b) => a - b);
+  }
+
+  /**
    * Homologación: createNextVoucher del SDK (getLastVoucher + createVoucher atómicos).
    * Evita 10016 por desfase entre consulta manual y autorización.
    */

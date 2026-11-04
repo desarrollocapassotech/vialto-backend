@@ -50,7 +50,7 @@ export function assertViajeOperacionExclusiva(refs: {
   }
   if (!ch || vids.length === 0) {
     throw new BadRequestException(
-      'Sin transportista externo, debés indicar chofer y al menos un vehículo.',
+      'Sin transporte / porteador, debés indicar chofer y al menos un vehículo.',
     );
   }
 }

@@ -255,7 +255,7 @@ export class ValidatorService {
           rowErrors.push({
             fila: row._rowNum,
             campo: "Transporte",
-            error: "Flota PROPIA con transportista externo asignado: datos incoherentes.",
+            error: "Flota PROPIA con transporte / porteador asignado: datos incoherentes.",
             valor: transportistaId,
           });
         }

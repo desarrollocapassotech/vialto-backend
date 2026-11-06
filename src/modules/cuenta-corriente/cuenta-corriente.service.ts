@@ -1081,17 +1081,35 @@ export class CuentaCorrienteService {
     }));
   }
 
-  /** Saldo por moneda de todas las cuentas de un lado, para el listado de la pantalla. */
+  /**
+   * Para el listado de la pantalla, por cuenta de un lado: saldo por moneda y próximo
+   * vencimiento sin imputar (el más viejo de sus ventas/compras abiertas, aunque ya haya
+   * pasado; de cualquier moneda, porque es una fecha y no un monto).
+   */
   async saldosDeCuentas(tenantId: string, lado: 'cliente' | 'proveedor') {
-    const grouped = await this.prisma.movimientoCuentaCorriente.groupBy({
-      by: ['contraparteId', 'moneda', 'tipo'],
-      where: {
-        tenantId,
-        estadoDisponibilidad: { not: 'anulado' },
-        ...(lado === 'cliente' ? { clienteId: { not: null } } : { proveedorId: { not: null } }),
-      },
-      _sum: { importe: true },
-    });
+    const filtroLado =
+      lado === 'cliente' ? { clienteId: { not: null } } : { proveedorId: { not: null } };
+    const [grouped, vencimientos] = await Promise.all([
+      this.prisma.movimientoCuentaCorriente.groupBy({
+        by: ['contraparteId', 'moneda', 'tipo'],
+        where: { tenantId, estadoDisponibilidad: { not: 'anulado' }, ...filtroLado },
+        _sum: { importe: true },
+      }),
+      this.prisma.movimientoCuentaCorriente.groupBy({
+        by: ['contraparteId'],
+        where: {
+          tenantId,
+          tipo: 'cargo',
+          estadoDisponibilidad: { in: ['pendiente', 'parcial'] },
+          fechaVencimiento: { not: null },
+          ...filtroLado,
+        },
+        _min: { fechaVencimiento: true },
+      }),
+    ]);
+    const proximoPorCuenta = new Map(
+      vencimientos.map((v) => [v.contraparteId, v._min.fechaVencimiento]),
+    );
     return saldosPorContraparte(
       grouped.map((g) => ({
         contraparteId: g.contraparteId,
@@ -1099,7 +1117,10 @@ export class CuentaCorrienteService {
         tipo: g.tipo,
         importe: g._sum.importe ?? 0,
       })),
-    );
+    ).map((cuenta) => ({
+      ...cuenta,
+      proximoVencimiento: proximoPorCuenta.get(cuenta.contraparteId) ?? null,
+    }));
   }
 
   async saldoCliente(tenantId: string, clienteId: string) {

@@ -159,6 +159,17 @@ export class CuentaCorrienteController {
     return this.service.registrarPago(auth.tenantId, dto, auth.userId);
   }
 
+  @ApiOperation({ summary: 'Saldos de todas las cuentas de clientes (lado=cliente, default) o proveedores (lado=proveedor)' })
+  @Get('saldos')
+  @Roles('admin', 'member', 'superadmin')
+  saldos(@CurrentAuth() auth: AuthPayload, @Query('lado') lado?: string) {
+    assertTenantId(auth.tenantId);
+    return this.service.saldosDeCuentas(
+      auth.tenantId,
+      lado === 'proveedor' ? 'proveedor' : 'cliente',
+    );
+  }
+
   @ApiOperation({ summary: 'Saldo actual de un cliente en cuenta corriente' })
   @Get('saldo/cliente/:clienteId')
   @Roles('admin', 'member', 'superadmin')

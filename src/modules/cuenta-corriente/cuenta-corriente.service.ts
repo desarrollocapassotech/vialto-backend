@@ -16,6 +16,7 @@ import { ExportarMovimientosQueryDto } from './dto/exportar-movimientos-query.dt
 import { CreateImputacionCcDto } from './dto/create-imputacion-cc.dto';
 import { CreateImputacionMultipleCcDto } from './dto/create-imputacion-multiple-cc.dto';
 import { repartirImputacion } from './imputacion-reparto.util';
+import { saldosPorContraparte } from './saldos-por-contraparte.util';
 import { sincronizarCargoLiquidacionCc } from '../liquidaciones-arca/liquidacion-cuenta-corriente';
 import {
   cuentaEnHistorialCc,
@@ -1078,6 +1079,27 @@ export class CuentaCorrienteService {
       moneda,
       saldo: v.cargos - v.pagos,
     }));
+  }
+
+  /** Saldo por moneda de todas las cuentas de un lado, para el listado de la pantalla. */
+  async saldosDeCuentas(tenantId: string, lado: 'cliente' | 'proveedor') {
+    const grouped = await this.prisma.movimientoCuentaCorriente.groupBy({
+      by: ['contraparteId', 'moneda', 'tipo'],
+      where: {
+        tenantId,
+        estadoDisponibilidad: { not: 'anulado' },
+        ...(lado === 'cliente' ? { clienteId: { not: null } } : { proveedorId: { not: null } }),
+      },
+      _sum: { importe: true },
+    });
+    return saldosPorContraparte(
+      grouped.map((g) => ({
+        contraparteId: g.contraparteId,
+        moneda: g.moneda,
+        tipo: g.tipo,
+        importe: g._sum.importe ?? 0,
+      })),
+    );
   }
 
   async saldoCliente(tenantId: string, clienteId: string) {

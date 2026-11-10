@@ -1528,7 +1528,7 @@ export class ViajesService {
     const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const creado = await this.prisma.$transaction(async (tx) => {
         const data: Prisma.ViajeUncheckedCreateInput = {
           tenantId,
           numero,
@@ -1596,6 +1596,8 @@ export class ViajesService {
           calcularMontosReales(outSinIva) as unknown as ViajeConVehiculosViaje,
         ) as ViajeConVehiculosViaje;
       }, VIAJE_INTERACTIVE_TX);
+      await this.registrarDireccionesManuales(tenantId, dto);
+      return creado;
     } catch (e) {
       this.assertNoUniqueConstraintViolation(e);
     }
@@ -2001,7 +2003,7 @@ export class ViajesService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const actualizado = await this.prisma.$transaction(async (tx) => {
         const updated = await tx.viaje.update({
           where: { id },
           data: data as Prisma.ViajeUncheckedUpdateInput,
@@ -2033,8 +2035,69 @@ export class ViajesService {
           calcularMontosReales(fullSinIva) as any,
         ) as ViajeConVehiculosViaje;
       }, VIAJE_INTERACTIVE_TX);
+      await this.registrarDireccionesManuales(tenantId, dto);
+      return actualizado;
     } catch (e) {
       this.assertNoUniqueConstraintViolation(e);
+    }
+  }
+
+  /**
+   * Empresas con origen/destino en texto libre (`Tenant.recomendacionCiudadesHabilitada
+   * = false`): lo que se escribió a mano y todavía no está en Direcciones de entrega se
+   * agrega al catálogo, para que el próximo viaje lo ofrezca como sugerencia. Con el
+   * buscador de ciudades no se guarda nada (ahí se elige una ciudad, no se escribe).
+   * Compara sin mayúsculas, acentos ni espacios de más. Best-effort: si falla, el viaje
+   * ya quedó guardado y solo se loguea.
+   */
+  private async registrarDireccionesManuales(
+    tenantId: string,
+    dto: Pick<CreateViajeDto, "origen" | "destino" | "destinos" | "clientes"> |
+      Pick<UpdateViajeDto, "origen" | "destino" | "destinos" | "clientes">,
+  ): Promise<void> {
+    try {
+      const textos = [
+        dto.origen,
+        dto.destino,
+        ...(dto.destinos ?? []).map((d) => d.etiqueta),
+        ...(dto.clientes ?? []).flatMap((c) => [
+          c.origen,
+          ...(c.destinos ?? []).map((d) => d.etiqueta),
+        ]),
+      ]
+        .map((t) => t?.trim().replace(/\s+/g, " "))
+        .filter((t): t is string => !!t);
+      if (textos.length === 0) return;
+
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { clerkOrgId: tenantId },
+        select: { recomendacionCiudadesHabilitada: true },
+      });
+      if (!tenant || tenant.recomendacionCiudadesHabilitada) return;
+
+      const clave = (s: string) =>
+        s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
+      const existentes = await this.prisma.direccionEntrega.findMany({
+        where: { tenantId },
+        select: { direccion: true },
+      });
+      const vistas = new Set(existentes.map((e) => clave(e.direccion)));
+      const nuevas: string[] = [];
+      for (const t of textos) {
+        const k = clave(t);
+        if (vistas.has(k)) continue;
+        vistas.add(k);
+        nuevas.push(t);
+      }
+      if (nuevas.length === 0) return;
+      await this.prisma.direccionEntrega.createMany({
+        data: nuevas.map((direccion) => ({ tenantId, direccion })),
+      });
+    } catch (e) {
+      console.warn(
+        `[viajes] No se pudieron registrar direcciones de entrega (tenant ${tenantId}):`,
+        e instanceof Error ? e.message : e,
+      );
     }
   }
 

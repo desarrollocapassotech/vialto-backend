@@ -679,20 +679,20 @@ export class ImportacionesService {
     rows: ValidatedRow[],
   ): Map<number, FilaRepetidaArchivo> {
     const repetidas = new Map<number, FilaRepetidaArchivo>();
+    const texto = (v: unknown) => (v == null ? "" : String(v).trim());
     if (modulo === "clientes" || modulo === "transportistas") {
       const vistas = new Map<string, { fila: number; nombre: string }>();
       for (const row of rows) {
-        const idFiscalRaw =
-          typeof row.idFiscal === "string" ? row.idFiscal.trim() : "";
+        const idFiscalRaw = texto(row.idFiscal);
         const clave = normalizarIdFiscal(idFiscalRaw);
         if (!clave) continue;
-        const nombre = String(row.nombre ?? "").trim();
+        const nombre = texto(row.nombre);
         const previa = vistas.get(clave);
         if (!previa) {
           vistas.set(clave, { fila: row._rowNum, nombre });
           continue;
         }
-        const pais = typeof row.pais === "string" ? row.pais.trim() : "";
+        const pais = texto(row.pais);
         repetidas.set(row._rowNum, {
           campoLabel: labelIdFiscalPorPais(pais, idFiscalRaw),
           valor: idFiscalRaw,
@@ -703,18 +703,18 @@ export class ImportacionesService {
     } else if (modulo === "choferes") {
       const vistas = new Map<string, { fila: number; nombre: string }>();
       for (const row of rows) {
-        const dni = typeof row.dni === "string" ? row.dni.trim() : "";
-        const cuit = typeof row.cuit === "string" ? row.cuit.trim() : "";
+        const dni = texto(row.dni);
+        const cuit = texto(row.cuit);
         const clave = claveDniChofer(dni, cuit);
         if (!clave) continue;
-        const nombre = String(row.nombre ?? "").trim();
+        const nombre = texto(row.nombre);
         const previa = vistas.get(clave);
         if (!previa) {
           vistas.set(clave, { fila: row._rowNum, nombre });
           continue;
         }
         repetidas.set(row._rowNum, {
-          campoLabel: dni ? "DNI" : "CUIT",
+          campoLabel: "DNI",
           valor: dni || cuit,
           filaOriginal: previa.fila,
           nombreOriginal: previa.nombre,

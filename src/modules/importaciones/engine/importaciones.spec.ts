@@ -360,4 +360,160 @@ const templateBase: TemplateConfig = {
     assert.equal(omitida6?.estado, "omitida");
     assert.match(omitida6?.mensaje ?? "", /mismo CUIT que la fila 5/);
   });
+
+  await test("Preview y confirm de choferes: DNI repetido en el mismo archivo (directo o dentro del CUIT) se marca como DNI repetido y se omite", async () => {
+    const choferesDB: { id: string; nombre: string; dni: string | null; cuit: string | null }[] = [
+      { id: "ch-existente", nombre: "FERNANDEZ JUAN CARLOS", dni: "40841857", cuit: null },
+    ];
+    let savedSession: any = null;
+    const prismaChoferesMock = {
+      tenant: {
+        findUnique: async () => ({
+          importacionesOcultas: false,
+          paisOrigenDestinoOculto: false,
+          paisOrigenDestinoCodigo: null,
+        }),
+      },
+      importTemplate: {
+        findFirst: async () => ({
+          id: "tpl-choferes",
+          modulo: "choferes",
+          config: {
+            sheet: "Choferes",
+            headerRow: 1,
+            columns: [
+              { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+              { field: "dni", excelHeader: "DNI", type: "string" },
+              { field: "cuit", excelHeader: "CUIT", type: "string" },
+            ],
+          },
+        }),
+      },
+      chofer: {
+        findMany: async () => choferesDB,
+        findFirst: async ({ where }: any) => {
+          if (where?.nombre?.equals) {
+            return (
+              choferesDB.find(
+                (c) => c.nombre.toLowerCase() === where.nombre.equals.toLowerCase(),
+              ) ?? null
+            );
+          }
+          return null;
+        },
+        create: async ({ data }: any) => {
+          const created = {
+            id: `ch-${choferesDB.length + 1}`,
+            nombre: data.nombre,
+            dni: data.dni ?? null,
+            cuit: data.cuit ?? null,
+          };
+          choferesDB.push(created);
+          return { id: created.id };
+        },
+      },
+      transportista: {
+        findMany: async () => [],
+      },
+      $queryRaw: async () => [],
+      importSession: {
+        create: async ({ data }: any) => {
+          savedSession = {
+            id: "sess-ch-1",
+            ...data,
+            template: {
+              modulo: "choferes",
+              config: {
+                columns: [
+                  { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+                  { field: "dni", excelHeader: "DNI", type: "string" },
+                  { field: "cuit", excelHeader: "CUIT", type: "string" },
+                ],
+              },
+            },
+          };
+          return { id: "sess-ch-1" };
+        },
+        findFirst: async () => savedSession,
+        delete: async () => ({}),
+      },
+      importLog: {
+        create: async ({ data }: any) => ({ id: "log-ch-1", ...data }),
+      },
+    } as any;
+
+    const clientesProcessor = new ClientesProcessor(prismaChoferesMock);
+    const transportistasProcessor = new TransportistasProcessor(prismaChoferesMock);
+    const choferesProcessor = new ChoferesProcessor(prismaChoferesMock);
+    const validatorChoferes = new ValidatorService(prismaChoferesMock, {} as any);
+    const service = new ImportacionesService(
+      prismaChoferesMock,
+      parser,
+      validatorChoferes,
+      {} as any,
+      clientesProcessor,
+      transportistasProcessor,
+      choferesProcessor,
+      {} as any,
+      {} as any,
+      {} as any,
+      { getConfig: async () => ({ hiddenFields: {} }) } as any,
+    );
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Nombre", "DNI", "CUIT"],
+      ["FERNANDEZ J CARLOS", "40841857", ""],
+      ["CHOFER NUEVO SOLO DNI", "37904686", ""],
+      ["CHOFER REPETIDO EN ARCHIVO A", "37555884", ""],
+      ["CHOFER REPETIDO EN ARCHIVO B", "", "20375558840"],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "Choferes");
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    const preview = await service.preview(
+      "tenant-1",
+      "choferes",
+      buffer,
+      "choferes.xlsx",
+      true,
+    );
+
+    // Fila 2 choca contra el chofer existente en DB
+    assert.deepEqual(
+      preview.advertenciasCampoUnicoDuplicado?.map((c) => c.fila),
+      [2],
+    );
+    // Fila 5 es repetida de la fila 4 (mismo DNI dentro del CUIT) y siempre usa campoLabel "DNI"
+    const fila4 = preview.filasDetalle?.find((f) => f.fila === 4);
+    const fila5 = preview.filasDetalle?.find((f) => f.fila === 5);
+    assert.equal(fila4?.esNuevo, true);
+    assert.equal(fila4?.repetidaEnArchivo, undefined);
+    assert.equal(fila5?.esNuevo, false);
+    assert.deepEqual(fila5?.repetidaEnArchivo, {
+      campoLabel: "DNI",
+      valor: "20375558840",
+      filaOriginal: 4,
+      nombreOriginal: "CHOFER REPETIDO EN ARCHIVO A",
+    });
+    // Solo las filas 3 y 4 son realmente nuevas
+    assert.equal(preview.entidadesNuevas, 2);
+    assert.equal(preview.entidadesActualizadas, 0);
+
+    const confirmRes = await service.confirm(
+      "tenant-1",
+      "sess-ch-1",
+      "user-1",
+      true,
+      undefined,
+      undefined,
+      true,
+      [{ fila: 2, accion: "ignorar" }],
+    );
+    assert.equal(confirmRes.errores, 0);
+    assert.equal(confirmRes.exitosas, 2);
+    const omitida5 = (confirmRes.detalles as any[]).find((d) => d.fila === 5);
+    assert.equal(omitida5?.estado, "omitida");
+    assert.match(omitida5?.mensaje ?? "", /mismo DNI que la fila 4/);
+  });
 })();

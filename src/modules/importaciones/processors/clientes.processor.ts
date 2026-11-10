@@ -106,7 +106,7 @@ export class ClientesProcessor implements IImportProcessor {
     tenantId: string,
   ): Promise<CampoUnicoConflicto[]> {
     const candidatas = rows.filter(
-      (r) => typeof r.idFiscal === 'string' && r.idFiscal.trim(),
+      (r) => r.idFiscal != null && String(r.idFiscal).trim() !== '',
     );
     if (candidatas.length === 0) return [];
 

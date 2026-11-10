@@ -98,7 +98,7 @@ export class ChoferesProcessor implements IImportProcessor {
     rows: ValidatedRow[],
     tenantId: string,
   ): Promise<CampoUnicoConflicto[]> {
-    const texto = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const texto = (v: unknown) => (v == null ? "" : String(v).trim());
     const candidatas = rows.filter((r) =>
       claveDniChofer(texto(r.dni), texto(r.cuit)),
     );

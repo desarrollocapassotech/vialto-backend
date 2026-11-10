@@ -44,7 +44,7 @@ import {
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { labelEnFrase, productoLabels } from "../../shared/util/producto-label.util";
 import {
-  claveDniChofer,
+  clavesDniChofer,
   normalizarIdFiscal,
 } from "../../shared/util/documento-unico.util";
 import { labelIdFiscalPorPais } from "../../shared/util/validar-id-fiscal";
@@ -705,12 +705,12 @@ export class ImportacionesService {
       for (const row of rows) {
         const dni = texto(row.dni);
         const cuit = texto(row.cuit);
-        const clave = claveDniChofer(dni, cuit);
-        if (!clave) continue;
+        const claves = clavesDniChofer(dni, cuit);
+        if (claves.length === 0) continue;
         const nombre = texto(row.nombre);
-        const previa = vistas.get(clave);
+        const previa = claves.map((c) => vistas.get(c)).find(Boolean);
         if (!previa) {
-          vistas.set(clave, { fila: row._rowNum, nombre });
+          for (const c of claves) vistas.set(c, { fila: row._rowNum, nombre });
           continue;
         }
         repetidas.set(row._rowNum, {

@@ -248,6 +248,28 @@ export class TenantsService {
     }
   }
 
+  /** Label del transportista: mismo criterio que `resolverProductoLabel` (plural con IA). */
+  private async resolverTransportistaLabel(
+    current: { transportistaLabel: string | null },
+    dto: UpdateTenantDto,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    if (dto.transportistaLabel !== undefined) {
+      const singular = dto.transportistaLabel?.trim() || null;
+      data.transportistaLabel = singular;
+      if (!singular) {
+        data.transportistaLabelPlural = null;
+        return;
+      }
+      if (dto.transportistaLabelPlural === undefined && singular !== current.transportistaLabel) {
+        data.transportistaLabelPlural = await this.productoLabelPlural.generar(singular);
+      }
+    }
+    if (dto.transportistaLabelPlural !== undefined) {
+      data.transportistaLabelPlural = dto.transportistaLabelPlural?.trim() || null;
+    }
+  }
+
   async update(clerkOrgId: string, dto: UpdateTenantDto) {
     const current = await this.findOne(clerkOrgId);
     const data: Record<string, unknown> = {
@@ -271,6 +293,7 @@ export class TenantsService {
     }
     this.assertIdentificadoresValidos(current, dto, data);
     await this.resolverProductoLabel(current, dto, data);
+    await this.resolverTransportistaLabel(current, dto, data);
     return this.prisma.tenant.update({
       where: { clerkOrgId },
       data,

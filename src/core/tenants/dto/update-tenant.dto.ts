@@ -107,4 +107,9 @@ export class UpdateTenantDto {
   @IsOptional() @IsString() @MaxLength(40) productoLabel?: string | null;
   /** Plural del label (corrección manual del generado). */
   @IsOptional() @IsString() @MaxLength(40) productoLabelPlural?: string | null;
+
+  /** Cómo llama la empresa al transportista (ej. "Fletero"). null/"" = "Transportista". Sin plural, se genera con IA. */
+  @IsOptional() @IsString() @MaxLength(40) transportistaLabel?: string | null;
+  /** Plural del label del transportista (corrección manual del generado). */
+  @IsOptional() @IsString() @MaxLength(40) transportistaLabelPlural?: string | null;
 }

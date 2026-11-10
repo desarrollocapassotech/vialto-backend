@@ -164,6 +164,15 @@ model Tenant {
   productoLabel                   String?
   /** Plural de productoLabel (ej. "Granos"). Lo genera la IA al guardar el singular; editable. */
   productoLabelPlural             String?
+  /**
+   * Cómo llama la empresa al transportista externo (ej. "Fletero", "Porteador");
+   * null = "Transportista". Se usa en Base de datos, alta/edición y detalle de Viajes
+   * (en el alta reemplaza también a "Transporte / Porteador"). Lo configura solo el
+   * superadmin ("Configuración por empresa" → General).
+   */
+  transportistaLabel              String?
+  /** Plural de transportistaLabel. Lo genera la IA al guardar el singular; editable. */
+  transportistaLabelPlural        String?
   createdAt                       DateTime @default(now())
 
   clientes                   Cliente[]

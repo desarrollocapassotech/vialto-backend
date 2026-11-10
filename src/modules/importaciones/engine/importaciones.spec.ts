@@ -1,10 +1,14 @@
-﻿/**
+/**
  * Pruebas del motor de importaciones (Parser y Validator).
  * Ejecutar: npm run test:importaciones
  */
 import * as assert from "node:assert/strict";
 import { ParserService } from "./parser.service";
 import { ValidatorService } from "./validator.service";
+import { ImportacionesService } from "../importaciones.service";
+import { ClientesProcessor } from "../processors/clientes.processor";
+import { TransportistasProcessor } from "../processors/transportistas.processor";
+import { ChoferesProcessor } from "../processors/choferes.processor";
 import * as XLSX from "xlsx";
 import type { TemplateConfig } from "../types/import.types";
 
@@ -186,5 +190,174 @@ const templateBase: TemplateConfig = {
     assert.equal(res.errors.length, 0);
     assert.deepEqual(res.created.productos, ["Maíz"]);
     assert.equal(new Set(res.valid.map((r) => r.productoId)).size, 1);
+  });
+
+  await test("Preview y confirm de clientes: CUIT repetido en el mismo archivo con distinto formato se marca y se omite", async () => {
+    const clientesDB: { id: string; nombre: string; idFiscal: string; pais: string }[] = [
+      { id: "c-existente", nombre: "Agroinsumos del Sur SA", idFiscal: "30608371180", pais: "AR" },
+    ];
+    let savedSession: any = null;
+    let savedLog: any = null;
+    const prismaClientesMock = {
+      tenant: {
+        findUnique: async () => ({
+          importacionesOcultas: false,
+          paisOrigenDestinoOculto: false,
+          paisOrigenDestinoCodigo: null,
+        }),
+      },
+      importTemplate: {
+        findFirst: async () => ({
+          id: "tpl-clientes",
+          modulo: "clientes",
+          config: {
+            sheet: "Clientes",
+            headerRow: 1,
+            columns: [
+              { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+              { field: "idFiscal", excelHeader: "CUIT", type: "string" },
+              { field: "pais", excelHeader: "País", type: "string" },
+            ],
+          },
+        }),
+      },
+      cliente: {
+        findMany: async ({ where }: any) => {
+          if (where?.idFiscal?.in) {
+            return clientesDB.filter((c) => where.idFiscal.in.includes(c.idFiscal));
+          }
+          return clientesDB;
+        },
+        findFirst: async ({ where }: any) => {
+          if (where?.nombre?.equals) {
+            return (
+              clientesDB.find(
+                (c) => c.nombre.toLowerCase() === where.nombre.equals.toLowerCase(),
+              ) ?? null
+            );
+          }
+          if (where?.idFiscal) {
+            return clientesDB.find((c) => c.idFiscal === where.idFiscal) ?? null;
+          }
+          return null;
+        },
+        create: async ({ data }: any) => {
+          const created = {
+            id: `c-${clientesDB.length + 1}`,
+            nombre: data.nombre,
+            idFiscal: data.idFiscal,
+            pais: data.pais ?? "AR",
+          };
+          clientesDB.push(created);
+          return { id: created.id };
+        },
+      },
+      importSession: {
+        create: async ({ data }: any) => {
+          savedSession = {
+            id: "sess-1",
+            ...data,
+            template: {
+              modulo: "clientes",
+              config: {
+                columns: [
+                  { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+                  { field: "idFiscal", excelHeader: "CUIT", type: "string" },
+                  { field: "pais", excelHeader: "País", type: "string" },
+                ],
+              },
+            },
+          };
+          return { id: "sess-1" };
+        },
+        findFirst: async () => savedSession,
+        delete: async () => ({}),
+      },
+      importLog: {
+        create: async ({ data }: any) => {
+          savedLog = { id: "log-1", ...data };
+          return savedLog;
+        },
+      },
+    } as any;
+
+    const clientesProcessor = new ClientesProcessor(prismaClientesMock);
+    const transportistasProcessor = new TransportistasProcessor(prismaClientesMock);
+    const choferesProcessor = new ChoferesProcessor(prismaClientesMock);
+    const validatorClientes = new ValidatorService(prismaClientesMock, {} as any);
+    const service = new ImportacionesService(
+      prismaClientesMock,
+      parser,
+      validatorClientes,
+      {} as any,
+      clientesProcessor,
+      transportistasProcessor,
+      choferesProcessor,
+      {} as any,
+      {} as any,
+      {} as any,
+      { getConfig: async () => ({ hiddenFields: {} }) } as any,
+    );
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Nombre", "CUIT", "País"],
+      ["Cliente Duplicado Mismo Formato", "30608371180", "Argentina"],
+      ["Cliente Duplicado Con Guiones", "30-60837118-0", "Argentina"],
+      ["Cliente Nuevo Valido", "33571385207", "Argentina"],
+      ["Cliente Repetido En Archivo A", "30607228228", "Argentina"],
+      ["Cliente Repetido En Archivo B", "30-60722822-8", "Argentina"],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "Clientes");
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    const preview = await service.preview(
+      "tenant-1",
+      "clientes",
+      buffer,
+      "clientes.xlsx",
+      true,
+    );
+
+    // Filas 2 y 3 chocan contra el cliente existente en DB
+    assert.deepEqual(
+      preview.advertenciasCampoUnicoDuplicado?.map((c) => c.fila),
+      [2, 3],
+    );
+    // Fila 6 es repetida de la fila 5 dentro del mismo archivo
+    const fila5 = preview.filasDetalle?.find((f) => f.fila === 5);
+    const fila6 = preview.filasDetalle?.find((f) => f.fila === 6);
+    assert.equal(fila5?.esNuevo, true);
+    assert.equal(fila5?.repetidaEnArchivo, undefined);
+    assert.equal(fila6?.esNuevo, false);
+    assert.deepEqual(fila6?.repetidaEnArchivo, {
+      campoLabel: "CUIT",
+      valor: "30-60722822-8",
+      filaOriginal: 5,
+      nombreOriginal: "Cliente Repetido En Archivo A",
+    });
+    // Solo las filas 4 y 5 son realmente nuevas (2, 3 tienen conflicto con DB y 6 está repetida en archivo)
+    assert.equal(preview.entidadesNuevas, 2);
+    assert.equal(preview.entidadesActualizadas, 0);
+
+    // Al confirmar ignorando las filas 2 y 3, la fila 6 se omite sola y no falla
+    const confirmRes = await service.confirm(
+      "tenant-1",
+      "sess-1",
+      "user-1",
+      true,
+      undefined,
+      undefined,
+      true,
+      [
+        { fila: 2, accion: "ignorar" },
+        { fila: 3, accion: "ignorar" },
+      ],
+    );
+    assert.equal(confirmRes.errores, 0);
+    assert.equal(confirmRes.exitosas, 2);
+    const omitida6 = (confirmRes.detalles as any[]).find((d) => d.fila === 6);
+    assert.equal(omitida6?.estado, "omitida");
+    assert.match(omitida6?.mensaje ?? "", /mismo CUIT que la fila 5/);
   });
 })();

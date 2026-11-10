@@ -47,9 +47,9 @@ export function validarIdFiscal(
   if (!pais || !idFiscal) return;
 
   if (pais === 'AR') {
-    if (!/^[\d-]+$/.test(idFiscal))
-      throw new BadRequestException('CUIT/CUIL solo puede contener dígitos y guiones.');
-    const d = idFiscal.replace(/-/g, '');
+    if (!/^[\d.-]+$/.test(idFiscal))
+      throw new BadRequestException('CUIT/CUIL solo puede contener dígitos, puntos y guiones.');
+    const d = idFiscal.replace(/[.-]/g, '');
     if (d.length !== 11)
       throw new BadRequestException(`CUIT/CUIL debe tener 11 dígitos (se recibieron ${d.length}).`);
   }
@@ -63,9 +63,9 @@ export function validarIdFiscal(
   }
 
   if (pais === 'PY') {
-    if (!/^[\d-]+$/.test(idFiscal))
-      throw new BadRequestException('El RUC solo puede contener dígitos y guiones.');
-    const d = idFiscal.replace(/-/g, '');
+    if (!/^[\d.-]+$/.test(idFiscal))
+      throw new BadRequestException('El RUC solo puede contener dígitos, puntos y guiones.');
+    const d = idFiscal.replace(/[.-]/g, '');
     if (d.length < 5 || d.length > 10)
       throw new BadRequestException(`RUC debe tener entre 5 y 10 dígitos (se recibieron ${d.length}).`);
   }

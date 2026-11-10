@@ -585,4 +585,83 @@ const templateBase: TemplateConfig = {
     assert.equal(errorFila9.lookupModel, "choferes");
     assert.deepEqual(errorFila9.valoresNoEncontrados, [{ valor: "Gomez Pedro", posicion: 0 }]);
   });
+
+  await test("CUIT con puntos: se acepta en clientes, transportistas y choferes y se guarda normalizado sin puntos ni guiones", async () => {
+    const columnsFiscal: TemplateConfig["columns"] = [
+      { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+      { field: "idFiscal", excelHeader: "CUIT", type: "string" },
+      { field: "pais", excelHeader: "País", type: "string" },
+    ];
+    const columnsChoferes: TemplateConfig["columns"] = [
+      { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+      { field: "dni", excelHeader: "DNI", type: "string" },
+      { field: "cuit", excelHeader: "CUIT", type: "string" },
+    ];
+
+    const resClientes = await validator.validate(
+      [{ _rowNum: 2, nombre: "Molinos Río Segundo SRL", idFiscal: "33.66736090.6", pais: "Argentina" }],
+      columnsFiscal,
+      "tenant-1",
+      "clientes",
+      true,
+    );
+    assert.equal(resClientes.errors.length, 0);
+    assert.equal(resClientes.valid.length, 1);
+
+    const resTransportistas = await validator.validate(
+      [{ _rowNum: 2, nombre: "EXPRESO SURESTE SRL", idFiscal: "30.68991122.2", pais: "Argentina" }],
+      columnsFiscal,
+      "tenant-1",
+      "transportistas",
+      true,
+    );
+    assert.equal(resTransportistas.errors.length, 0);
+    assert.equal(resTransportistas.valid.length, 1);
+
+    const resChoferes = await validator.validate(
+      [{ _rowNum: 2, nombre: "SUAREZ DIEGO HERNAN", dni: "30588511", cuit: "20.30588511.9" }],
+      columnsChoferes,
+      "tenant-1",
+      "choferes",
+      true,
+    );
+    assert.equal(resChoferes.errors.length, 0);
+    assert.equal(resChoferes.valid.length, 1);
+
+    let clienteCreado: any = null;
+    let transportistaCreado: any = null;
+    let choferCreado: any = null;
+    const prismaInsertMock = {
+      cliente: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => {
+          clienteCreado = data;
+          return { id: "c-1" };
+        },
+      },
+      transportista: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => {
+          transportistaCreado = data;
+          return { id: "t-1" };
+        },
+      },
+      chofer: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => {
+          choferCreado = data;
+          return { id: "ch-1" };
+        },
+      },
+      $queryRaw: async () => [],
+    } as any;
+
+    await new ClientesProcessor(prismaInsertMock).insert(resClientes.valid[0], "tenant-1", "user-1");
+    await new TransportistasProcessor(prismaInsertMock).insert(resTransportistas.valid[0], "tenant-1", "user-1");
+    await new ChoferesProcessor(prismaInsertMock).insert(resChoferes.valid[0], "tenant-1", "user-1");
+
+    assert.equal(clienteCreado?.idFiscal, "33667360906");
+    assert.equal(transportistaCreado?.idFiscal, "30689911222");
+    assert.equal(choferCreado?.cuit, "20305885119");
+  });
 })();

@@ -109,14 +109,17 @@ const templateBase: TemplateConfig = {
     );
     const validar = async (valor: string) => {
       const { rows } = parser.parse(createDummyExcel(["Transporte"], [valor]), templateBase);
-      return (await validatorNombres.validate(rows, templateBase.columns, "tenant-1", "")).valid[0]
-        .transportistaId;
+      return validatorNombres.validate(rows, templateBase.columns, "tenant-1", "");
     };
-    assert.equal(await validar("Fava Diego"), "fava");
-    // Dos "Peralta Marcos …": no se puede saber cuál es → se crea como antes.
-    assert.equal(await validar("Peralta Marcos"), "new-t");
+    assert.equal((await validar("Fava Diego")).valid[0]?.transportistaId, "fava");
+    // Dos "Peralta Marcos …": no se asigna automáticamente ni se autocrea, y se informa ambigüedad.
+    const resAmbiguo = await validar("Peralta Marcos");
+    assert.equal(resAmbiguo.valid.length, 0);
+    assert.equal(resAmbiguo.errors.length, 1);
+    assert.match(resAmbiguo.errors[0].error, /más de una coincidencia/i);
+    assert.equal(resAmbiguo.errors[0].lookupModel, undefined);
     // Una sola palabra no alcanza para vincular.
-    assert.equal(await validar("Fava"), "new-t");
+    assert.equal((await validar("Fava")).valid[0]?.transportistaId, "new-t");
   });
 
   await test("Validator: Transportista inexistente + CUIT/DNI -> falla", async () => {
@@ -515,5 +518,71 @@ const templateBase: TemplateConfig = {
     const omitida5 = (confirmRes.detalles as any[]).find((d) => d.fila === 5);
     assert.equal(omitida5?.estado, "omitida");
     assert.match(omitida5?.mensaje ?? "", /mismo DNI que la fila 4/);
+  });
+
+  await test("Validator en Viajes (createIfNotFound=false): nombres abreviados con única coincidencia se vinculan y múltiples coincidencias se informan como ambiguas", async () => {
+    const columnsViajes: TemplateConfig["columns"] = [
+      { field: "clienteId", excelHeader: "Cliente", type: "lookup", lookupModel: "clientes", lookupFields: ["idFiscal", "nombre"], required: true },
+      { field: "transportistaId", excelHeader: "Transporte", type: "lookup", lookupModel: "transportistas", lookupFields: ["idFiscal", "nombre"], required: true },
+      { field: "choferId", excelHeader: "Chofer", type: "lookup", lookupModel: "choferes", lookupFields: ["dni", "cuit", "nombre"] },
+      { field: "fechaCarga", excelHeader: "Fecha carga", type: "date", required: true },
+    ];
+    const validatorViajes = new ValidatorService(
+      {
+        tenant: {
+          findUnique: async () => ({
+            idSistemaHabilitado: true,
+            labelIdentificacionPersonalizadaViajes: "ID propio",
+          }),
+        },
+        cliente: {
+          findMany: async () => [
+            { id: "c-agro", nombre: "Agroinsumos del Sur SA", idFiscal: "30715566776" },
+            { id: "c-pampa", nombre: "Cereales Pampa SRL", idFiscal: "30711223341" },
+          ],
+        },
+        transportista: {
+          findMany: async () => [
+            { id: "t-lopez", nombre: "LOPEZ MARCELO JAVIER", idFiscal: "20245678909" },
+          ],
+        },
+        chofer: {
+          findMany: async () => [
+            { id: "ch-fernandez", nombre: "FERNANDEZ JUAN CARLOS", dni: "40841957", cuit: "20408419574" },
+            { id: "ch-martinez-1", nombre: "MARTINEZ DIEGO ALBERTO", dni: "31222333", cuit: "20312223339" },
+            { id: "ch-martinez-2", nombre: "MARTINEZ DIEGO FERNANDO", dni: "35444555", cuit: "20354445553" },
+          ],
+        },
+      } as any,
+      mockStock,
+    );
+
+    const rows = [
+      { _rowNum: 2, clienteId: "Agroinsumos del Sur SA", transportistaId: "Lopez Marcelo", choferId: "FERNANDEZ JUAN CARLOS", fechaCarga: new Date("2026-10-01T00:00:00Z") },
+      { _rowNum: 3, clienteId: "Cereales Pampa", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "FERNANDEZ JUAN CARLOS", fechaCarga: new Date("2026-10-03T00:00:00Z") },
+      { _rowNum: 4, clienteId: "Agroinsumos del Sur SA", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "Fernandez Juan", fechaCarga: new Date("2026-10-05T00:00:00Z") },
+      { _rowNum: 7, clienteId: "Agroinsumos del Sur SA", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "Martinez Diego", fechaCarga: new Date("2026-10-11T00:00:00Z") },
+      { _rowNum: 9, clienteId: "Agroinsumos del Sur SA", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "Gomez Pedro", fechaCarga: new Date("2026-10-15T00:00:00Z") },
+    ] as any[];
+
+    const res = await validatorViajes.validate(rows, columnsViajes, "tenant-1", "viajes", true);
+
+    assert.deepEqual(res.valid.map((r) => r._rowNum), [2, 3, 4]);
+    assert.equal(res.valid[0].transportistaId, "t-lopez");
+    assert.equal(res.valid[1].clienteId, "c-pampa");
+    assert.equal(res.valid[2].choferId, "ch-fernandez");
+
+    const errorFila7 = res.errors.find((e) => e.fila === 7);
+    assert.ok(errorFila7);
+    assert.match(errorFila7.error, /más de una coincidencia/i);
+    assert.match(errorFila7.error, /MARTINEZ DIEGO ALBERTO/);
+    assert.match(errorFila7.error, /MARTINEZ DIEGO FERNANDO/);
+    assert.equal(errorFila7.lookupModel, undefined);
+    assert.equal(errorFila7.valoresNoEncontrados, undefined);
+
+    const errorFila9 = res.errors.find((e) => e.fila === 9);
+    assert.ok(errorFila9);
+    assert.equal(errorFila9.lookupModel, "choferes");
+    assert.deepEqual(errorFila9.valoresNoEncontrados, [{ valor: "Gomez Pedro", posicion: 0 }]);
   });
 })();

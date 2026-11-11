@@ -31,6 +31,8 @@
     "backfill:cuenta-corriente:dry": "ts-node scripts/backfill-cuenta-corriente.ts --dry-run",
     "backfill:cobros-cc-facturas": "ts-node --transpile-only scripts/backfill-cobros-cc-facturas.ts --apply",
     "backfill:cobros-cc-facturas:dry": "ts-node --transpile-only scripts/backfill-cobros-cc-facturas.ts",
+    "backfill:pagos-viaje-cc": "ts-node --transpile-only scripts/backfill-pagos-viaje-cc.ts --apply",
+    "backfill:pagos-viaje-cc:dry": "ts-node --transpile-only scripts/backfill-pagos-viaje-cc.ts",
     "backfill:asignacion-vehiculo":"ts-node scripts/backfill-asignacion-vehiculo.ts",
     "backfill:asignacion-vehiculo:dry": "ts-node scripts/backfill-asignacion-vehiculo.ts --dry-run",
     "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts",

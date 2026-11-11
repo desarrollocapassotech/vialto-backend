@@ -59,6 +59,7 @@ import {
   calcularAcordadoTransportista,
   estadoDisponibilidadCcDesde,
 } from "./viaje-cuenta-corriente";
+import { sincronizarPagosCcDelViaje } from "./viaje-pago-cuenta-corriente";
 import {
   buildViajeExportacionesResponse,
   enrichViajeConExportaciones,
@@ -585,11 +586,13 @@ export class ViajesService {
     moneda: string,
     pagado: number,
   ) {
+    // Sin filtrar por transportista: la liquidación puede estar a nombre del efectivo (el
+    // que hace el flete) y no del contratante del viaje (LSF).
     const liquidacionVigente = await tx.liquidacionViaje.findFirst({
       where: {
         tenantId,
         viajeId,
-        liquidacion: { transportistaId, estado: { not: "anulado" } },
+        liquidacion: { estado: { not: "anulado" } },
       },
       select: { liquidacionId: true },
     });
@@ -1528,7 +1531,7 @@ export class ViajesService {
     const destinoFinal = ultimoDestinoEtiqueta(destinosNorm);
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const creado = await this.prisma.$transaction(async (tx) => {
         const data: Prisma.ViajeUncheckedCreateInput = {
           tenantId,
           numero,
@@ -1570,6 +1573,8 @@ export class ViajesService {
           createdBy: userId,
         };
         const viaje = await tx.viaje.create({ data });
+        // Pagos al transportista cargados en el alta → PAGO en Cuenta corriente.
+        await sincronizarPagosCcDelViaje(tx, tenantId, viaje.id, userId);
         // Inicializa liquidacionEstado (sin_liquidar | null) según transportista + ARCA del
         // tenant — la columna no tiene default propio porque su valor depende de eso, y sin
         // esta llamada un viaje recién creado queda en null hasta el primer evento de
@@ -1596,6 +1601,8 @@ export class ViajesService {
           calcularMontosReales(outSinIva) as unknown as ViajeConVehiculosViaje,
         ) as ViajeConVehiculosViaje;
       }, VIAJE_INTERACTIVE_TX);
+      await this.registrarDireccionesManuales(tenantId, dto);
+      return creado;
     } catch (e) {
       this.assertNoUniqueConstraintViolation(e);
     }
@@ -2001,11 +2008,15 @@ export class ViajesService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const actualizado = await this.prisma.$transaction(async (tx) => {
         const updated = await tx.viaje.update({
           where: { id },
           data: data as Prisma.ViajeUncheckedUpdateInput,
         });
+        // Pagos al transportista (o el transportista) cambiados → PAGOS en Cuenta corriente.
+        if ((data as any).pagosTransportista !== undefined || (data as any).transportistaId !== undefined) {
+          await sincronizarPagosCcDelViaje(tx, tenantId, id);
+        }
         await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
         if (dto.productoItems !== undefined) {
           await reemplazarProductosDelViaje(
@@ -2033,8 +2044,69 @@ export class ViajesService {
           calcularMontosReales(fullSinIva) as any,
         ) as ViajeConVehiculosViaje;
       }, VIAJE_INTERACTIVE_TX);
+      await this.registrarDireccionesManuales(tenantId, dto);
+      return actualizado;
     } catch (e) {
       this.assertNoUniqueConstraintViolation(e);
+    }
+  }
+
+  /**
+   * Empresas con origen/destino en texto libre (`Tenant.recomendacionCiudadesHabilitada
+   * = false`): lo que se escribió a mano y todavía no está en Direcciones de entrega se
+   * agrega al catálogo, para que el próximo viaje lo ofrezca como sugerencia. Con el
+   * buscador de ciudades no se guarda nada (ahí se elige una ciudad, no se escribe).
+   * Compara sin mayúsculas, acentos ni espacios de más. Best-effort: si falla, el viaje
+   * ya quedó guardado y solo se loguea.
+   */
+  private async registrarDireccionesManuales(
+    tenantId: string,
+    dto: Pick<CreateViajeDto, "origen" | "destino" | "destinos" | "clientes"> |
+      Pick<UpdateViajeDto, "origen" | "destino" | "destinos" | "clientes">,
+  ): Promise<void> {
+    try {
+      const textos = [
+        dto.origen,
+        dto.destino,
+        ...(dto.destinos ?? []).map((d) => d.etiqueta),
+        ...(dto.clientes ?? []).flatMap((c) => [
+          c.origen,
+          ...(c.destinos ?? []).map((d) => d.etiqueta),
+        ]),
+      ]
+        .map((t) => t?.trim().replace(/\s+/g, " "))
+        .filter((t): t is string => !!t);
+      if (textos.length === 0) return;
+
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { clerkOrgId: tenantId },
+        select: { recomendacionCiudadesHabilitada: true },
+      });
+      if (!tenant || tenant.recomendacionCiudadesHabilitada) return;
+
+      const clave = (s: string) =>
+        s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
+      const existentes = await this.prisma.direccionEntrega.findMany({
+        where: { tenantId },
+        select: { direccion: true },
+      });
+      const vistas = new Set(existentes.map((e) => clave(e.direccion)));
+      const nuevas: string[] = [];
+      for (const t of textos) {
+        const k = clave(t);
+        if (vistas.has(k)) continue;
+        vistas.add(k);
+        nuevas.push(t);
+      }
+      if (nuevas.length === 0) return;
+      await this.prisma.direccionEntrega.createMany({
+        data: nuevas.map((direccion) => ({ tenantId, direccion })),
+      });
+    } catch (e) {
+      console.warn(
+        `[viajes] No se pudieron registrar direcciones de entrega (tenant ${tenantId}):`,
+        e instanceof Error ? e.message : e,
+      );
     }
   }
 
@@ -2257,6 +2329,8 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
+      // El pago también va a Cuenta corriente (PAGO imputado a la liquidación, si hay).
+      await sincronizarPagosCcDelViaje(tx, tenantId, id, userId);
       await this.sincronizarCargoCcTransportista(
         tx,
         tenantId,
@@ -2320,6 +2394,8 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
+      // Si el pago se había cargado desde Viajes, su PAGO en Cuenta corriente se borra.
+      await sincronizarPagosCcDelViaje(tx, tenantId, id, userId);
       await this.sincronizarCargoCcTransportista(
         tx,
         tenantId,

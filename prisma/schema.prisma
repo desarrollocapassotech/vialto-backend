@@ -99,6 +99,14 @@ model Tenant {
    */
   tipoFlota                       String   @default("mixta")
   /**
+   * Solo con tipoFlota = 'mixta': qué opción viene marcada por defecto al crear un Viaje,
+   * un Chofer o un Vehículo — 'propia' (flota propia) | 'externa' (transportista externo).
+   * null (default) = como siempre: Viajes arranca en transportista externo y
+   * Choferes/Vehículos en flota propia. Se configura solo desde superadmin
+   * ("Configuración por empresa" → General). No afecta la edición.
+   */
+  tipoFlotaDefault                String?
+  /**
    * true (default) = el tenant ve el dashboard en la pantalla de inicio. false = no hay
    * dashboard: "/" redirige al primer módulo contratado (orden del menú lateral, ver
    * `lib/tenantHome.ts` del frontend). Se configura solo desde superadmin
@@ -156,6 +164,15 @@ model Tenant {
   productoLabel                   String?
   /** Plural de productoLabel (ej. "Granos"). Lo genera la IA al guardar el singular; editable. */
   productoLabelPlural             String?
+  /**
+   * Cómo llama la empresa al transportista externo (ej. "Fletero", "Porteador");
+   * null = "Transportista". Se usa en Base de datos, alta/edición y detalle de Viajes
+   * (en el alta reemplaza también a "Transporte / Porteador"). Lo configura solo el
+   * superadmin ("Configuración por empresa" → General).
+   */
+  transportistaLabel              String?
+  /** Plural de transportistaLabel. Lo genera la IA al guardar el singular; editable. */
+  transportistaLabelPlural        String?
   createdAt                       DateTime @default(now())
 
   clientes                   Cliente[]

@@ -52,6 +52,15 @@ export class PagoTransportistaDto {
   @IsOptional() @IsString() observaciones?: string;
   // Agrego createdBy en el dto
   @IsOptional() @IsString() createdBy?: string;
+  @IsOptional() @IsString() comprobante?: string;
+  /**
+   * Vínculos con Cuenta corriente (ver `viaje-pago-cuenta-corriente.ts`): el front los
+   * devuelve tal cual al editar para no perderlos. `ccPagoId` = PAGO creado desde el viaje;
+   * `ccImputacionId` = pago cargado en Cuenta corriente y espejado en el viaje. Un id que no
+   * sea de este viaje se ignora (el sync busca solo los PAGOS del viaje y de la empresa).
+   */
+  @IsOptional() @IsString() ccPagoId?: string;
+  @IsOptional() @IsString() ccImputacionId?: string;
 }
 
 export class CreateViajeDto {

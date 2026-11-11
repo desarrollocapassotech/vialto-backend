@@ -72,6 +72,9 @@ export class UpdateTenantDto {
   /** Con qué flota trabaja la empresa (ver Tenant.tipoFlota en schema.prisma). */
   @IsOptional() @IsIn(['mixta', 'propia', 'externa']) tipoFlota?: string;
 
+  /** Opción de flota marcada por defecto al crear Viaje/Chofer/Vehículo; null = la de siempre (ver schema.prisma). */
+  @IsOptional() @IsIn(['propia', 'externa']) tipoFlotaDefault?: string | null;
+
   /** false = el tenant no ve el dashboard; su inicio pasa a ser el primer módulo contratado. */
   @IsOptional() @IsBoolean() dashboardHabilitado?: boolean;
 
@@ -104,4 +107,9 @@ export class UpdateTenantDto {
   @IsOptional() @IsString() @MaxLength(40) productoLabel?: string | null;
   /** Plural del label (corrección manual del generado). */
   @IsOptional() @IsString() @MaxLength(40) productoLabelPlural?: string | null;
+
+  /** Cómo llama la empresa al transportista (ej. "Fletero"). null/"" = "Transportista". Sin plural, se genera con IA. */
+  @IsOptional() @IsString() @MaxLength(40) transportistaLabel?: string | null;
+  /** Plural del label del transportista (corrección manual del generado). */
+  @IsOptional() @IsString() @MaxLength(40) transportistaLabelPlural?: string | null;
 }

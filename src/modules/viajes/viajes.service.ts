@@ -586,11 +586,13 @@ export class ViajesService {
     moneda: string,
     pagado: number,
   ) {
+    // Sin filtrar por transportista: la liquidación puede estar a nombre del efectivo (el
+    // que hace el flete) y no del contratante del viaje (LSF).
     const liquidacionVigente = await tx.liquidacionViaje.findFirst({
       where: {
         tenantId,
         viajeId,
-        liquidacion: { transportistaId, estado: { not: "anulado" } },
+        liquidacion: { estado: { not: "anulado" } },
       },
       select: { liquidacionId: true },
     });

@@ -50,6 +50,24 @@ function datosPago(p: EntradaPago) {
   };
 }
 
+/**
+ * A quién va el PAGO: al transportista de la liquidación vigente del viaje (en LSF suele
+ * ser el efectivo, el que hace el flete, no el contratante) o, sin liquidación, al efectivo
+ * si hay y si no al contratante. Así queda en la misma cuenta que la compra que cancela.
+ */
+export async function proveedorDePagosDelViaje(
+  tx: Tx,
+  tenantId: string,
+  viaje: { id: string; transportistaId: string | null; transportistaEfectivoId: string | null },
+): Promise<string | null> {
+  if (!viaje.transportistaId) return null;
+  const lv = await tx.liquidacionViaje.findFirst({
+    where: { tenantId, viajeId: viaje.id, liquidacion: { estado: { not: "anulado" } } },
+    select: { liquidacion: { select: { transportistaId: true } } },
+  });
+  return lv?.liquidacion.transportistaId ?? viaje.transportistaEfectivoId ?? viaje.transportistaId;
+}
+
 /** Compra (cargo de Cuenta corriente) de la liquidación vigente del viaje, si existe. */
 async function cargoLiquidacionVigente(
   tx: Tx,
@@ -147,9 +165,10 @@ export async function sincronizarPagosCcDelViaje(
 ) {
   const viaje = await tx.viaje.findFirst({
     where: { id: viajeId, tenantId },
-    select: { id: true, transportistaId: true, pagosTransportista: true },
+    select: { id: true, transportistaId: true, transportistaEfectivoId: true, pagosTransportista: true },
   });
   if (!viaje) return;
+  const proveedorId = await proveedorDePagosDelViaje(tx, tenantId, viaje);
   const entradas: EntradaPago[] = Array.isArray(viaje.pagosTransportista)
     ? (viaje.pagosTransportista as EntradaPago[]).map((p) => ({ ...p }))
     : [];
@@ -164,7 +183,6 @@ export async function sincronizarPagosCcDelViaje(
   for (const entrada of entradas) {
     if (!esPagoDeViaje(entrada)) continue;
     const datos = datosPago(entrada);
-    const proveedorId = viaje.transportistaId;
     const ccPagoId = String(entrada.ccPagoId ?? "");
     const actual = ccPagoId ? porId.get(ccPagoId) : undefined;
 
@@ -228,6 +246,8 @@ export async function sincronizarPagosCcDelViaje(
         moneda: datos.moneda,
         fecha: datos.fecha,
         numeroComprobante: datos.numeroComprobante,
+        // Las observaciones del pago (ej. "Transferencia Itau…") van como medio de pago.
+        referencia: String(entrada.observaciones ?? "").trim().slice(0, 200) || null,
         createdBy: userId ?? (typeof entrada.createdBy === "string" ? entrada.createdBy : null),
       },
     });
@@ -260,25 +280,16 @@ export async function sincronizarPagosCcDelViaje(
 
 /**
  * Al crear (o actualizar) la compra de una liquidación: los PAGOS cargados desde Viajes
- * para sus viajes que quedaron a cuenta se imputan a esa compra. Idempotente.
+ * para sus viajes que quedaron a cuenta se imputan a esa compra (y pasan a la cuenta del
+ * transportista liquidado, si el PAGO estaba en otra). Idempotente.
  */
 export async function imputarPagosDeViajesALiquidacion(
   tx: Tx,
   tenantId: string,
   viajeIds: string[],
 ) {
-  if (viajeIds.length === 0) return;
-  const pagos = await tx.movimientoCuentaCorriente.findMany({
-    where: {
-      tenantId,
-      viajeId: { in: viajeIds },
-      tipo: "pago",
-      estadoImputacion: { not: "imputado" },
-    },
-    orderBy: [{ fecha: "asc" }, { createdAt: "asc" }],
-  });
-  for (const pago of pagos) {
-    await imputarPagoAViajeLiquidado(tx, tenantId, pago);
+  for (const viajeId of new Set(viajeIds)) {
+    await sincronizarPagosCcDelViaje(tx, tenantId, viajeId);
   }
 }
 

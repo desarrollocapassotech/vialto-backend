@@ -59,6 +59,7 @@ import {
   calcularAcordadoTransportista,
   estadoDisponibilidadCcDesde,
 } from "./viaje-cuenta-corriente";
+import { sincronizarPagosCcDelViaje } from "./viaje-pago-cuenta-corriente";
 import {
   buildViajeExportacionesResponse,
   enrichViajeConExportaciones,
@@ -1570,6 +1571,8 @@ export class ViajesService {
           createdBy: userId,
         };
         const viaje = await tx.viaje.create({ data });
+        // Pagos al transportista cargados en el alta → PAGO en Cuenta corriente.
+        await sincronizarPagosCcDelViaje(tx, tenantId, viaje.id, userId);
         // Inicializa liquidacionEstado (sin_liquidar | null) según transportista + ARCA del
         // tenant — la columna no tiene default propio porque su valor depende de eso, y sin
         // esta llamada un viaje recién creado queda en null hasta el primer evento de
@@ -2008,6 +2011,10 @@ export class ViajesService {
           where: { id },
           data: data as Prisma.ViajeUncheckedUpdateInput,
         });
+        // Pagos al transportista (o el transportista) cambiados → PAGOS en Cuenta corriente.
+        if ((data as any).pagosTransportista !== undefined || (data as any).transportistaId !== undefined) {
+          await sincronizarPagosCcDelViaje(tx, tenantId, id);
+        }
         await reemplazarVehiculosDelViaje(tx, id, op.vehiculoIds, tenantId);
         if (dto.productoItems !== undefined) {
           await reemplazarProductosDelViaje(
@@ -2320,6 +2327,8 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
+      // El pago también va a Cuenta corriente (PAGO imputado a la liquidación, si hay).
+      await sincronizarPagosCcDelViaje(tx, tenantId, id, userId);
       await this.sincronizarCargoCcTransportista(
         tx,
         tenantId,
@@ -2383,6 +2392,8 @@ export class ViajesService {
             pagosActualizados as unknown as Prisma.InputJsonValue,
         },
       });
+      // Si el pago se había cargado desde Viajes, su PAGO en Cuenta corriente se borra.
+      await sincronizarPagosCcDelViaje(tx, tenantId, id, userId);
       await this.sincronizarCargoCcTransportista(
         tx,
         tenantId,

@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { compensarMovimientoCc } from "../../shared/cuenta-corriente/movimiento-cc.util";
 import { fechaCalendarioAr } from "../../shared/util/fecha-ar.util";
 import { actualizarEstadoCargoLiquidacionCc } from "../viajes/viaje-cuenta-corriente";
+import { imputarPagosDeViajesALiquidacion } from "../viajes/viaje-pago-cuenta-corriente";
 import { conceptoAnulacion } from "../facturacion/cargo-factura.util";
 import { formatNumeroComprobante } from "./arca.util";
 import { round2 } from "./arca-iva.util";
@@ -153,6 +154,13 @@ export async function sincronizarCargoLiquidacionCc(tx: Tx, tenantId: string, li
     await anularCargoLiquidacionCc(tx, tenantId, liq);
     return;
   }
+  // Pagos al transportista cargados desde Viajes antes de liquidar: quedaron a cuenta en
+  // Cuenta corriente y ahora se imputan a esta compra.
+  await imputarPagosDeViajesALiquidacion(
+    tx,
+    tenantId,
+    liq.viajes.map((v) => v.viajeId),
+  );
   await actualizarEstadoCargoLiquidacionCc(tx, tenantId, liq.id);
 }
 

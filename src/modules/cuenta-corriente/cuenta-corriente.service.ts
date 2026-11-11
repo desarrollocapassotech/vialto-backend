@@ -19,6 +19,10 @@ import { repartirImputacion } from './imputacion-reparto.util';
 import { saldosPorContraparte } from './saldos-por-contraparte.util';
 import { sincronizarCargoLiquidacionCc } from '../liquidaciones-arca/liquidacion-cuenta-corriente';
 import {
+  actualizarEntradaPagoDeViaje,
+  quitarEntradaPagoDeViaje,
+} from '../viajes/viaje-pago-cuenta-corriente';
+import {
   cuentaEnHistorialCc,
   signoHistorialCc,
 } from '../../shared/cuenta-corriente/movimiento-cc.util';
@@ -875,6 +879,12 @@ export class CuentaCorrienteService {
     if (cambiaEstructura) {
       await this.assertSinImputaciones(current, 'cambiar la moneda o la cuenta de');
     }
+    // PAGO cargado desde Viajes: pertenece al transportista del viaje.
+    if (current.viajeId && current.tipo === 'pago' && (cambiaContraparte || (dto.tipo !== undefined && dto.tipo !== current.tipo))) {
+      throw new BadRequestException(
+        'Este pago se cargó desde un viaje: no se le puede cambiar el proveedor ni el tipo. Si está mal, eliminalo y cargalo de nuevo.',
+      );
+    }
     if (dto.numeroComprobante !== undefined && !dto.numeroComprobante.trim()) {
       throw new BadRequestException('Ingresá el número de comprobante');
     }
@@ -950,6 +960,10 @@ export class CuentaCorrienteService {
       },
       });
       if (cambiaImporte) await this.ajustarImputacionesAlImporte(tx, tenantId, actualizado);
+      // PAGO cargado desde Viajes: el pago del viaje toma importe, moneda, fecha y número.
+      if (actualizado.viajeId && actualizado.tipo === 'pago') {
+        await actualizarEntradaPagoDeViaje(tx, tenantId, actualizado);
+      }
       return tx.movimientoCuentaCorriente.findUniqueOrThrow({ where: { id } });
     }, CC_INTERACTIVE_TX);
   }
@@ -1032,6 +1046,10 @@ export class CuentaCorrienteService {
       }
       const { count } = await tx.movimientoCuentaCorriente.deleteMany({ where: { id, tenantId } });
       if (count === 0) throw new NotFoundException('Movimiento no encontrado');
+      // PAGO cargado desde Viajes: también sale del viaje.
+      if (current.viajeId && current.tipo === 'pago') {
+        await quitarEntradaPagoDeViaje(tx, tenantId, current.viajeId, id);
+      }
     }, CC_INTERACTIVE_TX);
     return { id };
   }
@@ -1354,7 +1372,9 @@ export class CuentaCorrienteService {
     // Espejo simétrico del lado proveedor: si el cargo es de un fletero y viene de
     // un viaje (Flujo C), el pago también se refleja en `Viaje.pagosTransportista`
     // — misma unificación que arriba, ver ViajesService.
-    if (cargo.proveedorId && cargo.viajeId) {
+    // Un PAGO cargado desde Viajes (`pago.viajeId`) ya está en `pagosTransportista`: no se
+    // espeja de nuevo (sería contarlo dos veces).
+    if (cargo.proveedorId && cargo.viajeId && !pago.viajeId) {
       await this.viajes.registrarPagoTransportistaDesdeCuentaCorriente(
         tenantId,
         cargo.viajeId,

@@ -141,6 +141,14 @@ export interface PreviewFilaCampo {
   valor: string;
 }
 
+export interface FilaRepetidaArchivo {
+  /** Nombre del campo repetido, para mostrar (ej. "CUIT", "RUT", "DNI"). */
+  campoLabel: string;
+  valor: string;
+  filaOriginal: number;
+  nombreOriginal: string;
+}
+
 /** Detalle fila por fila de un módulo "simple" (Clientes/Transportistas/Choferes/Vehículos): todas las columnas configuradas con su valor tal como viene del Excel, no solo el nombre. */
 export interface PreviewFilaEntidad {
   fila: number;
@@ -150,6 +158,8 @@ export interface PreviewFilaEntidad {
   sinCambios?: boolean;
   /** Solo si actualiza un registro existente: qué campos cambian (valor actual → valor del Excel). */
   cambios?: PreviewFilaCambio[];
+  /** Presente si la fila repite el mismo documento único (CUIT/RUT/DNI) que una fila anterior del mismo archivo. */
+  repetidaEnArchivo?: FilaRepetidaArchivo;
   campos: PreviewFilaCampo[];
 }
 

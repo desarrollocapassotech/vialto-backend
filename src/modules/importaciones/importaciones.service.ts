@@ -25,6 +25,7 @@ import type {
   PreviewFactura,
   PreviewEntidad,
   PreviewFilaCambio,
+  FilaRepetidaArchivo,
   RowError,
   EntidadesFaltantesModelo,
   ColumnaEsperada,
@@ -42,6 +43,11 @@ import {
 } from "./template-catalogo";
 import { IaTemplateSuggestionService, type SugerenciaTemplate } from "./ia-template-suggestion.service";
 import { labelEnFrase, productoLabels } from "../../shared/util/producto-label.util";
+import {
+  clavesDniChofer,
+  normalizarIdFiscal,
+} from "../../shared/util/documento-unico.util";
+import { labelIdFiscalPorPais } from "../../shared/util/validar-id-fiscal";
 import { VehiculosService } from "../../core/vehiculos/vehiculos.service";
 import { TenantFieldConfigService } from "../../core/tenant-field-config/tenant-field-config.service";
 
@@ -572,6 +578,20 @@ export class ImportacionesService {
         await processorModulo.detectarCampoUnicoDuplicado(valid, tenantId);
     }
 
+    const conflictosPorFila = new Set(
+      (result.advertenciasCampoUnicoDuplicado ?? []).map((c) => c.fila),
+    );
+    const repetidasPorFila = this.detectarFilasRepetidasEnArchivo(
+      modulo,
+      valid.filter((v) => !conflictosPorFila.has(v._rowNum)),
+    );
+    if (repetidasPorFila.size > 0) {
+      result.advertenciasCamposFaltantes =
+        result.advertenciasCamposFaltantes.filter(
+          (a) => !repetidasPorFila.has(a.fila),
+        );
+    }
+
     if (modulo === "viajes") {
       const fusionados = await this.viajesProcessor.detectarViajesFusionados(valid);
       Object.assign(
@@ -587,7 +607,12 @@ export class ImportacionesService {
       const nuevas = await processorModulo.filasNuevas(valid, tenantId);
       const { sinCambios, cambios } = await this.cambiosFilasExistentes(
         modulo,
-        valid.filter((v) => !nuevas.has(v._rowNum)),
+        valid.filter(
+          (v) =>
+            !nuevas.has(v._rowNum) &&
+            !conflictosPorFila.has(v._rowNum) &&
+            !repetidasPorFila.has(v._rowNum),
+        ),
         config.columns,
         tenantId,
       );
@@ -615,17 +640,88 @@ export class ImportacionesService {
             label: c.excelHeader,
             valor: valorLegible(raw![c.field]),
           }));
+        const repetidaEnArchivo = repetidasPorFila.get(v._rowNum);
+        const tieneConflicto = conflictosPorFila.has(v._rowNum);
         return {
           fila: v._rowNum,
-          esNuevo: nuevas.has(v._rowNum),
+          esNuevo:
+            nuevas.has(v._rowNum) && !tieneConflicto && !repetidaEnArchivo,
           sinCambios: sinCambios.has(v._rowNum),
           cambios: cambios.get(v._rowNum),
+          repetidaEnArchivo,
           campos,
         };
       });
+      result.entidadesNuevas = result.filasDetalle.filter(
+        (f) => f.esNuevo,
+      ).length;
+      result.entidadesActualizadas = result.filasDetalle.filter(
+        (f) =>
+          !f.esNuevo &&
+          !f.sinCambios &&
+          !f.repetidaEnArchivo &&
+          !conflictosPorFila.has(f.fila),
+      ).length;
     }
 
     return result;
+  }
+
+  /**
+   * Detecta filas dentro del mismo archivo que repiten el documento único
+   * (CUIT/RUT/RUC en Clientes y Transportistas, DNI/CUIT en Choferes) de una
+   * fila anterior, incluso cuando está escrito con distinto formato (con o sin
+   * guiones/puntos). La primera fila se conserva; las siguientes se marcan como
+   * repetidas y se omiten al confirmar.
+   */
+  private detectarFilasRepetidasEnArchivo(
+    modulo: string,
+    rows: ValidatedRow[],
+  ): Map<number, FilaRepetidaArchivo> {
+    const repetidas = new Map<number, FilaRepetidaArchivo>();
+    const texto = (v: unknown) => (v == null ? "" : String(v).trim());
+    if (modulo === "clientes" || modulo === "transportistas") {
+      const vistas = new Map<string, { fila: number; nombre: string }>();
+      for (const row of rows) {
+        const idFiscalRaw = texto(row.idFiscal);
+        const clave = normalizarIdFiscal(idFiscalRaw);
+        if (!clave) continue;
+        const nombre = texto(row.nombre);
+        const previa = vistas.get(clave);
+        if (!previa) {
+          vistas.set(clave, { fila: row._rowNum, nombre });
+          continue;
+        }
+        const pais = texto(row.pais);
+        repetidas.set(row._rowNum, {
+          campoLabel: labelIdFiscalPorPais(pais, idFiscalRaw),
+          valor: idFiscalRaw,
+          filaOriginal: previa.fila,
+          nombreOriginal: previa.nombre,
+        });
+      }
+    } else if (modulo === "choferes") {
+      const vistas = new Map<string, { fila: number; nombre: string }>();
+      for (const row of rows) {
+        const dni = texto(row.dni);
+        const cuit = texto(row.cuit);
+        const claves = clavesDniChofer(dni, cuit);
+        if (claves.length === 0) continue;
+        const nombre = texto(row.nombre);
+        const previa = claves.map((c) => vistas.get(c)).find(Boolean);
+        if (!previa) {
+          for (const c of claves) vistas.set(c, { fila: row._rowNum, nombre });
+          continue;
+        }
+        repetidas.set(row._rowNum, {
+          campoLabel: "DNI",
+          valor: dni || cuit,
+          filaOriginal: previa.fila,
+          nombreOriginal: previa.nombre,
+        });
+      }
+    }
+    return repetidas;
   }
 
   /**
@@ -803,18 +899,33 @@ export class ImportacionesService {
       }
     }
 
+    const repetidasPorFila = this.detectarFilasRepetidasEnArchivo(
+      session.template.modulo,
+      todasLasFilas.filter(
+        (f) => !excluidas.has(f._rowNum) && !actualizarEntidadPorFila.has(f._rowNum),
+      ),
+    );
+    for (const fila of repetidasPorFila.keys()) {
+      excluidas.add(fila);
+    }
+
     const filasValidas = todasLasFilas.filter(
       (f) => !excluidas.has(f._rowNum),
     );
     const detallesOmitidas = todasLasFilas
       .filter((f) => excluidas.has(f._rowNum))
-      .map((f) => ({
-        fila: f._rowNum,
-        estado: "omitida",
-        mensaje: filasExcluidas?.includes(f._rowNum)
-          ? "Fila omitida por el usuario antes de confirmar."
-          : `Fila omitida: el ${campoLabelConflicto} ya pertenece a otro registro.`,
-      }));
+      .map((f) => {
+        const rep = repetidasPorFila.get(f._rowNum);
+        return {
+          fila: f._rowNum,
+          estado: "omitida",
+          mensaje: rep
+            ? `Fila omitida: mismo ${rep.campoLabel} que la fila ${rep.filaOriginal}.`
+            : filasExcluidas?.includes(f._rowNum)
+              ? "Fila omitida por el usuario antes de confirmar."
+              : `Fila omitida: el ${campoLabelConflicto} ya pertenece a otro registro.`,
+        };
+      });
 
     for (const fila of filasValidas) {
       const entidadExistenteId = actualizarEntidadPorFila.get(fila._rowNum);

@@ -78,6 +78,16 @@ export class ViajesController {
     return this.service.getStats(auth.tenantId);
   }
 
+  @ApiOperation({
+    summary: "Ids de transportistas con viajes sin liquidar (opciones del filtro Transporte)",
+  })
+  @Get("transportistas-sin-liquidar")
+  @Roles("admin", "member", "superadmin")
+  transportistasSinLiquidar(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.transportistaIdsSinLiquidar(auth.tenantId);
+  }
+
   @ApiOperation({ summary: "Listar viajes paginado con filtros avanzados" })
   @Get("paginated")
   @Roles("admin", "member", "superadmin")

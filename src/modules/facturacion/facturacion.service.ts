@@ -11,6 +11,7 @@ import { CreateFacturaDto } from "./dto/create-factura.dto";
 import { UpdateFacturaDto } from "./dto/update-factura.dto";
 import { FacturaTramoDto } from "./dto/factura-tramo.dto";
 import { CreatePagoDto } from "./dto/create-pago.dto";
+import { normalizarObservacionesFactura } from "../../shared/util/factura-observaciones.util";
 import {
   FacturasPaginatedQueryDto,
   type FacturasSortField,
@@ -1089,6 +1090,7 @@ export class FacturacionService {
             ivaPct,
             facturarPorTramo,
             comprobanteUrl: dto.comprobanteUrl ?? null,
+            observaciones: normalizarObservacionesFactura(dto.observaciones),
             manual,
             manualCbteTipo: cbteManual?.cbteTipo ?? null,
             manualPtoVenta: cbteManual?.ptoVenta ?? null,
@@ -1285,6 +1287,9 @@ export class FacturacionService {
             : {}),
           ...(dto.facturarPorTramo !== undefined
             ? { facturarPorTramo }
+            : {}),
+          ...(dto.observaciones !== undefined
+            ? { observaciones: normalizarObservacionesFactura(dto.observaciones) }
             : {}),
           ...(pasaAManual ? { manual: true } : {}),
           ...(cbteManual

@@ -107,6 +107,13 @@ export class PlatformController {
     return tenantId;
   }
 
+  @Get("viajes/transportistas-sin-liquidar")
+  viajesTransportistasSinLiquidar(
+    @Query("tenantId") tenantId: string | undefined,
+  ) {
+    return this.service.viajesTransportistasSinLiquidar(tenantId);
+  }
+
   @Get("viajes/paginated")
   viajesPaginated(
     @Query("tenantId") tenantId: string | undefined,

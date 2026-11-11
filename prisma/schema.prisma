@@ -737,6 +737,11 @@ model Factura {
   facturarPorTramo Boolean        @default(false)
   comprobanteUrl   String? // URL Cloudinary del comprobante adjunto (PDF o imagen)
   /**
+   * Observaciones de la factura: renglones de texto sin importe, impresos en el PDF debajo
+   * de los viajes (pedido NyM, nov 2026). No se informan a ARCA. Se editan solo en borrador.
+   */
+  observaciones    String[]       @default([])
+  /**
    * Factura hecha por fuera del sistema en una empresa con `emision-facturas-arca`: no se
    * emite en ARCA, lleva número y comprobante adjunto, y se trata como en una empresa sin ARCA.
    */

@@ -966,6 +966,28 @@ export class ViajesService {
     };
   }
 
+  /**
+   * Transportistas (contratante o efectivo) con viajes en el filtro "Sin liquidar" de la
+   * grilla. Mismo `where` que el listado, así que elegir cualquiera de estos en el filtro
+   * "Transporte" siempre trae viajes. Lo usa el select de Transporte cuando el chip está activo.
+   */
+  async transportistaIdsSinLiquidar(tenantId: string): Promise<string[]> {
+    const where = buildViajesPaginatedWhere(tenantId, {
+      liquidacionEstado: "sin_liquidar",
+    } as ViajesPaginatedQueryDto);
+    const rows = await this.prisma.viaje.findMany({
+      where,
+      select: { transportistaId: true, transportistaEfectivoId: true },
+      distinct: ["transportistaId", "transportistaEfectivoId"],
+    });
+    const ids = new Set<string>();
+    for (const r of rows) {
+      if (r.transportistaId) ids.add(r.transportistaId);
+      if (r.transportistaEfectivoId) ids.add(r.transportistaEfectivoId);
+    }
+    return [...ids];
+  }
+
   async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {
     // Lazy update: sincroniza estados por fecha antes de devolver resultados
     await this.autoEstado.actualizarEstadosPorFecha(tenantId);

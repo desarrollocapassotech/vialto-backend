@@ -186,6 +186,12 @@ export class PlatformService {
     return this.viajesService.findAllPaginated(scoped, query);
   }
 
+  viajesTransportistasSinLiquidar(tenantId: string | undefined) {
+    return this.viajesService.transportistaIdsSinLiquidar(
+      this.requiredTenantId(tenantId),
+    );
+  }
+
   addViajeGasto(
     tenantId: string | undefined,
     viajeId: string,

@@ -114,6 +114,25 @@ export class PlatformController {
     return this.service.viajesTransportistasSinLiquidar(tenantId);
   }
 
+  @Get("viajes/filtros-opciones")
+  viajesFiltrosOpciones(
+    @Query("tenantId") tenantId: string | undefined,
+    @Query() query: ViajesPaginatedQueryDto,
+    @Req() req: Request,
+  ) {
+    const clienteId =
+      queryParamFromRequest(req, "clienteId") ?? query.clienteId;
+    const transportistaId =
+      queryParamFromRequest(req, "transportistaId") ?? query.transportistaId;
+    const choferId = queryParamFromRequest(req, "choferId") ?? query.choferId;
+    return this.service.viajesFiltrosOpciones(tenantId, {
+      ...query,
+      clienteId,
+      transportistaId,
+      choferId,
+    });
+  }
+
   @Get("viajes/paginated")
   viajesPaginated(
     @Query("tenantId") tenantId: string | undefined,

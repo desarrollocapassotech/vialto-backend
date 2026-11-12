@@ -988,6 +988,76 @@ export class ViajesService {
     return [...ids];
   }
 
+  async filtrosOpciones(
+    tenantId: string,
+    query: ViajesPaginatedQueryDto,
+  ): Promise<{
+    clienteIds: string[];
+    transportistaIds: string[];
+    choferIds: string[];
+  }> {
+    const whereClientes = buildViajesPaginatedWhere(tenantId, {
+      ...query,
+      clienteId: undefined,
+    });
+    const whereTransportistas = buildViajesPaginatedWhere(tenantId, {
+      ...query,
+      transportistaId: undefined,
+    });
+    const whereChoferes = buildViajesPaginatedWhere(tenantId, {
+      ...query,
+      choferId: undefined,
+    });
+
+    const [viajesCli, viajesTransp, viajesChof] = await Promise.all([
+      this.prisma.viaje.findMany({
+        where: whereClientes,
+        select: {
+          clienteId: true,
+          clientesViaje: { select: { clienteId: true } },
+        },
+      }),
+      this.prisma.viaje.findMany({
+        where: whereTransportistas,
+        select: {
+          transportistaId: true,
+          transportistaEfectivoId: true,
+        },
+        distinct: ["transportistaId", "transportistaEfectivoId"],
+      }),
+      this.prisma.viaje.findMany({
+        where: whereChoferes,
+        select: { choferId: true },
+        distinct: ["choferId"],
+      }),
+    ]);
+
+    const clienteIds = new Set<string>();
+    for (const v of viajesCli) {
+      if (v.clienteId) clienteIds.add(v.clienteId);
+      for (const cv of v.clientesViaje) {
+        if (cv.clienteId) clienteIds.add(cv.clienteId);
+      }
+    }
+
+    const transportistaIds = new Set<string>();
+    for (const v of viajesTransp) {
+      if (v.transportistaId) transportistaIds.add(v.transportistaId);
+      if (v.transportistaEfectivoId) transportistaIds.add(v.transportistaEfectivoId);
+    }
+
+    const choferIds = new Set<string>();
+    for (const v of viajesChof) {
+      if (v.choferId) choferIds.add(v.choferId);
+    }
+
+    return {
+      clienteIds: [...clienteIds],
+      transportistaIds: [...transportistaIds],
+      choferIds: [...choferIds],
+    };
+  }
+
   async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {
     // Lazy update: sincroniza estados por fecha antes de devolver resultados
     await this.autoEstado.actualizarEstadosPorFecha(tenantId);

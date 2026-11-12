@@ -192,6 +192,16 @@ export class PlatformService {
     );
   }
 
+  viajesFiltrosOpciones(
+    tenantId: string | undefined,
+    query: ViajesPaginatedQueryDto,
+  ) {
+    return this.viajesService.filtrosOpciones(
+      this.requiredTenantId(tenantId),
+      query,
+    );
+  }
+
   addViajeGasto(
     tenantId: string | undefined,
     viajeId: string,

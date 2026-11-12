@@ -88,16 +88,16 @@ export class UpdateViajeDto {
   @Type(() => Number)
   precioTransportistaIvaIncluidoPct?: number;
 
-  @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
+  @IsOptional()
   @IsNumber({}, { message: 'La cantidad a facturar debe ser un número válido' }) @Type(() => Number) cantidadFactura?: number;
 
-  @ValidateIf((o) => o.cantidadFactura != null || o.precioUnitarioFactura != null)
+  @IsOptional()
   @IsNumber({}, { message: 'El precio unitario a facturar debe ser un número válido' }) @Type(() => Number) precioUnitarioFactura?: number;
 
-  @ValidateIf((o) => o.cantidadTransportista != null || o.precioUnitarioTransportista != null)
+  @IsOptional()
   @IsNumber({}, { message: 'La cantidad del transportista debe ser un número válido' }) @Type(() => Number) cantidadTransportista?: number;
 
-  @ValidateIf((o) => o.cantidadTransportista != null || o.precioUnitarioTransportista != null)
+  @IsOptional()
   @IsNumber({}, { message: 'El precio unitario del transportista debe ser un número válido' }) @Type(() => Number) precioUnitarioTransportista?: number;
 
   @IsOptional()

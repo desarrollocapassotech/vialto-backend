@@ -357,6 +357,20 @@ export class LiquidacionesService {
       const tnOrigen = null;
       const tarifaTransportista = v.precioUnitarioTransportista ?? null;
 
+      const tienePrecio =
+        (typeof v.precioTransportistaExterno === 'number' && v.precioTransportistaExterno > 0) ||
+        (typeof tnDestino === 'number' &&
+          tnDestino > 0 &&
+          typeof tarifaTransportista === 'number' &&
+          tarifaTransportista > 0);
+
+      if (!tienePrecio) {
+        const idVis = v.numeroIdentificacionPersonalizado?.trim() || v.numero;
+        throw new BadRequestException(
+          `No se puede liquidar el viaje ${idVis}: falta cargar el monto del transportista.`,
+        );
+      }
+
       // Desglose: cantidadTransportista × precioUnitarioTransportista. Viaje estándar: precioTransportistaExterno.
       const subtotal = tnDestino != null && tarifaTransportista != null
         ? round2(tnDestino * tarifaTransportista)

@@ -21,24 +21,52 @@ export class ViajesAutoEstadoService {
 
     const base = tenantId ? { tenantId } : {};
 
+    const condicionMontoCliente = {
+      OR: [
+        { monto: { gt: 0 } },
+        {
+          AND: [
+            { cantidadFactura: { gt: 0 } },
+            { precioUnitarioFactura: { gt: 0 } },
+          ],
+        },
+      ],
+    };
+
+    const condicionMontoTransportista = {
+      OR: [
+        { transportistaId: null },
+        { precioTransportistaExterno: { gt: 0 } },
+        {
+          AND: [
+            { cantidadTransportista: { gt: 0 } },
+            { precioUnitarioTransportista: { gt: 0 } },
+          ],
+        },
+      ],
+    };
+
     const [finalizados, enCurso] = await Promise.all([
-      // pendiente/en_curso + fechaDescarga <= ahora → finalizado
+      // pendiente/en_curso + fechaDescarga <= ahora + montos completos → finalizado
       this.prisma.viaje.updateMany({
         where: {
           ...base,
           etapa: { in: ['pendiente', 'en_curso'] },
           fechaDescarga: { lte: ahora },
+          AND: [condicionMontoCliente, condicionMontoTransportista],
         },
         data: { etapa: 'finalizado', fechaFinalizado: new Date() },
       }),
 
-      // pendiente + fechaCarga <= ahora + fechaDescarga no pasada → en_curso
+      // pendiente + (fechaCarga <= ahora OR fechaDescarga <= ahora) que no pasaron a finalizado → en_curso
       this.prisma.viaje.updateMany({
         where: {
           ...base,
           etapa: 'pendiente',
-          fechaCarga: { lte: ahora },
-          OR: [{ fechaDescarga: null }, { fechaDescarga: { gt: ahora } }],
+          OR: [
+            { fechaCarga: { lte: ahora } },
+            { fechaDescarga: { lte: ahora } },
+          ],
         },
         data: { etapa: 'en_curso' },
       }),

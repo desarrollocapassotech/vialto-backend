@@ -661,6 +661,23 @@ export class FacturacionService {
     return [...monedas][0];
   }
 
+  private assertViajesTienenMontoCliente(viajes: ViajeSnap[]): void {
+    for (const v of viajes) {
+      const tieneMonto =
+        (typeof v.monto === "number" && v.monto > 0) ||
+        (typeof v.cantidadFactura === "number" &&
+          v.cantidadFactura > 0 &&
+          typeof v.precioUnitarioFactura === "number" &&
+          v.precioUnitarioFactura > 0);
+      if (!tieneMonto) {
+        const idVis = v.numeroIdentificacionPersonalizado?.trim() || v.numero;
+        throw new BadRequestException(
+          `No se puede facturar el viaje ${idVis}: falta cargar el monto del cliente.`,
+        );
+      }
+    }
+  }
+
   private readonly VIAJE_SELECT = {
     id: true,
     numero: true,
@@ -1052,6 +1069,7 @@ export class FacturacionService {
 
     const viajeIds = dto.viajeIds ?? [];
     const viajes = await this.resolveViajes(tenantId, viajeIds, dto.clienteId);
+    this.assertViajesTienenMontoCliente(viajes);
     const moneda = this.assertMonedaUnica(viajes);
     const facturarPorTramo = dto.facturarPorTramo === true;
     const tramosValidos = this.assertTramosValidos(
@@ -1238,14 +1256,13 @@ export class FacturacionService {
 
     let monedaNueva: string | undefined;
     if (dto.viajeIds !== undefined && dto.viajeIds.length > 0) {
-      const viajesNuevos = await this.prisma.viaje.findMany({
-        where: { id: { in: dto.viajeIds }, tenantId },
-        select: { id: true, monedaMonto: true },
-      });
-      if (viajesNuevos.length !== dto.viajeIds.length) {
-        throw new BadRequestException("Uno o más viajes inválidos");
-      }
-      monedaNueva = this.assertMonedaUnica(viajesNuevos);
+      const viajesNuevosSnap = await this.resolveViajes(
+        tenantId,
+        dto.viajeIds,
+        dto.clienteId ?? existing.clienteId ?? undefined,
+      );
+      this.assertViajesTienenMontoCliente(viajesNuevosSnap);
+      monedaNueva = this.assertMonedaUnica(viajesNuevosSnap);
     }
 
     return this.prisma.$transaction(async (tx) => {

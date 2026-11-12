@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -31,6 +32,13 @@ export class UpdateFacturaDto {
   @IsOptional() @IsInt() @Type(() => Number) manualCbteTipo?: number;
   @IsOptional() @IsInt() @Type(() => Number) manualPtoVenta?: number;
   @IsOptional() @IsInt() @Type(() => Number) manualCbteNro?: number;
+  /** Ver `CreateFacturaDto.observaciones`. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(300, { each: true })
+  observaciones?: string[];
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()
   @IsArray()

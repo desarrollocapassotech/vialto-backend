@@ -7,6 +7,7 @@ import { scalarDataFromRow } from "../prisma-import-fields";
 import {
   buscarChoferMismoDocumento,
   claveDniChofer,
+  clavesDniChofer,
 } from "../../../shared/util/documento-unico.util";
 
 @Injectable()
@@ -98,7 +99,7 @@ export class ChoferesProcessor implements IImportProcessor {
     rows: ValidatedRow[],
     tenantId: string,
   ): Promise<CampoUnicoConflicto[]> {
-    const texto = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const texto = (v: unknown) => (v == null ? "" : String(v).trim());
     const candidatas = rows.filter((r) =>
       claveDniChofer(texto(r.dni), texto(r.cuit)),
     );
@@ -110,21 +111,28 @@ export class ChoferesProcessor implements IImportProcessor {
     });
     const porClave = new Map<string, (typeof existentes)[number]>();
     for (const e of existentes) {
-      const clave = claveDniChofer(e.dni, e.cuit);
-      if (clave && !porClave.has(clave)) porClave.set(clave, e);
+      for (const clave of clavesDniChofer(e.dni, e.cuit)) {
+        if (!porClave.has(clave)) porClave.set(clave, e);
+      }
     }
 
     const conflictos: CampoUnicoConflicto[] = [];
     for (const row of candidatas) {
       const dni = texto(row.dni);
-      const match = porClave.get(claveDniChofer(dni, texto(row.cuit)) as string);
+      const cuit = texto(row.cuit);
+      const claveDni = claveDniChofer(dni, null);
+      const claveCuit = claveDniChofer(null, cuit);
+      const matchPorDni = claveDni ? porClave.get(claveDni) : undefined;
+      const matchPorCuit = claveCuit ? porClave.get(claveCuit) : undefined;
+      const match = matchPorDni ?? matchPorCuit;
       if (!match) continue;
       const nombreFila = String(row.nombre ?? "").trim().toLowerCase();
       if (match.nombre.trim().toLowerCase() === nombreFila) continue;
+      const chocaPorDni = Boolean(matchPorDni);
       conflictos.push({
         fila: row._rowNum,
-        campoLabel: dni ? "DNI" : "CUIT",
-        valor: dni || texto(row.cuit),
+        campoLabel: chocaPorDni ? "DNI" : "CUIT",
+        valor: chocaPorDni ? dni : cuit || dni,
         entidadExistenteId: match.id,
         entidadExistenteNombre: match.nombre,
       });

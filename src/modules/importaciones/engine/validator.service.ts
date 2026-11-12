@@ -50,7 +50,7 @@ export class ValidatorService {
     }
 
     // Pre-cargar lookups para evitar N queries por fila
-    const { caches, created } = await this.buildLookupCaches(
+    const { caches, ambiguous, created } = await this.buildLookupCaches(
       rows,
       columns,
       tenantId,
@@ -71,7 +71,7 @@ export class ValidatorService {
 
       for (const col of columns) {
         const raw = row[col.field];
-        const result = this.coerce(raw, col, caches, row._rowNum);
+        const result = this.coerce(raw, col, caches, row._rowNum, ambiguous);
 
         if (result.error) {
           rowErrors.push(result.error);
@@ -355,9 +355,10 @@ export class ValidatorService {
     col: ColumnConfig,
     caches: LookupCaches,
     rowNum: number,
+    ambiguous: Record<string, string[]> = {},
   ): { value?: ValidatedRow[string]; error?: RowError; warning?: boolean } {
     if (col.valorFijo != null) {
-      return this.coerce(col.valorFijo, { ...col, valorFijo: undefined }, caches, rowNum);
+      return this.coerce(col.valorFijo, { ...col, valorFijo: undefined }, caches, rowNum, ambiguous);
     }
     const isEmpty = raw == null || String(raw).trim() === "";
 
@@ -374,7 +375,7 @@ export class ValidatorService {
       if (col.defaultValue != null) {
         // Recursamos con el default como si fuera el valor crudo de la celda,
         // así pasa por la misma coerción/validación de tipo que un valor real.
-        return this.coerce(col.defaultValue, { ...col, defaultValue: undefined }, caches, rowNum);
+        return this.coerce(col.defaultValue, { ...col, defaultValue: undefined }, caches, rowNum, ambiguous);
       }
       if (col.warnIfEmpty) {
         return { value: null, warning: true };
@@ -535,6 +536,18 @@ export class ValidatorService {
           return { value: id };
         }
 
+        const coincidencias = ambiguous[`${model}:${this.claveLookup(str)}`];
+        if (coincidencias && coincidencias.length > 1) {
+          return {
+            error: {
+              fila: rowNum,
+              campo: col.excelHeader,
+              error: `Hay más de una coincidencia para "${str}" en ${model} (${coincidencias.join(", ")}). Indicá el nombre completo o el CUIT/DNI.`,
+              valor: raw,
+            },
+          };
+        }
+
         return {
           error: {
             fila: rowNum,
@@ -625,19 +638,25 @@ export class ValidatorService {
     columns: ColumnConfig[],
     tenantId: string,
     readOnly = false,
-  ): Promise<{ caches: LookupCaches; created: Record<string, string[]> }> {
+  ): Promise<{
+    caches: LookupCaches;
+    ambiguous: Record<string, string[]>;
+    created: Record<string, string[]>;
+  }> {
     const caches: LookupCaches = {};
+    const ambiguous: Record<string, string[]> = {};
     const created: Record<string, string[]> = {};
 
     const lookupCols = columns.filter(
-      (c) => c.type === "lookup" && c.lookupModel && (c.lookupModel as string) !== "ciudades",
+      (c) => c.type === "lookup" && (c.lookupModel as string) !== "ciudades",
     );
 
     // Agrupamos por modelo para consultar una sola vez aunque se busque por
     // varios campos distintos (ej. nombre y CUIT) en la misma entidad.
     const colsByModel = new Map<string, ColumnConfig[]>();
     for (const col of lookupCols) {
-      const model = col.lookupModel!;
+      const model = this.resolveLookupModel(col);
+      if (model === "ciudades") continue;
       const list = colsByModel.get(model) ?? [];
       list.push(col);
       colsByModel.set(model, list);
@@ -669,9 +688,9 @@ export class ValidatorService {
         caches[`${model}:${field}`] = map;
       }
 
-      // Crear entidades faltantes si alguna columna de este modelo lo permite.
+      // Resolver nombres abreviados (y crear entidades faltantes si alguna
+      // columna de este modelo lo permite).
       for (const col of cols) {
-        if (!col.createIfNotFound) continue;
         const colFields = this.lookupFieldsOf(col);
         const primaryField = colFields[0];
 
@@ -696,11 +715,8 @@ export class ValidatorService {
           });
           if (yaExiste) continue;
 
-          // Un CUIT/DNI en la columna no alcanza para crear un cliente,
-          // transportista o chofer nuevo (ver `esSoloDniOCuit`) — no generamos el
-          // placeholder acá, así la fila cae en el flujo normal de "no
-          // encontrado" y el problema se ve en el preview, no recién al
-          // confirmar.
+          // Un CUIT/DNI en la columna no alcanza para crear ni buscar por
+          // similitud de nombre un cliente, transportista o chofer nuevo.
           if (
             (model === "clientes" || model === "transportistas" || model === "choferes") &&
             this.esSoloDniOCuit(original)
@@ -708,16 +724,28 @@ export class ValidatorService {
             continue;
           }
 
-          // "Fava Diego" en el Excel y "FAVA DIEGO ABEL" ya cargado son la misma
-          // persona: se vincula al existente en vez de crear un duplicado sin CUIT.
-          const similarId =
-            model === "clientes" || model === "transportistas" || model === "choferes"
-              ? this.nombreSimilarUnico(original, records)
-              : null;
-          if (similarId) {
-            (caches[`${model}:${primaryField}`] ??= {})[lower] = similarId;
-            continue;
+          // "Lopez Marcelo" en el Excel y "LOPEZ MARCELO JAVIER" ya cargado son
+          // la misma persona/empresa: si coincide con un único registro existente
+          // se vincula (incluso cuando `createIfNotFound` es false); si coincide
+          // con más de uno, se marca como ambiguo para informar al usuario.
+          if (
+            model === "clientes" ||
+            model === "transportistas" ||
+            model === "choferes"
+          ) {
+            const similares = this.buscarNombresSimilares(original, records);
+            if (similares.length === 1) {
+              (caches[`${model}:${primaryField}`] ??= {})[lower] = similares[0].id;
+              (caches[`${model}:nombre`] ??= {})[lower] = similares[0].id;
+              continue;
+            }
+            if (similares.length > 1) {
+              ambiguous[`${model}:${lower}`] = similares.map((s) => s.nombre);
+              continue;
+            }
           }
+
+          if (!col.createIfNotFound) continue;
 
           if (readOnly) {
             (created[model] ??= []).push(original);
@@ -734,38 +762,43 @@ export class ValidatorService {
       }
     }
 
-    return { caches, created };
+    return { caches, ambiguous, created };
   }
 
   /**
-   * Id del único registro cuyo nombre contiene todas las palabras de `nombre` (o al
-   * revés): "Peralta Marcos" ↔ "PERALTA MARCOS ALEJANDRO". Pide al menos dos palabras
-   * del lado corto y que el candidato sea uno solo — con dos "Peralta Marcos …"
-   * distintos no se puede saber cuál es, y se crea como antes.
+   * Registros existentes cuyo nombre contiene todas las palabras de `nombre` (o al
+   * revés): "Lopez Marcelo" ↔ "LOPEZ MARCELO JAVIER", "Cereales Pampa" ↔
+   * "Cereales Pampa SRL". Pide al menos dos palabras del lado corto.
    */
-  private nombreSimilarUnico(
+  private buscarNombresSimilares(
     nombre: string,
     records: Record<string, unknown>[],
-  ): string | null {
-    const palabras = (v: unknown) =>
-      new Set(
-        this.claveLookup(String(v ?? "").replace(/[.,]/g, " "))
-          .split(" ")
-          .filter((p) => p.length > 1),
-      );
+  ): { id: string; nombre: string }[] {
+    const SUFIJOS_SOCIETARIOS = new Set(["sa", "srl", "sas", "sau", "sh", "sc", "sca"]);
+    const palabras = (v: unknown) => {
+      const todas = this.claveLookup(
+        String(v ?? "")
+          .replace(/\./g, "")
+          .replace(/[,()\-/]/g, " "),
+      )
+        .split(" ")
+        .filter((p) => p.length > 1);
+      const sinSufijos = todas.filter((p) => !SUFIJOS_SOCIETARIOS.has(p));
+      return new Set(sinSufijos.length >= 2 ? sinSufijos : todas);
+    };
     const contiene = (a: Set<string>, b: Set<string>) =>
       b.size >= 2 && [...b].every((p) => a.has(p));
 
     const buscadas = palabras(nombre);
-    const ids = new Set<string>();
+    const porId = new Map<string, string>();
     for (const r of records) {
       if (typeof r.nombre !== "string") continue;
       const propias = palabras(r.nombre);
       if (contiene(propias, buscadas) || contiene(buscadas, propias)) {
-        ids.add(r.id as string);
+        porId.set(r.id as string, r.nombre);
       }
     }
-    return ids.size === 1 ? [...ids][0] : null;
+    return [...porId.entries()].map(([id, n]) => ({ id, nombre: n }));
   }
 
   /**

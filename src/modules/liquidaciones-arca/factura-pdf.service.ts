@@ -933,6 +933,28 @@ export class FacturaPdfService {
       y += rowH;
     }
 
+    // Observaciones de la factura (pedido NyM, nov 2026): un renglón por observación, debajo
+    // de los viajes y gastos, solo con texto en "Detalle" (sin cantidad ni importes). No van
+    // en la nota de crédito: son de la factura, no del comprobante que la anula.
+    const observaciones: string[] =
+      kind === 'factura' && Array.isArray(factura.observaciones)
+        ? factura.observaciones.filter((o: unknown) => typeof o === 'string' && o.trim())
+        : [];
+    for (const obs of observaciones) {
+      const texto = `OBS.: ${obs.trim()}`.toUpperCase();
+      // El texto ocupa todo el ancho de la tabla: no hay importes en este renglón.
+      const anchoTexto = tableW - cellPadX * 2;
+      doc.fontSize(7).font('Helvetica');
+      const rowH = Math.max(
+        headerRowH,
+        doc.heightOfString(texto, { width: anchoTexto }) + cellPadY * 2,
+      );
+      doc.rect(M, y, tableW, rowH).stroke('#ddd');
+      doc.fontSize(7).font('Helvetica').fillColor('#000')
+        .text(texto, M + cellPadX, y + cellPadY, { width: anchoTexto, align: 'left' });
+      y += rowH;
+    }
+
     if (asociados.length > 0) {
       y += 8;
       doc.fontSize(8).font('Helvetica-Bold').fillColor('#000')

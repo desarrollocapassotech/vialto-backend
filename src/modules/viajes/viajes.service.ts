@@ -32,6 +32,7 @@ import {
   VIAJE_INCLUDE_VEHICULOS_INCLUDE,
   type ViajeConVehiculosViaje,
 } from "./viaje-vehiculos.helper";
+import { evaluarValorizacionViaje } from "./viaje-valorizacion.util";
 import {
   assertClientesDelViaje,
   assertProductosClientesDelViaje,
@@ -966,6 +967,98 @@ export class ViajesService {
     };
   }
 
+  /**
+   * Transportistas (contratante o efectivo) con viajes en el filtro "Sin liquidar" de la
+   * grilla. Mismo `where` que el listado, así que elegir cualquiera de estos en el filtro
+   * "Transporte" siempre trae viajes. Lo usa el select de Transporte cuando el chip está activo.
+   */
+  async transportistaIdsSinLiquidar(tenantId: string): Promise<string[]> {
+    const where = buildViajesPaginatedWhere(tenantId, {
+      liquidacionEstado: "sin_liquidar",
+    } as ViajesPaginatedQueryDto);
+    const rows = await this.prisma.viaje.findMany({
+      where,
+      select: { transportistaId: true, transportistaEfectivoId: true },
+      distinct: ["transportistaId", "transportistaEfectivoId"],
+    });
+    const ids = new Set<string>();
+    for (const r of rows) {
+      if (r.transportistaId) ids.add(r.transportistaId);
+      if (r.transportistaEfectivoId) ids.add(r.transportistaEfectivoId);
+    }
+    return [...ids];
+  }
+
+  async filtrosOpciones(
+    tenantId: string,
+    query: ViajesPaginatedQueryDto,
+  ): Promise<{
+    clienteIds: string[];
+    transportistaIds: string[];
+    choferIds: string[];
+  }> {
+    const whereClientes = buildViajesPaginatedWhere(tenantId, {
+      ...query,
+      clienteId: undefined,
+    });
+    const whereTransportistas = buildViajesPaginatedWhere(tenantId, {
+      ...query,
+      transportistaId: undefined,
+    });
+    const whereChoferes = buildViajesPaginatedWhere(tenantId, {
+      ...query,
+      choferId: undefined,
+    });
+
+    const [viajesCli, viajesTransp, viajesChof] = await Promise.all([
+      this.prisma.viaje.findMany({
+        where: whereClientes,
+        select: {
+          clienteId: true,
+          clientesViaje: { select: { clienteId: true } },
+        },
+      }),
+      this.prisma.viaje.findMany({
+        where: whereTransportistas,
+        select: {
+          transportistaId: true,
+          transportistaEfectivoId: true,
+        },
+        distinct: ["transportistaId", "transportistaEfectivoId"],
+      }),
+      this.prisma.viaje.findMany({
+        where: whereChoferes,
+        select: { choferId: true },
+        distinct: ["choferId"],
+      }),
+    ]);
+
+    const clienteIds = new Set<string>();
+    for (const v of viajesCli) {
+      if (v.clienteId) clienteIds.add(v.clienteId);
+      for (const cv of v.clientesViaje) {
+        if (cv.clienteId) clienteIds.add(cv.clienteId);
+      }
+    }
+
+    const transportistaIds = new Set<string>();
+    for (const v of viajesTransp) {
+      if (v.transportistaId) transportistaIds.add(v.transportistaId);
+      if (v.transportistaEfectivoId) transportistaIds.add(v.transportistaEfectivoId);
+    }
+
+    const choferIds = new Set<string>();
+    for (const v of viajesChof) {
+      if (v.choferId) choferIds.add(v.choferId);
+    }
+
+    return {
+      clienteIds: [...clienteIds],
+      transportistaIds: [...transportistaIds],
+      choferIds: [...choferIds],
+    };
+  }
+
   async findAllPaginated(tenantId: string, query: ViajesPaginatedQueryDto) {
     // Lazy update: sincroniza estados por fecha antes de devolver resultados
     await this.autoEstado.actualizarEstadosPorFecha(tenantId);
@@ -1550,7 +1643,7 @@ export class ViajesService {
           detalleCarga: dto.detalleCarga ?? null,
           kmRecorridos: dto.kmRecorridos ?? null,
           litrosConsumidos: dto.litrosConsumidos ?? null,
-          monto,
+          monto: monto ?? null,
           monedaMonto: dto.monedaMonto === "USD" ? "USD" : "ARS",
           precioTransportistaExterno: precioTransportistaExterno ?? null,
           monedaPrecioTransportistaExterno:
@@ -1819,12 +1912,16 @@ export class ViajesService {
     ) {
       precioTransportistaExternoInput =
         dto.cantidadTransportista * dto.precioUnitarioTransportista;
+    } else if (dto.precioUnitarioTransportista === null) {
+      precioTransportistaExternoInput = null;
     }
 
     let montoInput = dto.monto;
     if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
       montoInput =
         Math.round(dto.cantidadFactura * dto.precioUnitarioFactura * 100) / 100;
+    } else if (dto.precioUnitarioFactura === null) {
+      montoInput = null;
     }
 
     const precioTransportistaExternoResolved =
@@ -1851,10 +1948,15 @@ export class ViajesService {
         ? String(current.etapa)
         : "pendiente",
     );
-    const etapaSiguiente =
+    let etapaSiguiente =
       dto.etapa != null && String(dto.etapa).trim() !== ""
         ? this.parseEtapaViaje(String(dto.etapa))
         : etapaActual;
+
+    const ahora = new Date();
+    if (etapaSiguiente === "pendiente" && (fcResolved <= ahora || (fdResolved && fdResolved <= ahora))) {
+      etapaSiguiente = "en_curso";
+    }
 
     // VTO-431: un viaje facturado o liquidado no se cancela directo — primero se anula
     // (o elimina) la factura/liquidación, y cada paso deja su propia compensación en
@@ -1874,10 +1976,59 @@ export class ViajesService {
       }
     }
 
+    if (etapaSiguiente === "finalizado") {
+      const valorizacion = evaluarValorizacionViaje({
+        monto: montoInput !== undefined ? montoInput : current.monto,
+        cantidadFactura:
+          dto.cantidadFactura !== undefined
+            ? dto.cantidadFactura
+            : current.cantidadFactura,
+        precioUnitarioFactura:
+          dto.precioUnitarioFactura !== undefined
+            ? dto.precioUnitarioFactura
+            : current.precioUnitarioFactura,
+        transportistaId: op.transportistaId,
+        precioTransportistaExterno:
+          precioTransportistaExternoInput !== undefined
+            ? precioTransportistaExternoInput
+            : current.precioTransportistaExterno,
+        cantidadTransportista:
+          dto.cantidadTransportista !== undefined
+            ? dto.cantidadTransportista
+            : current.cantidadTransportista,
+        precioUnitarioTransportista:
+          dto.precioUnitarioTransportista !== undefined
+            ? dto.precioUnitarioTransportista
+            : current.precioUnitarioTransportista,
+        clientesViaje:
+          dto.clientes !== undefined
+            ? dto.clientes
+            : (current as any).clientesViaje,
+      });
+
+      if (!valorizacion.valorizado) {
+        if (valorizacion.faltaCliente && valorizacion.faltaTransportista) {
+          throw new BadRequestException(
+            "No se puede finalizar el viaje: faltan cargar los montos del cliente y del transportista.",
+          );
+        }
+        if (valorizacion.faltaCliente) {
+          throw new BadRequestException(
+            "No se puede finalizar el viaje: falta cargar el monto del cliente.",
+          );
+        }
+        if (valorizacion.faltaTransportista) {
+          throw new BadRequestException(
+            "No se puede finalizar el viaje: falta cargar el monto del transportista.",
+          );
+        }
+      }
+    }
+
     const data: Prisma.ViajeUpdateInput = {
       ...dto,
       monto:
-        montoInput !== undefined ? montoInput : (current.monto ?? undefined),
+        montoInput !== undefined ? (montoInput ?? null) : (current.monto ?? undefined),
       fechaCarga:
         dto.fechaCarga === undefined
           ? undefined

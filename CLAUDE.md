@@ -573,6 +573,10 @@ model Pago {
 }
 ```
 
+#### Observaciones de la factura (pedido NyM, nov 2026)
+
+`Factura.observaciones` (`String[]`, migración `20261111120000_factura_observaciones`): renglones de texto **sin importe**, propios de la factura (no del viaje: a veces la observación va solo en la factura y no en la liquidación). Se cargan en Nueva/Editar factura con `FacturaObservacionesEditor` (front, "+ Agregar observación", como los conceptos de una liquidación pero sin monto) y se normalizan con `normalizarObservacionesFactura` (`shared/util/factura-observaciones.util.ts`: sin espacios de más ni vacías; DTO: máx. 20 de 300 caracteres). En el PDF (`factura-pdf.service.ts`) salen como renglones "OBS.: …" debajo de los viajes y gastos, a todo el ancho de la tabla; no van en la nota de crédito. No se informan a ARCA y no tocan importes. Con ARCA solo se editan en borrador (`assertFacturaEditable`), así el PDF de una factura autorizada no cambia.
+
 #### Facturas por tramo (LSF / Uruguay) — IVA persistido (sep 2026)
 
 Pedido real de LSF: facturan a clientes separando cada viaje en tramos con distinto IVA (tramo AR exento, tramo UY 22%), como exige la normativa uruguaya. El PDF lo emiten ellos afuera y lo suben como comprobante — Vialto no arma ese PDF.
@@ -701,6 +705,8 @@ El modelo cambió de forma respecto a versiones anteriores de este documento: ya
 - **`StockItem`** es el snapshot de disponible, ahora clave por `(productoId, presentacionId, clienteId, depositoId)`.
 
 Los egresos generan un número de remito interno automático (`remitoPrefix-YYYY-NNNNN`), vía `StockEgresoRemitoConfig` + `StockRemitoSecuencia`. (El vínculo opcional `remitoId` hacia el módulo standalone `remitos` existió hasta ago 2026 — se borró junto con ese módulo, ver sección "`remitos` — eliminado" más abajo; no confundir con este remito interno, que sigue igual.)
+
+**Pendiente (a futuro): conectar Stock con Viajes.** Hoy son módulos independientes: un viaje no mueve stock (sus `ViajeProducto` son solo informativos) y un egreso/ingreso de stock no crea ni referencia un viaje. Empresas con los dos módulos (ej. Riedel) cargan cada cosa por separado; el manual de usuario de Riedel lo aclara como desarrollo futuro. Cuando se encare, definir el vínculo (ej. egreso de stock ↔ viaje que lo transporta, o generar el egreso desde el viaje), qué módulo es la fuente de cada dato (cliente, productos, cantidades, remito) y cómo se evita cargar lo mismo dos veces, igual que se hizo con Cuenta corriente ↔ Facturas/Liquidaciones.
 
 ```prisma
 model Producto {

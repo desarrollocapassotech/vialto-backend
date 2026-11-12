@@ -1,10 +1,14 @@
-﻿/**
+/**
  * Pruebas del motor de importaciones (Parser y Validator).
  * Ejecutar: npm run test:importaciones
  */
 import * as assert from "node:assert/strict";
 import { ParserService } from "./parser.service";
 import { ValidatorService } from "./validator.service";
+import { ImportacionesService } from "../importaciones.service";
+import { ClientesProcessor } from "../processors/clientes.processor";
+import { TransportistasProcessor } from "../processors/transportistas.processor";
+import { ChoferesProcessor } from "../processors/choferes.processor";
 import * as XLSX from "xlsx";
 import type { TemplateConfig } from "../types/import.types";
 
@@ -105,14 +109,17 @@ const templateBase: TemplateConfig = {
     );
     const validar = async (valor: string) => {
       const { rows } = parser.parse(createDummyExcel(["Transporte"], [valor]), templateBase);
-      return (await validatorNombres.validate(rows, templateBase.columns, "tenant-1", "")).valid[0]
-        .transportistaId;
+      return validatorNombres.validate(rows, templateBase.columns, "tenant-1", "");
     };
-    assert.equal(await validar("Fava Diego"), "fava");
-    // Dos "Peralta Marcos …": no se puede saber cuál es → se crea como antes.
-    assert.equal(await validar("Peralta Marcos"), "new-t");
+    assert.equal((await validar("Fava Diego")).valid[0]?.transportistaId, "fava");
+    // Dos "Peralta Marcos …": no se asigna automáticamente ni se autocrea, y se informa ambigüedad.
+    const resAmbiguo = await validar("Peralta Marcos");
+    assert.equal(resAmbiguo.valid.length, 0);
+    assert.equal(resAmbiguo.errors.length, 1);
+    assert.match(resAmbiguo.errors[0].error, /más de una coincidencia/i);
+    assert.equal(resAmbiguo.errors[0].lookupModel, undefined);
     // Una sola palabra no alcanza para vincular.
-    assert.equal(await validar("Fava"), "new-t");
+    assert.equal((await validar("Fava")).valid[0]?.transportistaId, "new-t");
   });
 
   await test("Validator: Transportista inexistente + CUIT/DNI -> falla", async () => {
@@ -186,5 +193,475 @@ const templateBase: TemplateConfig = {
     assert.equal(res.errors.length, 0);
     assert.deepEqual(res.created.productos, ["Maíz"]);
     assert.equal(new Set(res.valid.map((r) => r.productoId)).size, 1);
+  });
+
+  await test("Preview y confirm de clientes: CUIT repetido en el mismo archivo con distinto formato se marca y se omite", async () => {
+    const clientesDB: { id: string; nombre: string; idFiscal: string; pais: string }[] = [
+      { id: "c-existente", nombre: "Agroinsumos del Sur SA", idFiscal: "30608371180", pais: "AR" },
+    ];
+    let savedSession: any = null;
+    let savedLog: any = null;
+    const prismaClientesMock = {
+      tenant: {
+        findUnique: async () => ({
+          importacionesOcultas: false,
+          paisOrigenDestinoOculto: false,
+          paisOrigenDestinoCodigo: null,
+        }),
+      },
+      importTemplate: {
+        findFirst: async () => ({
+          id: "tpl-clientes",
+          modulo: "clientes",
+          config: {
+            sheet: "Clientes",
+            headerRow: 1,
+            columns: [
+              { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+              { field: "idFiscal", excelHeader: "CUIT", type: "string" },
+              { field: "pais", excelHeader: "País", type: "string" },
+            ],
+          },
+        }),
+      },
+      cliente: {
+        findMany: async ({ where }: any) => {
+          if (where?.idFiscal?.in) {
+            return clientesDB.filter((c) => where.idFiscal.in.includes(c.idFiscal));
+          }
+          return clientesDB;
+        },
+        findFirst: async ({ where }: any) => {
+          if (where?.nombre?.equals) {
+            return (
+              clientesDB.find(
+                (c) => c.nombre.toLowerCase() === where.nombre.equals.toLowerCase(),
+              ) ?? null
+            );
+          }
+          if (where?.idFiscal) {
+            return clientesDB.find((c) => c.idFiscal === where.idFiscal) ?? null;
+          }
+          return null;
+        },
+        create: async ({ data }: any) => {
+          const created = {
+            id: `c-${clientesDB.length + 1}`,
+            nombre: data.nombre,
+            idFiscal: data.idFiscal,
+            pais: data.pais ?? "AR",
+          };
+          clientesDB.push(created);
+          return { id: created.id };
+        },
+      },
+      importSession: {
+        create: async ({ data }: any) => {
+          savedSession = {
+            id: "sess-1",
+            ...data,
+            template: {
+              modulo: "clientes",
+              config: {
+                columns: [
+                  { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+                  { field: "idFiscal", excelHeader: "CUIT", type: "string" },
+                  { field: "pais", excelHeader: "País", type: "string" },
+                ],
+              },
+            },
+          };
+          return { id: "sess-1" };
+        },
+        findFirst: async () => savedSession,
+        delete: async () => ({}),
+      },
+      importLog: {
+        create: async ({ data }: any) => {
+          savedLog = { id: "log-1", ...data };
+          return savedLog;
+        },
+      },
+    } as any;
+
+    const clientesProcessor = new ClientesProcessor(prismaClientesMock);
+    const transportistasProcessor = new TransportistasProcessor(prismaClientesMock);
+    const choferesProcessor = new ChoferesProcessor(prismaClientesMock);
+    const validatorClientes = new ValidatorService(prismaClientesMock, {} as any);
+    const service = new ImportacionesService(
+      prismaClientesMock,
+      parser,
+      validatorClientes,
+      {} as any,
+      clientesProcessor,
+      transportistasProcessor,
+      choferesProcessor,
+      {} as any,
+      {} as any,
+      {} as any,
+      { getConfig: async () => ({ hiddenFields: {} }) } as any,
+    );
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Nombre", "CUIT", "País"],
+      ["Cliente Duplicado Mismo Formato", "30608371180", "Argentina"],
+      ["Cliente Duplicado Con Guiones", "30-60837118-0", "Argentina"],
+      ["Cliente Nuevo Valido", "33571385207", "Argentina"],
+      ["Cliente Repetido En Archivo A", "30607228228", "Argentina"],
+      ["Cliente Repetido En Archivo B", "30-60722822-8", "Argentina"],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "Clientes");
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    const preview = await service.preview(
+      "tenant-1",
+      "clientes",
+      buffer,
+      "clientes.xlsx",
+      true,
+    );
+
+    // Filas 2 y 3 chocan contra el cliente existente en DB
+    assert.deepEqual(
+      preview.advertenciasCampoUnicoDuplicado?.map((c) => c.fila),
+      [2, 3],
+    );
+    // Fila 6 es repetida de la fila 5 dentro del mismo archivo
+    const fila5 = preview.filasDetalle?.find((f) => f.fila === 5);
+    const fila6 = preview.filasDetalle?.find((f) => f.fila === 6);
+    assert.equal(fila5?.esNuevo, true);
+    assert.equal(fila5?.repetidaEnArchivo, undefined);
+    assert.equal(fila6?.esNuevo, false);
+    assert.deepEqual(fila6?.repetidaEnArchivo, {
+      campoLabel: "CUIT",
+      valor: "30-60722822-8",
+      filaOriginal: 5,
+      nombreOriginal: "Cliente Repetido En Archivo A",
+    });
+    // Solo las filas 4 y 5 son realmente nuevas (2, 3 tienen conflicto con DB y 6 está repetida en archivo)
+    assert.equal(preview.entidadesNuevas, 2);
+    assert.equal(preview.entidadesActualizadas, 0);
+
+    // Al confirmar ignorando las filas 2 y 3, la fila 6 se omite sola y no falla
+    const confirmRes = await service.confirm(
+      "tenant-1",
+      "sess-1",
+      "user-1",
+      true,
+      undefined,
+      undefined,
+      true,
+      [
+        { fila: 2, accion: "ignorar" },
+        { fila: 3, accion: "ignorar" },
+      ],
+    );
+    assert.equal(confirmRes.errores, 0);
+    assert.equal(confirmRes.exitosas, 2);
+    const omitida6 = (confirmRes.detalles as any[]).find((d) => d.fila === 6);
+    assert.equal(omitida6?.estado, "omitida");
+    assert.match(omitida6?.mensaje ?? "", /mismo CUIT que la fila 5/);
+  });
+
+  await test("Preview y confirm de choferes: DNI repetido en el mismo archivo (directo o dentro del CUIT) se marca como DNI repetido y se omite", async () => {
+    const choferesDB: { id: string; nombre: string; dni: string | null; cuit: string | null }[] = [
+      { id: "ch-existente", nombre: "FERNANDEZ JUAN CARLOS", dni: "40841857", cuit: null },
+    ];
+    let savedSession: any = null;
+    const prismaChoferesMock = {
+      tenant: {
+        findUnique: async () => ({
+          importacionesOcultas: false,
+          paisOrigenDestinoOculto: false,
+          paisOrigenDestinoCodigo: null,
+        }),
+      },
+      importTemplate: {
+        findFirst: async () => ({
+          id: "tpl-choferes",
+          modulo: "choferes",
+          config: {
+            sheet: "Choferes",
+            headerRow: 1,
+            columns: [
+              { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+              { field: "dni", excelHeader: "DNI", type: "string" },
+              { field: "cuit", excelHeader: "CUIT", type: "string" },
+            ],
+          },
+        }),
+      },
+      chofer: {
+        findMany: async () => choferesDB,
+        findFirst: async ({ where }: any) => {
+          if (where?.nombre?.equals) {
+            return (
+              choferesDB.find(
+                (c) => c.nombre.toLowerCase() === where.nombre.equals.toLowerCase(),
+              ) ?? null
+            );
+          }
+          return null;
+        },
+        create: async ({ data }: any) => {
+          const created = {
+            id: `ch-${choferesDB.length + 1}`,
+            nombre: data.nombre,
+            dni: data.dni ?? null,
+            cuit: data.cuit ?? null,
+          };
+          choferesDB.push(created);
+          return { id: created.id };
+        },
+      },
+      transportista: {
+        findMany: async () => [],
+      },
+      $queryRaw: async () => [],
+      importSession: {
+        create: async ({ data }: any) => {
+          savedSession = {
+            id: "sess-ch-1",
+            ...data,
+            template: {
+              modulo: "choferes",
+              config: {
+                columns: [
+                  { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+                  { field: "dni", excelHeader: "DNI", type: "string" },
+                  { field: "cuit", excelHeader: "CUIT", type: "string" },
+                ],
+              },
+            },
+          };
+          return { id: "sess-ch-1" };
+        },
+        findFirst: async () => savedSession,
+        delete: async () => ({}),
+      },
+      importLog: {
+        create: async ({ data }: any) => ({ id: "log-ch-1", ...data }),
+      },
+    } as any;
+
+    const clientesProcessor = new ClientesProcessor(prismaChoferesMock);
+    const transportistasProcessor = new TransportistasProcessor(prismaChoferesMock);
+    const choferesProcessor = new ChoferesProcessor(prismaChoferesMock);
+    const validatorChoferes = new ValidatorService(prismaChoferesMock, {} as any);
+    const service = new ImportacionesService(
+      prismaChoferesMock,
+      parser,
+      validatorChoferes,
+      {} as any,
+      clientesProcessor,
+      transportistasProcessor,
+      choferesProcessor,
+      {} as any,
+      {} as any,
+      {} as any,
+      { getConfig: async () => ({ hiddenFields: {} }) } as any,
+    );
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Nombre", "DNI", "CUIT"],
+      ["FERNANDEZ J CARLOS", "40841857", ""],
+      ["CHOFER NUEVO SOLO DNI", "37904686", ""],
+      ["CHOFER REPETIDO EN ARCHIVO A", "37555884", ""],
+      ["CHOFER REPETIDO EN ARCHIVO B", "", "20375558840"],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "Choferes");
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    const preview = await service.preview(
+      "tenant-1",
+      "choferes",
+      buffer,
+      "choferes.xlsx",
+      true,
+    );
+
+    // Fila 2 choca contra el chofer existente en DB
+    assert.deepEqual(
+      preview.advertenciasCampoUnicoDuplicado?.map((c) => c.fila),
+      [2],
+    );
+    // Fila 5 es repetida de la fila 4 (mismo DNI dentro del CUIT) y siempre usa campoLabel "DNI"
+    const fila4 = preview.filasDetalle?.find((f) => f.fila === 4);
+    const fila5 = preview.filasDetalle?.find((f) => f.fila === 5);
+    assert.equal(fila4?.esNuevo, true);
+    assert.equal(fila4?.repetidaEnArchivo, undefined);
+    assert.equal(fila5?.esNuevo, false);
+    assert.deepEqual(fila5?.repetidaEnArchivo, {
+      campoLabel: "DNI",
+      valor: "20375558840",
+      filaOriginal: 4,
+      nombreOriginal: "CHOFER REPETIDO EN ARCHIVO A",
+    });
+    // Solo las filas 3 y 4 son realmente nuevas
+    assert.equal(preview.entidadesNuevas, 2);
+    assert.equal(preview.entidadesActualizadas, 0);
+
+    const confirmRes = await service.confirm(
+      "tenant-1",
+      "sess-ch-1",
+      "user-1",
+      true,
+      undefined,
+      undefined,
+      true,
+      [{ fila: 2, accion: "ignorar" }],
+    );
+    assert.equal(confirmRes.errores, 0);
+    assert.equal(confirmRes.exitosas, 2);
+    const omitida5 = (confirmRes.detalles as any[]).find((d) => d.fila === 5);
+    assert.equal(omitida5?.estado, "omitida");
+    assert.match(omitida5?.mensaje ?? "", /mismo DNI que la fila 4/);
+  });
+
+  await test("Validator en Viajes (createIfNotFound=false): nombres abreviados con única coincidencia se vinculan y múltiples coincidencias se informan como ambiguas", async () => {
+    const columnsViajes: TemplateConfig["columns"] = [
+      { field: "clienteId", excelHeader: "Cliente", type: "lookup", lookupModel: "clientes", lookupFields: ["idFiscal", "nombre"], required: true },
+      { field: "transportistaId", excelHeader: "Transporte", type: "lookup", lookupModel: "transportistas", lookupFields: ["idFiscal", "nombre"], required: true },
+      { field: "choferId", excelHeader: "Chofer", type: "lookup", lookupModel: "choferes", lookupFields: ["dni", "cuit", "nombre"] },
+      { field: "fechaCarga", excelHeader: "Fecha carga", type: "date", required: true },
+    ];
+    const validatorViajes = new ValidatorService(
+      {
+        tenant: {
+          findUnique: async () => ({
+            idSistemaHabilitado: true,
+            labelIdentificacionPersonalizadaViajes: "ID propio",
+          }),
+        },
+        cliente: {
+          findMany: async () => [
+            { id: "c-agro", nombre: "Agroinsumos del Sur SA", idFiscal: "30715566776" },
+            { id: "c-pampa", nombre: "Cereales Pampa SRL", idFiscal: "30711223341" },
+          ],
+        },
+        transportista: {
+          findMany: async () => [
+            { id: "t-lopez", nombre: "LOPEZ MARCELO JAVIER", idFiscal: "20245678909" },
+          ],
+        },
+        chofer: {
+          findMany: async () => [
+            { id: "ch-fernandez", nombre: "FERNANDEZ JUAN CARLOS", dni: "40841957", cuit: "20408419574" },
+            { id: "ch-martinez-1", nombre: "MARTINEZ DIEGO ALBERTO", dni: "31222333", cuit: "20312223339" },
+            { id: "ch-martinez-2", nombre: "MARTINEZ DIEGO FERNANDO", dni: "35444555", cuit: "20354445553" },
+          ],
+        },
+      } as any,
+      mockStock,
+    );
+
+    const rows = [
+      { _rowNum: 2, clienteId: "Agroinsumos del Sur SA", transportistaId: "Lopez Marcelo", choferId: "FERNANDEZ JUAN CARLOS", fechaCarga: new Date("2026-10-01T00:00:00Z") },
+      { _rowNum: 3, clienteId: "Cereales Pampa", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "FERNANDEZ JUAN CARLOS", fechaCarga: new Date("2026-10-03T00:00:00Z") },
+      { _rowNum: 4, clienteId: "Agroinsumos del Sur SA", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "Fernandez Juan", fechaCarga: new Date("2026-10-05T00:00:00Z") },
+      { _rowNum: 7, clienteId: "Agroinsumos del Sur SA", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "Martinez Diego", fechaCarga: new Date("2026-10-11T00:00:00Z") },
+      { _rowNum: 9, clienteId: "Agroinsumos del Sur SA", transportistaId: "LOPEZ MARCELO JAVIER", choferId: "Gomez Pedro", fechaCarga: new Date("2026-10-15T00:00:00Z") },
+    ] as any[];
+
+    const res = await validatorViajes.validate(rows, columnsViajes, "tenant-1", "viajes", true);
+
+    assert.deepEqual(res.valid.map((r) => r._rowNum), [2, 3, 4]);
+    assert.equal(res.valid[0].transportistaId, "t-lopez");
+    assert.equal(res.valid[1].clienteId, "c-pampa");
+    assert.equal(res.valid[2].choferId, "ch-fernandez");
+
+    const errorFila7 = res.errors.find((e) => e.fila === 7);
+    assert.ok(errorFila7);
+    assert.match(errorFila7.error, /más de una coincidencia/i);
+    assert.match(errorFila7.error, /MARTINEZ DIEGO ALBERTO/);
+    assert.match(errorFila7.error, /MARTINEZ DIEGO FERNANDO/);
+    assert.equal(errorFila7.lookupModel, undefined);
+    assert.equal(errorFila7.valoresNoEncontrados, undefined);
+
+    const errorFila9 = res.errors.find((e) => e.fila === 9);
+    assert.ok(errorFila9);
+    assert.equal(errorFila9.lookupModel, "choferes");
+    assert.deepEqual(errorFila9.valoresNoEncontrados, [{ valor: "Gomez Pedro", posicion: 0 }]);
+  });
+
+  await test("CUIT con puntos: se acepta en clientes, transportistas y choferes y se guarda normalizado sin puntos ni guiones", async () => {
+    const columnsFiscal: TemplateConfig["columns"] = [
+      { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+      { field: "idFiscal", excelHeader: "CUIT", type: "string" },
+      { field: "pais", excelHeader: "País", type: "string" },
+    ];
+    const columnsChoferes: TemplateConfig["columns"] = [
+      { field: "nombre", excelHeader: "Nombre", type: "string", required: true },
+      { field: "dni", excelHeader: "DNI", type: "string" },
+      { field: "cuit", excelHeader: "CUIT", type: "string" },
+    ];
+
+    const resClientes = await validator.validate(
+      [{ _rowNum: 2, nombre: "Molinos Río Segundo SRL", idFiscal: "33.66736090.6", pais: "Argentina" }],
+      columnsFiscal,
+      "tenant-1",
+      "clientes",
+      true,
+    );
+    assert.equal(resClientes.errors.length, 0);
+    assert.equal(resClientes.valid.length, 1);
+
+    const resTransportistas = await validator.validate(
+      [{ _rowNum: 2, nombre: "EXPRESO SURESTE SRL", idFiscal: "30.68991122.2", pais: "Argentina" }],
+      columnsFiscal,
+      "tenant-1",
+      "transportistas",
+      true,
+    );
+    assert.equal(resTransportistas.errors.length, 0);
+    assert.equal(resTransportistas.valid.length, 1);
+
+    const resChoferes = await validator.validate(
+      [{ _rowNum: 2, nombre: "SUAREZ DIEGO HERNAN", dni: "30588511", cuit: "20.30588511.9" }],
+      columnsChoferes,
+      "tenant-1",
+      "choferes",
+      true,
+    );
+    assert.equal(resChoferes.errors.length, 0);
+    assert.equal(resChoferes.valid.length, 1);
+
+    let clienteCreado: any = null;
+    let transportistaCreado: any = null;
+    let choferCreado: any = null;
+    const prismaInsertMock = {
+      cliente: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => {
+          clienteCreado = data;
+          return { id: "c-1" };
+        },
+      },
+      transportista: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => {
+          transportistaCreado = data;
+          return { id: "t-1" };
+        },
+      },
+      chofer: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => {
+          choferCreado = data;
+          return { id: "ch-1" };
+        },
+      },
+      $queryRaw: async () => [],
+    } as any;
+
+    await new ClientesProcessor(prismaInsertMock).insert(resClientes.valid[0], "tenant-1", "user-1");
+    await new TransportistasProcessor(prismaInsertMock).insert(resTransportistas.valid[0], "tenant-1", "user-1");
+    await new ChoferesProcessor(prismaInsertMock).insert(resChoferes.valid[0], "tenant-1", "user-1");
+
+    assert.equal(clienteCreado?.idFiscal, "33667360906");
+    assert.equal(transportistaCreado?.idFiscal, "30689911222");
+    assert.equal(choferCreado?.cuit, "20305885119");
   });
 })();

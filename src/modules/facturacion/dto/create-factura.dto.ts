@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -38,6 +39,16 @@ export class CreateFacturaDto {
   @IsOptional() @IsInt() @Type(() => Number) manualCbteTipo?: number;
   @IsOptional() @IsInt() @Type(() => Number) manualPtoVenta?: number;
   @IsOptional() @IsInt() @Type(() => Number) manualCbteNro?: number;
+  /**
+   * Observaciones de la factura: renglones sin importe que van en el PDF debajo de los viajes.
+   * Se guardan sin espacios de más y sin renglones vacíos.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(300, { each: true })
+  observaciones?: string[];
   /** Si true, el importe se arma con tramos (+ viajes no divididos). */
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()

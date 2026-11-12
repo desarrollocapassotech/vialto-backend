@@ -88,6 +88,26 @@ export class ViajesController {
     return this.service.transportistaIdsSinLiquidar(auth.tenantId);
   }
 
+  @ApiOperation({
+    summary: "Opciones disponibles para filtros de viajes según filtros aplicados",
+  })
+  @Get("filtros-opciones")
+  @Roles("admin", "member", "superadmin")
+  filtrosOpciones(
+    @CurrentAuth() auth: AuthPayload,
+    @Query() query: ViajesPaginatedQueryDto,
+    @Req() req: Request,
+  ) {
+    assertTenantId(auth.tenantId);
+    return this.service.filtrosOpciones(auth.tenantId, {
+      ...query,
+      clienteId: queryParamFromRequest(req, "clienteId") ?? query.clienteId,
+      transportistaId:
+        queryParamFromRequest(req, "transportistaId") ?? query.transportistaId,
+      choferId: queryParamFromRequest(req, "choferId") ?? query.choferId,
+    });
+  }
+
   @ApiOperation({ summary: "Listar viajes paginado con filtros avanzados" })
   @Get("paginated")
   @Roles("admin", "member", "superadmin")

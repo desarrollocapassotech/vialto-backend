@@ -18,6 +18,11 @@ import {
 import { parsearNumeroComprobante } from '../../shared/util/comprobante-manual.util';
 import { esNumeroInterno } from '../../shared/util/numero-interno.util';
 import {
+  ivaConceptosFactura,
+  netoConceptosFactura,
+  normalizarConceptosFactura,
+} from '../../shared/util/factura-conceptos-extra.util';
+import {
   importeNetoFactura,
   restoSinTramoDeViaje,
 } from '../../shared/util/factura-estado-lectura';
@@ -82,6 +87,7 @@ export async function libroIvaVentas(
       ivaPct: true,
       ivaMonto: true,
       facturarPorTramo: true,
+      conceptos: true,
       moneda: true,
       anulacionCbteTipo: true,
       anulacionPtoVenta: true,
@@ -260,6 +266,8 @@ type FacturaMontos = {
     precioUnitarioFactura: number | null;
   }>;
   tramos: Array<{ viajeId: string; monto: number; ivaPct: number }>;
+  /** `Factura.conceptos`: cada concepto va con su alícuota. */
+  conceptos?: unknown;
 };
 
 /**
@@ -268,6 +276,7 @@ type FacturaMontos = {
  */
 function montosDesdeFactura(f: FacturaMontos): { alicuotas: LibroIvaAlicuota[]; total: number } {
   const ivaCabecera = f.ivaPct ?? 0;
+  const conceptos = normalizarConceptosFactura(f.conceptos);
   let items: Array<{ base: number; pct: number; iva?: number }>;
   if (f.facturarPorTramo && f.tramos.length > 0) {
     const porViaje = new Map<string, Array<{ monto: number }>>();
@@ -286,9 +295,17 @@ function montosDesdeFactura(f: FacturaMontos): { alicuotas: LibroIvaAlicuota[]; 
         .filter((it) => it.base > 0),
     ];
   } else {
-    const neto = importeNetoFactura(f.importe, f.viajes);
-    items = [{ base: neto, pct: ivaCabecera, iva: f.ivaMonto ?? undefined }];
+    // Neto de los viajes (sin viajes, el importe guardado ya trae los conceptos: se descuentan).
+    const neto =
+      f.viajes.length > 0
+        ? importeNetoFactura(f.importe, f.viajes)
+        : round2(f.importe - netoConceptosFactura(conceptos));
+    // `ivaMonto` incluye el IVA de los conceptos: a la cabecera le toca el resto.
+    const ivaViajes =
+      f.ivaMonto != null ? round2(f.ivaMonto - ivaConceptosFactura(conceptos)) : undefined;
+    items = [{ base: neto, pct: ivaCabecera, iva: ivaViajes }];
   }
+  items.push(...conceptos.map((c) => ({ base: c.importe, pct: c.ivaPct })));
   const alicuotas = agruparAlicuotas(items);
   const total = round2(alicuotas.reduce((s, a) => s + a.neto + a.iva, 0));
   return { alicuotas, total };

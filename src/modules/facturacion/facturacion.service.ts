@@ -13,6 +13,12 @@ import { FacturaTramoDto } from "./dto/factura-tramo.dto";
 import { CreatePagoDto } from "./dto/create-pago.dto";
 import { normalizarObservacionesFactura } from "../../shared/util/factura-observaciones.util";
 import {
+  type FacturaConcepto,
+  ivaConceptosFactura,
+  netoConceptosFactura,
+  normalizarConceptosFactura,
+} from "../../shared/util/factura-conceptos-extra.util";
+import {
   FacturasPaginatedQueryDto,
   type FacturasSortField,
 } from "./dto/facturas-paginated-query.dto";
@@ -128,24 +134,30 @@ export class FacturacionService {
     facturarPorTramo: boolean,
     ivaPctCabecera: number | null | undefined,
     _tieneArca?: boolean,
+    /** Conceptos además de los viajes: su neto va al importe y su IVA (por concepto) al IVA. */
+    conceptos: FacturaConcepto[] = [],
   ): { importe: number; ivaMonto: number } {
-    const importe = roundMoney2(
+    const importeViajes = roundMoney2(
       facturarPorTramo && tramos.length > 0
         ? importeNetoFactura(0, viajes, { facturarPorTramo, tramos })
         : this.computeImporte(viajes),
     );
+    const importe = roundMoney2(importeViajes + netoConceptosFactura(conceptos));
+    const ivaConceptos = ivaConceptosFactura(conceptos);
     if (facturarPorTramo && tramos.length > 0) {
       return {
         importe,
-        ivaMonto: ivaMontoDeTramos(importe, tramos, ivaPctCabecera, viajes),
+        ivaMonto: roundMoney2(
+          ivaMontoDeTramos(importeViajes, tramos, ivaPctCabecera, viajes) + ivaConceptos,
+        ),
       };
     }
     const pct = Number(ivaPctCabecera);
     const ivaPct = Number.isFinite(pct) ? pct : 0;
-    const ivaMonto = ivaPct > 0 ? roundMoney2((importe * ivaPct) / 100) : 0;
+    const ivaViajes = ivaPct > 0 ? roundMoney2((importeViajes * ivaPct) / 100) : 0;
     return {
       importe,
-      ivaMonto,
+      ivaMonto: roundMoney2(ivaViajes + ivaConceptos),
     };
   }
 
@@ -311,6 +323,7 @@ export class FacturacionService {
       ivaPct?: number | null;
       ivaMonto?: number | null;
       facturarPorTramo?: boolean;
+      conceptos?: unknown;
       createdAt: Date;
       viajes: ViajeSnap[];
       pagos?: { importe: number }[];
@@ -319,13 +332,15 @@ export class FacturacionService {
     tieneArca: boolean,
     includeViajes = false,
   ) {
-    const { viajes, pagos = [], tramos = [], ...f } = row;
+    const { viajes, pagos = [], tramos = [], conceptos: conceptosRaw, ...f } = row;
+    const conceptos = normalizarConceptosFactura(conceptosRaw);
     const cobroOpts = cobroOptsDeFactura(
       {
         facturarPorTramo: f.facturarPorTramo,
         ivaPct: f.ivaPct,
         tramos,
         ivaMonto: f.ivaMonto,
+        conceptos,
       },
       tieneArca && !f.manual,
     );
@@ -344,10 +359,12 @@ export class FacturacionService {
       tramos,
       ivaPctCabecera: f.ivaPct,
       ivaMontoGuardado: f.ivaMonto,
+      conceptos,
     });
     const tramosOrdenados = [...tramos].sort((a, b) => a.orden - b.orden);
     return {
       ...f,
+      conceptos,
       manual: f.manual ?? false,
       facturarPorTramo: f.facturarPorTramo ?? false,
       ivaMonto: f.ivaMonto ?? null,
@@ -1039,6 +1056,11 @@ export class FacturacionService {
   }
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
+    // Cliente obligatorio (nov 2026, como en Nueva liquidación el transportista): los viajes se
+    // eligen a partir de él y la venta va a su cuenta corriente.
+    if (!dto.clienteId?.trim()) {
+      throw new BadRequestException("Elegí el cliente de la factura.");
+    }
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
 
@@ -1096,12 +1118,14 @@ export class FacturacionService {
       facturarPorTramo,
     );
     const ivaPct = dto.ivaPct ?? 21;
+    const conceptos = normalizarConceptosFactura(dto.conceptos);
     const { importe, ivaMonto } = this.montosParaGuardar(
       viajes,
       tramosValidos,
       facturarPorTramo,
       ivaPct,
       tieneArca,
+      conceptos,
     );
 
     try {
@@ -1127,6 +1151,7 @@ export class FacturacionService {
             facturarPorTramo,
             comprobanteUrl: dto.comprobanteUrl ?? null,
             observaciones: normalizarObservacionesFactura(dto.observaciones),
+            conceptos,
             manual,
             manualCbteTipo: cbteManual?.cbteTipo ?? null,
             manualPtoVenta: cbteManual?.ptoVenta ?? null,
@@ -1218,6 +1243,7 @@ export class FacturacionService {
         manual: true,
         arcaEstado: true,
         numero: true,
+        conceptos: true,
       },
     });
     if (!existing) throw new NotFoundException("Factura no encontrada");
@@ -1335,6 +1361,9 @@ export class FacturacionService {
           ...(dto.observaciones !== undefined
             ? { observaciones: normalizarObservacionesFactura(dto.observaciones) }
             : {}),
+          ...(dto.conceptos !== undefined
+            ? { conceptos: normalizarConceptosFactura(dto.conceptos) }
+            : {}),
           ...(pasaAManual ? { manual: true } : {}),
           ...(cbteManual
             ? {
@@ -1447,6 +1476,9 @@ export class FacturacionService {
         facturarPorTramo,
         dto.ivaPct !== undefined ? dto.ivaPct : existing.ivaPct,
         tieneArca,
+        normalizarConceptosFactura(
+          dto.conceptos !== undefined ? dto.conceptos : existing.conceptos,
+        ),
       );
 
       const updated = await tx.factura.update({
@@ -1474,6 +1506,7 @@ export class FacturacionService {
           tramos: updated.tramos,
           ivaPctCabecera: updated.ivaPct,
           ivaMontoGuardado: updated.ivaMonto,
+          conceptos: updated.conceptos,
         });
         await this.actualizarEstadoCargoFactura(tx, tenantId, updated, cobrado);
       } else {
@@ -1752,6 +1785,7 @@ export class FacturacionService {
       tramos: factura.tramos,
       ivaPctCabecera: factura.ivaPct,
       ivaMontoGuardado: factura.ivaMonto,
+      conceptos: factura.conceptos,
     });
 
     const viajeIds = Array.from(new Set([

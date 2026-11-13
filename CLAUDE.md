@@ -590,6 +590,14 @@ model Pago {
 
 `Factura.observaciones` (`String[]`, migración `20261111120000_factura_observaciones`): renglones de texto **sin importe**, propios de la factura (no del viaje: a veces la observación va solo en la factura y no en la liquidación). Se cargan en Nueva/Editar factura con `FacturaObservacionesEditor` (front, "+ Agregar observación", como los conceptos de una liquidación pero sin monto) y se normalizan con `normalizarObservacionesFactura` (`shared/util/factura-observaciones.util.ts`: sin espacios de más ni vacías; DTO: máx. 20 de 300 caracteres). En el PDF (`factura-pdf.service.ts`) salen como renglones "OBS.: …" debajo de los viajes y gastos, a todo el ancho de la tabla; no van en la nota de crédito. No se informan a ARCA y no tocan importes. Con ARCA solo se editan en borrador (`assertFacturaEditable`), así el PDF de una factura autorizada no cambia.
 
+#### Conceptos de la factura además de los viajes (nov 2026)
+
+`Factura.conceptos` (Json `[{ descripcion, cantidad, precioUnitario, importe (neto = cantidad × unitario, > 0), ivaPct }]`, migración `20261113210000_factura_conceptos`; `normalizarConceptosFactura` recalcula el importe con cantidad × unitario y a los que no los tengan les pone cantidad 1 y unitario = importe): estadía, carga y descarga, gastos del viaje… **Solo suman** (ARCA no admite líneas ni totales negativos) y no tienen catálogo (a diferencia de los conceptos de liquidación; quizás a futuro). Utils en `shared/util/factura-conceptos-extra.util.ts` (`normalizarConceptosFactura`, `netoConceptosFactura`, `ivaConceptosFactura`, cada concepto con su IVA redondeado).
+- **Guardado**: `montosParaGuardar` suma su neto a `importe` y su IVA a `ivaMonto` (alta y edición; `conceptos` en el DTO reemplaza a los guardados).
+- **Lectura — trampa**: el neto de una factura se **recalcula desde los viajes** (`importeNetoFactura`), no se lee de `importe`. Los conceptos entran por `FacturaCobroOpts.conceptos` (`cobroOptsDeFactura` los lee de `f.conceptos`) y por `computeEstadoFacturaLectura({ conceptos })`. **Toda consulta nueva de facturas con `select` que calcule importe/cobro tiene que traer `conceptos: true`**; si no, el importe sale sin ellos (ya lo hacen dashboard, dashboard financiero, aviso de factura por vencer, Libro IVA y `toShape`).
+- **ARCA y PDF**: `defaultFacturaLineas` agrega una línea por concepto después de los viajes; el front manda las mismas líneas al emitir. Libro IVA ventas: cada concepto con su alícuota.
+- Front: por defecto se precargan con los `otrosGastos` de los viajes elegidos (misma moneda; solo si el cliente es el principal del viaje). Ver `vialto-frontend/CLAUDE.md`.
+
 #### Facturas por tramo (LSF / Uruguay) — IVA persistido (sep 2026)
 
 Pedido real de LSF: facturan a clientes separando cada viaje en tramos con distinto IVA (tramo AR exento, tramo UY 22%), como exige la normativa uruguaya. El PDF lo emiten ellos afuera y lo suben como comprobante — Vialto no arma ese PDF.

@@ -339,3 +339,41 @@ test('factura cobrada con vencimiento ayer no queda marcada como vencida', () =>
 
 console.log('factura-estado-lectura.spec.ts: OK');
 
+
+// Conceptos además de los viajes (nov 2026): entran al neto y cada uno lleva su IVA.
+const conceptos = [
+  { descripcion: 'Estadía', importe: 1000, ivaPct: 21 },
+  { descripcion: 'Seguro', importe: 500, ivaPct: 0 },
+];
+
+test('conceptos: el neto rearmado desde los viajes los suma (3100 + 1500 = 4600)', () => {
+  assert.equal(importeNetoFactura(0, viajes3100, { conceptos }), 4600);
+  // Sin viajes el importe guardado ya los trae: no se suman dos veces.
+  assert.equal(importeNetoFactura(4600, [], { conceptos }), 4600);
+});
+
+test('conceptos sin IVA guardado: viajes al 21% + cada concepto con su IVA (4600 + 651 + 210 = 5461)', () => {
+  assert.equal(importeOperativoFactura(0, viajes3100, { ivaPctCabecera: 21, conceptos }), 5461);
+});
+
+test('conceptos con IVA guardado: neto + IVA guardado (que ya incluye el de los conceptos)', () => {
+  assert.equal(
+    importeOperativoFactura(0, viajes3100, { ivaPctCabecera: 21, ivaMontoGuardado: 861, conceptos }),
+    5461,
+  );
+});
+
+test('conceptos: cobrada recién con los conceptos pagos', () => {
+  const base = {
+    viajes: viajes3100.map((v) => ({ ...v, facturacionEstado: 'facturado' })),
+    fechaVencimiento: null,
+    importeGuardado: 4600,
+    arcaEstado: null,
+    tieneArca: false,
+    ivaPctCabecera: 21,
+    ivaMontoGuardado: 861,
+    conceptos,
+  };
+  assert.equal(computeEstadoFacturaLectura({ ...base, pagos: [{ importe: 3751 }] }).cobrado, false);
+  assert.equal(computeEstadoFacturaLectura({ ...base, pagos: [{ importe: 5461 }] }).cobrado, true);
+});

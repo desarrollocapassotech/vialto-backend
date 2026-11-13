@@ -1,6 +1,10 @@
 import type { ConceptoFacturable } from './arca-cvlp.util';
 import { resolveIvaPct, round2 } from './arca-iva.util';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
+import {
+  netoConceptosFactura,
+  normalizarConceptosFactura,
+} from '../../shared/util/factura-conceptos-extra.util';
 
 /** Neto de la línea: cantidad × precio (2 decimales) si ambos están; si no, `monto`. */
 export function importeNetoLineaViaje(v: {
@@ -51,8 +55,32 @@ type ViajeSnap = {
   fechaCarga?: Date | null;
 };
 
-/** Líneas por defecto a partir de la factura y sus viajes vinculados. */
+/**
+ * Líneas por defecto a partir de la factura y sus viajes vinculados, más sus conceptos
+ * (`Factura.conceptos`: estadía, gastos del viaje…), cada uno con su IVA.
+ */
 export function defaultFacturaLineas(
+  factura: { importe: number; ivaPct?: number | null; conceptos?: unknown },
+  viajes: ViajeSnap[],
+): FacturaLineaInput[] {
+  const conceptos = normalizarConceptosFactura(factura.conceptos);
+  const lineasConceptos: FacturaLineaInput[] = conceptos.map((c) => ({
+    descripcion: c.descripcion,
+    cantidad: c.cantidad,
+    precioUnitario: c.precioUnitario,
+    importe: c.importe,
+    ivaPct: c.ivaPct,
+  }));
+  const lineasViajes = defaultFacturaLineasViajes(
+    { importe: round2(factura.importe - netoConceptosFactura(conceptos)), ivaPct: factura.ivaPct },
+    viajes,
+  );
+  return [...lineasViajes, ...lineasConceptos].filter(
+    (l, i, todas) => l.importe !== 0 || todas.length === 1,
+  );
+}
+
+function defaultFacturaLineasViajes(
   factura: { importe: number; ivaPct?: number | null },
   viajes: ViajeSnap[],
 ): FacturaLineaInput[] {

@@ -8,11 +8,25 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { FacturaTramoDto } from './factura-tramo.dto';
+
+/** Concepto de la factura además de los viajes. Solo suma (importe > 0). */
+export class FacturaConceptoDto {
+  @IsString() @MaxLength(200) descripcion: string;
+  /** Cantidad (> 0). Con `precioUnitario`, el importe se calcula como cantidad × unitario. */
+  @IsOptional() @IsNumber() @Min(0.0001) @Type(() => Number) cantidad?: number;
+  /** Monto unitario sin IVA. */
+  @IsOptional() @IsNumber() @Min(0.01) @Type(() => Number) precioUnitario?: number;
+  /** Neto sin IVA. Se ignora si vienen cantidad y unitario. */
+  @IsNumber() @Min(0.01) @Type(() => Number) importe: number;
+  @IsNumber() @Min(0) @Max(100) @Type(() => Number) ivaPct: number;
+}
 
 export class CreateFacturaDto {
   /** Opcional: con integracion-arca lo asigna AFIP al emitir; sin ARCA puede cargarse después, cuando se tenga el comprobante externo. */
@@ -54,6 +68,16 @@ export class CreateFacturaDto {
   @IsString({ each: true })
   @MaxLength(300, { each: true })
   observaciones?: string[];
+  /**
+   * Conceptos que se suman además de los viajes (estadía, gastos del viaje…): descripción,
+   * importe neto (> 0) e IVA %. Reemplazan a los guardados. Ver `normalizarConceptosFactura`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => FacturaConceptoDto)
+  conceptos?: FacturaConceptoDto[];
   /** Si true, el importe se arma con tramos (+ viajes no divididos). */
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()

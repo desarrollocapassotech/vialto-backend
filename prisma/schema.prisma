@@ -756,6 +756,14 @@ model Factura {
    */
   observaciones    String[]       @default([])
   /**
+   * Conceptos que se suman a la factura además de los viajes (nov 2026), ej. estadía o carga y
+   * descarga; por defecto se precargan con los gastos de los viajes elegidos. Json
+   * `[{ descripcion, importe (neto, > 0), ivaPct }]`, sin catálogo (a diferencia de los
+   * conceptos de liquidación). Su neto está incluido en `importe` y su IVA en `ivaMonto`; los
+   * lectores que recalculan el neto desde los viajes lo suman vía `cobroOptsDeFactura`.
+   */
+  conceptos        Json           @default("[]")
+  /**
    * Factura hecha por fuera del sistema en una empresa con `emision-facturas-arca`: no se
    * emite en ARCA, lleva número y comprobante adjunto, y se trata como en una empresa sin ARCA.
    */

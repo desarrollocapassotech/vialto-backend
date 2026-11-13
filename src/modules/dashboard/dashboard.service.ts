@@ -725,6 +725,7 @@ export class DashboardService {
         facturarPorTramo: true,
         ivaPct: true,
         ivaMonto: true,
+        conceptos: true,
         pagos: { select: { importe: true } },
         viajes: { select: { id: true, facturacionEstado: true, monto: true } },
         tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
@@ -744,6 +745,7 @@ export class DashboardService {
         tramos: f.tramos,
         ivaPctCabecera: f.ivaPct,
         ivaMontoGuardado: opts.ivaMontoGuardado,
+        conceptos: f.conceptos,
       }).vencida;
     });
     let montoVencidas = 0;

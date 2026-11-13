@@ -485,11 +485,10 @@ export class CuentaCorrienteService {
       throw new BadRequestException('El vencimiento de este movimiento no se puede editar.');
     }
     if (dto.fechaVencimiento) this.assertVencimientoNoAnterior(mov.fecha, dto.fechaVencimiento);
-    // El archivo vive en la factura/liquidación: una venta/compra manual no tiene dónde guardarlo.
+    // El archivo vive en la factura/liquidación; en un movimiento manual, en el movimiento.
     if (
       dto.comprobanteUrl !== undefined &&
-      (mov.origen === 'manual' ||
-        !this.comprobanteEditable(mov, liquidacion?.cbteNro ?? null, facturasConArca))
+      !this.comprobanteEditable(mov, liquidacion?.cbteNro ?? null, facturasConArca)
     ) {
       throw new BadRequestException('A este movimiento no se le puede adjuntar el comprobante.');
     }
@@ -556,6 +555,11 @@ export class CuentaCorrienteService {
       await this.prisma.liquidacion.update({
         where: { id: liquidacion.id },
         data: { comprobanteUrl, updatedAt: new Date() },
+      });
+    } else if (comprobanteUrl !== undefined && mov.origen === 'manual') {
+      await this.prisma.movimientoCuentaCorriente.update({
+        where: { id: mov.id },
+        data: { comprobanteUrl },
       });
     }
     return this.findOne(id, tenantId);
@@ -853,6 +857,15 @@ export class CuentaCorrienteService {
     return { creados, filas };
   }
 
+  /**
+   * Sube el archivo de un comprobante (factura, recibo, orden de pago) a Cloudinary. Mismas
+   * reglas que el de Facturas (PDF o imagen, 10 MB); propio de Cuenta corriente para que
+   * funcione en empresas sin el módulo de Facturación.
+   */
+  uploadComprobante(tenantId: string, file: Express.Multer.File) {
+    return this.facturacion.uploadComprobante(tenantId, file);
+  }
+
   /** Vista previa del número que asigna "Comprobante interno" (se recalcula al guardar). */
   async siguienteNumeroInterno(tenantId: string): Promise<{ numero: string }> {
     return { numero: await siguienteNumeroInterno(this.prisma, tenantId) };
@@ -916,6 +929,7 @@ export class CuentaCorrienteService {
             ? this.resolveFechaVencimiento(fecha, condicionPagoDias, dto.fechaVencimiento)
             : null,
         numeroComprobante,
+        comprobanteUrl: dto.comprobanteUrl?.trim() || null,
         referencia:
           dto.formaPago?.trim() ||
           dto.referencia?.trim() ||
@@ -1074,6 +1088,8 @@ export class CuentaCorrienteService {
               ? this.resolveFechaVencimiento(fecha, condicionPagoDias)
               : undefined,
         numeroComprobante: dto.numeroComprobante?.trim() || undefined,
+        comprobanteUrl:
+          dto.comprobanteUrl !== undefined ? dto.comprobanteUrl?.trim() || null : undefined,
         referencia,
       },
       });

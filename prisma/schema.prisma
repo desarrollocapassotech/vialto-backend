@@ -911,6 +911,10 @@ model MovimientoCuentaCorriente {
    * Referencia libre a un número de comprobante externo (tenants sin módulo de Facturación, o proveedores sin factura formal en el sistema). No confundir con `facturaId`, que vincula a una Factura real emitida por Vialto.
    */
   numeroComprobante    String?
+  /**
+   * Archivo adjunto (Cloudinary) de una venta/compra/cobro/pago manual: la factura, el recibo o la orden de pago. Facturas y liquidaciones guardan el suyo en su propia tabla (`Factura.comprobanteUrl`, `Liquidacion.comprobanteUrl`), no acá.
+   */
+  comprobanteUrl       String?
   referencia           String?
   /**
    * Solo aplica a cargos: pendiente | parcial | cancelado, según cuánto de su importe cubren las imputaciones recibidas. Se recalcula, nunca se edita a mano.

@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -49,6 +50,8 @@ export class CreateMovimientoCcDto {
   @IsOptional() @IsString() numeroComprobante?: string;
   /** true = el backend asigna el siguiente número interno (`INT-…`) e ignora `numeroComprobante`. */
   @IsOptional() @IsBoolean() numeroAutomatico?: boolean;
+  /** Archivo adjunto ya subido (`POST cuenta-corriente/upload-comprobante`). */
+  @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
   @IsOptional() @IsString() formaPago?: string;
   @IsOptional() @IsString() referencia?: string;
   /**

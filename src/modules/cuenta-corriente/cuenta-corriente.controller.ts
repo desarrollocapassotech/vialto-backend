@@ -1,6 +1,9 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards,
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res,
+  UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CuentaCorrienteService } from './cuenta-corriente.service';
@@ -157,6 +160,21 @@ export class CuentaCorrienteController {
   registrarPago(@Body() dto: RegistrarPagoDto, @CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);
     return this.service.registrarPago(auth.tenantId, dto, auth.userId);
+  }
+
+  @ApiOperation({ summary: 'Subir el comprobante adjunto de un movimiento (PDF o imagen) a Cloudinary' })
+  @Post('upload-comprobante')
+  @Roles('admin', 'superadmin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadComprobante(@UploadedFile() file: Express.Multer.File, @CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    if (!file) throw new BadRequestException('Se requiere un archivo.');
+    return this.service.uploadComprobante(auth.tenantId, file);
   }
 
   @ApiOperation({ summary: 'Siguiente número de comprobante interno (vista previa de "Comprobante interno")' })

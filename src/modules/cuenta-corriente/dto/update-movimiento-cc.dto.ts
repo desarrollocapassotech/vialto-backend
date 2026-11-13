@@ -5,6 +5,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -27,6 +29,12 @@ export class UpdateMovimientoCcDto {
   /** null = quitar el vencimiento. */
   @IsOptional() @IsDateString() fechaVencimiento?: string | null;
   @IsOptional() @IsString() numeroComprobante?: string;
+  /** Archivo adjunto ya subido; `null` lo quita. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(2048)
+  comprobanteUrl?: string | null;
   @IsOptional() @IsString() formaPago?: string;
   @IsOptional() @IsString() referencia?: string;
   /**

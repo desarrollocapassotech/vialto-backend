@@ -685,6 +685,10 @@ export class PlatformService {
     return row;
   }
 
+  transportistaCategorias(tenantId: string | undefined) {
+    return this.transportistasService.categorias(this.requiredTenantId(tenantId));
+  }
+
   /** Mismas reglas que el alta de la empresa (tipo, CUIT único, datos fiscales). */
   async createTransportista(
     tenantId: string | undefined,

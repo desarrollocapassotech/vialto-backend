@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { PROVEEDOR_TIPOS, type ProveedorTipo } from '../../../shared/util/proveedor-tipo';
@@ -47,6 +48,9 @@ export class UpdateTransportistaDto {
 
   /** Tipo de proveedor. No se puede cambiar si el proveedor ya se usó como ese tipo (viajes, OT…). */
   @IsOptional() @IsIn(PROVEEDOR_TIPOS) tipo?: ProveedorTipo;
+
+  /** Con tipo "otro": nombre del tipo (ej. "Combustible"). Sin el campo no se toca. */
+  @IsOptional() @Transform(trimString) @IsString() @MaxLength(60) categoria?: string;
 
   /** false = desactivado (no se ofrece en los selectores, conserva el historial). */
   @IsOptional() @IsBoolean() activo?: boolean;

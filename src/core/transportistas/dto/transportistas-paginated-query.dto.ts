@@ -34,6 +34,11 @@ export class TransportistasPaginatedQueryDto extends PaginationQueryDto {
   @IsIn(PROVEEDOR_TIPO_FILTRO)
   tipo?: ProveedorTipoFiltro;
 
+  /** Con `tipo=otro`: solo los de esa categoría (ej. "Combustible"). */
+  @IsOptional()
+  @IsString()
+  categoria?: string;
+
   @IsOptional()
   @IsIn(['true', 'false'])
   activo?: 'true' | 'false';

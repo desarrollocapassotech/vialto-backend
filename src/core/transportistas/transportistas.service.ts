@@ -16,6 +16,16 @@ import { validarIdFiscal } from '../../shared/util/validar-id-fiscal';
 import { normalizarIdFiscal } from '../../shared/util/documento-unico.util';
 import { PROVEEDOR_TIPO_LABEL, type ProveedorTipo } from '../../shared/util/proveedor-tipo';
 
+/** Para comparar categorías: sin mayúsculas, acentos ni espacios de más. */
+function claveCategoria(c: string): string {
+  return c
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
 /**
  * Proveedores de la empresa (tabla `transportistas`, nov 2026). Además de los
  * transportistas, guarda talleres (Mantenimiento) y cualquier otro proveedor
@@ -45,10 +55,41 @@ export class TransportistasService {
     });
   }
 
+  /**
+   * Tipos propios ("otro" con nombre) que ya usó la empresa, sin repetir y en orden
+   * alfabético: son las opciones extra del selector de tipo al dar de alta un proveedor.
+   */
+  async categorias(tenantId: string): Promise<string[]> {
+    const rows = await this.prisma.transportista.findMany({
+      where: { tenantId, tipo: 'otro', categoria: { not: null } },
+      select: { categoria: true },
+      distinct: ['categoria'],
+    });
+    const porClave = new Map<string, string>();
+    for (const r of rows) {
+      const c = r.categoria?.trim();
+      if (c && !porClave.has(claveCategoria(c))) porClave.set(claveCategoria(c), c);
+    }
+    return [...porClave.values()].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  }
+
+  /**
+   * Categoría a guardar: sin espacios de más y, si la empresa ya tiene una igual (sin
+   * importar mayúsculas ni acentos), con esa misma escritura — así "combustible" y
+   * "Combustible" no quedan como dos tipos distintos.
+   */
+  private async normalizarCategoria(tenantId: string, categoria: string): Promise<string> {
+    const limpia = categoria.trim().replace(/\s+/g, ' ');
+    const existentes = await this.categorias(tenantId);
+    return existentes.find((c) => claveCategoria(c) === claveCategoria(limpia)) ?? limpia;
+  }
+
   async findAllPaginated(tenantId: string, query: TransportistasPaginatedQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const where = TransportistasService.whereFiltro(tenantId, query);
+    const categoria = query.categoria?.trim();
+    if (categoria) where.categoria = { equals: categoria, mode: 'insensitive' };
 
     const nombre = query.nombre?.trim();
     if (nombre) where.nombre = { contains: nombre, mode: 'insensitive' };
@@ -181,11 +222,19 @@ export class TransportistasService {
     await TransportistasService.assertIdFiscalDisponible(this.prisma, tenantId, idFiscal);
     const tipo = dto.tipo ?? 'transportista';
     const esTransportista = tipo === 'transportista';
+    let categoria: string | null = null;
+    if (tipo === 'otro') {
+      if (!dto.categoria?.trim()) {
+        throw new BadRequestException('Escribí qué tipo de proveedor es (ej. Combustible, Gomería).');
+      }
+      categoria = await this.normalizarCategoria(tenantId, dto.categoria);
+    }
     try {
       return await this.prisma.transportista.create({
         data: {
           tenantId,
           tipo,
+          categoria,
           activo: dto.activo ?? true,
           nombre: dto.nombre.trim(),
           pais,
@@ -216,8 +265,20 @@ export class TransportistasService {
     const current = await this.findOne(id, tenantId);
     const tipo = dto.tipo ?? current.tipo;
     await this.assertCambioTipoPermitido(tenantId, id, current.tipo, tipo);
+    // Categoría: solo en tipo "otro", y siempre con nombre (no hay "otro sin especificar").
+    // Activar/desactivar sin tocar el tipo no la pide, para no trabar datos viejos.
+    let categoria: string | null = null;
+    if (tipo === 'otro') {
+      const pedida = dto.categoria !== undefined ? dto.categoria.trim() : (current.categoria ?? '');
+      const tocaTipo = dto.tipo !== undefined || dto.categoria !== undefined;
+      if (!pedida && tocaTipo) {
+        throw new BadRequestException('Escribí qué tipo de proveedor es (ej. Combustible, Gomería).');
+      }
+      categoria = pedida ? await this.normalizarCategoria(tenantId, pedida) : null;
+    }
     const next = {
       tipo,
+      categoria,
       activo: dto.activo ?? current.activo,
       nombre: dto.nombre !== undefined ? dto.nombre.trim() : current.nombre,
       pais:

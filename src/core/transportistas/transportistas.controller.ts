@@ -42,6 +42,14 @@ export class TransportistasController {
     return this.service.findAll(auth.tenantId, filtro);
   }
 
+  @ApiOperation({ summary: 'Tipos propios de proveedor ("otro" con nombre) que ya usó la empresa' })
+  @Get('categorias')
+  @Roles('admin', 'member', 'superadmin')
+  categorias(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.categorias(auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Listar transportistas paginado' })
   @Get('paginated')
   @Roles('admin', 'member', 'superadmin')

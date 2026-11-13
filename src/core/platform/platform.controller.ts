@@ -594,6 +594,11 @@ export class PlatformController {
     });
   }
 
+  @Get("transportistas/categorias")
+  transportistaCategorias(@Query("tenantId") tenantId?: string) {
+    return this.service.transportistaCategorias(tenantId);
+  }
+
   @Get("transportistas/:id")
   transportistaById(
     @Param("id") id: string,

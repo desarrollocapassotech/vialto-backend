@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { PROVEEDOR_TIPOS, type ProveedorTipo } from '../../../shared/util/proveedor-tipo';
@@ -46,6 +47,9 @@ export class CreateTransportistaDto {
 
   /** Tipo de proveedor; sin valor = transportista (compatibilidad con las altas de siempre). */
   @IsOptional() @IsIn(PROVEEDOR_TIPOS) tipo?: ProveedorTipo;
+
+  /** Obligatorio con tipo "otro": nombre del tipo (ej. "Combustible"). Se ignora en los demás. */
+  @IsOptional() @Transform(trimString) @IsString() @MaxLength(60) categoria?: string;
 
   @IsOptional() @IsBoolean() activo?: boolean;
 

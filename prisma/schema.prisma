@@ -272,6 +272,10 @@ model Transportista {
    */
   tipo                    String    @default("transportista")
   /**
+   * Solo tipo "otro": nombre del tipo que cargó la empresa (ej. "Combustible", "Gomería"). Las categorías ya usadas se ofrecen en el selector de tipo (`GET transportistas/categorias`). Null en transportista/taller.
+   */
+  categoria               String?
+  /**
    * false = desactivado: no se ofrece en los selectores, conserva su historial.
    */
   activo                  Boolean   @default(true)

@@ -718,6 +718,12 @@ export class PlatformController {
     return this.service.listFacturas(tenantId, clienteId);
   }
 
+  /** Vista previa del número interno de "Comprobante interno" (facturas). */
+  @Get("facturas-numero-interno")
+  facturaNumeroInterno(@Query("tenantId") tenantId?: string) {
+    return this.service.facturaNumeroInterno(tenantId);
+  }
+
   @Post("facturas")
   createFactura(
     @Query("tenantId") tenantId: string | undefined,

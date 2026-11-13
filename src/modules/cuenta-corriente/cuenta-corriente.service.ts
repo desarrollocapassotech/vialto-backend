@@ -37,6 +37,7 @@ import {
 } from '../../shared/cuenta-corriente/compra-viajes';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
+import { siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
 import {
   importeTotalConIvaPorTramo,
   ivaMontoDeTramos,
@@ -852,6 +853,11 @@ export class CuentaCorrienteService {
     return { creados, filas };
   }
 
+  /** Vista previa del número que asigna "Comprobante interno" (se recalcula al guardar). */
+  async siguienteNumeroInterno(tenantId: string): Promise<{ numero: string }> {
+    return { numero: await siguienteNumeroInterno(this.prisma, tenantId) };
+  }
+
   async create(tenantId: string, dto: CreateMovimientoCcDto, userId?: string) {
     const { contraparteId, condicionPagoDias } = await this.assertContraparte(
       tenantId,
@@ -860,8 +866,11 @@ export class CuentaCorrienteService {
     await this.assertCargoManualPermitido(tenantId, dto);
     // Todo movimiento manual se identifica por su comprobante (factura de la venta/compra,
     // recibo u orden de pago del cobro/pago): es lo que muestra la grilla y lo que se elige
-    // al imputar.
-    if (!dto.numeroComprobante?.trim()) {
+    // al imputar. Con `numeroAutomatico` se asigna el siguiente número interno.
+    const numeroComprobante = dto.numeroAutomatico
+      ? await siguienteNumeroInterno(this.prisma, tenantId)
+      : dto.numeroComprobante?.trim();
+    if (!numeroComprobante) {
       throw new BadRequestException('Ingresá el número de comprobante');
     }
     const porLineas = dto.lineas ? this.calcularLineas(dto.tipo, dto.lineas) : null;
@@ -906,7 +915,7 @@ export class CuentaCorrienteService {
           dto.tipo === 'cargo'
             ? this.resolveFechaVencimiento(fecha, condicionPagoDias, dto.fechaVencimiento)
             : null,
-        numeroComprobante: dto.numeroComprobante?.trim() || null,
+        numeroComprobante,
         referencia:
           dto.formaPago?.trim() ||
           dto.referencia?.trim() ||

@@ -97,6 +97,14 @@ export class FacturacionController {
     return this.service.findFactura(id, auth.tenantId);
   }
 
+  @ApiOperation({ summary: 'Siguiente número de comprobante interno (vista previa de "Comprobante interno")' })
+  @Get('numero-interno')
+  @Roles('admin', 'member', 'superadmin')
+  numeroInterno(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.siguienteNumeroInterno(auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Crear factura' })
   @Post('facturas')
   @Roles('admin', 'superadmin')

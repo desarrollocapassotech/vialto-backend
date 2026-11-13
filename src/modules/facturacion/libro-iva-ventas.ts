@@ -16,6 +16,7 @@ import {
   type LibroIvaResultado,
 } from '../../shared/util/libro-iva.util';
 import { parsearNumeroComprobante } from '../../shared/util/comprobante-manual.util';
+import { esNumeroInterno } from '../../shared/util/numero-interno.util';
 import {
   importeNetoFactura,
   restoSinTramoDeViaje,
@@ -188,6 +189,8 @@ export async function libroIvaVentas(
 
     // Con ARCA, una factura no manual sin CAE es un borrador (o un error): no se emitió.
     if (tieneArca && !f.manual) continue;
+    // Número interno (`INT-…`): no es un comprobante fiscal, no va al Libro IVA.
+    if (esNumeroInterno(f.numero)) continue;
 
     const fecha = ymdDeFecha(f.fechaEmision)!;
     if (!enRango(fecha, desde, hasta)) continue;

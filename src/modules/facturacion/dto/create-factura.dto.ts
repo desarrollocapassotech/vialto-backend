@@ -17,6 +17,11 @@ import { FacturaTramoDto } from './factura-tramo.dto';
 export class CreateFacturaDto {
   /** Opcional: con integracion-arca lo asigna AFIP al emitir; sin ARCA puede cargarse después, cuando se tenga el comprobante externo. */
   @IsOptional() @IsString() numero?: string;
+  /**
+   * true = el backend asigna el siguiente número interno (`INT-…`) e ignora `numero`. Con ARCA
+   * la factura queda manual (no se emite).
+   */
+  @IsOptional() @IsBoolean() numeroAutomatico?: boolean;
   /** Siempre "cliente" — el pago a transportistas externos se gestiona en Liquidaciones, no como Factura. */
   @IsIn(['cliente']) tipo: string;
   @IsOptional() @IsString() clienteId?: string;

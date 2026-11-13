@@ -969,6 +969,10 @@ export class PlatformService {
     return this.facturacionService.updateFactura(id, scopedTenantId, dto);
   }
 
+  async facturaNumeroInterno(tenantId: string | undefined) {
+    return this.facturacionService.siguienteNumeroInterno(this.requiredTenantId(tenantId));
+  }
+
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
     const tid = this.requiredTenantId(tenantId);
     await this.assertTenantExists(tid);

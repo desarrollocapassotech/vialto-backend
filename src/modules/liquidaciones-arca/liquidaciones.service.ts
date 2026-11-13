@@ -12,6 +12,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
+import { siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { generarTxtLibroIva, validarRangoLibroIva } from '../../shared/util/libro-iva.util';
 import { libroIvaCompras } from './libro-iva-compras';
@@ -260,6 +261,11 @@ export class LiquidacionesService {
 
   // ── Liquidaciones (CVLP Tipo 60) ──────────────────────────────────────────
 
+  /** Vista previa del número que asigna "Comprobante interno" (se recalcula al guardar). */
+  async siguienteNumeroInterno(tenantId: string): Promise<{ numero: string }> {
+    return { numero: await siguienteNumeroInterno(this.prisma, tenantId) };
+  }
+
   async createLiquidacion(tenantId: string, userId: string, dto: CreateLiquidacionDto) {
     const config = await this.arcaConfig.findPublic(tenantId);
 
@@ -326,6 +332,13 @@ export class LiquidacionesService {
     if (manual && !dto.proveedorCbteFecha) {
       throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
     }
+    // "Comprobante interno": número interno como comprobante del proveedor. Solo en
+    // liquidaciones sin Líquido Producto (con ARCA el número es el del CVLP, y la manual del
+    // monotributista lleva la factura del transportista).
+    const numeroInterno =
+      dto.numeroAutomatico && !tieneLiquidoProductoArca
+        ? await siguienteNumeroInterno(this.prisma, tenantId)
+        : null;
     if (tieneLiquidoProductoArca && !manual && moneda === 'USD') {
       throw new BadRequestException(
         'Las liquidaciones emitidas con ARCA (Líquido Producto) deben ser en ARS.',
@@ -450,7 +463,8 @@ export class LiquidacionesService {
           comprobanteUrl: dto.comprobanteUrl ?? null,
           proveedorContrato: dto.proveedorContrato?.trim() || null,
           numeroComprobanteProveedor:
-            cbteProveedor?.numero ?? (dto.numeroComprobanteProveedor?.trim() || null),
+            cbteProveedor?.numero ??
+            (numeroInterno || dto.numeroComprobanteProveedor?.trim() || null),
           proveedorCbteTipo: cbteProveedor?.cbteTipo ?? null,
           proveedorPtoVenta: cbteProveedor?.ptoVenta ?? null,
           proveedorCbteNro: cbteProveedor?.cbteNro ?? null,

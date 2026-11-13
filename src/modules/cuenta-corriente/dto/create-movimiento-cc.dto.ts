@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
@@ -46,6 +47,8 @@ export class CreateMovimientoCcDto {
   @IsDateString() fecha: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;
   @IsOptional() @IsString() numeroComprobante?: string;
+  /** true = el backend asigna el siguiente número interno (`INT-…`) e ignora `numeroComprobante`. */
+  @IsOptional() @IsBoolean() numeroAutomatico?: boolean;
   @IsOptional() @IsString() formaPago?: string;
   @IsOptional() @IsString() referencia?: string;
   /**

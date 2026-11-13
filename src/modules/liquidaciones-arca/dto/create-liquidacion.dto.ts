@@ -1,6 +1,7 @@
 import {
   IsString,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsInt,
   IsNumber,
@@ -134,6 +135,13 @@ export class CreateLiquidacionDto {
   @IsString()
   @MaxLength(64)
   numeroComprobanteProveedor?: string;
+
+  /**
+   * true = el backend asigna el siguiente número interno (`INT-…`) como
+   * `numeroComprobanteProveedor` e ignora el que venga. No aplica a la liquidación manual de
+   * un monotributista (esa lleva la factura del transportista).
+   */
+  @IsOptional() @IsBoolean() numeroAutomatico?: boolean;
 
   /**
    * Liquidación manual (transportista monotributista en empresa con ARCA): factura del

@@ -159,6 +159,14 @@ export class CuentaCorrienteController {
     return this.service.registrarPago(auth.tenantId, dto, auth.userId);
   }
 
+  @ApiOperation({ summary: 'Siguiente número de comprobante interno (vista previa de "Comprobante interno")' })
+  @Get('numero-interno')
+  @Roles('admin', 'member', 'superadmin')
+  numeroInterno(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.siguienteNumeroInterno(auth.tenantId);
+  }
+
   @ApiOperation({ summary: 'Viajes para vincular a una compra (recientes o filtrados por q)' })
   @Get('viajes-para-compra')
   @Roles('admin', 'member', 'superadmin')

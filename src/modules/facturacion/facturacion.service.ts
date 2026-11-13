@@ -47,6 +47,10 @@ import { formatNumeroComprobante } from "../liquidaciones-arca/arca.util";
 import { attachAnuladoPorNombres } from "../../shared/util/anulado-por-nombre.util";
 import { resolverComprobanteManual } from "../../shared/util/comprobante-manual.util";
 import {
+  esNumeroInterno,
+  siguienteNumeroInterno,
+} from "../../shared/util/numero-interno.util";
+import {
   generarTxtLibroIva,
   validarRangoLibroIva,
 } from "../../shared/util/libro-iva.util";
@@ -1029,6 +1033,11 @@ export class FacturacionService {
     }
   }
 
+  /** Vista previa del número que asigna "Comprobante interno" (se recalcula al guardar). */
+  async siguienteNumeroInterno(tenantId: string): Promise<{ numero: string }> {
+    return { numero: await siguienteNumeroInterno(this.prisma, tenantId) };
+  }
+
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
@@ -1036,7 +1045,11 @@ export class FacturacionService {
     const tieneArca = await this.tieneArca(tenantId);
     // Factura hecha por fuera del sistema (empresa con ARCA): no se emite y lleva su
     // número y comprobante, igual que en una empresa sin ARCA.
-    const manual = tieneArca && dto.manual === true;
+    // Número interno ("Comprobante interno"): no es un comprobante AFIP, así que con ARCA
+    // la factura es manual (no se emite) y no lleva tipo/punto de venta/número por separado.
+    const numeroAutomatico = dto.numeroAutomatico === true;
+    const numeroInterno = numeroAutomatico || esNumeroInterno(dto.numero);
+    const manual = tieneArca && (dto.manual === true || numeroInterno);
     const conArca = tieneArca && !manual;
 
     // Tenants con ARCA: el número NO se carga a mano — lo asigna AFIP al emitir
@@ -1050,15 +1063,20 @@ export class FacturacionService {
     // rompería la unicidad real (NULL sí admite múltiples filas, "" no).
     // Factura manual: tipo + punto de venta + número por separado (Libro IVA), y `numero` se
     // arma con ellos.
-    const cbteManual = manual
-      ? resolverComprobanteManual({
-          cbteTipo: dto.manualCbteTipo,
-          ptoVenta: dto.manualPtoVenta,
-          cbteNro: dto.manualCbteNro,
-          numero: dto.numero,
-        })
-      : null;
-    const numero = conArca ? null : cbteManual?.numero ?? (dto.numero?.trim() || null);
+    const cbteManual =
+      manual && !numeroInterno
+        ? resolverComprobanteManual({
+            cbteTipo: dto.manualCbteTipo,
+            ptoVenta: dto.manualPtoVenta,
+            cbteNro: dto.manualCbteNro,
+            numero: dto.numero,
+          })
+        : null;
+    const numero = conArca
+      ? null
+      : numeroAutomatico
+        ? await siguienteNumeroInterno(this.prisma, tenantId)
+        : cbteManual?.numero ?? (dto.numero?.trim() || null);
     if (!conArca && !numero) {
       throw new BadRequestException('Ingresá el número de comprobante de la factura.');
     }
@@ -1240,8 +1258,17 @@ export class FacturacionService {
       dto.manualCbteTipo !== undefined ||
       dto.manualPtoVenta !== undefined ||
       dto.manualCbteNro !== undefined;
+    // Número interno (`INT-…`): no es un comprobante AFIP, se conserva como texto.
+    const numeroInterno =
+      esNumeroInterno(dto.numero ?? existing.numero) &&
+      dto.manualCbteTipo == null &&
+      dto.manualPtoVenta == null &&
+      dto.manualCbteNro == null;
     const cbteManual =
-      tieneArca && (existing.manual || pasaAManual) && (tocaComprobante || pasaAManual)
+      tieneArca &&
+      !numeroInterno &&
+      (existing.manual || pasaAManual) &&
+      (tocaComprobante || pasaAManual)
         ? resolverComprobanteManual({
             cbteTipo: dto.manualCbteTipo,
             ptoVenta: dto.manualPtoVenta,

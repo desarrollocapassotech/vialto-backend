@@ -37,7 +37,10 @@ import {
 } from '../../shared/cuenta-corriente/compra-viajes';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
-import { siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
+import {
+  siguienteNumeroInterno,
+  siguienteNumeroOrdenPago,
+} from '../../shared/util/numero-interno.util';
 import {
   importeTotalConIvaPorTramo,
   ivaMontoDeTramos,
@@ -879,10 +882,15 @@ export class CuentaCorrienteService {
     await this.assertCargoManualPermitido(tenantId, dto);
     // Todo movimiento manual se identifica por su comprobante (factura de la venta/compra,
     // recibo u orden de pago del cobro/pago): es lo que muestra la grilla y lo que se elige
-    // al imputar. Con `numeroAutomatico` se asigna el siguiente número interno.
-    const numeroComprobante = dto.numeroAutomatico
-      ? await siguienteNumeroInterno(this.prisma, tenantId)
-      : dto.numeroComprobante?.trim();
+    // al imputar. Un pago a proveedor lleva siempre el número de su orden de pago, que genera
+    // el sistema (no se carga a mano ni es interno). En el resto, `numeroAutomatico` asigna el
+    // siguiente número interno.
+    const numeroComprobante =
+      dto.tipo === 'pago' && dto.proveedorId
+        ? await siguienteNumeroOrdenPago(this.prisma, tenantId)
+        : dto.numeroAutomatico
+          ? await siguienteNumeroInterno(this.prisma, tenantId)
+          : dto.numeroComprobante?.trim();
     if (!numeroComprobante) {
       throw new BadRequestException('Ingresá el número de comprobante');
     }

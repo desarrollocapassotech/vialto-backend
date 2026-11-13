@@ -127,6 +127,20 @@ export class CuentaCorrienteController {
     res.end(buffer);
   }
 
+  @ApiOperation({ summary: 'PDF de la orden de pago de un pago a proveedor (se genera al pedirlo)' })
+  @Get('movimientos/:id/orden-pago/pdf')
+  @Roles('admin', 'member', 'superadmin')
+  async ordenPagoPdf(@Param('id') id: string, @CurrentAuth() auth: AuthPayload, @Res() res: Response) {
+    assertTenantId(auth.tenantId);
+    const { buffer, filename } = await this.pdfService.generateOrdenPago(auth.tenantId, id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+    });
+    res.end(buffer);
+  }
+
   @ApiOperation({ summary: 'Obtener movimiento por ID' })
   @Get('movimientos/:id')
   @Roles('admin', 'member', 'superadmin')

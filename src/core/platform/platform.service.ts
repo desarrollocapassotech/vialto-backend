@@ -23,6 +23,8 @@ import { CreateVehiculoDto } from "../vehiculos/dto/create-vehiculo.dto";
 import { UpdateVehiculoDto } from "../vehiculos/dto/update-vehiculo.dto";
 import { CreateTransportistaDto } from "../transportistas/dto/create-transportista.dto";
 import { UpdateTransportistaDto } from "../transportistas/dto/update-transportista.dto";
+import { ProveedoresFiltroQueryDto } from "../transportistas/dto/transportistas-paginated-query.dto";
+import { TransportistasService } from "../transportistas/transportistas.service";
 import { CreateViajeDto } from "../../modules/viajes/dto/create-viaje.dto";
 import { type ViajeConVehiculosViaje } from "../../modules/viajes/viaje-vehiculos.helper";
 import { UpdateViajeDto } from "../../modules/viajes/dto/update-viaje.dto";
@@ -121,6 +123,7 @@ export class PlatformService {
     private readonly facturaPdfService: FacturaPdfService,
     private readonly fieldConfigService: TenantFieldConfigService,
     private readonly conceptosLiquidacionService: ConceptosLiquidacionService,
+    private readonly transportistasService: TransportistasService,
   ) {}
 
   private requiredTenantId(tenantId?: string) {
@@ -129,14 +132,6 @@ export class PlatformService {
       throw new BadRequestException("tenantId es requerido");
     }
     return id;
-  }
-
-  private async assertTransportistaExists(scopedTenantId: string, id: string) {
-    const row = await this.prisma.transportista.findFirst({
-      where: { id, tenantId: scopedTenantId },
-      select: { id: true },
-    });
-    if (!row) throw new NotFoundException("Transportista no encontrado");
   }
 
   private async assertTenantExists(tenantId: string) {
@@ -660,14 +655,15 @@ export class PlatformService {
       );
   }
 
-  listTransportistas(tenantId?: string) {
+  /** Mismo filtro que `GET /transportistas`: sin `tipo` = solo transportistas. */
+  listTransportistas(tenantId?: string, filtro: ProveedoresFiltroQueryDto = {}) {
     if (!tenantId?.trim()) {
       return Promise.resolve([]);
     }
     const id = tenantId.trim();
     return this.prisma.transportista
       .findMany({
-        where: { tenantId: id },
+        where: TransportistasService.whereFiltro(id, filtro),
         take: TAKE,
         orderBy: { createdAt: "desc" },
         include: { tenant: { select: { name: true } } },
@@ -689,32 +685,14 @@ export class PlatformService {
     return row;
   }
 
+  /** Mismas reglas que el alta de la empresa (tipo, CUIT único, datos fiscales). */
   async createTransportista(
     tenantId: string | undefined,
     dto: CreateTransportistaDto,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
     await this.assertTenantExists(scopedTenantId);
-    const idFiscal = normalizarIdFiscal(dto.idFiscal);
-    await this.assertIdFiscalLibre("transportista", scopedTenantId, idFiscal);
-    return this.prisma.transportista.create({
-      data: {
-        tenantId: scopedTenantId,
-        nombre: dto.nombre,
-        pais: dto.pais ?? null,
-        idFiscal,
-        email: dto.email ?? null,
-        telefono: dto.telefono ?? null,
-        domicilio: dto.domicilio ?? null,
-        condicionIva: dto.condicionIva ?? null,
-        condicionTributaria: dto.condicionTributaria ?? null,
-        paut: dto.paut ?? null,
-        permisoInternacional: dto.permisoInternacional ?? null,
-        fechaVencimientoPermiso: dto.fechaVencimientoPermiso
-          ? new Date(dto.fechaVencimientoPermiso)
-          : null,
-      },
-    });
+    return this.transportistasService.create(scopedTenantId, dto);
   }
 
   async updateTransportista(
@@ -723,39 +701,12 @@ export class PlatformService {
     dto: UpdateTransportistaDto,
   ) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    await this.assertTransportistaExists(scopedTenantId, id);
-    const idFiscal =
-      dto.idFiscal === undefined ? undefined : normalizarIdFiscal(dto.idFiscal);
-    if (idFiscal) {
-      await this.assertIdFiscalLibre("transportista", scopedTenantId, idFiscal, id);
-    }
-    return this.prisma.transportista.update({
-      where: { id },
-      data: {
-        nombre: dto.nombre,
-        pais: dto.pais,
-        idFiscal,
-        email: dto.email,
-        telefono: dto.telefono,
-        domicilio: dto.domicilio,
-        condicionIva: dto.condicionIva,
-        condicionTributaria: dto.condicionTributaria,
-        paut: dto.paut,
-        permisoInternacional: dto.permisoInternacional,
-        fechaVencimientoPermiso:
-          dto.fechaVencimientoPermiso === undefined
-            ? undefined
-            : dto.fechaVencimientoPermiso
-              ? new Date(dto.fechaVencimientoPermiso)
-              : null,
-      },
-    });
+    return this.transportistasService.update(id, scopedTenantId, dto);
   }
 
   async removeTransportista(tenantId: string | undefined, id: string) {
     const scopedTenantId = this.requiredTenantId(tenantId);
-    await this.assertTransportistaExists(scopedTenantId, id);
-    return this.prisma.transportista.delete({ where: { id } });
+    return this.transportistasService.remove(id, scopedTenantId);
   }
 
   async listUsers(tenantId?: string) {

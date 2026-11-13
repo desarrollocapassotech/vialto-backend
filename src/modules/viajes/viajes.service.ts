@@ -746,7 +746,7 @@ export class ViajesService {
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
       dto.transportistaId
         ? this.prisma.transportista.findFirst({
-            where: { id: dto.transportistaId, tenantId },
+            where: { id: dto.transportistaId, tenantId, tipo: 'transportista' },
           })
         : null,
       dto.choferId
@@ -756,7 +756,7 @@ export class ViajesService {
         : null,
       dto.transportistaEfectivoId
         ? this.prisma.transportista.findFirst({
-            where: { id: dto.transportistaEfectivoId, tenantId },
+            where: { id: dto.transportistaEfectivoId, tenantId, tipo: 'transportista' },
           })
         : null,
     ]);

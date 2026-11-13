@@ -446,7 +446,7 @@ export class FacturacionService {
   ) {
     if (transportistaId) {
       const t = await this.prisma.transportista.findFirst({
-        where: { id: transportistaId, tenantId },
+        where: { id: transportistaId, tenantId, tipo: "transportista" },
       });
       if (!t) throw new BadRequestException("Transportista inválido");
     }

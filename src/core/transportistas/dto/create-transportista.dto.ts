@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEmail,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -10,6 +11,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { PROVEEDOR_TIPOS, type ProveedorTipo } from '../../../shared/util/proveedor-tipo';
 
 const trimString = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -41,6 +43,11 @@ export class CreateTransportistaDto {
   @IsOptional() @IsString() paut?: string;
   @IsOptional() @IsString() permisoInternacional?: string;
   @IsOptional() @IsDateString() fechaVencimientoPermiso?: string;
+
+  /** Tipo de proveedor; sin valor = transportista (compatibilidad con las altas de siempre). */
+  @IsOptional() @IsIn(PROVEEDOR_TIPOS) tipo?: ProveedorTipo;
+
+  @IsOptional() @IsBoolean() activo?: boolean;
 
   /** El usuario confirmó explícitamente que quiere guardar sin ID Fiscal y/o país. */
   @IsOptional() @IsBoolean() confirmarSinDatosFiscales?: boolean;

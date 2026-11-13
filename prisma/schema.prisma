@@ -201,7 +201,6 @@ model Tenant {
   vehiculoKmEdiciones        VehiculoKmEdicion[]
   planesMantenimiento        PlanMantenimiento[]
   vehiculosPlanes            VehiculoPlan[]
-  talleres                   Taller[]
   ordenesTrabajo             OrdenTrabajo[]
   ordenTrabajoSecuencia      OrdenTrabajoSecuencia?
   importTemplates            ImportTemplate[]
@@ -267,7 +266,14 @@ model Transportista {
   idFiscal                String?
   email                   String?
   telefono                String?
-  tipo                    String    @default("externo") // siempre externo
+  /**
+   * Tipo de proveedor: transportista | taller | otro (ver `shared/util/proveedor-tipo.ts`). La tabla guarda todos los proveedores de la empresa; solo los "transportista" se usan en Viajes/Liquidaciones/Choferes/Vehículos y solo los "taller" en las órdenes de trabajo.
+   */
+  tipo                    String    @default("transportista")
+  /**
+   * false = desactivado: no se ofrece en los selectores, conserva su historial.
+   */
+  activo                  Boolean   @default(true)
   paut                    String? // número de PAUT
   permisoInternacional    String? // número de permiso internacional
   fechaVencimientoPermiso DateTime? // vencimiento del permiso internacional
@@ -294,8 +300,10 @@ model Transportista {
   facturas       Factura[]
   liquidaciones  Liquidacion[]
   movimientosCc  MovimientoCuentaCorriente[]
+  ordenesTrabajo OrdenTrabajo[]
 
   @@index([tenantId])
+  @@index([tenantId, tipo])
   @@map("transportistas")
 }
 
@@ -1319,21 +1327,6 @@ model VehiculoPlan {
   @@map("vehiculos_planes")
 }
 
-model Taller {
-  id       String         @id @default(cuid())
-  tenantId String
-  tenant   Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre   String
-  cuit     String?
-  telefono String?
-  interno  Boolean        @default(false) // previsto, sin UI
-  activo   Boolean        @default(true)
-  ordenes  OrdenTrabajo[]
-
-  @@unique([tenantId, nombre])
-  @@map("talleres")
-}
-
 model OrdenTrabajo {
   id          String             @id @default(cuid())
   tenantId    String
@@ -1344,8 +1337,8 @@ model OrdenTrabajo {
   tipo        String // preventivo | correctivo
   origen      String             @default("manual") // manual | plan | reporte_chofer (futuro)
   estado      String             @default("cerrada") // abierta | en_curso | cerrada | anulada — MVP solo cerrada/anulada
-  tallerId    String?
-  taller      Taller?            @relation(fields: [tallerId], references: [id], onDelete: SetNull)
+  tallerId    String? // proveedor (Transportista) de tipo "taller"
+  taller      Transportista?     @relation(fields: [tallerId], references: [id], onDelete: SetNull)
   fecha       DateTime // fecha del trabajo (sin hora, UTC)
   km          Int?
   horas       Float? // previsto, sin UI

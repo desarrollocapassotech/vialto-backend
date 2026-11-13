@@ -20,7 +20,10 @@ import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthPayload } from '../auth/clerk-auth.guard';
 import { TenantGuard } from '../../shared/guards/tenant.guard';
 import { assertTenantId } from '../../shared/util/assert-tenant';
-import { TransportistasPaginatedQueryDto } from './dto/transportistas-paginated-query.dto';
+import {
+  ProveedoresFiltroQueryDto,
+  TransportistasPaginatedQueryDto,
+} from './dto/transportistas-paginated-query.dto';
 
 @ApiTags('Core — Transportistas')
 @ApiBearerAuth('clerk-jwt')
@@ -29,12 +32,14 @@ import { TransportistasPaginatedQueryDto } from './dto/transportistas-paginated-
 export class TransportistasController {
   constructor(private readonly service: TransportistasService) {}
 
-  @ApiOperation({ summary: 'Listar todos los transportistas' })
+  @ApiOperation({
+    summary: 'Listar proveedores (sin `tipo` = solo transportistas; `tipo=todos` = todos)',
+  })
   @Get()
   @Roles('admin', 'member', 'superadmin')
-  findAll(@CurrentAuth() auth: AuthPayload) {
+  findAll(@CurrentAuth() auth: AuthPayload, @Query() filtro: ProveedoresFiltroQueryDto) {
     assertTenantId(auth.tenantId);
-    return this.service.findAll(auth.tenantId);
+    return this.service.findAll(auth.tenantId, filtro);
   }
 
   @ApiOperation({ summary: 'Listar transportistas paginado' })

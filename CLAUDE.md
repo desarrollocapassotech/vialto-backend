@@ -168,7 +168,7 @@ model Cliente {
   @@index([tenantId])
 }
 
-// Transporte externo (a quien se paga el flete; siempre tipo "externo")
+// Proveedor de la empresa (nov 2026): transportista, taller u otro — ver "Proveedores" abajo
 model Transportista {
   id                      String    @id @default(cuid())
   tenantId                String
@@ -176,7 +176,8 @@ model Transportista {
   idFiscal                String?                     // CUIT u otro identificador fiscal
   email                   String?
   telefono                String?
-  tipo                    String    @default("externo")
+  tipo                    String    @default("transportista") // transportista | taller | otro
+  activo                  Boolean   @default(true)
   paut                    String?                     // N° de PAUT
   permisoInternacional    String?
   fechaVencimientoPermiso DateTime?
@@ -249,6 +250,17 @@ model Vehiculo {
   @@unique([tenantId, patente])
 }
 ```
+
+### Proveedores: la tabla `transportistas` guarda todo tipo de proveedor (nov 2026)
+
+Antes cada proveedor era un transportista externo, y los talleres de Mantenimiento eran una entidad aparte (`Taller`). Ahora `Transportista` es el **proveedor** de la empresa, con `tipo` (`transportista | taller | otro`, constantes en `shared/util/proveedor-tipo.ts`, CHECK en la base) y `activo`. El modelo y la tabla conservan el nombre por compatibilidad. Migración `20261113120000_proveedores_tipo_talleres`: `externo` → `transportista`, cada taller pasa a proveedor tipo `taller` con el **mismo id** (las OT siguen apuntando bien), `OrdenTrabajo.tallerId` apunta a `transportistas` y se borra la tabla `talleres`.
+
+- **Quién usa cada tipo**: solo `transportista` en Viajes (contratante y efectivo), Liquidaciones, Facturas a transportista, Choferes, Vehículos, PAUT e Importaciones (hoja "Transportes"). Validar siempre con `tipo: 'transportista'` en el `where` al aceptar un `transportistaId`. Solo `taller` en las OT (`TalleresService`, `OrdenesService.assertTaller`, app de choferes). Cuenta corriente acepta cualquiera.
+- **`GET /transportistas` y `GET /platform/transportistas`**: sin `tipo` devuelven solo transportistas, así los selectores de siempre no cambian. `?tipo=todos|transportista|taller|otro` y `?activo=true|false` (también en `/paginated`). Filtro único: `TransportistasService.whereFiltro`. Platform delega el alta/edición/borrado en `TransportistasService` (mismas reglas).
+- **`/mantenimiento/talleres`** sigue con el mismo contrato (`{ id, nombre, cuit, telefono, activo, _count.ordenes }`), ahora sobre proveedores tipo `taller`: la app `vialto-combustible` no cambió.
+- **CUIT único entre todos los tipos** (`TransportistasService.assertIdFiscalDisponible`, estático, lo usa también `TalleresService`): un CUIT es un solo proveedor.
+- **Cambiar el tipo** se rechaza si ya tiene historial con el tipo anterior (viajes/liquidaciones/choferes/vehículos/facturas como transportista, OT como taller). Al dejar de ser transportista se borran PAUT y permiso internacional.
+- **Borrar** solo sin historial (incluida la cuenta corriente); si no, desactivar (`activo: false`). Desactivado = no se ofrece en los selectores al cargar, sí en los filtros de las grillas. Activar/desactivar no pide `confirmarSinDatosFiscales` (solo se pide si el PATCH trae `pais`/`idFiscal`).
 
 > `Destinatario` y `DireccionEntrega` son catálogos de apoyo, no imprescindibles como Cliente/Transportista/Chofer/Vehículo, pero viven en `core/` porque los usan varios módulos (viajes, stock) y se exponen también vía `PlatformController` para superadmin.
 
@@ -606,7 +618,7 @@ Pedido real de LSF: facturan a clientes separando cada viaje en tramos con disti
 
 ### `cuenta-corriente` — Cuenta corriente por cliente y por proveedor/fletero (rediseñado sep 2026)
 
-Reescrito desde cero respecto a la versión inicial (que era solo por cliente, un movimiento por viaje, sin moneda/vencimiento/estados). Hoy cubre ambos lados: **cliente** (a cobrar) y **proveedor/fletero** — un `Transportista` actuando como proveedor, ej. Riedel pagándole a sus fleteros — (a pagar), con el mismo modelo.
+Reescrito desde cero respecto a la versión inicial (que era solo por cliente, un movimiento por viaje, sin moneda/vencimiento/estados). Hoy cubre ambos lados: **cliente** (a cobrar) y **proveedor** (a pagar) con el mismo modelo. El proveedor es un `Transportista` de cualquier tipo (transportista, taller u otro, ver "Proveedores" en Entidades del Core): `proveedorId` no exige `tipo: 'transportista'`.
 
 - **`contraparteId`** = `clienteId ?? proveedorId`, columna auxiliar no nula para agrupar por cuenta sin distinguir lado.
 - **Dos ejes de estado independientes, nunca mezclados**: un `cargo` (venta/compra) usa `estadoDisponibilidad` (`pendiente|parcial|cancelado|anulado`, cuánto de su importe cubren las imputaciones recibidas); un `pago` (cobro/pago) usa `estadoImputacion` (`no_imputado|imputado_parcial|imputado`). Ambos se recalculan siempre vía `ImputacionCuentaCorriente`, nunca se editan a mano.

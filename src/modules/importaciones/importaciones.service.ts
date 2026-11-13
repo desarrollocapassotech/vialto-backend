@@ -220,7 +220,7 @@ export class ImportacionesService {
   }> {
     const [clientes, transportistas, choferes, vehiculos] = await Promise.all([
       this.prisma.cliente.count({ where: { tenantId } }),
-      this.prisma.transportista.count({ where: { tenantId } }),
+      this.prisma.transportista.count({ where: { tenantId, tipo: "transportista" } }),
       this.prisma.chofer.count({ where: { tenantId } }),
       this.prisma.vehiculo.count({ where: { tenantId } }),
     ]);
@@ -745,7 +745,10 @@ export class ImportacionesService {
 
     const porModulo: Record<string, { clave: "nombre" | "patente"; buscar: () => Promise<Record<string, unknown>[]> }> = {
       clientes: { clave: "nombre", buscar: () => this.prisma.cliente.findMany({ where: { tenantId } }) },
-      transportistas: { clave: "nombre", buscar: () => this.prisma.transportista.findMany({ where: { tenantId } }) },
+      transportistas: {
+        clave: "nombre",
+        buscar: () => this.prisma.transportista.findMany({ where: { tenantId, tipo: "transportista" } }),
+      },
       choferes: { clave: "nombre", buscar: () => this.prisma.chofer.findMany({ where: { tenantId } }) },
       vehiculos: { clave: "patente", buscar: () => this.prisma.vehiculo.findMany({ where: { tenantId } }) },
     };

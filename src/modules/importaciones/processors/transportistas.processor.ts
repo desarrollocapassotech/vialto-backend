@@ -40,8 +40,10 @@ export class TransportistasProcessor implements IImportProcessor {
       return { id: duplicadoEntidadId, creado: false };
     }
 
+    // La hoja "Transportes" carga solo transportistas: un taller u otro proveedor con el
+    // mismo nombre no se pisa (y si comparte CUIT, lo frena el chequeo de abajo).
     const existing = await this.prisma.transportista.findFirst({
-      where: { tenantId, nombre: { equals: nombre, mode: "insensitive" } },
+      where: { tenantId, tipo: "transportista", nombre: { equals: nombre, mode: "insensitive" } },
       select: { id: true },
     });
 
@@ -146,7 +148,7 @@ export class TransportistasProcessor implements IImportProcessor {
 
   async contarExistentes(rows: ValidatedRow[], tenantId: string): Promise<number> {
     const existentes = await this.prisma.transportista.findMany({
-      where: { tenantId },
+      where: { tenantId, tipo: "transportista" },
       select: { nombre: true },
     });
     const nombresExistentes = new Set(
@@ -159,7 +161,7 @@ export class TransportistasProcessor implements IImportProcessor {
 
   async filasNuevas(rows: ValidatedRow[], tenantId: string): Promise<Set<number>> {
     const existentes = await this.prisma.transportista.findMany({
-      where: { tenantId },
+      where: { tenantId, tipo: "transportista" },
       select: { nombre: true },
     });
     const nombresExistentes = new Set(

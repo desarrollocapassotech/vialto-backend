@@ -47,9 +47,10 @@ function crearMock(opts: { lecturas?: LecturaKm[] } = {}) {
       { id: 'vB', tenantId: 'org_B', patente: 'ZZZ', tipo: 'tractor' },
     ] as Row[],
     talleres: [
-      { id: 't1', tenantId: T, nombre: 'Norte', activo: true },
-      { id: 't2', tenantId: T, nombre: 'Viejo', activo: false },
-      { id: 'tB', tenantId: 'org_B', nombre: 'Ajeno', activo: true },
+      { id: 't1', tenantId: T, tipo: 'taller', nombre: 'Norte', activo: true },
+      { id: 't2', tenantId: T, tipo: 'taller', nombre: 'Viejo', activo: false },
+      { id: 'tB', tenantId: 'org_B', tipo: 'taller', nombre: 'Ajeno', activo: true },
+      { id: 'tF', tenantId: T, tipo: 'transportista', nombre: 'Fletes', activo: true },
     ] as Row[],
     asignaciones: [
       { id: 'vp1', tenantId: T, vehiculoId: 'v1', planId: 'p1' },
@@ -75,7 +76,7 @@ function crearMock(opts: { lecturas?: LecturaKm[] } = {}) {
   };
   const client: Row = {
     vehiculo: { findFirst: async ({ where }: Row) => db.vehiculos.find((v) => coincide(v, where)) ?? null },
-    taller: { findFirst: async ({ where }: Row) => db.talleres.find((t) => coincide(t, where)) ?? null },
+    transportista: { findFirst: async ({ where }: Row) => db.talleres.find((t) => coincide(t, where)) ?? null },
     vehiculoPlan: { findMany: async ({ where }: Row) => db.asignaciones.filter((a) => coincide(a, where)) },
     ordenTrabajo: {
       findFirst: async ({ where }: Row) => {

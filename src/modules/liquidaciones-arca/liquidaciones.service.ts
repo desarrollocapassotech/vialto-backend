@@ -265,7 +265,7 @@ export class LiquidacionesService {
 
     // Obtener el transportista y su comisionPct
     const transportista = await (this.prisma as PrismaAny).transportista.findFirst({
-      where: { id: dto.transportistaId, tenantId },
+      where: { id: dto.transportistaId, tenantId, tipo: 'transportista' },
       select: {
         id: true,
         condicionIva: true,

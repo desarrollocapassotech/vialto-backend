@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { cuitDigitoVerificadorValido, normalizarCuit } from '../../shared/util/cuit';
+import { TransportistasService } from '../../core/transportistas/transportistas.service';
 import { CreateTallerDto } from './dto/create-taller.dto';
 import { UpdateTallerDto } from './dto/update-taller.dto';
 import { TalleresQueryDto } from './dto/talleres-query.dto';
@@ -30,30 +31,69 @@ function textoOpcional(v: string | null | undefined): string | null | undefined 
   return v === null || v.trim() === '' ? null : v.trim();
 }
 
-const conCantidadOrdenes = { _count: { select: { ordenes: true } } } satisfies Prisma.TallerInclude;
+const TIPO_TALLER = 'taller';
 
+const selectTaller = {
+  id: true,
+  nombre: true,
+  idFiscal: true,
+  telefono: true,
+  activo: true,
+  _count: { select: { ordenesTrabajo: true } },
+} satisfies Prisma.TransportistaSelect;
+
+type TallerRow = Prisma.TransportistaGetPayload<{ select: typeof selectTaller }>;
+
+/** Mismo contrato de siempre de `/mantenimiento/talleres` (front y app de choferes). */
+function aTaller(r: TallerRow) {
+  return {
+    id: r.id,
+    nombre: r.nombre,
+    cuit: r.idFiscal,
+    telefono: r.telefono,
+    activo: r.activo,
+    interno: false,
+    _count: { ordenes: r._count.ordenesTrabajo },
+  };
+}
+
+/**
+ * Talleres de Mantenimiento (nov 2026): ya no son una entidad propia, son proveedores
+ * (tabla `transportistas`) de tipo "taller". Se dan de alta también desde Base de datos →
+ * Proveedores; este service queda para el selector y la alta rápida de la OT y de la app
+ * de choferes.
+ */
 @Injectable()
 export class TalleresService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(tenantId: string, query: TalleresQueryDto) {
-    return this.prisma.taller.findMany({
-      where: { tenantId, ...(query.activo !== undefined ? { activo: query.activo === 'true' } : {}) },
-      include: conCantidadOrdenes,
+  async findAll(tenantId: string, query: TalleresQueryDto) {
+    const rows = await this.prisma.transportista.findMany({
+      where: {
+        tenantId,
+        tipo: TIPO_TALLER,
+        ...(query.activo !== undefined ? { activo: query.activo === 'true' } : {}),
+      },
+      select: selectTaller,
       orderBy: { nombre: 'asc' },
     });
+    return rows.map(aTaller);
   }
 
   async findOne(tenantId: string, id: string) {
-    const taller = await this.prisma.taller.findFirst({ where: { id, tenantId }, include: conCantidadOrdenes });
+    const taller = await this.prisma.transportista.findFirst({
+      where: { id, tenantId, tipo: TIPO_TALLER },
+      select: selectTaller,
+    });
     if (!taller) throw new NotFoundException('Taller no encontrado');
-    return taller;
+    return aTaller(taller);
   }
 
   private async assertNombreDisponible(tenantId: string, nombre: string, excludeId?: string) {
-    const existe = await this.prisma.taller.findFirst({
+    const existe = await this.prisma.transportista.findFirst({
       where: {
         tenantId,
+        tipo: TIPO_TALLER,
         nombre: { equals: nombre, mode: 'insensitive' },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
@@ -62,32 +102,24 @@ export class TalleresService {
     if (existe) throw new ConflictException('Ya existe un taller con ese nombre.');
   }
 
-  /** El `@@unique([tenantId, nombre])` de la DB puede saltar ante dos altas simultáneas. */
-  private conflictoNombre(e: unknown): never {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-      throw new ConflictException('Ya existe un taller con ese nombre.');
-    }
-    throw e;
-  }
-
   async create(tenantId: string, dto: CreateTallerDto) {
     const nombre = dto.nombre.trim();
     const cuit = parseCuitTaller(dto.cuit) ?? null;
     await this.assertNombreDisponible(tenantId, nombre);
-    try {
-      return await this.prisma.taller.create({
-        data: {
-          tenantId,
-          nombre,
-          cuit,
-          telefono: textoOpcional(dto.telefono) ?? null,
-          activo: dto.activo ?? true,
-        },
-        include: conCantidadOrdenes,
-      });
-    } catch (e) {
-      this.conflictoNombre(e);
-    }
+    await TransportistasService.assertIdFiscalDisponible(this.prisma, tenantId, cuit);
+    const creado = await this.prisma.transportista.create({
+      data: {
+        tenantId,
+        tipo: TIPO_TALLER,
+        nombre,
+        idFiscal: cuit,
+        pais: cuit ? 'AR' : null,
+        telefono: textoOpcional(dto.telefono) ?? null,
+        activo: dto.activo ?? true,
+      },
+      select: selectTaller,
+    });
+    return aTaller(creado);
   }
 
   async update(tenantId: string, id: string, dto: UpdateTallerDto) {
@@ -97,31 +129,37 @@ export class TalleresService {
       await this.assertNombreDisponible(tenantId, nombre, id);
     }
     const cuit = parseCuitTaller(dto.cuit);
+    if (cuit) await TransportistasService.assertIdFiscalDisponible(this.prisma, tenantId, cuit, id);
     const telefono = textoOpcional(dto.telefono);
-    const data = {
+    const data: Prisma.TransportistaUpdateManyMutationInput = {
       ...(nombre !== undefined ? { nombre } : {}),
-      ...(cuit !== undefined ? { cuit } : {}),
+      ...(cuit !== undefined ? { idFiscal: cuit, ...(cuit ? { pais: 'AR' } : {}) } : {}),
       ...(telefono !== undefined ? { telefono } : {}),
       ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
     };
-    let count: number;
-    try {
-      ({ count } = await this.prisma.taller.updateMany({ where: { id, tenantId }, data }));
-    } catch (e) {
-      this.conflictoNombre(e);
-    }
+    const { count } = await this.prisma.transportista.updateMany({
+      where: { id, tenantId, tipo: TIPO_TALLER },
+      data,
+    });
     if (count === 0) throw new NotFoundException('Taller no encontrado');
     return this.findOne(tenantId, id);
   }
 
-  /** Solo sin órdenes de trabajo: con `onDelete: SetNull` esas OT perderían el taller. */
+  /** Solo sin órdenes de trabajo ni cuenta corriente: si tiene, desactivarlo. */
   async remove(tenantId: string, id: string) {
     await this.findOne(tenantId, id);
-    const ordenes = await this.prisma.ordenTrabajo.count({ where: { tenantId, tallerId: id } });
-    if (ordenes > 0) {
-      throw new ConflictException('El taller tiene órdenes de trabajo. Desactivalo en vez de borrarlo.');
+    const [ordenes, movimientos] = await Promise.all([
+      this.prisma.ordenTrabajo.count({ where: { tenantId, tallerId: id } }),
+      this.prisma.movimientoCuentaCorriente.count({ where: { tenantId, proveedorId: id } }),
+    ]);
+    if (ordenes > 0 || movimientos > 0) {
+      throw new ConflictException(
+        'El taller tiene órdenes de trabajo o cuenta corriente. Desactivalo en vez de borrarlo.',
+      );
     }
-    const { count } = await this.prisma.taller.deleteMany({ where: { id, tenantId } });
+    const { count } = await this.prisma.transportista.deleteMany({
+      where: { id, tenantId, tipo: TIPO_TALLER },
+    });
     if (count === 0) throw new NotFoundException('Taller no encontrado');
     return { id };
   }

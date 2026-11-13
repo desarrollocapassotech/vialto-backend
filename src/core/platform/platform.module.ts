@@ -11,6 +11,7 @@ import { StockModule } from '../../modules/stock/stock.module';
 import { FacturacionModule } from '../../modules/facturacion/facturacion.module';
 import { IntegracionArcaModule } from '../../modules/liquidaciones-arca/liquidaciones-arca.module';
 import { TenantFieldConfigModule } from '../tenant-field-config/tenant-field-config.module';
+import { TransportistasModule } from '../transportistas/transportistas.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { TenantFieldConfigModule } from '../tenant-field-config/tenant-field-con
     FacturacionModule,
     IntegracionArcaModule,
     TenantFieldConfigModule,
+    TransportistasModule,
   ],
   controllers: [PlatformController],
   providers: [PlatformService],

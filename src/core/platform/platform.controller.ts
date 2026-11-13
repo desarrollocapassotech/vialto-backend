@@ -44,6 +44,10 @@ import { CreateVehiculoDto } from "../vehiculos/dto/create-vehiculo.dto";
 import { UpdateVehiculoDto } from "../vehiculos/dto/update-vehiculo.dto";
 import { CreateTransportistaDto } from "../transportistas/dto/create-transportista.dto";
 import { UpdateTransportistaDto } from "../transportistas/dto/update-transportista.dto";
+import {
+  PROVEEDOR_TIPO_FILTRO,
+  type ProveedorTipoFiltro,
+} from "../transportistas/dto/transportistas-paginated-query.dto";
 import { CreateViajeDto } from "../../modules/viajes/dto/create-viaje.dto";
 import { UpdateViajeDto } from "../../modules/viajes/dto/update-viaje.dto";
 import { MicCrtExportDto } from "../../modules/viajes/dto/mic-crt-export.dto";
@@ -576,8 +580,18 @@ export class PlatformController {
   }
 
   @Get("transportistas")
-  transportistas(@Query("tenantId") tenantId?: string) {
-    return this.service.listTransportistas(tenantId);
+  transportistas(
+    @Query("tenantId") tenantId?: string,
+    @Query("tipo") tipo?: string,
+    @Query("activo") activo?: string,
+  ) {
+    if (tipo !== undefined && !(PROVEEDOR_TIPO_FILTRO as readonly string[]).includes(tipo)) {
+      throw new BadRequestException("tipo de proveedor inválido");
+    }
+    return this.service.listTransportistas(tenantId, {
+      tipo: tipo as ProveedorTipoFiltro | undefined,
+      activo: activo === "true" || activo === "false" ? activo : undefined,
+    });
   }
 
   @Get("transportistas/:id")

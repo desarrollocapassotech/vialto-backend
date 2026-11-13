@@ -67,19 +67,27 @@ function crear(opts: { modules?: string[]; conPlanes?: boolean; asignado?: boole
         ];
       },
     },
-    taller: {
-      findMany: async ({ where }: Row) => talleres.filter((t) => t.tenantId === where.tenantId && t.activo),
+    // Talleres = proveedores tipo "taller" (nov 2026).
+    transportista: {
+      findMany: async ({ where }: Row) =>
+        talleres.filter((t) => t.tenantId === where.tenantId && t.tipo === where.tipo && t.activo),
       findFirst: async ({ where }: Row) =>
-        talleres.find((t) => t.tenantId === where.tenantId && t.nombre.toLowerCase() === where.nombre.equals.toLowerCase()) ?? null,
+        talleres.find(
+          (t) =>
+            t.tenantId === where.tenantId &&
+            t.tipo === where.tipo &&
+            t.nombre.toLowerCase() === where.nombre.equals.toLowerCase(),
+        ) ?? null,
     },
   } as unknown as PrismaService;
   const talleres: Row[] = [
-    { id: 't1', tenantId: T, nombre: 'Lubricentro Norte', activo: true },
-    { id: 'tB', tenantId: 'org_B', nombre: 'Taller de otra empresa', activo: true },
+    { id: 't1', tenantId: T, tipo: 'taller', nombre: 'Lubricentro Norte', activo: true },
+    { id: 'tB', tenantId: 'org_B', tipo: 'taller', nombre: 'Taller de otra empresa', activo: true },
+    { id: 'tF', tenantId: T, tipo: 'transportista', nombre: 'Fletes (no es taller)', activo: true },
   ];
   const talleresSvc = {
     create: async (tenantId: string, dto: Row) => {
-      const t = { id: `t${talleres.length + 1}`, tenantId, nombre: dto.nombre, activo: true };
+      const t = { id: `t${talleres.length + 1}`, tenantId, tipo: 'taller', nombre: dto.nombre, activo: true };
       talleres.push(t);
       return t;
     },
@@ -168,8 +176,8 @@ function crear(opts: { modules?: string[]; conPlanes?: boolean; asignado?: boole
     await svc.registrar(T, CHOFER, { fecha: '2026-10-23', descripcion: 'x', tallerNombre: 'lubricentro norte' });
     await svc.registrar(T, CHOFER, { fecha: '2026-10-23', descripcion: 'x', tallerNombre: 'Gomería Ruta 9' });
     await svc.registrar(T, CHOFER, { fecha: '2026-10-23', descripcion: 'x' });
-    assert.deepEqual(creadas.map((c) => c.dto.tallerId), ['t1', 't1', 't3', null]);
-    assert.equal(talleres.find((t) => t.id === 't3')?.tenantId, T);
+    assert.deepEqual(creadas.map((c) => c.dto.tallerId), ['t1', 't1', 't4', null]);
+    assert.equal(talleres.find((t) => t.id === 't4')?.tenantId, T);
   });
 
   await test('mis services: solo los del chofer y su empresa, con tareas traducidas; sin módulo → vacío', async () => {

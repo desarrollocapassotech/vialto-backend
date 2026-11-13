@@ -202,6 +202,7 @@ model Tenant {
   planesMantenimiento        PlanMantenimiento[]
   vehiculosPlanes            VehiculoPlan[]
   ordenesTrabajo             OrdenTrabajo[]
+  comprasViajes              CompraViaje[]
   ordenTrabajoSecuencia      OrdenTrabajoSecuencia?
   importTemplates            ImportTemplate[]
   importLogs                 ImportLog[]
@@ -688,6 +689,7 @@ model Viaje {
   facturaTramos              FacturaTramo[]
   nroFactura                 String?
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
+  comprasCc                  CompraViaje[]
   liquidacionesViaje         LiquidacionViaje[]
 
   @@unique([tenantId, numero])
@@ -919,6 +921,7 @@ model MovimientoCuentaCorriente {
 
   imputacionesComoCargo ImputacionCuentaCorriente[] @relation("ImputacionCargo")
   imputacionesComoPago  ImputacionCuentaCorriente[] @relation("ImputacionPago")
+  viajesCompra          CompraViaje[]
 
   @@unique([tenantId, facturaId])
   @@unique([tenantId, liquidacionId])
@@ -932,6 +935,28 @@ model MovimientoCuentaCorriente {
   @@index([tenantId, viajeId])
   @@index([tenantId, facturaId])
   @@map("movimientos_cuenta_corriente")
+}
+
+/**
+ * Compra manual de Cuenta corriente vinculada (opcionalmente) a uno o varios viajes, con la
+ * parte del importe NETO que le toca a cada uno (nov 2026). Cada vínculo se refleja en
+ * `Viaje.otrosGastos` como una línea de solo lectura con `ccCompraId` (ver
+ * `cuenta-corriente/compra-viajes.ts`), así resta en la ganancia bruta del viaje.
+ */
+model CompraViaje {
+  id           String                    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant                    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  movimientoId String
+  movimiento   MovimientoCuentaCorriente @relation(fields: [movimientoId], references: [id], onDelete: Cascade)
+  viajeId      String
+  viaje        Viaje                     @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  importe      Float
+  createdAt    DateTime                  @default(now())
+
+  @@unique([movimientoId, viajeId])
+  @@index([tenantId, viajeId])
+  @@map("compras_viajes")
 }
 
 model ImputacionCuentaCorriente {

@@ -18,6 +18,12 @@ export class LineaMovimientoCcDto {
   @IsNumber() @Min(0) @Max(100) @Type(() => Number) ivaPct: number;
 }
 
+/** Parte del importe NETO de una compra que le toca a un viaje (vinculación opcional). */
+export class CompraViajeDto {
+  @IsString() viajeId: string;
+  @IsNumber() @Min(0) @Type(() => Number) importe: number;
+}
+
 export class CreateMovimientoCcDto {
   @IsOptional() @IsString() clienteId?: string;
   @IsOptional() @IsString() proveedorId?: string;
@@ -47,4 +53,13 @@ export class CreateMovimientoCcDto {
    * El importe se reparte del más viejo al más nuevo; lo que sobre queda a cuenta.
    */
   @IsOptional() @IsArray() @IsString({ each: true }) imputarACargoIds?: string[];
+  /**
+   * Solo compras (cargo de un proveedor), opcional: viajes a los que se carga como costo,
+   * con la parte del importe sin IVA de cada uno. La suma tiene que dar el neto.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CompraViajeDto)
+  viajes?: CompraViajeDto[];
 }

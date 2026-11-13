@@ -159,6 +159,14 @@ export class CuentaCorrienteController {
     return this.service.registrarPago(auth.tenantId, dto, auth.userId);
   }
 
+  @ApiOperation({ summary: 'Viajes para vincular a una compra (recientes o filtrados por q)' })
+  @Get('viajes-para-compra')
+  @Roles('admin', 'member', 'superadmin')
+  viajesParaCompra(@CurrentAuth() auth: AuthPayload, @Query('q') q?: string) {
+    assertTenantId(auth.tenantId);
+    return this.service.viajesParaCompra(auth.tenantId, q);
+  }
+
   @ApiOperation({ summary: 'Saldos de todas las cuentas de clientes (lado=cliente, default) o proveedores (lado=proveedor)' })
   @Get('saldos')
   @Roles('admin', 'member', 'superadmin')

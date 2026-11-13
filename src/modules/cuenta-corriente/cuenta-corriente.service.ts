@@ -26,6 +26,15 @@ import {
   cuentaEnHistorialCc,
   signoHistorialCc,
 } from '../../shared/cuenta-corriente/movimiento-cc.util';
+import {
+  type CompraViajeInput,
+  guardarViajesDeCompra,
+  netoCompra,
+  normalizarRepartoCompra,
+  reescalarReparto,
+  reflejarCompraEnViajes,
+  viajesDeCompra,
+} from '../../shared/cuenta-corriente/compra-viajes';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
 import {
@@ -257,6 +266,24 @@ export class CuentaCorrienteService {
             anulacionManualComprobanteUrl: true,
           },
         },
+        // Compra vinculada a viajes (opcional): reparto del neto por viaje.
+        viajesCompra: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            viajeId: true,
+            importe: true,
+            viaje: {
+              select: {
+                numero: true,
+                numeroIdentificacionPersonalizado: true,
+                fechaCarga: true,
+                origen: true,
+                destino: true,
+                cliente: { select: { nombre: true } },
+              },
+            },
+          },
+        },
       },
       // Orden de carga (último cargado primero), no por `fecha`: un cobro con fecha
       // anterior a otros movimientos tiene que aparecer arriba al registrarlo.
@@ -267,7 +294,7 @@ export class CuentaCorrienteService {
     // "Saldo" de la línea: lo que todavía no se resolvió de ESE movimiento puntual
     // (un cargo, cuánto le falta cobrar/pagar; un pago, cuánto le falta imputar) —
     // no confundir con el saldo acumulado de la cuenta completa.
-    return rows.map(({ imputacionesComoCargo, imputacionesComoPago, factura, liquidacion, ...m }) => {
+    return rows.map(({ imputacionesComoCargo, imputacionesComoPago, factura, liquidacion, viajesCompra, ...m }) => {
       const imputado =
         m.tipo === 'cargo'
           ? imputacionesComoCargo.reduce((s, i) => s + i.importe, 0)
@@ -297,8 +324,61 @@ export class CuentaCorrienteService {
         vencimientoEditable: this.vencimientoEditable(m),
         facturaComprobantes: factura,
         liquidacionComprobantes: liquidacion,
+        viajesCompra: viajesCompra.map(({ viajeId, importe, viaje }) => ({
+          viajeId,
+          importe: roundMoney2(importe),
+          numero: viaje.numeroIdentificacionPersonalizado || viaje.numero,
+          fechaCarga: viaje.fechaCarga,
+          origen: viaje.origen,
+          destino: viaje.destino,
+          cliente: viaje.cliente?.nombre ?? null,
+        })),
       };
     });
+  }
+
+  /**
+   * Viajes para vincular a una compra: los más recientes (o los que coinciden con `q` en
+   * número, ID propio, cliente, origen o destino). Para el selector de "Nueva compra".
+   */
+  async viajesParaCompra(tenantId: string, q?: string) {
+    const texto = q?.trim();
+    const rows = await this.prisma.viaje.findMany({
+      where: {
+        tenantId,
+        etapa: { not: 'cancelado' },
+        ...(texto
+          ? {
+              OR: [
+                { numero: { contains: texto, mode: 'insensitive' } },
+                { numeroIdentificacionPersonalizado: { contains: texto, mode: 'insensitive' } },
+                { origen: { contains: texto, mode: 'insensitive' } },
+                { destino: { contains: texto, mode: 'insensitive' } },
+                { cliente: { nombre: { contains: texto, mode: 'insensitive' } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ fechaCarga: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      take: 50,
+      select: {
+        id: true,
+        numero: true,
+        numeroIdentificacionPersonalizado: true,
+        fechaCarga: true,
+        origen: true,
+        destino: true,
+        cliente: { select: { nombre: true } },
+      },
+    });
+    return rows.map((v) => ({
+      viajeId: v.id,
+      numero: v.numeroIdentificacionPersonalizado || v.numero,
+      fechaCarga: v.fechaCarga,
+      origen: v.origen,
+      destino: v.destino,
+      cliente: v.cliente?.nombre ?? null,
+    }));
   }
 
   /** Con ARCA el número de una factura lo asigna AFIP al emitir (mismo criterio que Facturas). */
@@ -621,14 +701,38 @@ export class CuentaCorrienteService {
         'Tu empresa tiene Facturación: las ventas se registran al crear la factura.',
       );
     }
+    // Con Liquidaciones, los fletes a transportistas salen de la liquidación: una compra
+    // manual a un transportista duplicaría el flete. A un taller u otro proveedor, sí se carga.
     if (
       dto.proveedorId &&
-      (modules.has('liquidaciones') || modules.has('emision-liquido-producto-arca'))
+      (modules.has('liquidaciones') || modules.has('emision-liquido-producto-arca')) &&
+      (await this.esProveedorTransportista(tenantId, dto.proveedorId))
     ) {
       throw new BadRequestException(
-        'Tu empresa tiene Liquidaciones: las compras se registran al crear la liquidación.',
+        'Tu empresa tiene Liquidaciones: las compras a transportistas se registran al crear la liquidación.',
       );
     }
+  }
+
+  /** `'-'` = "algún proveedor" (importación AFIP): se decide fila por fila. */
+  private async esProveedorTransportista(tenantId: string, proveedorId: string) {
+    if (proveedorId === '-') return false;
+    const p = await this.prisma.transportista.findFirst({
+      where: { id: proveedorId, tenantId },
+      select: { tipo: true },
+    });
+    return p?.tipo === 'transportista';
+  }
+
+  /** Viajes de una compra: solo compras manuales a un proveedor, en ARS o USD. */
+  private repartoDeCompra(
+    mov: { tipo: string; proveedorId: string | null; importe: number; importeNeto: number | null },
+    viajes: CompraViajeInput[],
+  ): CompraViajeInput[] {
+    if (viajes.length > 0 && (mov.tipo !== 'cargo' || !mov.proveedorId)) {
+      throw new BadRequestException('Solo una compra a un proveedor se puede vincular a viajes');
+    }
+    return normalizarRepartoCompra(viajes, netoCompra(mov));
   }
 
   /**
@@ -819,6 +923,11 @@ export class CuentaCorrienteService {
         await this.aplicarImputacion(tx, tenantId, creado, cargo, importe, userId);
         restante = roundMoney2(restante - importe);
       }
+      // Compra vinculada (opcional) a viajes: queda como gasto de cada uno.
+      if (dto.viajes?.length) {
+        const reparto = this.repartoDeCompra(creado, dto.viajes);
+        await guardarViajesDeCompra(tx, tenantId, creado.id, reparto);
+      }
       return tx.movimientoCuentaCorriente.findUniqueOrThrow({ where: { id: creado.id } });
     }, CC_INTERACTIVE_TX);
   }
@@ -964,6 +1073,20 @@ export class CuentaCorrienteService {
       if (actualizado.viajeId && actualizado.tipo === 'pago') {
         await actualizarEntradaPagoDeViaje(tx, tenantId, actualizado);
       }
+      // Viajes de la compra: los que mande el formulario, o los mismos reescalados al
+      // importe nuevo. Siempre se reflejan otra vez (cambian monto, fecha o número).
+      const actuales = await viajesDeCompra(tx, tenantId, id);
+      if (dto.viajes !== undefined) {
+        await guardarViajesDeCompra(tx, tenantId, id, this.repartoDeCompra(actualizado, dto.viajes));
+      } else if (actuales.length > 0) {
+        if (actualizado.tipo !== 'cargo' || !actualizado.proveedorId) {
+          await guardarViajesDeCompra(tx, tenantId, id, []);
+        } else if (cambiaImporte) {
+          await guardarViajesDeCompra(tx, tenantId, id, reescalarReparto(actuales, netoCompra(actualizado)));
+        } else {
+          await reflejarCompraEnViajes(tx, tenantId, id, actuales.map((v) => v.viajeId));
+        }
+      }
       return tx.movimientoCuentaCorriente.findUniqueOrThrow({ where: { id } });
     }, CC_INTERACTIVE_TX);
   }
@@ -1044,6 +1167,9 @@ export class CuentaCorrienteService {
       for (const imputacion of imputaciones) {
         await this.deshacerImputacionTx(tx, tenantId, imputacion);
       }
+      // Compra vinculada a viajes: sus líneas salen de los gastos de cada viaje.
+      const viajesCompra = await viajesDeCompra(tx, tenantId, id);
+      await reflejarCompraEnViajes(tx, tenantId, id, viajesCompra.map((v) => v.viajeId), { quitar: true });
       const { count } = await tx.movimientoCuentaCorriente.deleteMany({ where: { id, tenantId } });
       if (count === 0) throw new NotFoundException('Movimiento no encontrado');
       // PAGO cargado desde Viajes: también sale del viaje.

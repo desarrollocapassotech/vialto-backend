@@ -61,6 +61,7 @@ import {
   estadoDisponibilidadCcDesde,
 } from "./viaje-cuenta-corriente";
 import { sincronizarPagosCcDelViaje } from "./viaje-pago-cuenta-corriente";
+import { mergeGastosConCompras } from "../../shared/cuenta-corriente/compra-viajes";
 import {
   buildViajeExportacionesResponse,
   enrichViajeConExportaciones,
@@ -1811,6 +1812,15 @@ export class ViajesService {
             "Los datos operativos (fechas, km, litros, observaciones) sí se pueden seguir editando.",
         );
       }
+    }
+
+    // Los gastos que vienen de compras de Cuenta corriente (`ccCompraId`) no se editan
+    // desde el viaje: se conservan los que ya tenía, lleguen o no en el formulario.
+    if (dto.otrosGastos !== undefined) {
+      dto.otrosGastos = mergeGastosConCompras(
+        dto.otrosGastos,
+        current.otrosGastos,
+      ) as unknown as typeof dto.otrosGastos;
     }
 
     // `precioTransportistaIvaIncluidoPct` se bloquea solo por liquidación vigente (no

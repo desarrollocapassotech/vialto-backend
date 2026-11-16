@@ -1740,6 +1740,11 @@ export class ViajesService {
     const current = await this.findOne(id, tenantId);
 
     if (userRole === "member") {
+      if (current.etapa === "finalizado") {
+        throw new ForbiddenException(
+          "Los viajes finalizados solo pueden ser editados por administradores",
+        );
+      }
       const valorizacionActual = evaluarValorizacionViaje(current);
       if (valorizacionActual.valorizado) {
         throw new ForbiddenException(

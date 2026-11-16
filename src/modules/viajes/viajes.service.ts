@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -1726,8 +1727,22 @@ export class ViajesService {
     "pagosTransportista",
   ] as const;
 
-  async update(id: string, tenantId: string, dto: UpdateViajeDto) {
+  async update(
+    id: string,
+    tenantId: string,
+    dto: UpdateViajeDto,
+    userRole?: string | null,
+  ) {
     const current = await this.findOne(id, tenantId);
+
+    if (userRole === "member") {
+      const valorizacionActual = evaluarValorizacionViaje(current);
+      if (valorizacionActual.valorizado) {
+        throw new ForbiddenException(
+          "Los viajes valorizados solo pueden ser editados por administradores",
+        );
+      }
+    }
     // Solo se valida si el campo viene explícito en el request (no bloquea
     // ediciones de otros campos en viajes viejos que quedaron sin ID Propio 1
     // antes de que el tenant deshabilitara el ID Sistema).

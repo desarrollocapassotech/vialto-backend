@@ -1703,20 +1703,23 @@ export class ViajesService {
   }
 
   /**
-   * Campos que afectan comprobantes ya emitidos (montos, tarifas, cliente,
-   * transportista). Se bloquean solo mientras el viaje tiene una factura o
-   * liquidación vigente; los campos operativos (fechas, km, litros,
+   * Campos que afectan comprobantes ya emitidos, separados por lado. Los del
+   * cliente se bloquean con una factura vigente; los del transportista, con una
+   * liquidación vigente. Los campos operativos (fechas, km, litros,
    * observaciones, etc.) siempre se pueden editar.
    */
-  private static readonly CAMPOS_FISCALES_VIAJE = [
+  private static readonly CAMPOS_FISCALES_CLIENTE = [
     "clienteId",
-    "transportistaId",
-    "transportistaEfectivoId",
-    "contratanteRealizaFlete",
     "monto",
     "monedaMonto",
     "cantidadFactura",
     "precioUnitarioFactura",
+  ] as const;
+
+  private static readonly CAMPOS_FISCALES_TRANSPORTE = [
+    "transportistaId",
+    "transportistaEfectivoId",
+    "contratanteRealizaFlete",
     "precioTransportistaExterno",
     "monedaPrecioTransportistaExterno",
     "cantidadTransportista",
@@ -1754,41 +1757,16 @@ export class ViajesService {
         liquidacionEstado,
       );
 
+    // Lock por lado, con o sin ARCA (pedido NyM, nov 2026): la factura bloquea solo
+    // el lado cliente y la liquidación solo el lado transportista. Un viaje facturado
+    // pero sin liquidar puede corregir cantidad/precio del transportista antes de
+    // liquidarlo (ej. factura por 36,6 tn y liquidación por 31,16 tn).
     if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {
-      const tieneArca = await this.tieneArca(tenantId);
+      const bloqueados: string[] = [];
+      if (bloqueadoPorFactura) bloqueados.push(...ViajesService.CAMPOS_FISCALES_CLIENTE);
+      if (bloqueadoPorLiquidacion) bloqueados.push(...ViajesService.CAMPOS_FISCALES_TRANSPORTE);
 
-      let camposBloqueados: readonly string[];
-      if (tieneArca) {
-        camposBloqueados = ViajesService.CAMPOS_FISCALES_VIAJE;
-      } else {
-        const camposCliente = [
-          "clienteId",
-          "monto",
-          "monedaMonto",
-          "cantidadFactura",
-          "precioUnitarioFactura",
-        ];
-        const camposTransporte = [
-          "transportistaId",
-          "transportistaEfectivoId",
-          "contratanteRealizaFlete",
-          "precioTransportistaExterno",
-          "monedaPrecioTransportistaExterno",
-          "cantidadTransportista",
-          "precioUnitarioTransportista",
-          "gananciaBrutaManual",
-          "monedaGananciaBrutaManual",
-          "otrosGastos",
-          "pagosTransportista",
-        ];
-
-        const bloqueados: string[] = [];
-        if (bloqueadoPorFactura) bloqueados.push(...camposCliente);
-        if (bloqueadoPorLiquidacion) bloqueados.push(...camposTransporte);
-        camposBloqueados = bloqueados;
-      }
-
-      const camposTocados = camposBloqueados.filter(
+      const camposTocados = bloqueados.filter(
         (campo) => (dto as Record<string, unknown>)[campo] !== undefined,
       );
       if (camposTocados.length > 0) {
@@ -1798,10 +1776,9 @@ export class ViajesService {
             : bloqueadoPorFactura
               ? "facturado"
               : "liquidado";
-              
-        const detalle = tieneArca
-          ? "los datos comerciales"
-          : (bloqueadoPorFactura && bloqueadoPorLiquidacion)
+
+        const detalle =
+          bloqueadoPorFactura && bloqueadoPorLiquidacion
             ? "los datos comerciales"
             : bloqueadoPorFactura
               ? "los datos del cliente"

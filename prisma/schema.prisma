@@ -663,6 +663,12 @@ model Viaje {
    * % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" antes de sumarlo al bruto de una Liquidación, para no duplicar el IVA.
    */
   precioTransportistaIvaIncluidoPct Float           @default(0)
+  /**
+   * IVA por tramo del pago al transportista: [{ detalle, monto, ivaPct }]. Lo que no
+   * cubren los tramos usa precioTransportistaIvaIncluidoPct. Vacío = cálculo de siempre.
+   * Ver shared/util/viaje-tramos-transportista.util.ts.
+   */
+  tramosTransportista               Json            @default("[]")
 
   cantidadFactura             Float?
   precioUnitarioFactura       Float?

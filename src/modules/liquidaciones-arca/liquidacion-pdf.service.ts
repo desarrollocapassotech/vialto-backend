@@ -21,6 +21,7 @@ import { ArcaComprobanteCvlp } from "./types/arca.types";
 import { normalizeUnidadCantidad } from "./cantidad-unidad.util";
 import { ymdAr } from "../../shared/util/fecha-ar.util";
 import { formatCuit } from "../../shared/util/cuit";
+import { tramosIvaParaLiquidacion } from "../../shared/util/viaje-tramos-transportista.util";
 import {
   nombreArchivoComprobante,
   tipoComprobanteLegible,
@@ -313,6 +314,7 @@ export class LiquidacionPdfService {
                 precioUnitarioTransportista: true,
                 precioTransportistaExterno: true,
                 precioTransportistaIvaIncluidoPct: true,
+                tramosTransportista: true,
                 cliente: {
                   select: {
                     id: true,
@@ -491,6 +493,11 @@ export class LiquidacionPdfService {
           bruto: subtotal,
           comision: round2(subtotal * liq.comisionPct / 100),
           ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
+          tramosIva: tramosIvaParaLiquidacion(
+            subtotal,
+            v.viaje.precioTransportistaIvaIncluidoPct,
+            v.viaje.tramosTransportista,
+          ),
         };
       });
 
@@ -919,11 +926,30 @@ export class LiquidacionPdfService {
         continue;
       }
       for (const lViaje of liq.viajes) {
+        const base = lViaje.subtotal ?? 0;
+        // Viaje con tramos de IVA: una fila por tramo (y el resto), cada una en su alícuota.
+        const tramos = tramosIvaParaLiquidacion(
+          base,
+          lViaje.viaje.precioTransportistaIvaIncluidoPct,
+          lViaje.viaje.tramosTransportista,
+        );
+        if (tramos) {
+          for (const parte of tramos) {
+            if (parte.ivaPct !== item.ivaPct) continue;
+            drawFila([
+              "1,00",
+              detalleViajeCvlp(lViaje.viaje, tenantIdPropio2),
+              fmtNum(parte.base),
+              fmtNum(item.ivaPct),
+              fmtNum(parte.base),
+            ]);
+          }
+          continue;
+        }
         const tripIva =
           lViaje.viaje.precioTransportistaIvaIncluidoPct ||
           resolveIvaPct((liq as any).ivaPct ?? config?.ivaGastosAdmin);
         if (tripIva !== item.ivaPct) continue;
-        const base = lViaje.subtotal ?? 0;
         drawFila([
           lViaje.tnDestino != null ? `${fmtNum(lViaje.tnDestino)} ${unidad}` : "1,00",
           detalleViajeCvlp(lViaje.viaje, tenantIdPropio2),

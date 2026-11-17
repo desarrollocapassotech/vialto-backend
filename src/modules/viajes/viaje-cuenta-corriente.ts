@@ -29,18 +29,20 @@ export function calcularAcordadoTransportista(
     id?: string;
     precioTransportistaExterno?: number | null;
     precioTransportistaIvaIncluidoPct?: number | null;
+    tramosTransportista?: unknown;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     liquidacionesViaje?: any[];
   },
   ivaTransportistaHabilitado: boolean,
 ): number {
   // Caso base (sin Liquidación vigente): "acordado" es lo que hay que pagarle en
-  // efectivo al transportista — el precio cargado (siempre neto) más el % de IVA
-  // que se le suma encima, si tiene. Si el tenant tiene el campo deshabilitado
-  // (ver ViajesService.ivaTransportistaHabilitado()), el % guardado se ignora sin borrarlo.
+  // efectivo al transportista — el precio cargado (siempre neto) más el IVA que se le
+  // suma encima (un % general o por tramo). Si el tenant tiene el campo deshabilitado
+  // (ver ViajesService.ivaTransportistaHabilitado()), el % y los tramos se ignoran sin borrarlos.
   let acordado = engrosarConIva(
     v.precioTransportistaExterno ?? 0,
     ivaTransportistaHabilitado ? Number(v.precioTransportistaIvaIncluidoPct) || 0 : 0,
+    ivaTransportistaHabilitado ? v.tramosTransportista : undefined,
   );
 
   if (v.liquidacionesViaje && v.liquidacionesViaje.length > 0) {

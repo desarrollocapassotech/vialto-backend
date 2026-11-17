@@ -30,6 +30,29 @@ export function signedImporte(signo: ConceptoSigno, monto: number): number {
 }
 
 /**
+ * Viaje dentro de una liquidación. `tramosIva` (opcional) reparte su `bruto` por
+ * alícuota cuando el viaje tiene tramos de IVA (ver viaje-tramos-transportista.util.ts):
+ * si viene, reemplaza a `ivaPct` y la suma de sus bases es el bruto del viaje.
+ */
+export type ViajeLiquidacionPayload = {
+  id: string;
+  numero: string | number;
+  bruto?: number;
+  comision?: number;
+  ivaPct?: number;
+  tramosIva?: { base: number; ivaPct: number }[];
+};
+
+/** Partes del flete de un viaje por alícuota (tramos o un solo % para todo). */
+function partesFleteViaje(
+  v: ViajeLiquidacionPayload,
+  ivaPctDefault: number,
+): { base: number; ivaPct: number }[] {
+  if (v.tramosIva && v.tramosIva.length > 0) return v.tramosIva;
+  return [{ base: v.bruto ?? 0, ivaPct: v.ivaPct ?? ivaPctDefault }];
+}
+
+/**
  * Conceptos base (Fletes / Comisión) + líneas configurables del tenant.
  * Los gastos del viaje viven en `otrosGastos` y no forman parte del CVLP.
  */
@@ -38,13 +61,7 @@ export function buildCvlpConceptosList(args: {
   comision: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
-  viajes?: {
-    id: string;
-    numero: string | number;
-    bruto?: number;
-    comision?: number;
-    ivaPct?: number;
-  }[];
+  viajes?: ViajeLiquidacionPayload[];
 }): ConceptoFacturable[] {
   const conceptos: ConceptoFacturable[] = [];
 
@@ -58,8 +75,12 @@ export function buildCvlpConceptosList(args: {
     const comisionPorIva = new Map<number, number>();
 
     for (const v of args.viajes!) {
-      const vIva = v.ivaPct ?? args.ivaPctDefault;
-      fletesPorIva.set(vIva, round2((fletesPorIva.get(vIva) ?? 0) + (v.bruto ?? 0)));
+      for (const parte of partesFleteViaje(v, args.ivaPctDefault)) {
+        fletesPorIva.set(
+          parte.ivaPct,
+          round2((fletesPorIva.get(parte.ivaPct) ?? 0) + parte.base),
+        );
+      }
       // La comisión siempre tributa a la alícuota por defecto del tenant (ej. 21%)
       const comisionIva = args.ivaPctDefault;
       comisionPorIva.set(comisionIva, round2((comisionPorIva.get(comisionIva) ?? 0) + (v.comision ?? 0)));
@@ -149,13 +170,7 @@ export function computeLiquidacionTotales(args: {
   comision: number;
   ivaPctDefault: number;
   lineas?: ConceptoLineaInput[];
-  viajes?: {
-    id: string;
-    numero: string | number;
-    bruto?: number;
-    comision?: number;
-    ivaPct?: number;
-  }[];
+  viajes?: ViajeLiquidacionPayload[];
 }): { impNeto: number; impIva: number; liquido: number } {
   const defaultPct = Number(args.ivaPctDefault);
   const ivaPctFallback = Number.isFinite(defaultPct) ? defaultPct : 0;
@@ -173,10 +188,11 @@ export function computeLiquidacionTotales(args: {
   if (tieneDesgloseViajes) {
     let ivaFletes = 0;
     for (const v of args.viajes!) {
-      const vIva = v.ivaPct ?? ivaPctFallback;
-      const vBruto = round2(v.bruto ?? 0);
-      if (vIva > 0) {
-        ivaFletes = round2(ivaFletes + round2((vBruto * vIva) / 100));
+      for (const parte of partesFleteViaje(v, ivaPctFallback)) {
+        const base = round2(parte.base);
+        if (parte.ivaPct > 0) {
+          ivaFletes = round2(ivaFletes + round2((base * parte.ivaPct) / 100));
+        }
       }
     }
     const ivaComision = ivaPctFallback > 0 ? round2((comision * ivaPctFallback) / 100) : 0;

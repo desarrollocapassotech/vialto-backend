@@ -86,6 +86,10 @@ import {
   type ViajesSortFieldTexto,
 } from "./viajes-paginated-query.util";
 import { ordenarPorClaves } from "../../shared/util/orden-listado.util";
+import {
+  normalizarTramosTransportista,
+  validarTramosTransportista,
+} from "../../shared/util/viaje-tramos-transportista.util";
 
 /** Documentos por viaje: máximo 3 y 10 MB entre todos. */
 const MAX_ADJUNTOS_VIAJE = 3;
@@ -379,12 +383,19 @@ export class ViajesService {
    * tener que conocer la configuración del tenant.
    */
   private zerarIvaTransportistaSiDeshabilitado<
-    T extends { precioTransportistaIvaIncluidoPct?: unknown },
+    T extends { precioTransportistaIvaIncluidoPct?: unknown; tramosTransportista?: unknown },
   >(item: T, habilitado: boolean): T {
     if (habilitado || item.precioTransportistaIvaIncluidoPct == null) {
       return item;
     }
-    return { ...item, precioTransportistaIvaIncluidoPct: 0 };
+    // Los tramos de IVA van con el mismo campo: deshabilitado = no aplican.
+    return { ...item, precioTransportistaIvaIncluidoPct: 0, tramosTransportista: [] };
+  }
+
+  /** Valida los tramos de IVA del transportista contra el neto del viaje. */
+  private assertTramosTransportista(tramos: unknown, neto: number | null | undefined): void {
+    const error = validarTramosTransportista(tramos, neto);
+    if (error) throw new BadRequestException(error);
   }
 
   /**
@@ -436,6 +447,7 @@ export class ViajesService {
       id?: string;
       precioTransportistaExterno?: number | null;
       precioTransportistaIvaIncluidoPct?: number | null;
+      tramosTransportista?: unknown;
       liquidacionesViaje?: any[];
     },
     ivaTransportistaHabilitado: boolean,
@@ -497,6 +509,7 @@ export class ViajesService {
       precioTransportistaExterno?: number | null;
       monedaPrecioTransportistaExterno?: string | null;
       precioTransportistaIvaIncluidoPct?: number | null;
+      tramosTransportista?: unknown;
       pagosTransportista?: unknown;
       liquidacionesViaje?: any[];
     },
@@ -911,6 +924,7 @@ export class ViajesService {
           precioTransportistaExterno: true,
           monedaPrecioTransportistaExterno: true,
           precioTransportistaIvaIncluidoPct: true,
+          tramosTransportista: true,
           pagosTransportista: true,
           liquidacionesViaje: {
             include: {
@@ -1338,6 +1352,7 @@ export class ViajesService {
           monedaMonto: true,
           precioTransportistaExterno: true,
           precioTransportistaIvaIncluidoPct: true,
+          tramosTransportista: true,
           monedaPrecioTransportistaExterno: true,
           otrosGastos: true,
           gananciaBrutaManual: true,
@@ -1364,6 +1379,10 @@ export class ViajesService {
             conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
               ? 0
               : row.precioTransportistaIvaIncluidoPct,
+          tramosTransportista:
+            conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
+              ? []
+              : row.tramosTransportista,
           monedaPrecioTransportistaExterno:
             conReales.monedaCostoLiquidadoReal ??
             row.monedaPrecioTransportistaExterno,
@@ -1459,6 +1478,7 @@ export class ViajesService {
         monedaMonto: true,
         precioTransportistaExterno: true,
         precioTransportistaIvaIncluidoPct: true,
+        tramosTransportista: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,
@@ -1483,6 +1503,10 @@ export class ViajesService {
         conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
           ? 0
           : row.precioTransportistaIvaIncluidoPct,
+      tramosTransportista:
+        conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
+          ? []
+          : row.tramosTransportista,
       monedaPrecioTransportistaExterno:
         conReales.monedaCostoLiquidadoReal ??
         row.monedaPrecioTransportistaExterno,
@@ -1599,6 +1623,14 @@ export class ViajesService {
         dto.cantidadTransportista * dto.precioUnitarioTransportista;
     }
 
+    // Tramos de IVA del transportista: solo si la empresa tiene el IVA del transportista
+    // habilitado y el viaje tiene transportista; si no, se ignoran.
+    const tramosTransportista =
+      ivaTransportistaHabilitado && refs.transportistaId
+        ? (dto.tramosTransportista ?? [])
+        : [];
+    this.assertTramosTransportista(tramosTransportista, precioTransportistaExterno);
+
     const numero =
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, tenantId));
     const gananciaPersist = this.applyGananciaBrutaFields(
@@ -1617,6 +1649,7 @@ export class ViajesService {
         precioTransportistaExterno,
         monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
         precioTransportistaIvaIncluidoPct: dto.precioTransportistaIvaIncluidoPct,
+        tramosTransportista,
         pagosTransportista: dto.pagosTransportista,
         liquidacionesViaje: [], // Al crearse, obviamente no tiene liquidaciones.
       },
@@ -1652,6 +1685,9 @@ export class ViajesService {
             dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS",
           precioTransportistaIvaIncluidoPct:
             dto.precioTransportistaIvaIncluidoPct ?? 0,
+          tramosTransportista: normalizarTramosTransportista(
+            tramosTransportista,
+          ) as unknown as Prisma.InputJsonValue,
           cantidadFactura: dto.cantidadFactura ?? null,
           precioUnitarioFactura: dto.precioUnitarioFactura ?? null,
           cantidadTransportista: dto.cantidadTransportista ?? null,
@@ -1839,6 +1875,19 @@ export class ViajesService {
         'No se puede cambiar el % de IVA incluido porque el viaje ya está liquidado o tiene una liquidación en curso.',
       );
     }
+    // Mismo lock angosto para los tramos de IVA, pero solo si cambian: el formulario
+    // los reenvía tal cual aunque no se toquen.
+    if (
+      ivaTransportistaHabilitado &&
+      bloqueadoPorLiquidacion &&
+      dto.tramosTransportista !== undefined &&
+      JSON.stringify(normalizarTramosTransportista(dto.tramosTransportista)) !==
+        JSON.stringify(normalizarTramosTransportista((current as any).tramosTransportista))
+    ) {
+      throw new ConflictException(
+        'No se pueden cambiar los tramos de IVA porque el viaje ya está liquidado o tiene una liquidación en curso.',
+      );
+    }
 
     const currentIds = current.vehiculosViaje.map((x) => x.vehiculoId);
     const op = mergeViajeOperacionIds(
@@ -1946,6 +1995,25 @@ export class ViajesService {
       : dto.precioTransportistaIvaIncluidoPct !== undefined
         ? dto.precioTransportistaIvaIncluidoPct
         : (current as any).precioTransportistaIvaIncluidoPct;
+    // Tramos: mismo criterio (deshabilitado = se conserva lo guardado). Sin transportista
+    // no hay pago al transportista, así que no quedan tramos.
+    const tramosTransportistaResolved: unknown = !ivaTransportistaHabilitado
+      ? (current as any).tramosTransportista
+      : !op.transportistaId
+        ? []
+        : dto.tramosTransportista !== undefined
+          ? dto.tramosTransportista
+          : (current as any).tramosTransportista;
+    if (
+      ivaTransportistaHabilitado &&
+      !bloqueadoPorLiquidacion &&
+      (dto.tramosTransportista !== undefined || precioTransportistaExternoInput !== undefined)
+    ) {
+      this.assertTramosTransportista(
+        tramosTransportistaResolved,
+        precioTransportistaExternoResolved,
+      );
+    }
     const pagosTransportistaResolved =
       dto.pagosTransportista !== undefined
         ? dto.pagosTransportista
@@ -2077,6 +2145,12 @@ export class ViajesService {
       (data as any).precioTransportistaExterno =
         precioTransportistaExternoInput;
     }
+    delete (data as { tramosTransportista?: unknown }).tramosTransportista;
+    if (ivaTransportistaHabilitado && !bloqueadoPorLiquidacion) {
+      (data as any).tramosTransportista = normalizarTramosTransportista(
+        tramosTransportistaResolved,
+      ) as unknown as Prisma.InputJsonValue;
+    }
     if (dto.monedaMonto !== undefined) {
       (data as any).monedaMonto = dto.monedaMonto === "USD" ? "USD" : "ARS";
     }
@@ -2140,6 +2214,7 @@ export class ViajesService {
             monedaPrecioTransportistaExternoResolved,
           precioTransportistaIvaIncluidoPct:
             precioTransportistaIvaIncluidoPctResolved,
+          tramosTransportista: tramosTransportistaResolved,
           pagosTransportista: pagosTransportistaResolved,
           liquidacionesViaje: (current as any).liquidacionesViaje,
         },
@@ -2467,6 +2542,7 @@ export class ViajesService {
         monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
         precioTransportistaIvaIncluidoPct: (viaje as any)
           .precioTransportistaIvaIncluidoPct,
+        tramosTransportista: (viaje as any).tramosTransportista,
         pagosTransportista: pagosActualizados,
         liquidacionesViaje: (viaje as any).liquidacionesViaje,
       },

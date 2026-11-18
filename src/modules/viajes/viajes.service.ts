@@ -2051,7 +2051,9 @@ export class ViajesService {
       }
     }
 
-    if (etapaSiguiente === "finalizado") {
+    const pasandoAFinalizado =
+      etapaActual !== "finalizado" && etapaSiguiente === "finalizado";
+    if (pasandoAFinalizado) {
       const valorizacion = evaluarValorizacionViaje({
         monto: montoInput !== undefined ? montoInput : current.monto,
         cantidadFactura:

@@ -112,6 +112,14 @@ model Tenant {
    */
   dashboardHabilitado             Boolean  @default(true)
   /**
+   * Bloques del dashboard de inicio, en el orden en que se muestran (ids de
+   * `DASHBOARD_BLOQUES` en `update-tenant.dto.ts`, espejo de `lib/dashboardBloques.ts`
+   * del frontend). [] (default) = el set recomendado según los módulos contratados.
+   * Un bloque de un módulo que la empresa ya no tiene no se muestra (no se borra).
+   * Se configura solo desde superadmin (ficha de la empresa → Dashboard).
+   */
+  dashboardBloques                String[] @default([])
+  /**
    * true (default) = origen/destino de Viajes se eligen de un buscador de ciudades
    * (catálogo externo, obliga a elegir de la lista) y el import valida las ciudades del
    * Excel contra ese catálogo. false = texto libre, sin sugerencias ni validación. Se

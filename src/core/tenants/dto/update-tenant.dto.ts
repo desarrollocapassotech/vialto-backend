@@ -27,6 +27,49 @@ export const VIAJES_COLUMNAS_ORDENABLES = [
   'observaciones',
 ] as const;
 
+/**
+ * Bloques del dashboard de inicio (Tenant.dashboardBloques).
+ * Espejo de `DASHBOARD_BLOQUES` en `vialto-frontend/src/lib/dashboardBloques.ts`:
+ * si se agrega un bloque, sumarlo en los dos lados.
+ */
+export const DASHBOARD_BLOQUES = [
+  // Tarjetas
+  'facturado',
+  'cobrado',
+  'sin-facturar',
+  'a-pagar-transportistas',
+  'margen',
+  'viajes-en-curso',
+  'viajes-finalizados',
+  'por-cobrar',
+  'por-pagar',
+  'combustible-gasto',
+  'combustible-precio-litro',
+  'stock-ingresos',
+  'stock-egresos',
+  'mantenimiento-vencidos',
+  'mantenimiento-proximos',
+  // Pendientes
+  'pendientes-facturas-vencidas',
+  'pendientes-viajes-sin-facturar',
+  'pendientes-viajes-sin-liquidar',
+  'pendientes-cuenta-corriente',
+  'pendientes-mantenimiento',
+  'pendientes-combustible',
+  'pendientes-margen-bajo',
+  // Análisis
+  'analisis-margen',
+  'analisis-viajes',
+  'analisis-facturacion',
+  'analisis-liquidaciones',
+  'analisis-cuenta-corriente',
+  'analisis-combustible',
+  'analisis-combustible-vehiculos',
+  'analisis-combustible-choferes',
+  'analisis-combustible-distribucion',
+  'analisis-combustible-viajes',
+] as const;
+
 export class UpdateTenantDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() idFiscal?: string;
@@ -71,6 +114,13 @@ export class UpdateTenantDto {
 
   /** false = el tenant no ve el dashboard; su inicio pasa a ser el primer módulo contratado. */
   @IsOptional() @IsBoolean() dashboardHabilitado?: boolean;
+
+  /** Bloques del dashboard en orden. [] = set recomendado por módulos. */
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(DASHBOARD_BLOQUES, { each: true })
+  dashboardBloques?: string[];
 
   /** false = origen/destino de Viajes en texto libre, sin buscador de ciudades ni validación en el import. */
   @IsOptional() @IsBoolean() recomendacionCiudadesHabilitada?: boolean;

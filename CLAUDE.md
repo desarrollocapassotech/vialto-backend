@@ -1192,6 +1192,8 @@ model ArcaLog {
 ### `dashboard` — KPIs del tenant (no es un módulo vendible)
 No está gateado por `RequireModule`; disponible para todos los tenants. `GET dashboard/resumen` agrega KPIs, últimos viajes y alertas desde las tablas de Viaje/Factura/MovimientoCuentaCorriente ya existentes (sin modelo Prisma propio), con soporte de rango de fechas/período. Es la base de datos que consume el dashboard real del frontend (`TenantOwnerDashboard.tsx`).
 
+**Bloques configurables (nov 2026)**: qué muestra el dashboard de cada empresa lo elige el superadmin: `Tenant.dashboardBloques` (`String[]`, `[]` = set recomendado por módulos, migración `20261118130000_tenant_dashboard_bloques`). El backend solo lo guarda y valida los ids contra `DASHBOARD_BLOQUES` (`update-tenant.dto.ts`, espejo de `lib/dashboardBloques.ts` del front); los endpoints del dashboard no cambian ni filtran por bloque. Un bloque nuevo se suma en los dos lados con el mismo id (ver `vialto-frontend/CLAUDE.md`, "Dashboard del tenant: bloques configurables").
+
 ---
 
 ### `importaciones` — Carga masiva desde Excel (uso admin)

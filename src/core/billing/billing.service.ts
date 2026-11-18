@@ -8,7 +8,7 @@ export class BillingService {
   async getSubscription(clerkOrgId: string) {
     const tenant = await this.prisma.tenant.findUnique({
       where:  { clerkOrgId },
-      select: { modules: true, billingStatus: true, billingRenewsAt: true, maxUsers: true },
+      select: { modules: true },
     });
     if (!tenant) throw new NotFoundException('Tenant no encontrado');
     return { tenantId: clerkOrgId, ...tenant };

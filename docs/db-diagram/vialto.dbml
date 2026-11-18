@@ -67,9 +67,6 @@ Table tenants as "[IMP-CORE] tenants" [note: 'CORE — una fila por org Clerk. P
   name String [not null]
   idFiscal String [unique, note: 'CUIT/RUT opcional']
   modules String[] [default: '[]', note: 'módulos vendibles activos']
-  maxUsers Int [default: 10]
-  billingStatus String [default: 'trial', note: 'trial|active|suspended|expired']
-  billingRenewsAt DateTime
   whiteLabelDomain String
   labelIdentificacionPersonalizadaViajes String [default: 'ID propio', note: 'label del campo "ID propio" del módulo viajes, personalizable por tenant']
   importacionesOcultas Boolean [default: false, note: 'true = el admin del tenant no ve la pantalla de import masivo (superadmin sí)']

@@ -4,12 +4,9 @@ import {
   IsOptional,
   IsArray,
   IsIn,
-  IsInt,
   IsBoolean,
-  IsDateString,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 /**
  * Columnas reordenables de la grilla de Viajes (Tenant.viajesColumnasOrden).
@@ -34,9 +31,6 @@ export class UpdateTenantDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() idFiscal?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) modules?: string[];
-  @IsOptional() @IsInt() @Type(() => Number) maxUsers?: number;
-  @IsOptional() @IsIn(['trial', 'active', 'suspended', 'expired']) billingStatus?: string;
-  @IsOptional() @IsDateString() billingRenewsAt?: string;
   @IsOptional() @IsString() labelIdentificacionPersonalizadaViajes?: string;
   /** true = muestra la columna/campo dedicado "ID Sistema" en Viajes. */
   @IsOptional() @IsBoolean() idSistemaHabilitado?: boolean;

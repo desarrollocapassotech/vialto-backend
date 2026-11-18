@@ -127,13 +127,12 @@ model Tenant {
   name             String
   idFiscal         String?   @unique          // CUIT u otro identificador fiscal (antes "cuit")
   modules          String[]  @default([])     // módulos activos — ver VIALTO_MODULES en shared/types/modules.ts
-  maxUsers         Int       @default(10)
-  billingStatus    String    @default("trial") // trial | active | suspended | expired
-  billingRenewsAt  DateTime?
   whiteLabelDomain String?
   createdAt        DateTime  @default(now())
 }
 ```
+
+> **Suscripción fuera de Vialto (nov 2026)**: estado de la suscripción (`billingStatus`), renovación (`billingRenewsAt`) y máximo de usuarios (`maxUsers`) se borraron (migración `20261118120000_drop_tenant_suscripcion`): se manejan en otro sistema y ninguna regla de Vialto los leía (no bloqueaban accesos ni usuarios). Con ellos se fue "Habilitar/Deshabilitar empresa" del superadmin, que solo cambiaba ese estado. No reintroducirlos sin un pedido explícito.
 
 > El identificador de módulo persistido en `Tenant.modules` y usado por `RequireModule`/`ModuleGuard` es la **fuente de verdad única**: `shared/types/modules.ts` exporta `VIALTO_MODULES` con los slugs válidos exactos. Antes de usar un slug en código, docs o Postman, verificar ahí — no asumirlo por el nombre de la carpeta en `src/modules/`.
 

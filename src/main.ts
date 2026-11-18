@@ -118,7 +118,7 @@ async function bootstrap() {
     .addTag('Core — Usuarios', 'Usuarios de la organización (sincronizados con Clerk)')
     // Admin — solo superadmin
     .addTag('Admin — Tenants', 'Alta y configuración de empresas clientes · Solo superadmin')
-    .addTag('Admin — Billing', 'Suscripción y módulos activos por tenant · Solo superadmin')
+    .addTag('Admin — Billing', 'Módulos activos por tenant · Solo superadmin')
     .addTag('Admin — Platform', 'Vista cross-tenant de todos los datos · Solo superadmin')
     .addTag('Admin — Importaciones', 'Importación masiva de datos desde Excel')
     // Módulos activos

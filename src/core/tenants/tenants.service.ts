@@ -15,10 +15,6 @@ import { ListTenantsDto } from './dto/list-tenants.dto';
 import { ProductoLabelPluralService } from './producto-label-plural.service';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
-
-/** `billingStatus` de una empresa deshabilitada (mismo criterio que el listado del front). */
-const TENANT_ESTADOS_DESHABILITADOS: ReadonlySet<string> = new Set(['suspended', 'expired']);
-
 function isClerkNotFoundError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as {
@@ -74,26 +70,15 @@ export class TenantsService {
         }
       : undefined;
 
-    // Habilitadas primero y deshabilitadas (suspended/expired) al final; dentro de cada
-    // grupo, la más nueva primero. Se ordena sobre todas las filtradas y recién después
-    // se corta la página (Prisma no ordena por una expresión; la tabla es chica).
-    const claves = await this.prisma.tenant.findMany({
-      where,
-      select: { id: true, billingStatus: true, createdAt: true },
-    });
-    const deshabilitada = (status: string) =>
-      TENANT_ESTADOS_DESHABILITADOS.has(status.toLowerCase());
-    claves.sort(
-      (a, b) =>
-        Number(deshabilitada(a.billingStatus)) - Number(deshabilitada(b.billingStatus)) ||
-        b.createdAt.getTime() - a.createdAt.getTime() ||
-        a.id.localeCompare(b.id),
-    );
-    const total = claves.length;
-    const idsPagina = claves.slice((page - 1) * pageSize, page * pageSize).map((t) => t.id);
-    const registros = await this.prisma.tenant.findMany({ where: { id: { in: idsPagina } } });
-    const porId = new Map(registros.map((t) => [t.id, t]));
-    const items = idsPagina.flatMap((id) => porId.get(id) ?? []);
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.tenant.count({ where }),
+      this.prisma.tenant.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -177,7 +162,6 @@ export class TenantsService {
           name: dto.name,
           idFiscal: dto.idFiscal ?? null,
           modules: dto.modules ?? [],
-          maxUsers: 10,
         },
       });
       await this.tenantBootstrap.seedDefaultPresentaciones(tenant.clerkOrgId);
@@ -286,16 +270,7 @@ export class TenantsService {
 
   async update(clerkOrgId: string, dto: UpdateTenantDto) {
     const current = await this.findOne(clerkOrgId);
-    const data: Record<string, unknown> = {
-      ...dto,
-      billingStatus: dto.billingStatus,
-      billingRenewsAt:
-        dto.billingRenewsAt === undefined
-          ? undefined
-          : dto.billingRenewsAt
-            ? new Date(dto.billingRenewsAt)
-            : null,
-    };
+    const data: Record<string, unknown> = { ...dto };
     if (dto.opcionesProveedorLiquidacion !== undefined) {
       data.opcionesProveedorLiquidacion = Array.from(
         new Set(

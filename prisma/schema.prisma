@@ -18,9 +18,7 @@ model Tenant {
   name                                   String
   idFiscal                               String?   @unique
   modules                                String[]  @default([])
-  maxUsers                               Int       @default(10)
-  billingStatus                          String    @default("trial") // trial | active | suspended | expired
-  billingRenewsAt                        DateTime?
+  // Suscripción (estado, renovación, máx. usuarios): se maneja en otro sistema, no en Vialto.
   whiteLabelDomain                       String?
   /**
    * Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG").

@@ -13,7 +13,7 @@ import { Roles } from '../auth/roles.decorator';
 export class BillingController {
   constructor(private readonly service: BillingService) {}
 
-  @ApiOperation({ summary: 'Obtener suscripción y módulos activos del tenant' })
+  @ApiOperation({ summary: 'Obtener módulos activos del tenant' })
   @Get(':orgId')
   @UseGuards(OwnTenantOrAdminGuard)
   getSubscription(@Param('orgId') orgId: string) {

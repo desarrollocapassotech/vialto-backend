@@ -725,6 +725,8 @@ model ImputacionCuentaCorriente {
 
 **Endpoints** (`cuenta-corriente.controller.ts`): CRUD de movimientos, `POST pagos` (registrar cobro/pago), `GET saldo/cliente/:id` / `GET saldo/proveedor/:id`, `GET tablero` (vencidos / próximos a vencer / sin vencimiento, cada uno `{cobrar, pagar}`, filtrable por período), `POST/DELETE imputaciones`, `GET movimientos/exportar` (movimientos de un período con saldo inicial/final ya calculados — usado tanto por el PDF como por el Excel del frontend), `GET estado-cuenta/pdf` (estado de cuenta de una contraparte por período) y `GET listado-deudores/pdf` (listado agregado de todo lo pendiente de cobro y de pago del tenant) — ambos PDF vía `pdfkit` en `estado-cuenta-pdf.service.ts`, mismo patrón que `liquidaciones-arca/factura-pdf.service.ts`.
 
+**Superadmin: solo lectura con `?tenantId=` (nov 2026).** Los GET de lectura (`movimientos`, `movimientos/:id`, `tablero`, `saldos`, `saldo/cliente|proveedor/:id`, `movimientos/exportar`, `estado-cuenta/pdf`, `listado-deudores/pdf`, `movimientos/:id/orden-pago/pdf`) resuelven la empresa con `CuentaCorrienteController.tenantLectura`: el superadmin puede pasar `?tenantId=`; cualquier otro rol usa siempre el del token. **Las escrituras (POST/PATCH/DELETE) y los GET que alimentan una carga (`numero-interno`, `viajes-para-compra`) no lo aceptan**: el superadmin no opera en nombre de la empresa. Si se agrega un GET de lectura, usar `tenantLectura`; una escritura, nunca.
+
 **Notificación**: `cuenta-corriente.vencimiento` en el catálogo de `notificaciones/` — avisa por email cuando un cargo vence en los próximos días y sigue con saldo pendiente (evaluator `CuentaCorrienteVencimientoEvaluator`).
 
 ---

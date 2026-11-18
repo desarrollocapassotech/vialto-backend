@@ -37,6 +37,19 @@ export class CuentaCorrienteController {
     private readonly pdfService: EstadoCuentaPdfService,
   ) {}
 
+  /**
+   * Solo para endpoints de LECTURA: el superadmin consulta la empresa elegida con
+   * `?tenantId=` (vista de solo lectura del superadmin, nov 2026). Cualquier otro rol
+   * usa siempre la empresa del token. Las escrituras no usan esto: operan sobre la
+   * empresa del token.
+   */
+  private tenantLectura(auth: AuthPayload, override?: string): string {
+    const tenantId =
+      auth.role === 'superadmin' && override?.trim() ? override.trim() : auth.tenantId;
+    assertTenantId(tenantId);
+    return tenantId;
+  }
+
   @ApiOperation({ summary: 'Listar movimientos de cuenta corriente (filtros opcionales: cliente, proveedor, estado, rango de fechas)' })
   @Get('movimientos')
   @Roles('admin', 'member', 'superadmin')
@@ -47,9 +60,10 @@ export class CuentaCorrienteController {
     @Query('estado') estado?: string,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
+    @Query('tenantId') tenantIdQuery?: string,
   ) {
-    assertTenantId(auth.tenantId);
-    return this.service.findAll(auth.tenantId, { clienteId, proveedorId, estado, desde, hasta });
+    const tenantId = this.tenantLectura(auth, tenantIdQuery);
+    return this.service.findAll(tenantId, { clienteId, proveedorId, estado, desde, hasta });
   }
 
   @ApiOperation({ summary: 'Tablero de cobranzas y pagos: vencidos, próximos a vencer y sin vencimiento' })
@@ -60,11 +74,12 @@ export class CuentaCorrienteController {
     @Query('diasProximos') diasProximos?: string,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
+    @Query('tenantId') tenantIdQuery?: string,
   ) {
-    assertTenantId(auth.tenantId);
+    const tenantId = this.tenantLectura(auth, tenantIdQuery);
     const dias = diasProximos ? Number(diasProximos) : undefined;
     return this.service.tablero(
-      auth.tenantId,
+      tenantId,
       Number.isFinite(dias) ? dias : undefined,
       desde,
       hasta,
@@ -77,9 +92,9 @@ export class CuentaCorrienteController {
   exportar(
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ExportarMovimientosQueryDto,
+    @Query('tenantId') tenantIdQuery?: string,
   ) {
-    assertTenantId(auth.tenantId);
-    return this.service.exportarMovimientos(auth.tenantId, query);
+    return this.service.exportarMovimientos(this.tenantLectura(auth, tenantIdQuery), query);
   }
 
   @ApiOperation({ summary: 'Descargar el estado de cuenta en PDF de un cliente o proveedor, por período' })
@@ -89,9 +104,12 @@ export class CuentaCorrienteController {
     @CurrentAuth() auth: AuthPayload,
     @Query() query: ExportarMovimientosQueryDto,
     @Res() res: Response,
+    @Query('tenantId') tenantIdQuery?: string,
   ) {
-    assertTenantId(auth.tenantId);
-    const { buffer, filename } = await this.pdfService.generate(auth.tenantId, query);
+    const { buffer, filename } = await this.pdfService.generate(
+      this.tenantLectura(auth, tenantIdQuery),
+      query,
+    );
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${filename}"`,
@@ -111,11 +129,12 @@ export class CuentaCorrienteController {
     @Query('diasProximos') diasProximos: string | undefined,
     @Query('lado') lado: string | undefined,
     @Res() res: Response,
+    @Query('tenantId') tenantIdQuery?: string,
   ) {
-    assertTenantId(auth.tenantId);
+    const tenantId = this.tenantLectura(auth, tenantIdQuery);
     const dias = diasProximos ? Number(diasProximos) : undefined;
     const { buffer, filename } = await this.pdfService.generateListadoDeudores(
-      auth.tenantId,
+      tenantId,
       lado === 'proveedor' ? 'proveedor' : 'cliente',
       Number.isFinite(dias) ? dias : undefined,
     );
@@ -130,9 +149,16 @@ export class CuentaCorrienteController {
   @ApiOperation({ summary: 'PDF de la orden de pago de un pago a proveedor (se genera al pedirlo)' })
   @Get('movimientos/:id/orden-pago/pdf')
   @Roles('admin', 'member', 'superadmin')
-  async ordenPagoPdf(@Param('id') id: string, @CurrentAuth() auth: AuthPayload, @Res() res: Response) {
-    assertTenantId(auth.tenantId);
-    const { buffer, filename } = await this.pdfService.generateOrdenPago(auth.tenantId, id);
+  async ordenPagoPdf(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Res() res: Response,
+    @Query('tenantId') tenantIdQuery?: string,
+  ) {
+    const { buffer, filename } = await this.pdfService.generateOrdenPago(
+      this.tenantLectura(auth, tenantIdQuery),
+      id,
+    );
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,
@@ -144,9 +170,12 @@ export class CuentaCorrienteController {
   @ApiOperation({ summary: 'Obtener movimiento por ID' })
   @Get('movimientos/:id')
   @Roles('admin', 'member', 'superadmin')
-  findOne(@Param('id') id: string, @CurrentAuth() auth: AuthPayload) {
-    assertTenantId(auth.tenantId);
-    return this.service.findOne(id, auth.tenantId);
+  findOne(
+    @Param('id') id: string,
+    @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') tenantIdQuery?: string,
+  ) {
+    return this.service.findOne(id, this.tenantLectura(auth, tenantIdQuery));
   }
 
   @ApiOperation({ summary: 'Registrar movimiento de cuenta corriente (cliente o proveedor)' })
@@ -210,10 +239,13 @@ export class CuentaCorrienteController {
   @ApiOperation({ summary: 'Saldos de todas las cuentas de clientes (lado=cliente, default) o proveedores (lado=proveedor)' })
   @Get('saldos')
   @Roles('admin', 'member', 'superadmin')
-  saldos(@CurrentAuth() auth: AuthPayload, @Query('lado') lado?: string) {
-    assertTenantId(auth.tenantId);
+  saldos(
+    @CurrentAuth() auth: AuthPayload,
+    @Query('lado') lado?: string,
+    @Query('tenantId') tenantIdQuery?: string,
+  ) {
     return this.service.saldosDeCuentas(
-      auth.tenantId,
+      this.tenantLectura(auth, tenantIdQuery),
       lado === 'proveedor' ? 'proveedor' : 'cliente',
     );
   }
@@ -224,9 +256,9 @@ export class CuentaCorrienteController {
   saldoCliente(
     @Param('clienteId') clienteId: string,
     @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') tenantIdQuery?: string,
   ) {
-    assertTenantId(auth.tenantId);
-    return this.service.saldoCliente(auth.tenantId, clienteId);
+    return this.service.saldoCliente(this.tenantLectura(auth, tenantIdQuery), clienteId);
   }
 
   @ApiOperation({ summary: 'Saldo actual de un proveedor/fletero en cuenta corriente' })
@@ -235,9 +267,9 @@ export class CuentaCorrienteController {
   saldoProveedor(
     @Param('proveedorId') proveedorId: string,
     @CurrentAuth() auth: AuthPayload,
+    @Query('tenantId') tenantIdQuery?: string,
   ) {
-    assertTenantId(auth.tenantId);
-    return this.service.saldoProveedor(auth.tenantId, proveedorId);
+    return this.service.saldoProveedor(this.tenantLectura(auth, tenantIdQuery), proveedorId);
   }
 
   @ApiOperation({ summary: 'Actualizar movimiento de cuenta corriente' })

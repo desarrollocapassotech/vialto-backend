@@ -299,6 +299,15 @@ export class TenantsService {
     });
   }
 
+  async setDashboardBloques(clerkOrgId: string, dashboardBloques: string[]) {
+    await this.findOne(clerkOrgId);
+    return this.prisma.tenant.update({
+      where: { clerkOrgId },
+      data: { dashboardBloques },
+      select: { clerkOrgId: true, dashboardBloques: true },
+    });
+  }
+
   async setModules(clerkOrgId: string, modules: string[]) {
     await this.findOne(clerkOrgId);
     return this.prisma.tenant.update({ where: { clerkOrgId }, data: { modules } });

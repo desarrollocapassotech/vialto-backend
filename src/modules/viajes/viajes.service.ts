@@ -34,6 +34,7 @@ import {
   type ViajeConVehiculosViaje,
 } from "./viaje-vehiculos.helper";
 import { evaluarValorizacionViaje } from "./viaje-valorizacion.util";
+import { resolverMontoInput } from "./viaje-montos.util";
 import {
   assertClientesDelViaje,
   assertProductosClientesDelViaje,
@@ -1961,24 +1962,17 @@ export class ViajesService {
       });
     }
 
-    let precioTransportistaExternoInput = dto.precioTransportistaExterno;
-    if (
-      dto.cantidadTransportista != null &&
-      dto.precioUnitarioTransportista != null
-    ) {
-      precioTransportistaExternoInput =
-        dto.cantidadTransportista * dto.precioUnitarioTransportista;
-    } else if (dto.precioUnitarioTransportista === null) {
-      precioTransportistaExternoInput = null;
-    }
+    const precioTransportistaExternoInput = resolverMontoInput(
+      dto.precioTransportistaExterno,
+      dto.cantidadTransportista,
+      dto.precioUnitarioTransportista,
+    );
 
-    let montoInput = dto.monto;
-    if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
-      montoInput =
-        Math.round(dto.cantidadFactura * dto.precioUnitarioFactura * 100) / 100;
-    } else if (dto.precioUnitarioFactura === null) {
-      montoInput = null;
-    }
+    const montoInput = resolverMontoInput(
+      dto.monto,
+      dto.cantidadFactura,
+      dto.precioUnitarioFactura,
+    );
 
     const precioTransportistaExternoResolved =
       precioTransportistaExternoInput !== undefined

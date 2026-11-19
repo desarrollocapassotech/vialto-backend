@@ -1,4 +1,4 @@
-import * as assert from "assert";
+import * as assert from "node:assert/strict";
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { evaluarValorizacionViaje } from "./viaje-valorizacion.util";
 
@@ -28,7 +28,7 @@ function validarCambioEtapa(
     );
   }
 
-  if (nuevaEtapa === "finalizado") {
+  if (viaje.etapa !== "finalizado" && nuevaEtapa === "finalizado") {
     const valorizacion = evaluarValorizacionViaje({
       monto: viaje.monto,
       transportistaId: viaje.transportistaId,
@@ -130,6 +130,17 @@ test("cambiar a cancelado es exitoso", () => {
   };
 
   assert.doesNotThrow(() => validarCambioEtapa(viaje, "cancelado", "member"));
+});
+
+test("editar un viaje ya finalizado no valorizado con solo monto transportista es exitoso", () => {
+  const viaje = {
+    etapa: "finalizado",
+    monto: null,
+    transportistaId: "transp-1",
+    precioTransportistaExterno: 50000,
+  };
+
+  assert.doesNotThrow(() => validarCambioEtapa(viaje, "finalizado", "admin"));
 });
 
 console.log("viaje-etapa-cambio.spec.ts: OK");

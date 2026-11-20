@@ -1,11 +1,13 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -16,6 +18,12 @@ export class LineaMovimientoCcDto {
   @IsString() descripcion: string;
   @IsNumber() @Type(() => Number) importe: number;
   @IsNumber() @Min(0) @Max(100) @Type(() => Number) ivaPct: number;
+}
+
+/** Parte del importe NETO de una compra que le toca a un viaje (vinculación opcional). */
+export class CompraViajeDto {
+  @IsString() viajeId: string;
+  @IsNumber() @Min(0) @Type(() => Number) importe: number;
 }
 
 export class CreateMovimientoCcDto {
@@ -40,6 +48,10 @@ export class CreateMovimientoCcDto {
   @IsDateString() fecha: string;
   @IsOptional() @IsDateString() fechaVencimiento?: string;
   @IsOptional() @IsString() numeroComprobante?: string;
+  /** true = el backend asigna el siguiente número interno (`INT-…`) e ignora `numeroComprobante`. */
+  @IsOptional() @IsBoolean() numeroAutomatico?: boolean;
+  /** Archivo adjunto ya subido (`POST cuenta-corriente/upload-comprobante`). */
+  @IsOptional() @IsString() @MaxLength(2048) comprobanteUrl?: string;
   @IsOptional() @IsString() formaPago?: string;
   @IsOptional() @IsString() referencia?: string;
   /**
@@ -47,4 +59,13 @@ export class CreateMovimientoCcDto {
    * El importe se reparte del más viejo al más nuevo; lo que sobre queda a cuenta.
    */
   @IsOptional() @IsArray() @IsString({ each: true }) imputarACargoIds?: string[];
+  /**
+   * Solo compras (cargo de un proveedor), opcional: viajes a los que se carga como costo,
+   * con la parte del importe sin IVA de cada uno. La suma tiene que dar el neto.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CompraViajeDto)
+  viajes?: CompraViajeDto[];
 }

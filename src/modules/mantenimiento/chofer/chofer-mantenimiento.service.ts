@@ -54,8 +54,8 @@ export class ChoferMantenimientoService {
     if (dto.tallerId) return dto.tallerId; // `create` valida que sea de la empresa
     if (!dto.tallerNombre) return null;
     const buscar = () =>
-      this.prisma.taller.findFirst({
-        where: { tenantId, nombre: { equals: dto.tallerNombre, mode: 'insensitive' } },
+      this.prisma.transportista.findFirst({
+        where: { tenantId, tipo: 'taller', nombre: { equals: dto.tallerNombre, mode: 'insensitive' } },
         select: { id: true },
       });
     const existente = await buscar();
@@ -79,8 +79,8 @@ export class ChoferMantenimientoService {
     const [lectura, planes, talleres] = await Promise.all([
       this.odometro.getUltimaLectura(tenantId, vehiculo.id),
       conPlanes ? this.planesDelVehiculo(tenantId, vehiculo.id) : Promise.resolve([]),
-      this.prisma.taller.findMany({
-        where: { tenantId, activo: true },
+      this.prisma.transportista.findMany({
+        where: { tenantId, tipo: 'taller', activo: true },
         select: { id: true, nombre: true },
         orderBy: { nombre: 'asc' },
       }),

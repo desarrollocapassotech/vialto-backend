@@ -16,6 +16,7 @@ import { CreateTenantDto } from "./dto/create-tenant.dto";
 import { UpdateTenantDto } from "./dto/update-tenant.dto";
 import { ListTenantsDto } from "./dto/list-tenants.dto";
 import { ViajesColumnasOrdenDto } from "./dto/viajes-columnas-orden.dto";
+import { DashboardBloquesDto } from "./dto/dashboard-bloques.dto";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
 import { OwnTenantOrAdminGuard } from "../auth/own-tenant-or-admin.guard";
@@ -99,6 +100,19 @@ export class TenantsController {
     @Body() dto: ViajesColumnasOrdenDto,
   ) {
     return this.service.setViajesColumnasOrden(orgId, dto.viajesColumnasOrden);
+  }
+
+  @ApiOperation({
+    summary: "Bloques del dashboard de inicio (admin de la propia empresa o superadmin)",
+  })
+  @Patch(":orgId/dashboard-bloques")
+  @Roles("superadmin", "org:admin", "admin")
+  @UseGuards(OwnTenantOrAdminGuard)
+  setDashboardBloques(
+    @Param("orgId") orgId: string,
+    @Body() dto: DashboardBloquesDto,
+  ) {
+    return this.service.setDashboardBloques(orgId, dto.dashboardBloques);
   }
 
   @ApiOperation({ summary: "Reemplazar lista de módulos activos del tenant" })

@@ -1,3 +1,5 @@
+import { engrosarConIva } from '../../shared/util/viaje-tramos-transportista.util';
+
 export type MonedaViaje = 'ARS' | 'USD';
 
 /** % de margen debajo del cual un viaje se considera "margen bajo" en dashboards. */
@@ -69,22 +71,11 @@ function coerceMoneyField(value: unknown): number | null {
 }
 
 /**
- * Suma el IVA a un precio cargado sin IVA. `precioTransportistaExterno` siempre es
- * neto — `precioTransportistaIvaIncluidoPct` es el % que hay que sumarle para saber
- * cuánto se le paga en efectivo al transportista (puramente para seguimiento de
- * pagos/ganancia; no toca el cálculo de Liquidación/CVLP, que usa el precio neto tal
- * cual, con su propio IVA configurado aparte). Única fuente de esta fórmula en el
- * backend — reusar este import en vez de duplicarla (`calcularAcordado` en
- * `viajes.service.ts` y los dashboards financieros ya la importan de acá).
+ * Neto + IVA del transportista (lo que se le paga en efectivo). La fórmula, con los
+ * tramos de IVA, vive en `shared/util/viaje-tramos-transportista.util.ts`; se
+ * re-exporta acá porque es el import histórico de viajes y dashboards.
  */
-export function engrosarConIva(
-  precioNeto: number,
-  pct: number | null | undefined,
-): number {
-  const p = Number(pct) || 0;
-  if (p <= 0) return precioNeto;
-  return Math.round(precioNeto * (1 + p / 100) * 100) / 100;
-}
+export { engrosarConIva };
 
 /** Ganancia automática cuando facturación y pago al transportista comparten moneda. */
 export function calcularGananciaAutomatica(viaje: {
@@ -92,6 +83,7 @@ export function calcularGananciaAutomatica(viaje: {
   monedaMonto?: string | null;
   precioTransportistaExterno?: number | null;
   precioTransportistaIvaIncluidoPct?: number | null;
+  tramosTransportista?: unknown;
   otrosGastos?: unknown;
 }): { monto: number; moneda: MonedaViaje } | null {
   const monto = viaje.monto;
@@ -100,6 +92,7 @@ export function calcularGananciaAutomatica(viaje: {
   const precio = engrosarConIva(
     viaje.precioTransportistaExterno ?? 0,
     viaje.precioTransportistaIvaIncluidoPct,
+    viaje.tramosTransportista,
   );
   const gastos = sumarOtrosGastosPorMoneda(viaje.otrosGastos);
   return {
@@ -150,6 +143,7 @@ export function buildGananciaBrutaResumen(viaje: {
   monedaMonto?: string | null;
   precioTransportistaExterno?: number | null;
   precioTransportistaIvaIncluidoPct?: number | null;
+  tramosTransportista?: unknown;
   monedaPrecioTransportistaExterno?: string | null;
   otrosGastos?: unknown;
   gananciaBrutaManual?: number | null;
@@ -296,6 +290,7 @@ export function gananciaBrutaValorOrdenable(viaje: {
   monedaMonto?: string | null;
   precioTransportistaExterno?: number | null;
   precioTransportistaIvaIncluidoPct?: number | null;
+  tramosTransportista?: unknown;
   monedaPrecioTransportistaExterno?: string | null;
   otrosGastos?: unknown;
   gananciaBrutaManual?: number | null;

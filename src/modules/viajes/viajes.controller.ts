@@ -366,14 +366,14 @@ export class ViajesController {
       "El campo `destino` del viaje se sincroniza con el último destino de la lista.",
   })
   @Patch(":id")
-  @Roles("admin", "superadmin")
+  @Roles("admin", "member", "superadmin")
   update(
     @Param("id") id: string,
     @Body() dto: UpdateViajeDto,
     @CurrentAuth() auth: AuthPayload,
   ) {
     assertTenantId(auth.tenantId);
-    return this.service.update(id, auth.tenantId, dto);
+    return this.service.update(id, auth.tenantId, dto, auth.role);
   }
 
   @ApiOperation({ summary: "Registrar pago al transportista en un viaje" })

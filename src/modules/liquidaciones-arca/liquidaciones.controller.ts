@@ -218,6 +218,17 @@ export class LiquidacionesController {
     return this.conceptosService.remove(auth.tenantId, id);
   }
 
+  @ApiOperation({
+    summary: 'Siguiente número de comprobante interno (vista previa de "Comprobante interno")',
+  })
+  @Get("numero-interno")
+  @RequireModule("liquidaciones", "emision-liquido-producto-arca")
+  @Roles("admin", "member", "superadmin")
+  numeroInterno(@CurrentAuth() auth: AuthPayload) {
+    assertTenantId(auth.tenantId);
+    return this.service.siguienteNumeroInterno(auth.tenantId);
+  }
+
   @ApiOperation({ summary: "Obtener liquidación por ID" })
   @Get("liquidaciones/:id")
   @RequireModule("liquidaciones", "emision-liquido-producto-arca")
@@ -676,6 +687,11 @@ export class LiquidacionesPlatformController {
   ) {
     const id = this.requiredTenantId(tenantId);
     return this.service.findAll(id, estado);
+  }
+
+  @Get("numero-interno")
+  numeroInterno(@Query("tenantId") tenantId: string | undefined) {
+    return this.service.siguienteNumeroInterno(this.requiredTenantId(tenantId));
   }
 
   @Get("liquidaciones/:id")

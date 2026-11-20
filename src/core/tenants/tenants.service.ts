@@ -15,7 +15,6 @@ import { ListTenantsDto } from './dto/list-tenants.dto';
 import { ProductoLabelPluralService } from './producto-label-plural.service';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
-
 function isClerkNotFoundError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as {
@@ -163,7 +162,6 @@ export class TenantsService {
           name: dto.name,
           idFiscal: dto.idFiscal ?? null,
           modules: dto.modules ?? [],
-          maxUsers: 10,
         },
       });
       await this.tenantBootstrap.seedDefaultPresentaciones(tenant.clerkOrgId);
@@ -272,16 +270,7 @@ export class TenantsService {
 
   async update(clerkOrgId: string, dto: UpdateTenantDto) {
     const current = await this.findOne(clerkOrgId);
-    const data: Record<string, unknown> = {
-      ...dto,
-      billingStatus: dto.billingStatus,
-      billingRenewsAt:
-        dto.billingRenewsAt === undefined
-          ? undefined
-          : dto.billingRenewsAt
-            ? new Date(dto.billingRenewsAt)
-            : null,
-    };
+    const data: Record<string, unknown> = { ...dto };
     if (dto.opcionesProveedorLiquidacion !== undefined) {
       data.opcionesProveedorLiquidacion = Array.from(
         new Set(
@@ -307,6 +296,15 @@ export class TenantsService {
       where: { clerkOrgId },
       data: { viajesColumnasOrden },
       select: { clerkOrgId: true, viajesColumnasOrden: true },
+    });
+  }
+
+  async setDashboardBloques(clerkOrgId: string, dashboardBloques: string[]) {
+    await this.findOne(clerkOrgId);
+    return this.prisma.tenant.update({
+      where: { clerkOrgId },
+      data: { dashboardBloques },
+      select: { clerkOrgId: true, dashboardBloques: true },
     });
   }
 

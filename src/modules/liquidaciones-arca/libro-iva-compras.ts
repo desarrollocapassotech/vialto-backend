@@ -17,6 +17,7 @@ import {
   type LibroIvaResultado,
 } from '../../shared/util/libro-iva.util';
 import { parsearNumeroComprobante } from '../../shared/util/comprobante-manual.util';
+import { esNumeroInterno } from '../../shared/util/numero-interno.util';
 
 /**
  * Libro IVA Compras: liquidaciones del período. Ver `shared/util/libro-iva.util.ts`.
@@ -216,6 +217,8 @@ export async function libroIvaCompras(
 
     // Con ARCA, una liquidación no manual sin CAE no se emitió (borrador / error).
     if (tieneArca && !l.manual) continue;
+    // Número interno (`INT-…`): no es un comprobante fiscal, no va al Libro IVA.
+    if (esNumeroInterno(l.numeroComprobanteProveedor)) continue;
 
     const partes =
       l.proveedorCbteTipo != null && l.proveedorPtoVenta != null && l.proveedorCbteNro != null

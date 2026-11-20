@@ -157,6 +157,7 @@ type ViajeMargenRow = {
   monedaMonto: string;
   precioTransportistaExterno: number | null;
   precioTransportistaIvaIncluidoPct: number | null;
+  tramosTransportista: unknown;
   monedaPrecioTransportistaExterno: string;
   otrosGastos: unknown;
   gananciaBrutaManual: number | null;
@@ -258,6 +259,7 @@ export class DashboardFinancieroService {
         monedaMonto: true,
         precioTransportistaExterno: true,
         precioTransportistaIvaIncluidoPct: true,
+        tramosTransportista: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,
@@ -267,11 +269,15 @@ export class DashboardFinancieroService {
         detalleCarga: true,
       },
     });
-    // Si el tenant tiene el campo deshabilitado, se ignora el % guardado en el cálculo
-    // de margen (sin borrarlo de la base) — mismo criterio que viajes.service.ts.
+    // Si el tenant tiene el campo deshabilitado, se ignoran el % y los tramos guardados
+    // en el cálculo de margen (sin borrarlos de la base) — mismo criterio que viajes.service.ts.
     const viajes = ivaTransportistaHabilitado
       ? viajesRaw
-      : viajesRaw.map((v) => ({ ...v, precioTransportistaIvaIncluidoPct: 0 }));
+      : viajesRaw.map((v) => ({
+          ...v,
+          precioTransportistaIvaIncluidoPct: 0,
+          tramosTransportista: [],
+        }));
 
     const clienteIds = [...new Set(viajes.map((v) => v.clienteId))];
     const transportistaIds = [
@@ -483,6 +489,7 @@ export class DashboardFinancieroService {
         transportistaId: true,
         precioTransportistaExterno: true,
         precioTransportistaIvaIncluidoPct: true,
+        tramosTransportista: true,
         monedaPrecioTransportistaExterno: true,
         pagosTransportista: true,
       },
@@ -509,6 +516,7 @@ export class DashboardFinancieroService {
       const acordado = engrosarConIva(
         v.precioTransportistaExterno ?? 0,
         ivaTransportistaHabilitado ? v.precioTransportistaIvaIncluidoPct : 0,
+        ivaTransportistaHabilitado ? v.tramosTransportista : undefined,
       );
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
@@ -606,6 +614,7 @@ export class DashboardFinancieroService {
         transportistaId: true,
         precioTransportistaExterno: true,
         precioTransportistaIvaIncluidoPct: true,
+        tramosTransportista: true,
         monedaPrecioTransportistaExterno: true,
         pagosTransportista: true,
       },
@@ -621,6 +630,7 @@ export class DashboardFinancieroService {
       const acordado = engrosarConIva(
         v.precioTransportistaExterno ?? 0,
         ivaTransportistaHabilitado ? v.precioTransportistaIvaIncluidoPct : 0,
+        ivaTransportistaHabilitado ? v.tramosTransportista : undefined,
       );
       const pagos = Array.isArray(v.pagosTransportista)
         ? (v.pagosTransportista as Array<{ monto?: number; moneda?: string }>)
@@ -743,6 +753,7 @@ export class DashboardFinancieroService {
         facturarPorTramo: true,
         ivaPct: true,
         ivaMonto: true,
+        conceptos: true,
         pagos: { select: { importe: true, fecha: true } },
         viajes: { select: { id: true, monto: true } },
         tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
@@ -837,6 +848,7 @@ export class DashboardFinancieroService {
         facturarPorTramo: true,
         ivaPct: true,
         ivaMonto: true,
+        conceptos: true,
         pagos: { select: { importe: true } },
         viajes: { select: { id: true, monto: true } },
         tramos: { select: { viajeId: true, monto: true, ivaPct: true } },

@@ -725,6 +725,7 @@ export class DashboardService {
         facturarPorTramo: true,
         ivaPct: true,
         ivaMonto: true,
+        conceptos: true,
         pagos: { select: { importe: true } },
         viajes: { select: { id: true, facturacionEstado: true, monto: true } },
         tramos: { select: { viajeId: true, monto: true, ivaPct: true } },
@@ -744,6 +745,7 @@ export class DashboardService {
         tramos: f.tramos,
         ivaPctCabecera: f.ivaPct,
         ivaMontoGuardado: opts.ivaMontoGuardado,
+        conceptos: f.conceptos,
       }).vencida;
     });
     let montoVencidas = 0;
@@ -929,17 +931,22 @@ export class DashboardService {
         monedaMonto: true,
         precioTransportistaExterno: true,
         precioTransportistaIvaIncluidoPct: true,
+        tramosTransportista: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,
         monedaGananciaBrutaManual: true,
       },
     });
-    // Si el tenant tiene el campo deshabilitado, se ignora el % guardado (sin
-    // borrarlo de la base) — mismo criterio que viajes.service.ts.
+    // Si el tenant tiene el campo deshabilitado, se ignoran el % y los tramos guardados
+    // (sin borrarlos de la base) — mismo criterio que viajes.service.ts.
     const viajes = ivaTransportistaHabilitado
       ? viajesRaw
-      : viajesRaw.map((v) => ({ ...v, precioTransportistaIvaIncluidoPct: 0 }));
+      : viajesRaw.map((v) => ({
+          ...v,
+          precioTransportistaIvaIncluidoPct: 0,
+          tramosTransportista: [],
+        }));
 
     let cantidad = 0;
     let montoNegativoArs = 0;

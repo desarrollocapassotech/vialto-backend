@@ -46,8 +46,6 @@ async function main() {
         clerkOrgId,
         name: nameArg || clerkOrgId,
         modules: VIALTO_MODULES,
-        maxUsers: 10,
-        billingStatus: 'trial',
       },
     });
     await prisma.presentacion.createMany({

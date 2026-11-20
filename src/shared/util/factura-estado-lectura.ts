@@ -1,4 +1,10 @@
 import { fechaCalendarioAr } from "./fecha-ar.util";
+import {
+  type FacturaConcepto,
+  ivaConceptosFactura,
+  netoConceptosFactura,
+  normalizarConceptosFactura,
+} from "./factura-conceptos-extra.util";
 
 /**
  * Utilidades puras de lectura del estado de una factura.
@@ -42,14 +48,24 @@ export type FacturaCobroOpts = {
    * `null`/`undefined` = factura vieja todavía no backfilleada: se calcula.
    */
   ivaMontoGuardado?: number | null;
+  /**
+   * Conceptos de la factura además de los viajes (`Factura.conceptos`). El neto que se
+   * recalcula desde los viajes los suma; sin ellos, el importe de la factura quedaría corto.
+   */
+  conceptos?: FacturaConcepto[];
 };
 
+/**
+ * Opciones de cobro de una factura leída de la base. OJO: la consulta tiene que traer
+ * `conceptos` (si usa `select`); si no, el importe sale sin los conceptos.
+ */
 export function cobroOptsDeFactura(
   f: {
     facturarPorTramo?: boolean | null;
     ivaPct?: number | null;
     tramos?: FacturaTramoCobro[] | null;
     ivaMonto?: number | null;
+    conceptos?: unknown;
   },
   tieneArca: boolean,
 ): FacturaCobroOpts {
@@ -59,6 +75,7 @@ export function cobroOptsDeFactura(
     tramos: f.tramos ?? undefined,
     ivaPctCabecera: f.ivaPct,
     ivaMontoGuardado: f.ivaMonto,
+    conceptos: normalizarConceptosFactura(f.conceptos),
   };
 }
 
@@ -121,16 +138,19 @@ function agruparTramosPorViaje<T extends { viajeId?: string }>(
 export function importeNetoFactura(
   importeGuardado: number,
   viajes: ViajeCobro[],
-  opts?: Pick<FacturaCobroOpts, "facturarPorTramo" | "tramos">,
+  opts?: Pick<FacturaCobroOpts, "facturarPorTramo" | "tramos" | "conceptos">,
 ): number {
+  // Conceptos además de los viajes: se suman cuando el neto se rearma desde los viajes o
+  // los tramos (el `importeGuardado` ya los incluye).
+  const netoConceptos = netoConceptosFactura(opts?.conceptos ?? []);
   if (opts?.facturarPorTramo && opts.tramos && opts.tramos.length > 0) {
     const sumaTramos = roundMoney2(
       opts.tramos.reduce((s, t) => s + (t.monto ?? 0), 0),
     );
     if (viajes.length === 0) {
       return opts.tramos.length >= 2
-        ? sumaTramos
-        : Math.max(roundMoney2(importeGuardado), sumaTramos);
+        ? roundMoney2(sumaTramos + netoConceptos)
+        : Math.max(roundMoney2(importeGuardado), roundMoney2(sumaTramos + netoConceptos));
     }
     const porViaje = agruparTramosPorViaje(opts.tramos);
     const sumaRestos = roundMoney2(
@@ -140,10 +160,10 @@ export function importeNetoFactura(
         0,
       ),
     );
-    return roundMoney2(sumaTramos + sumaRestos);
+    return roundMoney2(sumaTramos + sumaRestos + netoConceptos);
   }
   if (viajes.length === 0) return importeGuardado;
-  return roundMoney2(viajes.reduce((s, v) => s + importeNetoViaje(v), 0));
+  return roundMoney2(viajes.reduce((s, v) => s + importeNetoViaje(v), 0) + netoConceptos);
 }
 
 /**
@@ -209,17 +229,27 @@ export function importeOperativoFactura(
   opts?: FacturaCobroOpts,
 ): number {
   const neto = importeNetoFactura(importeGuardado, viajes, opts);
+  // El IVA guardado ya incluye el de los conceptos; si hay que calcularlo, cada concepto
+  // lleva su alícuota y el resto (viajes) la de cabecera.
+  const conceptos = opts?.conceptos ?? [];
+  const netoConceptos = netoConceptosFactura(conceptos);
+  const ivaConceptos = ivaConceptosFactura(conceptos);
   if (opts?.facturarPorTramo && opts.tramos && opts.tramos.length > 0) {
     if (opts.ivaMontoGuardado != null && Number.isFinite(opts.ivaMontoGuardado)) {
       return roundMoney2(neto + opts.ivaMontoGuardado);
     }
-    return importeTotalConIvaPorTramo(neto, opts.tramos, opts.ivaPctCabecera, viajes);
+    return roundMoney2(
+      importeTotalConIvaPorTramo(neto, opts.tramos, opts.ivaPctCabecera, viajes) + ivaConceptos,
+    );
   }
   if (opts?.ivaMontoGuardado != null && Number.isFinite(opts.ivaMontoGuardado)) {
     return roundMoney2(neto + opts.ivaMontoGuardado);
   }
   const pct = Number(opts?.ivaPctCabecera);
-  const iva = Number.isFinite(pct) && pct > 0 ? roundMoney2((neto * pct) / 100) : 0;
+  const baseCabecera = roundMoney2(neto - netoConceptos);
+  const iva =
+    (Number.isFinite(pct) && pct > 0 ? roundMoney2((baseCabecera * pct) / 100) : 0) +
+    ivaConceptos;
   return roundMoney2(neto + iva);
 }
 
@@ -256,6 +286,8 @@ export function computeEstadoFacturaLectura(args: {
   tramos?: FacturaTramoCobro[];
   ivaPctCabecera?: number | null;
   ivaMontoGuardado?: number | null;
+  /** `Factura.conceptos` (Json tal cual se lee). Sin él, el importe queda sin los conceptos. */
+  conceptos?: unknown;
   /** Opcional: día de referencia para evaluar vencimiento (por defecto hoy en Argentina). */
   hoyReferencia?: Date | string | null;
 }): FacturaEstadoResult {
@@ -273,6 +305,7 @@ export function computeEstadoFacturaLectura(args: {
     tramos: args.tramos,
     ivaPctCabecera: args.ivaPctCabecera,
     ivaMontoGuardado: args.ivaMontoGuardado,
+    conceptos: normalizarConceptosFactura(args.conceptos),
   };
   const importe = importeOperativoFactura(
     args.importeGuardado,

@@ -19,8 +19,9 @@ export class UpdateComprobanteCcDto {
   fechaVencimiento?: string | null;
 
   /**
-   * Archivo del comprobante (URL de Cloudinary, subido antes vía upload-comprobante). Solo
-   * factura o liquidación sin ARCA: se guarda en su `comprobanteUrl`.
+   * Archivo del comprobante (URL de Cloudinary, subido antes vía upload-comprobante). Factura
+   * o liquidación sin ARCA: se guarda en su `comprobanteUrl`; movimiento manual (venta,
+   * compra, cobro, pago): en el movimiento.
    */
   @IsOptional()
   @ValidateIf((_, v) => v !== null)

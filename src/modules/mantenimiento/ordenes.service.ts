@@ -89,7 +89,10 @@ export class OrdenesService {
 
   private async assertTaller(tenantId: string, tallerId: string | null | undefined) {
     if (!tallerId) return;
-    const t = await this.prisma.taller.findFirst({ where: { id: tallerId, tenantId }, select: { activo: true } });
+    const t = await this.prisma.transportista.findFirst({
+      where: { id: tallerId, tenantId, tipo: 'taller' },
+      select: { activo: true },
+    });
     if (!t) throw new BadRequestException('El taller no existe en esta empresa.');
     if (!t.activo) throw new BadRequestException('El taller está desactivado.');
   }

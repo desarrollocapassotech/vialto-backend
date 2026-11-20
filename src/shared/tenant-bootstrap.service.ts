@@ -103,8 +103,6 @@ export class TenantBootstrapService {
           clerkOrgId,
           name,
           modules: [...VIALTO_MODULES],
-          maxUsers: 10,
-          billingStatus: 'trial',
         },
       });
       await this.seedDefaultPresentaciones(tenant.clerkOrgId);

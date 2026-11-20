@@ -13,7 +13,12 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { normalizarEtapaViaje, VIAJE_ETAPAS } from '../viaje-estados';
-import { normalizeOptionalId, OtroGastoDto, PagoTransportistaDto } from './create-viaje.dto';
+import {
+  normalizeOptionalId,
+  OtroGastoDto,
+  PagoTransportistaDto,
+  TramoTransportistaDto,
+} from './create-viaje.dto';
 import { ViajeProductoItemDto } from './viaje-producto-item.dto';
 import { ViajeDestinoItemDto } from './viaje-destino-item.dto';
 import { ViajeClienteItemDto } from './viaje-cliente-item.dto';
@@ -87,6 +92,12 @@ export class UpdateViajeDto {
   @Max(100, { message: 'El % de IVA incluido no puede superar 100.' })
   @Type(() => Number)
   precioTransportistaIvaIncluidoPct?: number;
+  /** Reemplaza los tramos del pago al transportista ([] = sin tramos). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TramoTransportistaDto)
+  tramosTransportista?: TramoTransportistaDto[];
 
   @IsOptional()
   @IsNumber({}, { message: 'La cantidad a facturar debe ser un número válido' }) @Type(() => Number) cantidadFactura?: number;

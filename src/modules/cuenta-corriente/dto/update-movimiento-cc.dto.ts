@@ -5,10 +5,12 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { LineaMovimientoCcDto } from './create-movimiento-cc.dto';
+import { CompraViajeDto, LineaMovimientoCcDto } from './create-movimiento-cc.dto';
 
 export class UpdateMovimientoCcDto {
   @IsOptional() @IsString() clienteId?: string;
@@ -27,6 +29,21 @@ export class UpdateMovimientoCcDto {
   /** null = quitar el vencimiento. */
   @IsOptional() @IsDateString() fechaVencimiento?: string | null;
   @IsOptional() @IsString() numeroComprobante?: string;
+  /** Archivo adjunto ya subido; `null` lo quita. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(2048)
+  comprobanteUrl?: string | null;
   @IsOptional() @IsString() formaPago?: string;
   @IsOptional() @IsString() referencia?: string;
+  /**
+   * Solo compras: reemplaza los viajes vinculados (`[]` = sin viajes). Sin el campo no se
+   * tocan; si cambia el importe, el reparto se reescala proporcionalmente.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CompraViajeDto)
+  viajes?: CompraViajeDto[];
 }

@@ -120,8 +120,7 @@ export class PautService {
     // Si se pasa un emisorId distinto al contratante, buscamos sus datos en la DB
     if (emisorId && emisorId !== viaje.transportista?.id) {
       const emisor = await this.prisma.transportista.findFirst({
-        // Nota: Si tu tabla transportista tiene `tenantId`, cambialo a: where: { id: emisorId, tenantId }
-        where: { id: emisorId },
+        where: { id: emisorId, tenantId, tipo: 'transportista' },
         select: {
           id: true,
           nombre: true,

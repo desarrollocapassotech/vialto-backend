@@ -63,6 +63,20 @@ export class PagoTransportistaDto {
   @IsOptional() @IsString() ccImputacionId?: string;
 }
 
+/** Tramo del pago al transportista con su propio % de IVA (ver viaje-tramos-transportista.util.ts). */
+export class TramoTransportistaDto {
+  @IsString() @IsNotEmpty({ message: "Cada tramo necesita una descripción." }) detalle: string;
+  @IsNumber({}, { message: "El monto del tramo debe ser un número válido." })
+  @Min(0.01, { message: "El monto del tramo debe ser mayor a 0." })
+  @Type(() => Number)
+  monto: number;
+  @IsNumber({}, { message: "El % de IVA del tramo debe ser un número válido." })
+  @Min(0, { message: "El % de IVA del tramo no puede ser negativo." })
+  @Max(100, { message: "El % de IVA del tramo no puede superar 100." })
+  @Type(() => Number)
+  ivaPct: number;
+}
+
 export class CreateViajeDto {
   /** Si no se envía, el servidor asigna un correlativo (AAAA-NNNNNN). */
   @IsOptional() @IsString() numero?: string;
@@ -143,6 +157,12 @@ export class CreateViajeDto {
   @Max(100, { message: "El % de IVA incluido no puede superar 100." })
   @Type(() => Number)
   precioTransportistaIvaIncluidoPct?: number;
+  /** Tramos del pago al transportista, cada uno con su % de IVA (vacío = un solo % para todo). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TramoTransportistaDto)
+  tramosTransportista?: TramoTransportistaDto[];
 
   @IsOptional()
   @IsNumber({}, { message: 'La cantidad a facturar debe ser un número válido' }) @Type(() => Number) cantidadFactura?: number;

@@ -12,7 +12,9 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
+import { siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
+import { tramosIvaParaLiquidacion } from '../../shared/util/viaje-tramos-transportista.util';
 import { generarTxtLibroIva, validarRangoLibroIva } from '../../shared/util/libro-iva.util';
 import { libroIvaCompras } from './libro-iva-compras';
 import { ArcaClientService } from './arca-client.service';
@@ -260,12 +262,17 @@ export class LiquidacionesService {
 
   // ── Liquidaciones (CVLP Tipo 60) ──────────────────────────────────────────
 
+  /** Vista previa del número que asigna "Comprobante interno" (se recalcula al guardar). */
+  async siguienteNumeroInterno(tenantId: string): Promise<{ numero: string }> {
+    return { numero: await siguienteNumeroInterno(this.prisma, tenantId) };
+  }
+
   async createLiquidacion(tenantId: string, userId: string, dto: CreateLiquidacionDto) {
     const config = await this.arcaConfig.findPublic(tenantId);
 
     // Obtener el transportista y su comisionPct
     const transportista = await (this.prisma as PrismaAny).transportista.findFirst({
-      where: { id: dto.transportistaId, tenantId },
+      where: { id: dto.transportistaId, tenantId, tipo: 'transportista' },
       select: {
         id: true,
         condicionIva: true,
@@ -326,6 +333,13 @@ export class LiquidacionesService {
     if (manual && !dto.proveedorCbteFecha) {
       throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
     }
+    // "Comprobante interno": número interno como comprobante del proveedor. Solo en
+    // liquidaciones sin Líquido Producto (con ARCA el número es el del CVLP, y la manual del
+    // monotributista lleva la factura del transportista).
+    const numeroInterno =
+      dto.numeroAutomatico && !tieneLiquidoProductoArca
+        ? await siguienteNumeroInterno(this.prisma, tenantId)
+        : null;
     if (tieneLiquidoProductoArca && !manual && moneda === 'USD') {
       throw new BadRequestException(
         'Las liquidaciones emitidas con ARCA (Líquido Producto) deben ser en ARS.',
@@ -413,6 +427,11 @@ export class LiquidacionesService {
         bruto: subtotal,
         comision: vComision,
         ivaPct: v.precioTransportistaIvaIncluidoPct || undefined,
+        tramosIva: tramosIvaParaLiquidacion(
+          subtotal,
+          v.precioTransportistaIvaIncluidoPct,
+          v.tramosTransportista,
+        ),
       };
     });
 
@@ -450,7 +469,8 @@ export class LiquidacionesService {
           comprobanteUrl: dto.comprobanteUrl ?? null,
           proveedorContrato: dto.proveedorContrato?.trim() || null,
           numeroComprobanteProveedor:
-            cbteProveedor?.numero ?? (dto.numeroComprobanteProveedor?.trim() || null),
+            cbteProveedor?.numero ??
+            (numeroInterno || dto.numeroComprobanteProveedor?.trim() || null),
           proveedorCbteTipo: cbteProveedor?.cbteTipo ?? null,
           proveedorPtoVenta: cbteProveedor?.ptoVenta ?? null,
           proveedorCbteNro: cbteProveedor?.cbteNro ?? null,
@@ -517,7 +537,7 @@ export class LiquidacionesService {
     const liq = await this.prisma.liquidacion.findUnique({
       where: { id },
       include: {
-        viajes: { select: { viajeId: true, viaje: { select: { numero: true, cantidadTransportista: true, precioUnitarioTransportista: true, precioTransportistaExterno: true, precioTransportistaIvaIncluidoPct: true } } } },
+        viajes: { select: { viajeId: true, viaje: { select: { numero: true, cantidadTransportista: true, precioUnitarioTransportista: true, precioTransportistaExterno: true, precioTransportistaIvaIncluidoPct: true, tramosTransportista: true } } } },
       },
     });
     if (!liq || liq.tenantId !== tenantId) {
@@ -589,6 +609,11 @@ export class LiquidacionesService {
         bruto: subtotal,
         comision: 0,
         ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
+        tramosIva: tramosIvaParaLiquidacion(
+          subtotal,
+          v.viaje.precioTransportistaIvaIncluidoPct,
+          v.viaje.tramosTransportista,
+        ),
       };
     });
     let brutoActual = liq.bruto as number;
@@ -686,6 +711,11 @@ export class LiquidacionesService {
           bruto: subtotal,
           comision: 0,
           ivaPct: v.precioTransportistaIvaIncluidoPct || undefined,
+          tramosIva: tramosIvaParaLiquidacion(
+            subtotal,
+            v.precioTransportistaIvaIncluidoPct,
+            v.tramosTransportista,
+          ),
         };
       });
       brutoActual = brutoNuevo;
@@ -861,6 +891,7 @@ export class LiquidacionesService {
                 precioUnitarioTransportista: true,
                 precioTransportistaExterno: true,
                 precioTransportistaIvaIncluidoPct: true,
+                tramosTransportista: true,
                 cliente: {
                   select: {
                     nombre: true,
@@ -1063,6 +1094,11 @@ export class LiquidacionesService {
           bruto: subtotal,
           comision: round2(subtotal * liquidacion.comisionPct / 100),
           ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
+          tramosIva: tramosIvaParaLiquidacion(
+            subtotal,
+            v.viaje.precioTransportistaIvaIncluidoPct,
+            v.viaje.tramosTransportista,
+          ),
         };
       });
 
@@ -1206,7 +1242,7 @@ export class LiquidacionesService {
 
     const liquidacion = await this.prisma.liquidacion.findUnique({
       where: { id: liquidacionId },
-      include: { viajes: { select: { viajeId: true, viaje: { select: { numero: true, cantidadTransportista: true, precioUnitarioTransportista: true, precioTransportistaExterno: true, precioTransportistaIvaIncluidoPct: true } } } } },
+      include: { viajes: { select: { viajeId: true, viaje: { select: { numero: true, cantidadTransportista: true, precioUnitarioTransportista: true, precioTransportistaExterno: true, precioTransportistaIvaIncluidoPct: true, tramosTransportista: true } } } } },
     });
     if (!liquidacion || liquidacion.tenantId !== tenantId) {
       throw new NotFoundException('Liquidación no encontrada');
@@ -1294,6 +1330,11 @@ export class LiquidacionesService {
           bruto: subtotal,
           comision: round2(subtotal * liquidacion.comisionPct / 100),
           ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
+          tramosIva: tramosIvaParaLiquidacion(
+            subtotal,
+            v.viaje.precioTransportistaIvaIncluidoPct,
+            v.viaje.tramosTransportista,
+          ),
         };
       });
 
@@ -2172,6 +2213,7 @@ export class LiquidacionesService {
                 precioUnitarioTransportista: true,
                 precioTransportistaExterno: true,
                 precioTransportistaIvaIncluidoPct: true,
+                tramosTransportista: true,
                 cliente: {
                   select: {
                     id: true,

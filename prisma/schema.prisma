@@ -18,9 +18,7 @@ model Tenant {
   name                                   String
   idFiscal                               String?   @unique
   modules                                String[]  @default([])
-  maxUsers                               Int       @default(10)
-  billingStatus                          String    @default("trial") // trial | active | suspended | expired
-  billingRenewsAt                        DateTime?
+  // Suscripción (estado, renovación, máx. usuarios): se maneja en otro sistema, no en Vialto.
   whiteLabelDomain                       String?
   /**
    * Label del campo "ID propio" en el módulo de viajes, personalizable por tenant (ej. "Nro de CTG").
@@ -114,6 +112,14 @@ model Tenant {
    */
   dashboardHabilitado             Boolean  @default(true)
   /**
+   * Bloques del dashboard de inicio, en el orden en que se muestran (ids de
+   * `DASHBOARD_BLOQUES` en `update-tenant.dto.ts`, espejo de `lib/dashboardBloques.ts`
+   * del frontend). [] (default) = el set recomendado según los módulos contratados.
+   * Un bloque de un módulo que la empresa ya no tiene no se muestra (no se borra).
+   * Se configura solo desde superadmin (ficha de la empresa → Dashboard).
+   */
+  dashboardBloques                String[] @default([])
+  /**
    * true (default) = origen/destino de Viajes se eligen de un buscador de ciudades
    * (catálogo externo, obliga a elegir de la lista) y el import valida las ciudades del
    * Excel contra ese catálogo. false = texto libre, sin sugerencias ni validación. Se
@@ -201,8 +207,8 @@ model Tenant {
   vehiculoKmEdiciones        VehiculoKmEdicion[]
   planesMantenimiento        PlanMantenimiento[]
   vehiculosPlanes            VehiculoPlan[]
-  talleres                   Taller[]
   ordenesTrabajo             OrdenTrabajo[]
+  comprasViajes              CompraViaje[]
   ordenTrabajoSecuencia      OrdenTrabajoSecuencia?
   importTemplates            ImportTemplate[]
   importLogs                 ImportLog[]
@@ -267,7 +273,18 @@ model Transportista {
   idFiscal                String?
   email                   String?
   telefono                String?
-  tipo                    String    @default("externo") // siempre externo
+  /**
+   * Tipo de proveedor: transportista | taller | otro (ver `shared/util/proveedor-tipo.ts`). La tabla guarda todos los proveedores de la empresa; solo los "transportista" se usan en Viajes/Liquidaciones/Choferes/Vehículos y solo los "taller" en las órdenes de trabajo.
+   */
+  tipo                    String    @default("transportista")
+  /**
+   * Solo tipo "otro": nombre del tipo que cargó la empresa (ej. "Combustible", "Gomería"). Las categorías ya usadas se ofrecen en el selector de tipo (`GET transportistas/categorias`). Null en transportista/taller.
+   */
+  categoria               String?
+  /**
+   * false = desactivado: no se ofrece en los selectores, conserva su historial.
+   */
+  activo                  Boolean   @default(true)
   paut                    String? // número de PAUT
   permisoInternacional    String? // número de permiso internacional
   fechaVencimientoPermiso DateTime? // vencimiento del permiso internacional
@@ -294,8 +311,10 @@ model Transportista {
   facturas       Factura[]
   liquidaciones  Liquidacion[]
   movimientosCc  MovimientoCuentaCorriente[]
+  ordenesTrabajo OrdenTrabajo[]
 
   @@index([tenantId])
+  @@index([tenantId, tipo])
   @@map("transportistas")
 }
 
@@ -650,6 +669,12 @@ model Viaje {
    * % de IVA ya incluido en precioTransportistaExterno (0 = no incluye). Se "netea" antes de sumarlo al bruto de una Liquidación, para no duplicar el IVA.
    */
   precioTransportistaIvaIncluidoPct Float           @default(0)
+  /**
+   * IVA por tramo del pago al transportista: [{ detalle, monto, ivaPct }]. Lo que no
+   * cubren los tramos usa precioTransportistaIvaIncluidoPct. Vacío = cálculo de siempre.
+   * Ver shared/util/viaje-tramos-transportista.util.ts.
+   */
+  tramosTransportista               Json            @default("[]")
 
   cantidadFactura             Float?
   precioUnitarioFactura       Float?
@@ -680,6 +705,7 @@ model Viaje {
   facturaTramos              FacturaTramo[]
   nroFactura                 String?
   movimientosCuentaCorriente MovimientoCuentaCorriente[]
+  comprasCc                  CompraViaje[]
   liquidacionesViaje         LiquidacionViaje[]
 
   @@unique([tenantId, numero])
@@ -741,6 +767,14 @@ model Factura {
    * de los viajes (pedido NyM, nov 2026). No se informan a ARCA. Se editan solo en borrador.
    */
   observaciones    String[]       @default([])
+  /**
+   * Conceptos que se suman a la factura además de los viajes (nov 2026), ej. estadía o carga y
+   * descarga; por defecto se precargan con los gastos de los viajes elegidos. Json
+   * `[{ descripcion, importe (neto, > 0), ivaPct }]`, sin catálogo (a diferencia de los
+   * conceptos de liquidación). Su neto está incluido en `importe` y su IVA en `ivaMonto`; los
+   * lectores que recalculan el neto desde los viajes lo suman vía `cobroOptsDeFactura`.
+   */
+  conceptos        Json           @default("[]")
   /**
    * Factura hecha por fuera del sistema en una empresa con `emision-facturas-arca`: no se
    * emite en ARCA, lleva número y comprobante adjunto, y se trata como en una empresa sin ARCA.
@@ -897,6 +931,10 @@ model MovimientoCuentaCorriente {
    * Referencia libre a un número de comprobante externo (tenants sin módulo de Facturación, o proveedores sin factura formal en el sistema). No confundir con `facturaId`, que vincula a una Factura real emitida por Vialto.
    */
   numeroComprobante    String?
+  /**
+   * Archivo adjunto (Cloudinary) de una venta/compra/cobro/pago manual: la factura, el recibo o la orden de pago. Facturas y liquidaciones guardan el suyo en su propia tabla (`Factura.comprobanteUrl`, `Liquidacion.comprobanteUrl`), no acá.
+   */
+  comprobanteUrl       String?
   referencia           String?
   /**
    * Solo aplica a cargos: pendiente | parcial | cancelado, según cuánto de su importe cubren las imputaciones recibidas. Se recalcula, nunca se edita a mano.
@@ -911,6 +949,7 @@ model MovimientoCuentaCorriente {
 
   imputacionesComoCargo ImputacionCuentaCorriente[] @relation("ImputacionCargo")
   imputacionesComoPago  ImputacionCuentaCorriente[] @relation("ImputacionPago")
+  viajesCompra          CompraViaje[]
 
   @@unique([tenantId, facturaId])
   @@unique([tenantId, liquidacionId])
@@ -924,6 +963,28 @@ model MovimientoCuentaCorriente {
   @@index([tenantId, viajeId])
   @@index([tenantId, facturaId])
   @@map("movimientos_cuenta_corriente")
+}
+
+/**
+ * Compra manual de Cuenta corriente vinculada (opcionalmente) a uno o varios viajes, con la
+ * parte del importe NETO que le toca a cada uno (nov 2026). Cada vínculo se refleja en
+ * `Viaje.otrosGastos` como una línea de solo lectura con `ccCompraId` (ver
+ * `cuenta-corriente/compra-viajes.ts`), así resta en la ganancia bruta del viaje.
+ */
+model CompraViaje {
+  id           String                    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant                    @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
+  movimientoId String
+  movimiento   MovimientoCuentaCorriente @relation(fields: [movimientoId], references: [id], onDelete: Cascade)
+  viajeId      String
+  viaje        Viaje                     @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  importe      Float
+  createdAt    DateTime                  @default(now())
+
+  @@unique([movimientoId, viajeId])
+  @@index([tenantId, viajeId])
+  @@map("compras_viajes")
 }
 
 model ImputacionCuentaCorriente {
@@ -1319,21 +1380,6 @@ model VehiculoPlan {
   @@map("vehiculos_planes")
 }
 
-model Taller {
-  id       String         @id @default(cuid())
-  tenantId String
-  tenant   Tenant         @relation(fields: [tenantId], references: [clerkOrgId], onDelete: Cascade)
-  nombre   String
-  cuit     String?
-  telefono String?
-  interno  Boolean        @default(false) // previsto, sin UI
-  activo   Boolean        @default(true)
-  ordenes  OrdenTrabajo[]
-
-  @@unique([tenantId, nombre])
-  @@map("talleres")
-}
-
 model OrdenTrabajo {
   id          String             @id @default(cuid())
   tenantId    String
@@ -1344,8 +1390,8 @@ model OrdenTrabajo {
   tipo        String // preventivo | correctivo
   origen      String             @default("manual") // manual | plan | reporte_chofer (futuro)
   estado      String             @default("cerrada") // abierta | en_curso | cerrada | anulada — MVP solo cerrada/anulada
-  tallerId    String?
-  taller      Taller?            @relation(fields: [tallerId], references: [id], onDelete: SetNull)
+  tallerId    String? // proveedor (Transportista) de tipo "taller"
+  taller      Transportista?     @relation(fields: [tallerId], references: [id], onDelete: SetNull)
   fecha       DateTime // fecha del trabajo (sin hora, UTC)
   km          Int?
   horas       Float? // previsto, sin UI

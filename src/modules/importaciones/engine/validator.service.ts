@@ -900,7 +900,11 @@ export class ValidatorService {
       case "vehiculos":
         return this.prisma.vehiculo.findMany({ where: { tenantId }, select });
       case "transportistas":
-        return this.prisma.transportista.findMany({ where: { tenantId }, select });
+        // Solo los proveedores tipo transportista se pueden vincular a un viaje/chofer/vehículo.
+        return this.prisma.transportista.findMany({
+          where: { tenantId, tipo: "transportista" },
+          select,
+        });
       case "productos":
         // Solo activos: un producto inactivo no debe poder vincularse desde el
         // import, mismo criterio que el alta manual (assertProductosAsignables).

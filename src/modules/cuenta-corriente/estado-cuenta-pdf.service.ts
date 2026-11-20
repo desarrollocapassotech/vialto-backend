@@ -496,6 +496,237 @@ export class EstadoCuentaPdfService {
     });
   }
 
+  /**
+   * Orden de pago de un pago a proveedor (nov 2026), generada al pedirla (no se guarda):
+   * empresa y proveedor, número y fecha, los comprobantes que cancela (sus imputaciones),
+   * el valor entregado (medio de pago) y el saldo que queda a cuenta.
+   */
+  async generateOrdenPago(tenantId: string, movimientoId: string) {
+    const mov = await this.prisma.movimientoCuentaCorriente.findFirst({
+      where: { id: movimientoId, tenantId },
+      include: {
+        proveedor: {
+          select: { nombre: true, idFiscal: true, domicilio: true, telefono: true, condicionIva: true },
+        },
+        imputacionesComoPago: {
+          where: { tenantId },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            importe: true,
+            cargo: {
+              select: { concepto: true, numeroComprobante: true, fecha: true, importe: true },
+            },
+          },
+        },
+      },
+    });
+    if (!mov || mov.tipo !== 'pago' || !mov.proveedorId || !mov.proveedor) {
+      throw new NotFoundException('Orden de pago no encontrada');
+    }
+    const [tenant, arca] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { clerkOrgId: tenantId },
+        select: { name: true, idFiscal: true },
+      }),
+      this.prisma.arcaConfig.findUnique({
+        where: { tenantId },
+        select: { razonSocial: true, cuitEmisor: true, domicilioEmisor: true, condicionIvaEmisor: true },
+      }),
+    ]);
+
+    const buffer = await this.buildOrdenPagoPdf({
+      logo: await this.logoEmpresa(tenantId),
+      empresa: {
+        nombre: arca?.razonSocial?.trim() || tenant?.name || 'Vialto',
+        cuit: arca?.cuitEmisor?.trim() || tenant?.idFiscal || null,
+        domicilio: arca?.domicilioEmisor?.trim() || null,
+        condicionIva: arca?.condicionIvaEmisor?.trim() || null,
+      },
+      proveedor: mov.proveedor,
+      numero: mov.numeroComprobante,
+      fecha: mov.fecha,
+      importe: mov.importe,
+      moneda: mov.moneda,
+      medio: mov.referencia,
+      comprobantes: mov.imputacionesComoPago.map((i) => ({
+        comprobante: [i.cargo.concepto, i.cargo.numeroComprobante].filter(Boolean).join(' '),
+        fecha: i.cargo.fecha,
+        importe: i.cargo.importe,
+        cancela: i.importe,
+      })),
+    });
+    const filename = `orden-de-pago-${slugify(mov.numeroComprobante ?? mov.id)}.pdf`;
+    return { buffer, filename };
+  }
+
+  private buildOrdenPagoPdf(p: {
+    logo: Buffer | null;
+    empresa: { nombre: string; cuit: string | null; domicilio: string | null; condicionIva: string | null };
+    proveedor: {
+      nombre: string;
+      idFiscal: string | null;
+      domicilio: string | null;
+      telefono: string | null;
+      condicionIva: number | null;
+    };
+    numero: string | null;
+    fecha: Date;
+    importe: number;
+    moneda: string;
+    medio: string | null;
+    comprobantes: { comprobante: string; fecha: Date; importe: number; cancela: number }[];
+  }): Promise<Buffer> {
+    const monto = (n: number) => `$ ${fmtMoney(n)} ${p.moneda}`;
+    const totalCancela = p.comprobantes.reduce((s, c) => s + c.cancela, 0);
+    const saldoACuenta = Math.max(Math.round((p.importe - totalCancela) * 100) / 100, 0);
+    const condIva = (c: number | null) =>
+      c === 1 ? 'Responsable Inscripto' : c === 4 ? 'IVA Exento' : c === 5 ? 'Consumidor Final' : c === 6 ? 'Monotributista' : null;
+
+    return new Promise((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ size: 'A4', margin: MARGIN });
+        const chunks: Buffer[] = [];
+        doc.on('data', (c: Buffer) => chunks.push(c));
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
+        const anchoTexto = CONTENT_WIDTH - (p.logo ? LOGO_W + 10 : 0);
+
+        // Encabezado: título y empresa a la izquierda, logo a la derecha.
+        this.drawLogo(doc, p.logo);
+        doc.font('Helvetica-Bold').fontSize(16).fillColor('#000')
+          .text('ORDEN DE PAGO', MARGIN, MARGIN, { width: anchoTexto });
+        doc.moveDown(0.3);
+        doc.font('Helvetica-Bold').fontSize(11).text(p.empresa.nombre, { width: anchoTexto });
+        doc.font('Helvetica').fontSize(8.5).fillColor('#333');
+        if (p.empresa.domicilio) doc.text(p.empresa.domicilio, { width: anchoTexto });
+        if (p.empresa.cuit) doc.text(`CUIT: ${p.empresa.cuit}`, { width: anchoTexto });
+        if (p.empresa.condicionIva) doc.text(`IVA: ${p.empresa.condicionIva}`, { width: anchoTexto });
+
+        let y = Math.max(doc.y, MARGIN + LOGO_H) + 10;
+        doc.moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#000').lineWidth(1).stroke();
+        y += 12;
+
+        // Proveedor a la izquierda; número y fecha a la derecha.
+        const colDerX = MARGIN + CONTENT_WIDTH - 190;
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000')
+          .text(`Sr./es.: ${p.proveedor.nombre}`, MARGIN, y, { width: colDerX - MARGIN - 10 });
+        doc.font('Helvetica').fontSize(8.5).fillColor('#333');
+        const datosProv = [
+          p.proveedor.domicilio,
+          p.proveedor.idFiscal ? `CUIT: ${p.proveedor.idFiscal}` : null,
+          condIva(p.proveedor.condicionIva) ? `IVA: ${condIva(p.proveedor.condicionIva)}` : null,
+          p.proveedor.telefono ? `Tel.: ${p.proveedor.telefono}` : null,
+        ].filter(Boolean) as string[];
+        for (const d of datosProv) doc.text(d, MARGIN, doc.y, { width: colDerX - MARGIN - 10 });
+        const yIzq = doc.y;
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000')
+          .text(`Orden de pago N°: ${p.numero?.trim() || 's/n'}`, colDerX, y, { width: 190, align: 'right' });
+        doc.font('Helvetica').fontSize(9).fillColor('#333')
+          .text(`Fecha: ${fmtDate(p.fecha)}`, colDerX, doc.y + 2, { width: 190, align: 'right' });
+        y = Math.max(yIzq, doc.y) + 16;
+
+        doc.font('Helvetica').fontSize(9).fillColor('#000').text('De nuestra mayor consideración:', MARGIN, y);
+        doc.fontSize(8.5).fillColor('#333').text(
+          p.comprobantes.length > 0
+            ? `Adjuntamos los valores que se detallan al pie, por la suma de ${monto(p.importe)}, para aplicarlos al pago de los siguientes comprobantes:`
+            : `Adjuntamos los valores que se detallan al pie, por la suma de ${monto(p.importe)}, a cuenta.`,
+          MARGIN,
+          doc.y + 2,
+          { width: CONTENT_WIDTH },
+        );
+        y = doc.y + 12;
+
+        // Comprobantes que cancela.
+        const cols = {
+          comprobante: { x: MARGIN, w: 215 },
+          fecha: { x: MARGIN + 215, w: 80 },
+          importe: { x: MARGIN + 295, w: 110 },
+          cancela: { x: MARGIN + 405, w: CONTENT_WIDTH - 405 },
+        };
+        if (p.comprobantes.length > 0) {
+          doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#000');
+          doc.text('Comprobante', cols.comprobante.x, y, { width: cols.comprobante.w });
+          doc.text('Fecha emisión', cols.fecha.x, y, { width: cols.fecha.w, align: 'center' });
+          doc.text('Importe', cols.importe.x, y, { width: cols.importe.w - 5, align: 'right' });
+          doc.text('Cancela', cols.cancela.x, y, { width: cols.cancela.w, align: 'right' });
+          y += 13;
+          doc.moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#000').lineWidth(0.7).stroke();
+          y += 5;
+          doc.font('Helvetica').fontSize(8.5).fillColor('#000');
+          for (const c of p.comprobantes) {
+            if (y + ROW_H > PAGE_BOTTOM - 120) {
+              doc.addPage();
+              y = MARGIN;
+            }
+            doc.text(c.comprobante || 'Sin comprobante', cols.comprobante.x, y, {
+              width: cols.comprobante.w - 5,
+              ellipsis: true,
+              lineBreak: false,
+            });
+            doc.text(fmtDate(c.fecha), cols.fecha.x, y, { width: cols.fecha.w, align: 'center' });
+            doc.text(monto(c.importe), cols.importe.x, y, { width: cols.importe.w - 5, align: 'right' });
+            doc.text(monto(c.cancela), cols.cancela.x, y, { width: cols.cancela.w, align: 'right' });
+            y += ROW_H - 4;
+          }
+          doc.moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#000').lineWidth(0.7).stroke();
+          y += 5;
+          doc.font('Helvetica-Bold').text('TOTAL:', cols.importe.x, y, { width: cols.importe.w - 5, align: 'right' });
+          doc.text(monto(totalCancela), cols.cancela.x, y, { width: cols.cancela.w, align: 'right' });
+          y += 22;
+        }
+
+        // Detalle de los valores entregados.
+        doc.moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y).dash(3, { space: 3 }).strokeColor('#555').stroke();
+        doc.undash();
+        y += 6;
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#000')
+          .text('DETALLE DE LOS VALORES', MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
+        y = doc.y + 4;
+        doc.fontSize(8.5).text('Valor entregado', MARGIN, y);
+        doc.text('Importe', MARGIN, y, { width: CONTENT_WIDTH, align: 'right' });
+        y += 13;
+        doc.moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y).strokeColor('#000').lineWidth(0.7).stroke();
+        y += 5;
+        doc.font('Helvetica').fontSize(8.5)
+          .text(p.medio?.trim() || '—', MARGIN, y, { width: CONTENT_WIDTH - 130 });
+        doc.text(monto(p.importe), MARGIN, y, { width: CONTENT_WIDTH, align: 'right' });
+        y = doc.y + 30;
+
+        // Totales.
+        if (y + 60 > PAGE_BOTTOM) {
+          doc.addPage();
+          y = MARGIN;
+        }
+        const totX = MARGIN + CONTENT_WIDTH - 240;
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('#000');
+        doc.text('TOTAL PAGO:', totX, y, { width: 120, align: 'right' });
+        doc.text(monto(p.importe), totX + 120, y, { width: 120, align: 'right' });
+        y += 16;
+        doc.text('SALDO A CUENTA:', totX, y, { width: 120, align: 'right' });
+        doc.text(monto(saldoACuenta), totX + 120, y, { width: 120, align: 'right' });
+
+        // Firma y pie.
+        const yFirma = PAGE_BOTTOM - 40;
+        doc.moveTo(MARGIN + CONTENT_WIDTH - 200, yFirma)
+          .lineTo(MARGIN + CONTENT_WIDTH, yFirma)
+          .strokeColor('#555')
+          .lineWidth(0.7)
+          .stroke();
+        doc.font('Helvetica').fontSize(8).fillColor('#555')
+          .text('Firma y aclaración', MARGIN + CONTENT_WIDTH - 200, yFirma + 4, { width: 200, align: 'center' });
+        doc.fontSize(7).fillColor('#999')
+          .text(`Generado el ${fmtDate(new Date())} | Vialto Software`, MARGIN, doc.page.height - MARGIN - 15, {
+            width: CONTENT_WIDTH,
+            align: 'center',
+          });
+
+        doc.end();
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   private drawTableHeader(doc: PDFKit.PDFDocument, y: number, layout: LayoutEstadoCuenta): number {
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#555');
     doc.text('Fecha', layout.fecha.x, y, { width: layout.fecha.w });

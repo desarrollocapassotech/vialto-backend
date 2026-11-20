@@ -48,6 +48,7 @@ export async function evaluarFacturasConSaldo(
       facturarPorTramo: true,
       ivaPct: true,
       ivaMonto: true,
+      conceptos: true,
       clienteId: true,
       pagos: { select: { importe: true } },
       viajes: { select: { id: true, facturacionEstado: true, monto: true } },
@@ -80,6 +81,7 @@ export async function evaluarFacturasConSaldo(
       tramos: f.tramos,
       ivaPctCabecera: f.ivaPct,
       ivaMontoGuardado: opts.ivaMontoGuardado,
+      conceptos: f.conceptos,
     });
     if (estado.cobrado || estado.estado === 'anulado') continue;
 

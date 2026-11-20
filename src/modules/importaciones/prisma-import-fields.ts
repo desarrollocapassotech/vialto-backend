@@ -21,7 +21,7 @@ const SKIP_SIEMPRE = new Set([
 /** Campos internos / de sistema que no se importan aunque existan en Prisma. */
 export const PRISMA_IMPORT_EXCLUDE: Record<string, ReadonlySet<string>> = {
   Cliente: new Set(),
-  Transportista: new Set(["tipo"]),
+  Transportista: new Set(["tipo", "activo"]),
   Chofer: new Set(["pin", "activo"]),
   Vehiculo: new Set(["activo", "patentePendiente"]),
   Viaje: new Set([

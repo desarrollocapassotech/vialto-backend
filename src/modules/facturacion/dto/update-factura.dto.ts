@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { FacturaTramoDto } from './factura-tramo.dto';
+import { FacturaConceptoDto } from './create-factura.dto';
 
 export class UpdateFacturaDto {
   @IsOptional() @IsString() numero?: string;
@@ -39,6 +40,13 @@ export class UpdateFacturaDto {
   @IsString({ each: true })
   @MaxLength(300, { each: true })
   observaciones?: string[];
+  /** Ver `CreateFacturaDto.conceptos`. Sin el campo no se tocan; `[]` los quita. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => FacturaConceptoDto)
+  conceptos?: FacturaConceptoDto[];
   @IsOptional() @IsBoolean() facturarPorTramo?: boolean;
   @IsOptional()
   @IsArray()

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -33,6 +34,7 @@ import {
   type ViajeConVehiculosViaje,
 } from "./viaje-vehiculos.helper";
 import { evaluarValorizacionViaje } from "./viaje-valorizacion.util";
+import { resolverMontoInput } from "./viaje-montos.util";
 import {
   assertClientesDelViaje,
   assertProductosClientesDelViaje,
@@ -61,6 +63,7 @@ import {
   estadoDisponibilidadCcDesde,
 } from "./viaje-cuenta-corriente";
 import { sincronizarPagosCcDelViaje } from "./viaje-pago-cuenta-corriente";
+import { mergeGastosConCompras } from "../../shared/cuenta-corriente/compra-viajes";
 import {
   buildViajeExportacionesResponse,
   enrichViajeConExportaciones,
@@ -84,6 +87,10 @@ import {
   type ViajesSortFieldTexto,
 } from "./viajes-paginated-query.util";
 import { ordenarPorClaves } from "../../shared/util/orden-listado.util";
+import {
+  normalizarTramosTransportista,
+  validarTramosTransportista,
+} from "../../shared/util/viaje-tramos-transportista.util";
 
 /** Documentos por viaje: máximo 3 y 10 MB entre todos. */
 const MAX_ADJUNTOS_VIAJE = 3;
@@ -377,12 +384,19 @@ export class ViajesService {
    * tener que conocer la configuración del tenant.
    */
   private zerarIvaTransportistaSiDeshabilitado<
-    T extends { precioTransportistaIvaIncluidoPct?: unknown },
+    T extends { precioTransportistaIvaIncluidoPct?: unknown; tramosTransportista?: unknown },
   >(item: T, habilitado: boolean): T {
     if (habilitado || item.precioTransportistaIvaIncluidoPct == null) {
       return item;
     }
-    return { ...item, precioTransportistaIvaIncluidoPct: 0 };
+    // Los tramos de IVA van con el mismo campo: deshabilitado = no aplican.
+    return { ...item, precioTransportistaIvaIncluidoPct: 0, tramosTransportista: [] };
+  }
+
+  /** Valida los tramos de IVA del transportista contra el neto del viaje. */
+  private assertTramosTransportista(tramos: unknown, neto: number | null | undefined): void {
+    const error = validarTramosTransportista(tramos, neto);
+    if (error) throw new BadRequestException(error);
   }
 
   /**
@@ -434,6 +448,7 @@ export class ViajesService {
       id?: string;
       precioTransportistaExterno?: number | null;
       precioTransportistaIvaIncluidoPct?: number | null;
+      tramosTransportista?: unknown;
       liquidacionesViaje?: any[];
     },
     ivaTransportistaHabilitado: boolean,
@@ -495,6 +510,7 @@ export class ViajesService {
       precioTransportistaExterno?: number | null;
       monedaPrecioTransportistaExterno?: string | null;
       precioTransportistaIvaIncluidoPct?: number | null;
+      tramosTransportista?: unknown;
       pagosTransportista?: unknown;
       liquidacionesViaje?: any[];
     },
@@ -746,7 +762,7 @@ export class ViajesService {
       this.prisma.cliente.findFirst({ where: { id: dto.clienteId, tenantId } }),
       dto.transportistaId
         ? this.prisma.transportista.findFirst({
-            where: { id: dto.transportistaId, tenantId },
+            where: { id: dto.transportistaId, tenantId, tipo: 'transportista' },
           })
         : null,
       dto.choferId
@@ -756,7 +772,7 @@ export class ViajesService {
         : null,
       dto.transportistaEfectivoId
         ? this.prisma.transportista.findFirst({
-            where: { id: dto.transportistaEfectivoId, tenantId },
+            where: { id: dto.transportistaEfectivoId, tenantId, tipo: 'transportista' },
           })
         : null,
     ]);
@@ -909,6 +925,7 @@ export class ViajesService {
           precioTransportistaExterno: true,
           monedaPrecioTransportistaExterno: true,
           precioTransportistaIvaIncluidoPct: true,
+          tramosTransportista: true,
           pagosTransportista: true,
           liquidacionesViaje: {
             include: {
@@ -1336,6 +1353,7 @@ export class ViajesService {
           monedaMonto: true,
           precioTransportistaExterno: true,
           precioTransportistaIvaIncluidoPct: true,
+          tramosTransportista: true,
           monedaPrecioTransportistaExterno: true,
           otrosGastos: true,
           gananciaBrutaManual: true,
@@ -1362,6 +1380,10 @@ export class ViajesService {
             conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
               ? 0
               : row.precioTransportistaIvaIncluidoPct,
+          tramosTransportista:
+            conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
+              ? []
+              : row.tramosTransportista,
           monedaPrecioTransportistaExterno:
             conReales.monedaCostoLiquidadoReal ??
             row.monedaPrecioTransportistaExterno,
@@ -1457,6 +1479,7 @@ export class ViajesService {
         monedaMonto: true,
         precioTransportistaExterno: true,
         precioTransportistaIvaIncluidoPct: true,
+        tramosTransportista: true,
         monedaPrecioTransportistaExterno: true,
         otrosGastos: true,
         gananciaBrutaManual: true,
@@ -1481,6 +1504,10 @@ export class ViajesService {
         conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
           ? 0
           : row.precioTransportistaIvaIncluidoPct,
+      tramosTransportista:
+        conReales.costoLiquidadoReal != null || !ivaTransportistaHabilitado
+          ? []
+          : row.tramosTransportista,
       monedaPrecioTransportistaExterno:
         conReales.monedaCostoLiquidadoReal ??
         row.monedaPrecioTransportistaExterno,
@@ -1597,6 +1624,14 @@ export class ViajesService {
         dto.cantidadTransportista * dto.precioUnitarioTransportista;
     }
 
+    // Tramos de IVA del transportista: solo si la empresa tiene el IVA del transportista
+    // habilitado y el viaje tiene transportista; si no, se ignoran.
+    const tramosTransportista =
+      ivaTransportistaHabilitado && refs.transportistaId
+        ? (dto.tramosTransportista ?? [])
+        : [];
+    this.assertTramosTransportista(tramosTransportista, precioTransportistaExterno);
+
     const numero =
       dto.numero?.trim() || (await generateNumeroViaje(this.prisma, tenantId));
     const gananciaPersist = this.applyGananciaBrutaFields(
@@ -1615,6 +1650,7 @@ export class ViajesService {
         precioTransportistaExterno,
         monedaPrecioTransportistaExterno: dto.monedaPrecioTransportistaExterno,
         precioTransportistaIvaIncluidoPct: dto.precioTransportistaIvaIncluidoPct,
+        tramosTransportista,
         pagosTransportista: dto.pagosTransportista,
         liquidacionesViaje: [], // Al crearse, obviamente no tiene liquidaciones.
       },
@@ -1650,6 +1686,9 @@ export class ViajesService {
             dto.monedaPrecioTransportistaExterno === "USD" ? "USD" : "ARS",
           precioTransportistaIvaIncluidoPct:
             dto.precioTransportistaIvaIncluidoPct ?? 0,
+          tramosTransportista: normalizarTramosTransportista(
+            tramosTransportista,
+          ) as unknown as Prisma.InputJsonValue,
           cantidadFactura: dto.cantidadFactura ?? null,
           precioUnitarioFactura: dto.precioUnitarioFactura ?? null,
           cantidadTransportista: dto.cantidadTransportista ?? null,
@@ -1702,20 +1741,23 @@ export class ViajesService {
   }
 
   /**
-   * Campos que afectan comprobantes ya emitidos (montos, tarifas, cliente,
-   * transportista). Se bloquean solo mientras el viaje tiene una factura o
-   * liquidación vigente; los campos operativos (fechas, km, litros,
+   * Campos que afectan comprobantes ya emitidos, separados por lado. Los del
+   * cliente se bloquean con una factura vigente; los del transportista, con una
+   * liquidación vigente. Los campos operativos (fechas, km, litros,
    * observaciones, etc.) siempre se pueden editar.
    */
-  private static readonly CAMPOS_FISCALES_VIAJE = [
+  private static readonly CAMPOS_FISCALES_CLIENTE = [
     "clienteId",
-    "transportistaId",
-    "transportistaEfectivoId",
-    "contratanteRealizaFlete",
     "monto",
     "monedaMonto",
     "cantidadFactura",
     "precioUnitarioFactura",
+  ] as const;
+
+  private static readonly CAMPOS_FISCALES_TRANSPORTE = [
+    "transportistaId",
+    "transportistaEfectivoId",
+    "contratanteRealizaFlete",
     "precioTransportistaExterno",
     "monedaPrecioTransportistaExterno",
     "cantidadTransportista",
@@ -1726,8 +1768,27 @@ export class ViajesService {
     "pagosTransportista",
   ] as const;
 
-  async update(id: string, tenantId: string, dto: UpdateViajeDto) {
+  async update(
+    id: string,
+    tenantId: string,
+    dto: UpdateViajeDto,
+    userRole?: string | null,
+  ) {
     const current = await this.findOne(id, tenantId);
+
+    if (userRole === "member") {
+      if (current.etapa === "finalizado") {
+        throw new ForbiddenException(
+          "Los viajes finalizados solo pueden ser editados por administradores",
+        );
+      }
+      const valorizacionActual = evaluarValorizacionViaje(current);
+      if (valorizacionActual.valorizado) {
+        throw new ForbiddenException(
+          "Los viajes valorizados solo pueden ser editados por administradores",
+        );
+      }
+    }
     // Solo se valida si el campo viene explícito en el request (no bloquea
     // ediciones de otros campos en viajes viejos que quedaron sin ID Propio 1
     // antes de que el tenant deshabilitara el ID Sistema).
@@ -1753,41 +1814,16 @@ export class ViajesService {
         liquidacionEstado,
       );
 
+    // Lock por lado, con o sin ARCA (pedido NyM, nov 2026): la factura bloquea solo
+    // el lado cliente y la liquidación solo el lado transportista. Un viaje facturado
+    // pero sin liquidar puede corregir cantidad/precio del transportista antes de
+    // liquidarlo (ej. factura por 36,6 tn y liquidación por 31,16 tn).
     if (bloqueadoPorFactura || bloqueadoPorLiquidacion) {
-      const tieneArca = await this.tieneArca(tenantId);
+      const bloqueados: string[] = [];
+      if (bloqueadoPorFactura) bloqueados.push(...ViajesService.CAMPOS_FISCALES_CLIENTE);
+      if (bloqueadoPorLiquidacion) bloqueados.push(...ViajesService.CAMPOS_FISCALES_TRANSPORTE);
 
-      let camposBloqueados: readonly string[];
-      if (tieneArca) {
-        camposBloqueados = ViajesService.CAMPOS_FISCALES_VIAJE;
-      } else {
-        const camposCliente = [
-          "clienteId",
-          "monto",
-          "monedaMonto",
-          "cantidadFactura",
-          "precioUnitarioFactura",
-        ];
-        const camposTransporte = [
-          "transportistaId",
-          "transportistaEfectivoId",
-          "contratanteRealizaFlete",
-          "precioTransportistaExterno",
-          "monedaPrecioTransportistaExterno",
-          "cantidadTransportista",
-          "precioUnitarioTransportista",
-          "gananciaBrutaManual",
-          "monedaGananciaBrutaManual",
-          "otrosGastos",
-          "pagosTransportista",
-        ];
-
-        const bloqueados: string[] = [];
-        if (bloqueadoPorFactura) bloqueados.push(...camposCliente);
-        if (bloqueadoPorLiquidacion) bloqueados.push(...camposTransporte);
-        camposBloqueados = bloqueados;
-      }
-
-      const camposTocados = camposBloqueados.filter(
+      const camposTocados = bloqueados.filter(
         (campo) => (dto as Record<string, unknown>)[campo] !== undefined,
       );
       if (camposTocados.length > 0) {
@@ -1797,10 +1833,9 @@ export class ViajesService {
             : bloqueadoPorFactura
               ? "facturado"
               : "liquidado";
-              
-        const detalle = tieneArca
-          ? "los datos comerciales"
-          : (bloqueadoPorFactura && bloqueadoPorLiquidacion)
+
+        const detalle =
+          bloqueadoPorFactura && bloqueadoPorLiquidacion
             ? "los datos comerciales"
             : bloqueadoPorFactura
               ? "los datos del cliente"
@@ -1811,6 +1846,15 @@ export class ViajesService {
             "Los datos operativos (fechas, km, litros, observaciones) sí se pueden seguir editando.",
         );
       }
+    }
+
+    // Los gastos que vienen de compras de Cuenta corriente (`ccCompraId`) no se editan
+    // desde el viaje: se conservan los que ya tenía, lleguen o no en el formulario.
+    if (dto.otrosGastos !== undefined) {
+      dto.otrosGastos = mergeGastosConCompras(
+        dto.otrosGastos,
+        current.otrosGastos,
+      ) as unknown as typeof dto.otrosGastos;
     }
 
     // `precioTransportistaIvaIncluidoPct` se bloquea solo por liquidación vigente (no
@@ -1830,6 +1874,19 @@ export class ViajesService {
     ) {
       throw new ConflictException(
         'No se puede cambiar el % de IVA incluido porque el viaje ya está liquidado o tiene una liquidación en curso.',
+      );
+    }
+    // Mismo lock angosto para los tramos de IVA, pero solo si cambian: el formulario
+    // los reenvía tal cual aunque no se toquen.
+    if (
+      ivaTransportistaHabilitado &&
+      bloqueadoPorLiquidacion &&
+      dto.tramosTransportista !== undefined &&
+      JSON.stringify(normalizarTramosTransportista(dto.tramosTransportista)) !==
+        JSON.stringify(normalizarTramosTransportista((current as any).tramosTransportista))
+    ) {
+      throw new ConflictException(
+        'No se pueden cambiar los tramos de IVA porque el viaje ya está liquidado o tiene una liquidación en curso.',
       );
     }
 
@@ -1905,24 +1962,17 @@ export class ViajesService {
       });
     }
 
-    let precioTransportistaExternoInput = dto.precioTransportistaExterno;
-    if (
-      dto.cantidadTransportista != null &&
-      dto.precioUnitarioTransportista != null
-    ) {
-      precioTransportistaExternoInput =
-        dto.cantidadTransportista * dto.precioUnitarioTransportista;
-    } else if (dto.precioUnitarioTransportista === null) {
-      precioTransportistaExternoInput = null;
-    }
+    const precioTransportistaExternoInput = resolverMontoInput(
+      dto.precioTransportistaExterno,
+      dto.cantidadTransportista,
+      dto.precioUnitarioTransportista,
+    );
 
-    let montoInput = dto.monto;
-    if (dto.cantidadFactura != null && dto.precioUnitarioFactura != null) {
-      montoInput =
-        Math.round(dto.cantidadFactura * dto.precioUnitarioFactura * 100) / 100;
-    } else if (dto.precioUnitarioFactura === null) {
-      montoInput = null;
-    }
+    const montoInput = resolverMontoInput(
+      dto.monto,
+      dto.cantidadFactura,
+      dto.precioUnitarioFactura,
+    );
 
     const precioTransportistaExternoResolved =
       precioTransportistaExternoInput !== undefined
@@ -1939,6 +1989,25 @@ export class ViajesService {
       : dto.precioTransportistaIvaIncluidoPct !== undefined
         ? dto.precioTransportistaIvaIncluidoPct
         : (current as any).precioTransportistaIvaIncluidoPct;
+    // Tramos: mismo criterio (deshabilitado = se conserva lo guardado). Sin transportista
+    // no hay pago al transportista, así que no quedan tramos.
+    const tramosTransportistaResolved: unknown = !ivaTransportistaHabilitado
+      ? (current as any).tramosTransportista
+      : !op.transportistaId
+        ? []
+        : dto.tramosTransportista !== undefined
+          ? dto.tramosTransportista
+          : (current as any).tramosTransportista;
+    if (
+      ivaTransportistaHabilitado &&
+      !bloqueadoPorLiquidacion &&
+      (dto.tramosTransportista !== undefined || precioTransportistaExternoInput !== undefined)
+    ) {
+      this.assertTramosTransportista(
+        tramosTransportistaResolved,
+        precioTransportistaExternoResolved,
+      );
+    }
     const pagosTransportistaResolved =
       dto.pagosTransportista !== undefined
         ? dto.pagosTransportista
@@ -1976,7 +2045,9 @@ export class ViajesService {
       }
     }
 
-    if (etapaSiguiente === "finalizado") {
+    const pasandoAFinalizado =
+      etapaActual !== "finalizado" && etapaSiguiente === "finalizado";
+    if (pasandoAFinalizado) {
       const valorizacion = evaluarValorizacionViaje({
         monto: montoInput !== undefined ? montoInput : current.monto,
         cantidadFactura:
@@ -2070,6 +2141,12 @@ export class ViajesService {
       (data as any).precioTransportistaExterno =
         precioTransportistaExternoInput;
     }
+    delete (data as { tramosTransportista?: unknown }).tramosTransportista;
+    if (ivaTransportistaHabilitado && !bloqueadoPorLiquidacion) {
+      (data as any).tramosTransportista = normalizarTramosTransportista(
+        tramosTransportistaResolved,
+      ) as unknown as Prisma.InputJsonValue;
+    }
     if (dto.monedaMonto !== undefined) {
       (data as any).monedaMonto = dto.monedaMonto === "USD" ? "USD" : "ARS";
     }
@@ -2133,6 +2210,7 @@ export class ViajesService {
             monedaPrecioTransportistaExternoResolved,
           precioTransportistaIvaIncluidoPct:
             precioTransportistaIvaIncluidoPctResolved,
+          tramosTransportista: tramosTransportistaResolved,
           pagosTransportista: pagosTransportistaResolved,
           liquidacionesViaje: (current as any).liquidacionesViaje,
         },
@@ -2460,6 +2538,7 @@ export class ViajesService {
         monedaPrecioTransportistaExterno: viaje.monedaPrecioTransportistaExterno,
         precioTransportistaIvaIncluidoPct: (viaje as any)
           .precioTransportistaIvaIncluidoPct,
+        tramosTransportista: (viaje as any).tramosTransportista,
         pagosTransportista: pagosActualizados,
         liquidacionesViaje: (viaje as any).liquidacionesViaje,
       },

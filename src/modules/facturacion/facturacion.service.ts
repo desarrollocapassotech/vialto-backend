@@ -326,13 +326,45 @@ export class FacturacionService {
       conceptos?: unknown;
       createdAt: Date;
       viajes: ViajeSnap[];
+      clientesViaje?: Array<{
+        viajeId: string;
+        origen?: string | null;
+        destino?: string | null;
+        cantidad?: number | null;
+        precioUnitario?: number | null;
+        monto?: number | null;
+        monedaMonto?: string;
+        facturacionEstado?: string;
+        viaje?: ViajeSnap | null;
+      }>;
       pagos?: { importe: number }[];
       tramos?: TramoSnap[];
     },
     tieneArca: boolean,
     includeViajes = false,
   ) {
-    const { viajes, pagos = [], tramos = [], conceptos: conceptosRaw, ...f } = row;
+    const { viajes, clientesViaje = [], pagos = [], tramos = [], conceptos: conceptosRaw, ...f } = row;
+    const viajesCombinados: ViajeSnap[] = [...viajes];
+    const vistos = new Set(viajes.map((v) => v.id));
+    for (const cv of clientesViaje) {
+      if (cv.viaje && !vistos.has(cv.viaje.id)) {
+        vistos.add(cv.viaje.id);
+        viajesCombinados.push({
+          id: cv.viaje.id,
+          numero: cv.viaje.numero,
+          numeroIdentificacionPersonalizado: cv.viaje.numeroIdentificacionPersonalizado,
+          idPropio2: cv.viaje.idPropio2,
+          fechaCarga: cv.viaje.fechaCarga,
+          origen: cv.origen ?? cv.viaje.origen,
+          destino: cv.destino ?? cv.viaje.destino,
+          facturacionEstado: cv.facturacionEstado ?? cv.viaje.facturacionEstado,
+          monto: cv.monto ?? cv.viaje.monto,
+          monedaMonto: cv.monedaMonto ?? cv.viaje.monedaMonto,
+          cantidadFactura: cv.cantidad ?? cv.viaje.cantidadFactura,
+          precioUnitarioFactura: cv.precioUnitario ?? cv.viaje.precioUnitarioFactura,
+        });
+      }
+    }
     const conceptos = normalizarConceptosFactura(conceptosRaw);
     const cobroOpts = cobroOptsDeFactura(
       {
@@ -344,11 +376,11 @@ export class FacturacionService {
       },
       tieneArca && !f.manual,
     );
-    const importe = importeNetoFactura(f.importe, viajes, cobroOpts);
-    const importeACobrar = importeOperativoFactura(f.importe, viajes, cobroOpts);
+    const importe = importeNetoFactura(f.importe, viajesCombinados, cobroOpts);
+    const importeACobrar = importeOperativoFactura(f.importe, viajesCombinados, cobroOpts);
     const totalPagado = pagos.reduce((s, p) => s + p.importe, 0);
     const { estado, cobrado, vencida } = computeEstadoFacturaLectura({
-      viajes,
+      viajes: viajesCombinados,
       fechaVencimiento: f.fechaVencimiento,
       importeGuardado: f.importe,
       pagos,
@@ -368,9 +400,9 @@ export class FacturacionService {
       manual: f.manual ?? false,
       facturarPorTramo: f.facturarPorTramo ?? false,
       ivaMonto: f.ivaMonto ?? null,
-      viajeIds: viajes.map((v) => v.id),
+      viajeIds: viajesCombinados.map((v) => v.id),
       viajes: includeViajes
-        ? viajes.map((v) => ({
+        ? viajesCombinados.map((v) => ({
             id: v.id,
             numero: v.numero,
             numeroIdentificacionPersonalizado: v.numeroIdentificacionPersonalizado,
@@ -724,7 +756,19 @@ export class FacturacionService {
   } as const;
   private readonly FACTURA_INCLUDE = {
     viajes: { select: this.VIAJE_SELECT },
-    clientesViaje: { select: { viajeId: true } },
+    clientesViaje: {
+      select: {
+        viajeId: true,
+        origen: true,
+        destino: true,
+        cantidad: true,
+        precioUnitario: true,
+        monto: true,
+        monedaMonto: true,
+        facturacionEstado: true,
+        viaje: { select: this.VIAJE_SELECT },
+      },
+    },
     pagos: { select: this.PAGO_SELECT },
     tramos: { select: this.TRAMO_SELECT, orderBy: { orden: "asc" as const } },
   };

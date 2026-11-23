@@ -50,6 +50,9 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "etapa", label: "Seguimiento de viaje", obligatorioSistema: false },
           { campo: "facturacionEstado", label: "Seguimiento de facturación", obligatorioSistema: false },
           { campo: "liquidacionEstado", label: "Seguimiento de liquidación", obligatorioSistema: false },
+          // Solo el indicador visual (icono $) en la grilla y el detalle: ocultarlo no
+          // cambia las reglas de valorización (finalizar/facturar/liquidar/cuenta corriente).
+          { campo: "valorizacion", label: "Seguimiento de valorización", obligatorioSistema: false, defaultVisible: false },
         ],
       },
       edicion_viaje: {
@@ -82,6 +85,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "etapa", label: "Seguimiento de viaje", obligatorioSistema: false },
           { campo: "facturacionEstado", label: "Seguimiento de facturación", obligatorioSistema: false },
           { campo: "liquidacionEstado", label: "Seguimiento de liquidación", obligatorioSistema: false },
+          { campo: "valorizacion", label: "Seguimiento de valorización", obligatorioSistema: false, defaultVisible: false },
         ],
       },
       detalle_viaje: {
@@ -109,6 +113,7 @@ export const FIELD_CATALOG: Record<string, ModuloCatalogo> = {
           { campo: "etapa", label: "Seguimiento de viaje", obligatorioSistema: false },
           { campo: "facturacionEstado", label: "Seguimiento de facturación", obligatorioSistema: false },
           { campo: "liquidacionEstado", label: "Seguimiento de liquidación", obligatorioSistema: false },
+          { campo: "valorizacion", label: "Seguimiento de valorización", obligatorioSistema: false, defaultVisible: false },
         ],
       },
     },

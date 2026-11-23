@@ -151,5 +151,9 @@ export class CreateLiquidacionDto {
   @IsOptional() @IsInt() @Type(() => Number) proveedorCbteTipo?: number;
   @IsOptional() @IsInt() @Type(() => Number) proveedorPtoVenta?: number;
   @IsOptional() @IsInt() @Type(() => Number) proveedorCbteNro?: number;
+  /**
+   * Fecha del comprobante del proveedor (`YYYY-MM-DD`). Obligatoria en toda liquidación sin
+   * Líquido Producto (empresa sin ARCA o manual): es la fecha de la liquidación en Cuenta corriente.
+   */
   @IsOptional() @IsDateString() proveedorCbteFecha?: string;
 }

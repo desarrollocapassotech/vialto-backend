@@ -85,5 +85,6 @@ export class UpdateLiquidacionDto {
   @IsOptional() @IsInt() @Type(() => Number) proveedorCbteTipo?: number;
   @IsOptional() @IsInt() @Type(() => Number) proveedorPtoVenta?: number;
   @IsOptional() @IsInt() @Type(() => Number) proveedorCbteNro?: number;
+  /** Fecha del comprobante del proveedor: manuales y empresas sin ARCA (no se puede borrar). */
   @IsOptional() @IsDateString() proveedorCbteFecha?: string;
 }

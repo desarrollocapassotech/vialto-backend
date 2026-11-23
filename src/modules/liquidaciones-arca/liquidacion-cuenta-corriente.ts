@@ -34,6 +34,8 @@ type LiquidacionCc = {
   anulacionCbteNro?: number | null;
   anulacionCbteTipo?: number | null;
   anulacionMetodo?: string | null;
+  proveedorCbteFecha?: Date | null;
+  fechaEmision?: Date | null;
   createdAt: Date;
   viajes: Array<{ viajeId: string }>;
 };
@@ -47,6 +49,20 @@ function numeroLiquidacion(
 ): string | null {
   if (liq.cbteNro) return formatNumeroComprobante(liq.ptoVenta ?? 0, liq.cbteNro);
   return liq.numeroComprobanteProveedor?.trim() || null;
+}
+
+/**
+ * Fecha del movimiento de la compra: la del comprobante, no la de carga (pedido de LSF, nov
+ * 2026: al cargar facturas viejas quedaban con la fecha del día). Sin ARCA / manual, la de la
+ * factura del proveedor; con ARCA, la de emisión del CVLP; si no hay ninguna (liquidaciones
+ * anteriores a esos campos o CVLP en borrador), la de carga.
+ */
+function fechaMovimientoLiquidacion(
+  liq: Pick<LiquidacionCc, "proveedorCbteFecha" | "fechaEmision" | "createdAt">,
+): Date {
+  if (liq.proveedorCbteFecha) return fechaCalendarioAr(liq.proveedorCbteFecha.toISOString());
+  if (liq.fechaEmision) return fechaCalendarioAr(liq.fechaEmision.toISOString());
+  return fechaCalendarioAr(liq.createdAt.toISOString());
 }
 
 /**
@@ -131,6 +147,8 @@ export async function sincronizarCargoLiquidacionCc(tx: Tx, tenantId: string, li
     importe: round2(liq.liquido),
     moneda: liq.moneda,
     numeroComprobante: numero,
+    // Se actualiza con la liquidación (ej. corrigen la fecha de la factura del proveedor).
+    fecha: fechaMovimientoLiquidacion(liq),
   };
 
   const cargo = await tx.movimientoCuentaCorriente.findFirst({
@@ -145,7 +163,6 @@ export async function sincronizarCargoLiquidacionCc(tx: Tx, tenantId: string, li
       data: {
         tenantId,
         ...datos,
-        fecha: fechaCalendarioAr(liq.createdAt.toISOString()),
         viajeId: liq.viajes[0]?.viajeId ?? null,
       },
     });

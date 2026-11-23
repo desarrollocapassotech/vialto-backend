@@ -232,6 +232,8 @@ export class ImportacionesPostViajesService {
         periodoHasta: hasta,
         viajeIds: grupo.map((v) => v.id),
         moneda,
+        // Sin Líquido Producto la fecha del comprobante es obligatoria: el fin del período.
+        proveedorCbteFecha: hasta,
       });
       creadas.push(liquidacion);
     }

@@ -289,9 +289,10 @@ export class CuentaCorrienteService {
           },
         },
       },
-      // Orden de carga (último cargado primero), no por `fecha`: un cobro con fecha
-      // anterior a otros movimientos tiene que aparecer arriba al registrarlo.
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      // Por fecha del movimiento, más reciente primero (fecha del comprobante en
+      // facturas/liquidaciones, del pago en cobros/pagos; pedido de LSF, nov 2026). A igual
+      // fecha, orden de carga. Antes era solo orden de carga.
+      orderBy: [{ fecha: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       take: 500,
     });
 
@@ -1372,11 +1373,12 @@ export class CuentaCorrienteService {
         fecha: { gte: desde, lte: hasta },
       },
       include: { anuladoPor: { select: { id: true } } },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      orderBy: [{ fecha: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
 
-    // Mismo orden que el detalle en pantalla: el saldo acumulado se recorre en orden de
-    // carga y la lista sale con el último cargado primero (PDF y Excel la usan tal cual).
+    // Mismo orden que el detalle en pantalla: el saldo acumulado se recorre por fecha del
+    // movimiento (comprobante / pago; a igual fecha, orden de carga) y la lista sale con el
+    // más reciente primero (PDF y Excel la usan tal cual).
     // Se acumula POR MONEDA (igual que la grilla): cada fila muestra el saldo de su moneda.
     const acumuladoPorMoneda = new Map(saldoInicial);
     const items = movimientos.map((mov) => {

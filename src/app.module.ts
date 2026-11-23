@@ -30,6 +30,7 @@ import { PaisesModule } from './core/paises/paises.module';
 import { PadronModule } from './core/padron/padron.module';
 import { OdometroModule } from './core/odometro/odometro.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
+import { LeadsModule } from './core/leads/leads.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { NotificacionesModule } from './modules/notificaciones/notificaciones.mo
     PadronModule,
     OdometroModule,
     NotificacionesModule,
+    LeadsModule,
   ],
   controllers: [HealthController],
 })

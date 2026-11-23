@@ -330,8 +330,17 @@ export class LiquidacionesService {
           numero: dto.numeroComprobanteProveedor,
         })
       : null;
-    if (manual && !dto.proveedorCbteFecha) {
-      throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+    // Sin Líquido Producto (empresa sin ARCA o liquidación manual) la fecha de la liquidación
+    // es la del comprobante del proveedor, y es obligatoria: es la fecha con la que entra a
+    // Cuenta corriente (pedido de LSF, nov 2026: cargaban facturas viejas y quedaban con la
+    // fecha de carga). Con ARCA manda la fecha de emisión del CVLP.
+    const sinLiquidoProducto = !tieneLiquidoProductoArca || manual;
+    if (sinLiquidoProducto && !dto.proveedorCbteFecha) {
+      throw new BadRequestException(
+        manual
+          ? 'Ingresá la fecha de la factura del transportista.'
+          : 'Ingresá la fecha del comprobante.',
+      );
     }
     // "Comprobante interno": número interno como comprobante del proveedor. Solo en
     // liquidaciones sin Líquido Producto (con ARCA el número es el del CVLP, y la manual del
@@ -475,7 +484,7 @@ export class LiquidacionesService {
           proveedorPtoVenta: cbteProveedor?.ptoVenta ?? null,
           proveedorCbteNro: cbteProveedor?.cbteNro ?? null,
           proveedorCbteFecha:
-            cbteProveedor && dto.proveedorCbteFecha
+            sinLiquidoProducto && dto.proveedorCbteFecha
               ? fechaCalendarioAr(dto.proveedorCbteFecha)
               : null,
           createdBy: userId,
@@ -850,6 +859,16 @@ export class LiquidacionesService {
         proveedorCbteNro: cbte.cbteNro,
         proveedorCbteFecha: fechaCalendarioAr(fecha),
       });
+    } else if (
+      dto.proveedorCbteFecha !== undefined &&
+      !(await this.tieneModulo(tenantId, 'emision-liquido-producto-arca'))
+    ) {
+      // Empresa sin ARCA: la fecha del comprobante del proveedor se edita y no se puede borrar
+      // (es la fecha de la liquidación en Cuenta corriente).
+      if (!dto.proveedorCbteFecha) {
+        throw new BadRequestException('Ingresá la fecha del comprobante.');
+      }
+      data.proveedorCbteFecha = fechaCalendarioAr(dto.proveedorCbteFecha);
     }
 
     await this.prisma.liquidacion.update({ where: { id }, data });

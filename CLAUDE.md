@@ -143,6 +143,8 @@ model Tenant {
 | `org:admin` | Admin | Gestión completa de su empresa |
 | `org:member` | Operador / Chofer | Solo registra y ve sus propias operaciones |
 
+> **Matriz de permisos (nov 2026)**: los roles reales son `admin`, `member`, `stock_viewer`, `stock_operator` (`publicMetadata.vialtoRole`, `core/auth/clerk-organization-roles.ts`). Lo que puede cada uno lo deciden los `@Roles(...)` de cada endpoint; el frontend los espeja en una sola tabla, `vialto-frontend/src/lib/permisosRol.ts` (menú, inicio y botones). **Al cambiar un `@Roles`, cambiar también esa matriz**, o el front muestra botones que dan 403 o esconde módulos que el rol puede usar (pasó: el Miembro de LSF y NyM no veía ningún módulo). Hoy el `member` consulta Viajes, Facturas, Liquidaciones y Cuenta corriente, edita viajes no valorizados (VTO-485) y carga ingresos/egresos de stock.
+
 ---
 
 ## Entidades del Core (SIEMPRE presentes, no son módulos opcionales)

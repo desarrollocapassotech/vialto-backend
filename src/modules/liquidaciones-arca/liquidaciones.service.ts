@@ -12,7 +12,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
-import { siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
+import { esNumeroInterno, siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { tramosIvaParaLiquidacion } from '../../shared/util/viaje-tramos-transportista.util';
 import { generarTxtLibroIva, validarRangoLibroIva } from '../../shared/util/libro-iva.util';
@@ -318,35 +318,37 @@ export class LiquidacionesService {
       tenantId,
       'emision-liquido-producto-arca',
     );
-    // Monotributista en empresa con ARCA: liquidación manual, no se emite Líquido Producto.
+    // Monotributista en empresa con ARCA o comprobante interno: liquidación manual, no se emite Líquido Producto.
+    const numeroAutomatico = dto.numeroAutomatico === true;
     const manual =
-      tieneLiquidoProductoArca && esCondicionIvaMonotributo(transportista.condicionIva);
-    // Factura del transportista por separado (Libro IVA): obligatoria en la liquidación manual.
-    const cbteProveedor = manual
-      ? resolverComprobanteManual({
-          cbteTipo: dto.proveedorCbteTipo,
-          ptoVenta: dto.proveedorPtoVenta,
-          cbteNro: dto.proveedorCbteNro,
-          numero: dto.numeroComprobanteProveedor,
-        })
-      : null;
+      (tieneLiquidoProductoArca && esCondicionIvaMonotributo(transportista.condicionIva)) ||
+      numeroAutomatico;
+    // Factura del transportista por separado (Libro IVA): obligatoria en la liquidación manual (salvo comprobante interno).
+    const cbteProveedor =
+      manual && !numeroAutomatico
+        ? resolverComprobanteManual({
+            cbteTipo: dto.proveedorCbteTipo,
+            ptoVenta: dto.proveedorPtoVenta,
+            cbteNro: dto.proveedorCbteNro,
+            numero: dto.numeroComprobanteProveedor,
+          })
+        : null;
     // Sin Líquido Producto (empresa sin ARCA o liquidación manual) la fecha de la liquidación
     // es la del comprobante del proveedor, y es obligatoria: es la fecha con la que entra a
     // Cuenta corriente (pedido de LSF, nov 2026: cargaban facturas viejas y quedaban con la
     // fecha de carga). Con ARCA manda la fecha de emisión del CVLP.
     const sinLiquidoProducto = !tieneLiquidoProductoArca || manual;
-    if (sinLiquidoProducto && !dto.proveedorCbteFecha) {
+    const fechaCbte = dto.proveedorCbteFecha;
+    if (sinLiquidoProducto && !fechaCbte) {
       throw new BadRequestException(
-        manual
+        manual && !numeroAutomatico
           ? 'Ingresá la fecha de la factura del transportista.'
           : 'Ingresá la fecha del comprobante.',
       );
     }
-    // "Comprobante interno": número interno como comprobante del proveedor. Solo en
-    // liquidaciones sin Líquido Producto (con ARCA el número es el del CVLP, y la manual del
-    // monotributista lleva la factura del transportista).
+    // "Comprobante interno": número interno como comprobante del proveedor.
     const numeroInterno =
-      dto.numeroAutomatico && !tieneLiquidoProductoArca
+      numeroAutomatico
         ? await siguienteNumeroInterno(this.prisma, tenantId)
         : null;
     if (tieneLiquidoProductoArca && !manual && moneda === 'USD') {
@@ -484,8 +486,8 @@ export class LiquidacionesService {
           proveedorPtoVenta: cbteProveedor?.ptoVenta ?? null,
           proveedorCbteNro: cbteProveedor?.cbteNro ?? null,
           proveedorCbteFecha:
-            sinLiquidoProducto && dto.proveedorCbteFecha
-              ? fechaCalendarioAr(dto.proveedorCbteFecha)
+            sinLiquidoProducto && fechaCbte
+              ? fechaCalendarioAr(fechaCbte)
               : null,
           createdBy: userId,
           updatedAt: new Date(),
@@ -839,26 +841,35 @@ export class LiquidacionesService {
       dto.proveedorCbteNro !== undefined ||
       dto.proveedorCbteFecha !== undefined;
     if ((liq.manual || pasaAManual) && tocaCbteProveedor) {
-      const cbte = resolverComprobanteManual({
-        cbteTipo: dto.proveedorCbteTipo,
-        ptoVenta: dto.proveedorPtoVenta,
-        cbteNro: dto.proveedorCbteNro,
-        numero:
-          dto.numeroComprobanteProveedor === undefined
-            ? liq.numeroComprobanteProveedor
-            : dto.numeroComprobanteProveedor,
-      });
-      const fecha = dto.proveedorCbteFecha ?? liq.proveedorCbteFecha?.toISOString();
-      if (!fecha) {
-        throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+      if (esNumeroInterno(liq.numeroComprobanteProveedor)) {
+        if (dto.numeroComprobanteProveedor !== undefined) {
+          data.numeroComprobanteProveedor = dto.numeroComprobanteProveedor?.trim() || null;
+        }
+        if (dto.proveedorCbteFecha !== undefined) {
+          data.proveedorCbteFecha = dto.proveedorCbteFecha ? fechaCalendarioAr(dto.proveedorCbteFecha) : null;
+        }
+      } else {
+        const cbte = resolverComprobanteManual({
+          cbteTipo: dto.proveedorCbteTipo,
+          ptoVenta: dto.proveedorPtoVenta,
+          cbteNro: dto.proveedorCbteNro,
+          numero:
+            dto.numeroComprobanteProveedor === undefined
+              ? liq.numeroComprobanteProveedor
+              : dto.numeroComprobanteProveedor,
+        });
+        const fecha = dto.proveedorCbteFecha ?? liq.proveedorCbteFecha?.toISOString();
+        if (!fecha) {
+          throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+        }
+        Object.assign(data, {
+          numeroComprobanteProveedor: cbte.numero,
+          proveedorCbteTipo: cbte.cbteTipo,
+          proveedorPtoVenta: cbte.ptoVenta,
+          proveedorCbteNro: cbte.cbteNro,
+          proveedorCbteFecha: fechaCalendarioAr(fecha),
+        });
       }
-      Object.assign(data, {
-        numeroComprobanteProveedor: cbte.numero,
-        proveedorCbteTipo: cbte.cbteTipo,
-        proveedorPtoVenta: cbte.ptoVenta,
-        proveedorCbteNro: cbte.cbteNro,
-        proveedorCbteFecha: fechaCalendarioAr(fecha),
-      });
     } else if (
       dto.proveedorCbteFecha !== undefined &&
       !(await this.tieneModulo(tenantId, 'emision-liquido-producto-arca'))
@@ -952,7 +963,9 @@ export class LiquidacionesService {
     }
     if (liquidacion.manual || esCondicionIvaMonotributo(liquidacion.transportista?.condicionIva)) {
       throw new BadRequestException(
-        'A un transportista monotributista no se le emite Líquido Producto: la liquidación queda manual, con la factura del transportista adjunta.',
+        liquidacion.manual
+          ? 'Una liquidación manual o con comprobante interno no se emite por ARCA.'
+          : 'A un transportista monotributista no se le emite Líquido Producto: la liquidación queda manual, con la factura del transportista adjunta.',
       );
     }
     if (liquidacion.moneda === 'USD') {

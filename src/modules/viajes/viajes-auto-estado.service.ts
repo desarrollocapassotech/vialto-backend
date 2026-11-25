@@ -21,62 +21,24 @@ export class ViajesAutoEstadoService {
 
     const base = tenantId ? { tenantId } : {};
 
-    const condicionMontoCliente = {
-      OR: [
-        { monto: { gt: 0 } },
-        {
-          AND: [
-            { cantidadFactura: { gt: 0 } },
-            { precioUnitarioFactura: { gt: 0 } },
-          ],
-        },
-      ],
-    };
+    // pendiente + (fechaCarga <= ahora OR fechaDescarga <= ahora) → en_curso
+    // La etapa 'finalizado' ya no se asigna automáticamente por fechas; el viaje
+    // pasa a finalizado cuando queda valorizado o por acción manual (ver viajes.service.ts).
+    const enCurso = await this.prisma.viaje.updateMany({
+      where: {
+        ...base,
+        etapa: 'pendiente',
+        OR: [
+          { fechaCarga: { lte: ahora } },
+          { fechaDescarga: { lte: ahora } },
+        ],
+      },
+      data: { etapa: 'en_curso' },
+    });
 
-    const condicionMontoTransportista = {
-      OR: [
-        { transportistaId: null },
-        { precioTransportistaExterno: { gt: 0 } },
-        {
-          AND: [
-            { cantidadTransportista: { gt: 0 } },
-            { precioUnitarioTransportista: { gt: 0 } },
-          ],
-        },
-      ],
-    };
-
-    const [finalizados, enCurso] = await Promise.all([
-      // pendiente/en_curso + fechaDescarga <= ahora + montos completos → finalizado
-      this.prisma.viaje.updateMany({
-        where: {
-          ...base,
-          etapa: { in: ['pendiente', 'en_curso'] },
-          fechaDescarga: { lte: ahora },
-          AND: [condicionMontoCliente, condicionMontoTransportista],
-        },
-        data: { etapa: 'finalizado', fechaFinalizado: new Date() },
-      }),
-
-      // pendiente + (fechaCarga <= ahora OR fechaDescarga <= ahora) que no pasaron a finalizado → en_curso
-      this.prisma.viaje.updateMany({
-        where: {
-          ...base,
-          etapa: 'pendiente',
-          OR: [
-            { fechaCarga: { lte: ahora } },
-            { fechaDescarga: { lte: ahora } },
-          ],
-        },
-        data: { etapa: 'en_curso' },
-      }),
-    ]);
-
-    const total = finalizados.count + enCurso.count;
-    if (total > 0) {
+    if (enCurso.count > 0) {
       this.logger.log(
-        `Auto-etapa${tenantId ? ` [${tenantId}]` : ''}: ` +
-        `${enCurso.count} → en_curso, ${finalizados.count} → finalizado`,
+        `Auto-etapa${tenantId ? ` [${tenantId}]` : ''}: ${enCurso.count} → en_curso`,
       );
     }
   }

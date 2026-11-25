@@ -143,7 +143,7 @@ export class StockController {
 
   @ApiOperation({ summary: "Crear presentación en el catálogo" })
   @Post("presentaciones")
-  @Roles("admin", "superadmin")
+  @Roles("admin", "member", "superadmin")
   createPresentacion(
     @Body() dto: CreatePresentacionDto,
     @CurrentAuth() auth: AuthPayload,

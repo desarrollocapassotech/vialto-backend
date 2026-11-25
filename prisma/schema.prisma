@@ -496,20 +496,23 @@ model ViajeVehiculo {
 }
 
 model ViajeProducto {
-  id         String   @id @default(cuid())
-  tenantId   String
-  viajeId    String
-  viaje      Viaje    @relation(fields: [viajeId], references: [id], onDelete: Cascade)
-  productoId String
-  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  orden      Int      @default(0)
-  cantidad   Float?
-  pesoKg     Float?
+  id             String        @id @default(cuid())
+  tenantId       String
+  viajeId        String
+  viaje          Viaje         @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  productoId     String
+  producto       Producto      @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  presentacionId String?
+  presentacion   Presentacion? @relation(fields: [presentacionId], references: [id], onDelete: SetNull)
+  orden          Int           @default(0)
+  cantidad       Float?
+  pesoKg         Float?
 
   @@unique([viajeId, productoId])
   @@index([tenantId])
   @@index([viajeId])
   @@index([productoId])
+  @@index([presentacionId])
   @@map("viajes_productos")
 }
 
@@ -590,13 +593,15 @@ model ViajeClienteDestino {
 }
 
 model ViajeClienteProducto {
-  id             String       @id @default(cuid())
+  id             String        @id @default(cuid())
   tenantId       String
   viajeClienteId String
-  viajeCliente   ViajeCliente @relation(fields: [viajeClienteId], references: [id], onDelete: Cascade)
+  viajeCliente   ViajeCliente  @relation(fields: [viajeClienteId], references: [id], onDelete: Cascade)
   productoId     String
-  producto       Producto     @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  orden          Int          @default(0)
+  producto       Producto      @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  presentacionId String?
+  presentacion   Presentacion? @relation(fields: [presentacionId], references: [id], onDelete: SetNull)
+  orden          Int           @default(0)
   cantidad       Float?
   pesoKg         Float?
 
@@ -604,6 +609,7 @@ model ViajeClienteProducto {
   @@index([tenantId])
   @@index([viajeClienteId])
   @@index([productoId])
+  @@index([presentacionId])
   @@map("viajes_clientes_productos")
 }
 
@@ -1060,7 +1066,9 @@ model Presentacion {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  productoPresentaciones ProductoPresentacion[]
+  productoPresentaciones  ProductoPresentacion[]
+  viajesProductos         ViajeProducto[]
+  viajesClientesProductos ViajeClienteProducto[]
 
   @@unique([tenantId, nombreNormalizado])
   @@index([tenantId])

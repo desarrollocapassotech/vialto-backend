@@ -143,4 +143,142 @@ test("editar un viaje ya finalizado no valorizado con solo monto transportista e
   assert.doesNotThrow(() => validarCambioEtapa(viaje, "finalizado", "admin"));
 });
 
+function resolverEtapaSiguiente(
+  viaje: {
+    etapa: string;
+    monto?: number | null;
+    transportistaId?: string | null;
+    transportistaEfectivoId?: string | null;
+    precioTransportistaExterno?: number | null;
+    clientesViaje?: Array<{
+      monto?: number | null;
+      cantidad?: number | null;
+      precioUnitario?: number | null;
+    }>;
+  },
+  dtoEtapa?: string,
+  fechasIniciadas?: boolean,
+): string {
+  const etapaActual = viaje.etapa || "pendiente";
+  let etapaSiguiente = dtoEtapa || etapaActual;
+
+  if (etapaSiguiente === "pendiente" && fechasIniciadas) {
+    etapaSiguiente = "en_curso";
+  }
+
+  const valorizacion = evaluarValorizacionViaje({
+    monto: viaje.monto,
+    transportistaId: viaje.transportistaId,
+    transportistaEfectivoId: viaje.transportistaEfectivoId,
+    precioTransportistaExterno: viaje.precioTransportistaExterno,
+    clientesViaje: viaje.clientesViaje,
+  });
+
+  if (
+    etapaActual !== "finalizado" &&
+    etapaSiguiente !== "cancelado" &&
+    etapaSiguiente === "en_curso" &&
+    valorizacion.valorizado
+  ) {
+    etapaSiguiente = "finalizado";
+  }
+
+  if (etapaActual !== "finalizado" && etapaSiguiente === "finalizado") {
+    if (!valorizacion.valorizado) {
+      if (valorizacion.faltaCliente && valorizacion.faltaTransportista) {
+        throw new BadRequestException(
+          "No se puede finalizar el viaje: faltan cargar los montos del cliente y del transportista.",
+        );
+      }
+      if (valorizacion.faltaCliente) {
+        throw new BadRequestException(
+          "No se puede finalizar el viaje: falta cargar el monto del cliente.",
+        );
+      }
+      if (valorizacion.faltaTransportista) {
+        throw new BadRequestException(
+          "No se puede finalizar el viaje: falta cargar el monto del transportista.",
+        );
+      }
+    }
+  }
+
+  return etapaSiguiente;
+}
+
+test("viaje de flota de terceros con fechas pasadas sin montos sigue en curso", () => {
+  const viaje = {
+    etapa: "pendiente",
+    monto: null,
+    transportistaId: "transp-1",
+    precioTransportistaExterno: null,
+  };
+  const res = resolverEtapaSiguiente(viaje, undefined, true);
+  assert.equal(res, "en_curso");
+});
+
+test("viaje de flota de terceros con solo monto de cliente sigue en curso", () => {
+  const viaje = {
+    etapa: "en_curso",
+    monto: 150000,
+    transportistaId: "transp-1",
+    precioTransportistaExterno: null,
+  };
+  const res = resolverEtapaSiguiente(viaje);
+  assert.equal(res, "en_curso");
+});
+
+test("viaje de flota de terceros con solo monto de transportista sigue en curso", () => {
+  const viaje = {
+    etapa: "en_curso",
+    monto: null,
+    transportistaId: "transp-1",
+    precioTransportistaExterno: 120000,
+  };
+  const res = resolverEtapaSiguiente(viaje);
+  assert.equal(res, "en_curso");
+});
+
+test("viaje de flota de terceros pasa a finalizado cuando se cargan ambos montos", () => {
+  const viaje = {
+    etapa: "en_curso",
+    monto: 150000,
+    transportistaId: "transp-1",
+    precioTransportistaExterno: 120000,
+  };
+  const res = resolverEtapaSiguiente(viaje);
+  assert.equal(res, "finalizado");
+});
+
+test("viaje de flota propia con monto de cliente cargado pasa a finalizado sin pedir transportista", () => {
+  const viaje = {
+    etapa: "en_curso",
+    monto: 200000,
+    transportistaId: null,
+  };
+  const res = resolverEtapaSiguiente(viaje);
+  assert.equal(res, "finalizado");
+});
+
+test("viaje de flota propia sin monto de cliente sigue en curso", () => {
+  const viaje = {
+    etapa: "en_curso",
+    monto: null,
+    transportistaId: null,
+  };
+  const res = resolverEtapaSiguiente(viaje);
+  assert.equal(res, "en_curso");
+});
+
+test("viaje que ya estaba finalizado no cambia de etapa al editarlo", () => {
+  const viaje = {
+    etapa: "finalizado",
+    monto: 100000,
+    transportistaId: "transp-1",
+    precioTransportistaExterno: 80000,
+  };
+  const res = resolverEtapaSiguiente(viaje);
+  assert.equal(res, "finalizado");
+});
+
 console.log("viaje-etapa-cambio.spec.ts: OK");

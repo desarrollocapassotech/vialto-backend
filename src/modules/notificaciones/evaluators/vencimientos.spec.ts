@@ -61,9 +61,22 @@ const dia = (n: number) => new Date(hoy.getTime() + n * DIA);
       ['c:vencido', 'b:vencido', 'd:por-vencer', 'a:por-vencer'],
     );
     assert.equal(items[0].tono, 'alerta');
-    assert.equal(items[0].seccion, 'Vencidos');
+    assert.equal(items[0].seccion, 'A cobrar a clientes');
     assert.equal(items[2].tono, 'aviso');
-    assert.equal(items[2].seccion, 'Vencen pronto');
+  });
+
+  await test('armarAvisos: clientes primero y proveedores después, sin repetir el lado en la fila', () => {
+    const base = { comprobante: 'FACTURA A 1', saldo: 10, moneda: 'ARS', url: '/x' };
+    const items = armarAvisosVencimientos(
+      [
+        { ...base, id: 'p', contraparte: 'Prov', sentido: 'pagar', fechaVencimiento: dia(-9) },
+        { ...base, id: 'c', contraparte: 'Cli', sentido: 'cobrar', fechaVencimiento: dia(2) },
+      ],
+      hoy,
+    );
+    assert.deepEqual(items.map((i) => i.seccion), ['A cobrar a clientes', 'A pagar a proveedores']);
+    assert.equal(items[0].encabezado, 'Cli');
+    assert.equal(items[0].subtitulo, 'FACTURA A 1');
   });
 
   await test('con Cuenta corriente: usa los movimientos (no las facturas) y arma cobrar/pagar', async () => {
@@ -98,7 +111,7 @@ const dia = (n: number) => new Date(hoy.getTime() + n * DIA);
     assert.equal(consultoFacturas, false);
     assert.equal(items.length, 2);
     assert.equal(items[0].entidadId, 'm1:vencido');
-    assert.equal(items[0].titulo, 'A cobrar: Agnone — FACTURA A 0003-00000094');
+    assert.equal(items[0].titulo, 'A cobrar: Agnone · FACTURA A 0003-00000094');
     assert.deepEqual(items[0].importe, { monto: 600, moneda: 'ARS', sentido: 'cobrar' });
     assert.equal(items[0].url, '/cuenta-corriente?tipo=cliente&id=c1');
     assert.equal(items[1].entidadId, 'm2:por-vencer');
@@ -130,10 +143,12 @@ const dia = (n: number) => new Date(hoy.getTime() + n * DIA);
     const e = armarEmailNotificacion({
       label: 'Vencimientos de cobros y pagos', empresa: 'LSF', frecuencia: 'diaria', items, rutaBoton: '/cuenta-corriente',
     });
-    assert.equal(e.subject, 'Vencimientos de cobros y pagos — 1 vencido, 2 vencen pronto · LSF');
+    assert.equal(e.subject, 'Vencimientos de cobros y pagos: 2 a cobrar a clientes, 1 a pagar a proveedores · LSF');
     assert.ok(e.html.includes('https://admin.vialto.uno/#/cuenta-corriente?tipo=cliente&amp;id=c1'));
     assert.ok(!e.html.includes('admin.vialto.uno/cuenta-corriente'));
     assert.ok(e.html.includes('&lt;Agnone &amp; Cía&gt;'));
+    assert.ok(!e.html.includes('A cobrar · '), 'la fila no repite el lado (ya lo dice el bloque)');
+    assert.ok(!e.html.includes('Ver todo'), 'sin "Ver todo": lo cubre el botón principal');
     assert.ok(e.html.includes('ARS 1.500,00'), 'total a cobrar suma ARS');
     assert.ok(e.html.includes('USD 50,00'), 'total a pagar en USD aparte');
     assert.ok(e.text.includes('https://admin.vialto.uno/#/configuracion/notificaciones'));
@@ -144,7 +159,8 @@ const dia = (n: number) => new Date(hoy.getTime() + n * DIA);
     const e = armarEmailNotificacion({ label: 'L', frecuencia: 'semanal', items, rutaBoton: '/' });
     assert.ok(e.html.includes('Y 7 avisos más'));
     assert.ok(!e.html.includes(`>T${MAX_TARJETAS}<`));
-    assert.equal(e.subject, `L — ${MAX_TARJETAS + 7} avisos nuevos`);
+    assert.equal(e.subject, `L: ${MAX_TARJETAS + 7} avisos nuevos`);
+    assert.ok(!e.html.includes('—') && !e.text.includes('—'), 'sin rayas largas en el email');
   });
 
   if (fallos > 0) {

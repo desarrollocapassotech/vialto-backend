@@ -937,7 +937,6 @@ export class CombustibleService {
       url: "/?combustibleTab=alertas",
       tono: "alerta",
       subtitulo: [patente, fecha ? `carga del ${fecha}` : null].filter(Boolean).join(" · ") || undefined,
-      etiqueta: "Quedó trabada en el celular",
     });
 
     return log;

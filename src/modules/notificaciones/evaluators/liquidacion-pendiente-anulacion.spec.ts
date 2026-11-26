@@ -60,7 +60,7 @@ function prismaLiquidaciones() {
     const items = await ev.evaluar('org_A', new Date('2026-10-12T11:00:00Z'));
     assert.equal(items.length, 1);
     assert.equal(items[0].entidadId, 'l1:2026-W42');
-    assert.equal(items[0].titulo, 'Liquidación 00003-00000125 — Transportes Sur');
+    assert.equal(items[0].titulo, 'Liquidación 00003-00000125 · Transportes Sur');
     assert.match(items[0].detalle, /Pendiente de anular desde el 1\/10\/2026/);
   });
 

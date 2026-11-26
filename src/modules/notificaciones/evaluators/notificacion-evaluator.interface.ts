@@ -12,6 +12,11 @@ export type NotificacionItem = {
 
   // ── Opcionales: solo mejoran el email y la campana, un aviso sin ellos se ve como tarjeta simple ──
 
+  /**
+   * Texto principal de la fila del email, si `titulo` repite lo que ya dicen `subtitulo` o la sección
+   * (ej. vencimientos: solo el cliente, porque "A cobrar · FACTURA…" va en el subtítulo). Default: `titulo`.
+   */
+  encabezado?: string;
   /** Ruta de la app (sin `#`, ej. `/facturacion?factura=…`) que abre el registro. Botón "Ver" de la tarjeta y click en la campana. */
   url?: string;
   /** Agrupa las tarjetas del email bajo un subtítulo (ej. "Vencidos", "Vencen pronto"), en el orden en que aparecen. */

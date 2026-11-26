@@ -51,5 +51,5 @@ for (const ej of ejemplos) {
   });
   writeFileSync(join(salida, ej.archivo), email.html, 'utf8');
   writeFileSync(join(salida, ej.archivo.replace('.html', '.txt')), `${email.subject}\n\n${email.text}`, 'utf8');
-  console.log(`✓ ${join(salida, ej.archivo)}  —  Asunto: ${email.subject}`);
+  console.log(`✓ ${join(salida, ej.archivo)} · Asunto: ${email.subject}`);
 }

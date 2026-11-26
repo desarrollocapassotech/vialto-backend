@@ -19,8 +19,9 @@ export const DIAS_VENTANA_VENCIDOS = 30;
 
 const DIA_MS = 86_400_000;
 
-export const SECCION_VENCIDOS = 'Vencidos';
-export const SECCION_POR_VENCER = 'Vencen pronto';
+/** Clientes y proveedores separados en el email (cada bloque con su total). */
+export const SECCION_COBRAR = 'A cobrar a clientes';
+export const SECCION_PAGAR = 'A pagar a proveedores';
 
 /** Un vencimiento con saldo, venga de una factura o de un movimiento de cuenta corriente. */
 export type VencimientoConSaldo = {
@@ -60,31 +61,36 @@ export function etiquetaVencimiento(dias: number): string {
 }
 
 /**
- * Arma los avisos: vencidos primero (el más viejo arriba), después los que vencen pronto (el más
- * cercano arriba). `entidadId = id:vencido | id:por-vencer`, así un mismo vencimiento se avisa
- * una vez al acercarse y otra vez si vence sin saldarse.
+ * Arma los avisos: primero lo que hay que cobrar (clientes) y después lo que hay que pagar
+ * (proveedores); en cada lado, vencidos primero (el más viejo arriba) y después lo que vence
+ * pronto (el más cercano arriba). `entidadId = id:vencido | id:por-vencer`, así un mismo
+ * vencimiento se avisa una vez al acercarse y otra vez si vence sin saldarse.
  */
 export function armarAvisosVencimientos(lista: VencimientoConSaldo[], hoy: Date): NotificacionItem[] {
   return lista
     .map((v) => ({ v, dias: Math.round((v.fechaVencimiento.getTime() - hoy.getTime()) / DIA_MS) }))
     .sort((a, b) => {
+      const sa = a.v.sentido === 'cobrar' ? 0 : 1;
+      const sb = b.v.sentido === 'cobrar' ? 0 : 1;
       const va = a.dias < 0 ? 0 : 1;
       const vb = b.dias < 0 ? 0 : 1;
-      return va - vb || a.dias - b.dias || a.v.contraparte.localeCompare(b.v.contraparte, 'es');
+      return sa - sb || va - vb || a.dias - b.dias || a.v.contraparte.localeCompare(b.v.contraparte, 'es');
     })
     .map(({ v, dias }) => {
       const vencido = dias < 0;
       const lado = v.sentido === 'cobrar' ? 'A cobrar' : 'A pagar';
       const etiqueta = etiquetaVencimiento(dias);
-      const subtitulo = [lado, v.comprobante].filter(Boolean).join(' · ');
       return {
         entidadId: `${v.id}:${vencido ? 'vencido' : 'por-vencer'}`,
-        titulo: `${lado}: ${v.contraparte}${v.comprobante ? ` — ${v.comprobante}` : ''}`,
+        // Campana (una sola línea, sin bloque que la agrupe): lleva el lado y el comprobante.
+        titulo: `${lado}: ${v.contraparte}${v.comprobante ? ` · ${v.comprobante}` : ''}`,
+        // Email: el bloque ya dice a cobrar / a pagar, la fila solo la contraparte y el comprobante.
+        encabezado: v.contraparte,
         detalle: `${etiqueta} (${fmtFecha(v.fechaVencimiento)}) · Saldo ${fmtImporte(v.saldo, v.moneda)}`,
         url: v.url,
-        seccion: vencido ? SECCION_VENCIDOS : SECCION_POR_VENCER,
+        seccion: v.sentido === 'cobrar' ? SECCION_COBRAR : SECCION_PAGAR,
         tono: vencido ? 'alerta' : 'aviso',
-        subtitulo,
+        subtitulo: v.comprobante ?? undefined,
         etiqueta: `${etiqueta} · ${fmtFecha(v.fechaVencimiento)}`,
         importe: { monto: v.saldo, moneda: v.moneda, sentido: v.sentido },
       } satisfies NotificacionItem;

@@ -2,38 +2,48 @@ import type { NotificacionFrecuencia } from './notificaciones-catalog';
 import type { NotificacionItem, NotificacionTono } from './evaluators/notificacion-evaluator.interface';
 
 /**
- * Email de notificaciones (rediseño nov 2026). Funciones puras: no leen la base ni envían nada,
- * así se pueden previsualizar (`npm run preview:email-notificacion`) y probar sin Resend.
+ * Email de notificaciones. Funciones puras: no leen la base ni envían nada, así se pueden
+ * previsualizar (`npm run preview:email-notificacion`) y probar sin Resend.
  *
- * Reglas de un email que se ve bien en Gmail/Outlook/Apple Mail: todo con tablas y estilos inline,
- * sin imágenes de fondo ni flexbox, y el `<style>` del head solo para ajustes de mobile (los clientes
- * que lo ignoran ven la versión de escritorio, que también funciona en una pantalla angosta).
+ * Fiel a la app y a la web (nov 2026): barra superior carbón como `AppShell` (logo chico + nombre
+ * de la empresa), tipografías del sistema (Bebas Neue títulos y números, Barlow texto, Barlow
+ * Condensed en mayúsculas para etiquetas y botones), esquinas rectas, cada sección como un bloque
+ * "Pendientes" del dashboard (`DashboardPendientesMarco`: título + badge de cantidad + "Ver todo",
+ * franja de montos y tabla con encabezados chicos) y pie oscuro como el `Footer` de la web.
+ *
+ * Reglas de email: todo con tablas y estilos inline. Las fuentes web cargan en Apple Mail, iOS y
+ * Outlook para Mac; Gmail las ignora y usa la de respaldo (Arial Narrow / Arial). El `<style>` del
+ * head solo ajusta mobile: los clientes que lo ignoran ven la versión de escritorio.
  */
 
-/** Logo servido desde el sitio en producción (URL pública estable) — un cliente de email no puede resolver rutas relativas ni localhost. */
-const LOGO_URL = 'https://admin.vialto.uno/vialto-software-white-removebg.png';
+/** Isotipo blanco de la web (vialto.uno, URL pública estable). */
+const ISOTIPO_URL = 'https://vialto.uno/vialto-isotipo-blanco.png';
 export const APP_URL = 'https://admin.vialto.uno';
 
-/** Tope de tarjetas por email: un tipo con cientos de avisos (cargas sospechosas) no arma un mail interminable. */
+/** Tope de filas por email: un tipo con cientos de avisos (cargas para revisar) no arma un mail interminable. */
 export const MAX_TARJETAS = 20;
 
-/** Colores de marca (`--color-vialto-*` de `index.css` del frontend). Esquinas rectas, como la app. */
+/** Colores de marca (`--color-vialto-*` de `index.css` del frontend). */
 const C = {
   charcoal: '#1a1a1a',
+  graphite: '#2e2e2e',
   fire: '#e8470a',
   steel: '#4a4a4a',
   mist: '#f5f3f0',
-  borde: '#e7e3dc',
-  suave: '#8a8580',
+  borde: '#e6e6e6', // black/10 sobre blanco
+  bordeSuave: '#f2f2f2', // black/5
 };
 
-const TONOS: Record<NotificacionTono, { acento: string; chipFondo: string; chipTexto: string }> = {
-  alerta: { acento: '#c62828', chipFondo: '#fdecea', chipTexto: '#b71c1c' },
-  aviso: { acento: '#d97706', chipFondo: '#fff4e0', chipTexto: '#92400e' },
-  info: { acento: C.steel, chipFondo: '#f1efec', chipTexto: C.steel },
+/** Mismos tonos que los "Pendientes" del dashboard (rose / amber de Tailwind). */
+const TONOS: Record<NotificacionTono, { acento: string; fondo: string; borde: string; texto: string }> = {
+  alerta: { acento: '#e11d48', fondo: '#fff1f2', borde: '#ffe4e6', texto: '#be123c' },
+  aviso: { acento: '#f59e0b', fondo: '#fffbeb', borde: '#fef3c7', texto: '#b45309' },
+  info: { acento: C.steel, fondo: C.mist, borde: '#e7e3dc', texto: C.steel },
 };
 
-const FONT = `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;`;
+const F_DISPLAY = `font-family:'Bebas Neue','Oswald','Arial Narrow',Arial,sans-serif; font-weight:400;`;
+const F_BODY = `font-family:Barlow,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;`;
+const F_UI = `font-family:'Barlow Condensed','Arial Narrow',Arial,sans-serif;`;
 
 /**
  * URL absoluta de una ruta de la app. El frontend usa `HashRouter`: sin el `#` el servidor
@@ -72,16 +82,16 @@ function fmtMonto(monto: number, moneda: string): string {
   return `${moneda} ${monto.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-type Seccion = { nombre: string | null; tono: NotificacionTono; items: NotificacionItem[] };
+type Seccion = { nombre: string | null; items: NotificacionItem[] };
 
-/** Agrupa por `seccion` respetando el orden de llegada. El tono de la sección es el del primer ítem. */
+/** Agrupa por `seccion` respetando el orden de llegada. */
 function agruparSecciones(items: NotificacionItem[]): Seccion[] {
   const secciones: Seccion[] = [];
   for (const it of items) {
     const nombre = it.seccion ?? null;
     let s = secciones.find((x) => x.nombre === nombre);
     if (!s) {
-      s = { nombre, tono: it.tono ?? 'info', items: [] };
+      s = { nombre, items: [] };
       secciones.push(s);
     }
     s.items.push(it);
@@ -89,9 +99,25 @@ function agruparSecciones(items: NotificacionItem[]): Seccion[] {
   return secciones;
 }
 
-/** Totales por sentido y moneda (nunca se suman monedas distintas). */
-function totales(items: NotificacionItem[]): { sentido: 'cobrar' | 'pagar'; montos: { moneda: string; monto: number }[] }[] {
-  const res: { sentido: 'cobrar' | 'pagar'; montos: { moneda: string; monto: number }[] }[] = [];
+/** Color del badge de cantidad: rojo si hay algo urgente, si no ámbar, si no neutro. */
+function tonoSeccion(s: Seccion): NotificacionTono {
+  if (s.items.some((i) => i.tono === 'alerta')) return 'alerta';
+  if (s.items.some((i) => i.tono === 'aviso')) return 'aviso';
+  return 'info';
+}
+
+/** Línea de color arriba del bloque para separar a simple vista lo que entra (cobrar) de lo que sale (pagar). */
+const COLOR_SENTIDO = { cobrar: '#059669', pagar: C.charcoal } as const;
+function sentidoSeccion(s: Seccion): 'cobrar' | 'pagar' | null {
+  const sentidos = new Set(s.items.map((i) => i.importe?.sentido ?? null));
+  return sentidos.size === 1 ? ([...sentidos][0] ?? null) : null;
+}
+
+type Total = { sentido: 'cobrar' | 'pagar'; montos: { moneda: string; monto: number }[] };
+
+/** Totales por sentido y moneda (nunca se suman monedas distintas). ARS primero. */
+function totales(items: NotificacionItem[]): Total[] {
+  const res: Total[] = [];
   for (const sentido of ['cobrar', 'pagar'] as const) {
     const porMoneda = new Map<string, number>();
     for (const it of items) {
@@ -109,25 +135,15 @@ function totales(items: NotificacionItem[]): { sentido: 'cobrar' | 'pagar'; mont
   return res;
 }
 
-/** Singular de los nombres de sección conocidos, para "1 vencido" en vez de "1 vencidos". */
-const SECCION_SINGULAR: Record<string, string> = {
-  Vencidos: 'vencido',
-  'Vencen pronto': 'vence pronto',
-};
-
-/** "2 vencidos, 1 vence pronto" o "5 avisos nuevos" (asunto, preheader y versión de texto). */
+/** "3 a cobrar a clientes, 2 a pagar a proveedores" o "5 avisos nuevos" (asunto, preheader y texto plano). */
 function resumenCorto(secciones: Seccion[], total: number): string {
   const conNombre = secciones.filter((s) => s.nombre);
-  if (conNombre.length > 0) {
-    return conNombre
-      .map((s) => {
-        const n = s.items.length;
-        const nombre = n === 1 ? (SECCION_SINGULAR[s.nombre!] ?? s.nombre!.toLowerCase()) : s.nombre!.toLowerCase();
-        return `${n} ${nombre}`;
-      })
-      .join(', ');
-  }
-  return total === 1 ? '1 aviso nuevo' : `${total} avisos nuevos`;
+  if (conNombre.length > 0) return conNombre.map((s) => `${s.items.length} ${s.nombre!.toLowerCase()}`).join(', ');
+  return cantidadAvisos(total);
+}
+
+function cantidadAvisos(n: number): string {
+  return n === 1 ? '1 aviso nuevo' : `${n} avisos nuevos`;
 }
 
 const ENCABEZADO_FRECUENCIA: Record<NotificacionFrecuencia, string> = {
@@ -137,102 +153,123 @@ const ENCABEZADO_FRECUENCIA: Record<NotificacionFrecuencia, string> = {
 };
 
 function fechaLarga(d: Date): string {
-  const s = d.toLocaleDateString('es-AR', {
+  return d.toLocaleDateString('es-AR', {
     timeZone: 'America/Argentina/Buenos_Aires',
     weekday: 'long',
     day: 'numeric',
     month: 'long',
   });
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function tarjeta(it: NotificacionItem): string {
-  const tono = TONOS[it.tono ?? 'info'];
+/** Logo como el de la web: isotipo + "VIAL" blanco + "TO." naranja + "SOFTWARE". Chico. */
+function logo(): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+    <td valign="middle" style="padding-right:7px;"><img src="${ISOTIPO_URL}" alt="" width="27" height="22" style="display:block; width:27px; height:22px; border:0;" /></td>
+    <td valign="middle" style="line-height:1;">
+      <div style="${F_DISPLAY} font-size:19px; line-height:17px; letter-spacing:0.02em; color:#ffffff;">VIAL<span style="color:${C.fire};">TO.</span></div>
+      <div style="${F_UI} font-size:8px; line-height:9px; font-weight:600; letter-spacing:0.28em; text-transform:uppercase; color:rgba(255,255,255,0.85);">Software</div>
+    </td>
+  </tr></table>`;
+}
+
+/** Badge de estado como los de la app: mayúsculas, condensada, borde y fondo del tono. */
+function badgeEstado(texto: string, tono: NotificacionTono): string {
+  const t = TONOS[tono];
+  return `<span style="display:inline-block; ${F_UI} font-size:11px; font-weight:600; line-height:1; letter-spacing:0.05em; text-transform:uppercase; padding:4px 6px; border:1px solid ${t.borde}; background-color:${t.fondo}; color:${t.texto};">${esc(texto)}</span>`;
+}
+
+const TH = `${F_UI} padding:8px 0; font-size:11px; font-weight:400; letter-spacing:0.15em; text-transform:uppercase; color:${C.steel}; border-bottom:1px solid ${C.borde};`;
+
+function fila(it: NotificacionItem, conImporte: boolean): string {
+  const tono = it.tono ?? 'info';
   const href = it.url ? esc(urlApp(it.url)) : null;
+  const principal = it.encabezado ?? it.titulo;
   const titulo = href
-    ? `<a href="${href}" style="color:${C.charcoal}; text-decoration:none;">${esc(it.titulo)}</a>`
-    : esc(it.titulo);
+    ? `<a href="${href}" style="color:${C.charcoal}; text-decoration:none;">${esc(principal)}</a>`
+    : esc(principal);
   // Con datos estructurados, el `detalle` (texto de la campana) sería repetido: se muestra solo como respaldo.
   const segunda = it.subtitulo ?? (it.etiqueta ? null : it.detalle);
-  const importe = it.importe
-    ? `<td class="monto" align="right" valign="top" style="${FONT} padding-left:12px; white-space:nowrap; font-size:15px; font-weight:700; color:${C.charcoal};">${esc(fmtMonto(it.importe.monto, it.importe.moneda))}</td>`
-    : '';
-  const chip = it.etiqueta
-    ? `<span style="display:inline-block; ${FONT} font-size:12px; font-weight:700; line-height:1; padding:5px 8px; background-color:${tono.chipFondo}; color:${tono.chipTexto};">${esc(it.etiqueta)}</span>`
-    : '';
-  const ver = href
-    ? `<a href="${href}" style="${FONT} font-size:13px; font-weight:700; color:${C.fire}; text-decoration:none; white-space:nowrap;">Ver&nbsp;&rarr;</a>`
-    : '';
-  const filaInferior =
-    chip || ver
-      ? `<tr>
-          <td colspan="2" style="padding-top:10px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-              <td valign="middle">${chip}</td>
-              <td valign="middle" align="right">${ver}</td>
-            </tr></table>
-          </td>
-        </tr>`
-      : '';
-
-  return `
-    <tr><td style="padding-bottom:10px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border:1px solid ${C.borde}; border-left:4px solid ${tono.acento};">
-        <tr><td style="padding:14px 16px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td valign="top" style="${FONT} font-size:15px; font-weight:700; line-height:1.35; color:${C.charcoal};">${titulo}</td>
-              ${importe}
-            </tr>
-            ${segunda ? `<tr><td colspan="2" style="${FONT} padding-top:4px; font-size:13px; line-height:1.45; color:${C.steel};">${esc(segunda)}</td></tr>` : ''}
-            ${filaInferior}
-          </table>
-        </td></tr>
-      </table>
-    </td></tr>`;
+  const td = `border-bottom:1px solid ${C.bordeSuave};`;
+  return `<tr>
+    <td valign="top" style="${td} padding:10px 12px 10px 0;">
+      <div style="${F_BODY} font-size:14px; font-weight:600; line-height:1.35; color:${C.charcoal};">${titulo}</div>
+      ${segunda ? `<div style="${F_BODY} padding-top:2px; font-size:12px; line-height:1.4; color:${C.steel};">${esc(segunda)}</div>` : ''}
+      ${it.etiqueta ? `<div style="padding-top:6px;">${badgeEstado(it.etiqueta, tono)}</div>` : ''}
+    </td>
+    ${
+      conImporte
+        ? `<td class="monto" valign="top" align="right" style="${td} ${F_BODY} padding:10px 12px 10px 0; white-space:nowrap; font-size:14px; font-weight:600; color:${C.charcoal};">${it.importe ? esc(fmtMonto(it.importe.monto, it.importe.moneda)) : ''}</td>`
+        : ''
+    }
+    <td valign="top" align="right" style="${td} padding:11px 0 10px;">${
+      href
+        ? `<a href="${href}" style="${F_UI} font-size:12px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:${C.fire}; text-decoration:none; white-space:nowrap;">Ver&nbsp;&rsaquo;</a>`
+        : ''
+    }</td>
+  </tr>`;
 }
 
-function bloqueResumen(secciones: Seccion[], tots: ReturnType<typeof totales>): string {
-  const conNombre = secciones.filter((s) => s.nombre);
-  if (conNombre.length === 0 && tots.length === 0) return '';
+/**
+ * Una sección como un bloque "Pendientes" del dashboard: título + badge de cantidad, franja con el
+ * total (si los ítems tienen sentido cobrar/pagar) y la tabla. Sin "Ver todo": el botón principal
+ * del email ya lleva ahí.
+ */
+function bloqueSeccion(s: Seccion, visibles: NotificacionItem[]): string {
+  const t = TONOS[tonoSeccion(s)];
+  const sentido = sentidoSeccion(s);
+  const conImporte = s.items.some((i) => i.importe);
+  const etiquetaImporte = s.items.some((i) => i.importe?.sentido) ? 'Saldo' : 'Importe';
+  const ocultos = s.items.length - visibles.length;
+  const total = sentido ? totales(s.items)[0] : undefined;
+  // Sin nombre de sección, el título del email ya dice qué es: el bloque solo muestra la cantidad.
+  const titulo = s.nombre ? esc(s.nombre) : cantidadAvisos(s.items.length);
 
-  const ancho = conNombre.length > 0 ? Math.floor(100 / conNombre.length) : 100;
-  const tiles = conNombre
-    .map((s, i) => {
-      const t = TONOS[s.tono];
-      return `<td class="tile" width="${ancho}%" valign="top" style="padding:${i === 0 ? '0' : '0 0 0 8px'};">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${C.mist}; border-top:3px solid ${t.acento};">
-          <tr><td style="padding:12px 14px;">
-            <div style="${FONT} font-size:28px; font-weight:800; line-height:1; color:${t.acento};">${s.items.length}</div>
-            <div style="${FONT} padding-top:6px; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:${C.steel};">${esc(s.nombre!)}</div>
-          </td></tr>
+  const franja = total
+    ? (() => {
+        const [principal, ...resto] = total.montos;
+        return `<tr><td style="padding:0 16px 12px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${C.mist}; border:1px solid #ebe8e3;"><tr><td style="padding:8px 12px;">
+            <div style="${F_UI} font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:${C.steel};">${sentido === 'cobrar' ? 'Total a cobrar' : 'Total a pagar'}</div>
+            <span style="${F_DISPLAY} font-size:26px; line-height:28px; letter-spacing:0.03em; color:${C.charcoal};">${esc(fmtMonto(principal.monto, principal.moneda))}</span>
+            ${resto.map((m) => `<span style="${F_DISPLAY} padding-left:8px; font-size:18px; line-height:28px; letter-spacing:0.03em; color:#5f5f5f;">+ ${esc(fmtMonto(m.monto, m.moneda))}</span>`).join('')}
+          </td></tr></table>
+        </td></tr>`;
+      })()
+    : '';
+
+  return `
+  <tr><td style="padding:0 0 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border:1px solid ${C.borde};${sentido ? ` border-top:3px solid ${COLOR_SENTIDO[sentido]};` : ''}">
+      <tr><td style="padding:14px 16px 12px; ${F_BODY} font-size:15px; font-weight:600; color:${C.charcoal};">
+        ${titulo}${
+          s.nombre
+            ? `<span style="display:inline-block; margin-left:8px; min-width:12px; padding:4px 7px; ${F_BODY} font-size:12px; font-weight:700; line-height:1; text-align:center; background-color:${t.acento}; color:#ffffff; vertical-align:1px;">${s.items.length}</span>`
+            : ''
+        }
+      </td></tr>
+      ${franja}
+      <tr><td style="padding:0 16px 6px; border-top:1px solid ${C.borde};">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <th align="left" style="${TH}">Detalle</th>
+            ${conImporte ? `<th align="right" style="${TH} padding-right:12px;">${etiquetaImporte}</th>` : ''}
+            <th align="right" style="${TH}">&nbsp;</th>
+          </tr>
+          ${visibles.map((i) => fila(i, conImporte)).join('')}
         </table>
-      </td>`;
-    })
-    .join('');
-
-  const filasTotales = tots
-    .map(
-      (t) => `<tr>
-        <td style="${FONT} padding:6px 0; font-size:13px; color:${C.steel}; border-top:1px solid ${C.borde};">${t.sentido === 'cobrar' ? 'Total a cobrar' : 'Total a pagar'}</td>
-        <td align="right" style="${FONT} padding:6px 0; font-size:14px; font-weight:700; color:${t.sentido === 'cobrar' ? '#1b7a3d' : C.charcoal}; border-top:1px solid ${C.borde};">${t.montos.map((m) => esc(fmtMonto(m.monto, m.moneda))).join('<br />')}</td>
-      </tr>`,
-    )
-    .join('');
-
-  return `
-    ${tiles ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${filasTotales ? '12px' : '24px'};"><tr>${tiles}</tr></table>` : ''}
-    ${filasTotales ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px; border-bottom:1px solid ${C.borde};">${filasTotales}</table>` : ''}`;
+        ${
+          ocultos > 0
+            ? `<p style="${F_BODY} margin:10px 0 6px; font-size:13px; color:${C.steel};">Y ${ocultos} ${ocultos === 1 ? 'aviso más' : 'avisos más'} en Vialto.</p>`
+            : ''
+        }
+      </td></tr>
+    </table>
+  </td></tr>`;
 }
 
-function encabezadoSeccion(s: Seccion): string {
-  if (!s.nombre) return '';
-  const t = TONOS[s.tono];
-  return `<tr><td style="padding:8px 0 10px;">
-    <span style="display:inline-block; width:8px; height:8px; background-color:${t.acento}; vertical-align:middle;"></span>
-    <span style="${FONT} padding-left:6px; font-size:12px; font-weight:800; letter-spacing:0.1em; text-transform:uppercase; color:${C.charcoal}; vertical-align:middle;">${esc(s.nombre)}</span>
-    <span style="${FONT} padding-left:4px; font-size:12px; color:${C.suave}; vertical-align:middle;">(${s.items.length})</span>
-  </td></tr>`;
+/** Filas por sección: el tope se reparte para que ningún bloque (ej. proveedores) quede afuera. */
+function cupoPorSeccion(secciones: Seccion[]): number {
+  return Math.max(5, Math.floor(MAX_TARJETAS / Math.max(secciones.length, 1)));
 }
 
 export function armarEmailNotificacion(input: EmailNotificacionInput): EmailNotificacion {
@@ -243,21 +280,16 @@ export function armarEmailNotificacion(input: EmailNotificacionInput): EmailNoti
   const resumen = resumenCorto(secciones, items.length);
   const urlBoton = urlApp(rutaBoton);
   const urlConfig = urlApp('/configuracion/notificaciones');
+  const anio = fecha.getFullYear();
 
-  // Tope de tarjetas repartido en orden (las primeras secciones —vencidos— tienen prioridad).
-  let restantes = MAX_TARJETAS;
-  const cuerpo = secciones
-    .map((s) => {
-      const visibles = s.items.slice(0, Math.max(restantes, 0));
-      restantes -= visibles.length;
-      if (visibles.length === 0) return '';
-      return encabezadoSeccion(s) + visibles.map(tarjeta).join('');
-    })
-    .join('');
-  const ocultos = items.length - Math.min(items.length, MAX_TARJETAS);
+  const cupo = cupoPorSeccion(secciones);
+  const cuerpo = secciones.map((s) => bloqueSeccion(s, s.items.slice(0, cupo))).join('');
 
-  const subject = `${label} — ${resumen}${empresa ? ` · ${empresa}` : ''}`;
-  const preheader = [resumen, ...tots.map((t) => `${t.sentido === 'cobrar' ? 'A cobrar' : 'A pagar'} ${t.montos.map((m) => fmtMonto(m.monto, m.moneda)).join(' + ')}`)].join(' · ');
+  const subject = `${label}: ${resumen}${empresa ? ` · ${empresa}` : ''}`;
+  const preheader = [
+    resumen,
+    ...tots.map((t) => `${t.sentido === 'cobrar' ? 'A cobrar' : 'A pagar'} ${t.montos.map((m) => fmtMonto(m.monto, m.moneda)).join(' + ')}`),
+  ].join(' · ');
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -267,12 +299,13 @@ export function armarEmailNotificacion(input: EmailNotificacionInput): EmailNoti
 <meta name="color-scheme" content="light only" />
 <meta name="supported-color-schemes" content="light" />
 <title>${esc(label)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet" />
 <style>
   @media (max-width: 520px) {
-    .px { padding-left: 18px !important; padding-right: 18px !important; }
-    .h1 { font-size: 21px !important; }
-    .tile { display: block !important; width: 100% !important; padding: 0 0 8px 0 !important; }
-    .monto { display: block !important; text-align: left !important; padding: 4px 0 0 0 !important; }
+    .px { padding-left: 16px !important; padding-right: 16px !important; }
+    .h1 { font-size: 30px !important; line-height: 30px !important; }
+    .tile { display: block !important; width: 100% !important; padding: 0 0 10px 0 !important; }
+    .empresa { display: none !important; }
     .btn a { display: block !important; }
   }
 </style>
@@ -280,49 +313,49 @@ export function armarEmailNotificacion(input: EmailNotificacionInput): EmailNoti
 <body style="margin:0; padding:0; background-color:${C.mist};">
 <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent;">${esc(preheader)}&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${C.mist};">
-  <tr><td align="center" style="padding:28px 12px;">
+  <tr><td align="center" style="padding:24px 12px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;">
 
-      <tr><td class="px" style="background-color:${C.charcoal}; padding:18px 28px;">
+      <tr><td class="px" style="background-color:${C.charcoal}; padding:12px 20px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td valign="middle"><img src="${LOGO_URL}" alt="Vialto Software" width="120" style="display:block; height:auto; border:0;" /></td>
-          <td valign="middle" align="right" style="${FONT} font-size:12px; line-height:1.4; color:#cfcac3;">
-            <strong style="color:#ffffff;">${ENCABEZADO_FRECUENCIA[frecuencia]}</strong><br />${esc(fechaLarga(fecha))}
-          </td>
+          <td valign="middle" width="1">${logo()}</td>
+          ${
+            empresa
+              ? `<td valign="middle" style="padding-left:12px;"><div style="border-left:1px solid rgba(255,255,255,0.12); padding-left:12px; ${F_UI} font-size:12px; letter-spacing:0.04em; color:rgba(255,255,255,0.55);">${esc(empresa)}</div></td>`
+              : '<td></td>'
+          }
         </tr></table>
       </td></tr>
-      <tr><td style="height:4px; line-height:4px; font-size:0; background-color:${C.fire};">&nbsp;</td></tr>
+      <tr><td style="height:3px; line-height:3px; font-size:0; background-color:${C.fire};">&nbsp;</td></tr>
 
-      <tr><td class="px" style="background-color:#ffffff; padding:28px 28px 8px;">
-        ${empresa ? `<p style="${FONT} margin:0 0 6px; font-size:11px; font-weight:800; letter-spacing:0.14em; text-transform:uppercase; color:${C.fire};">${esc(empresa)}</p>` : ''}
-        <h1 class="h1" style="${FONT} margin:0 0 8px; font-size:24px; line-height:1.25; font-weight:800; color:${C.charcoal};">${esc(label)}</h1>
-        ${intro ? `<p style="${FONT} margin:0 0 22px; font-size:14px; line-height:1.5; color:${C.steel};">${esc(intro)}</p>` : '<div style="height:14px;"></div>'}
-        ${bloqueResumen(secciones, tots)}
+      <tr><td class="px" style="padding:26px 4px 18px;">
+        <p style="${F_UI} margin:0 0 8px; font-size:12px; font-weight:600; letter-spacing:0.3em; text-transform:uppercase; color:${C.fire};">${ENCABEZADO_FRECUENCIA[frecuencia]} · ${esc(fechaLarga(fecha))}</p>
+        <h1 class="h1" style="${F_DISPLAY} margin:0; font-size:36px; line-height:36px; letter-spacing:0.03em; text-transform:uppercase; color:${C.charcoal};">${esc(label)}</h1>
+        ${intro ? `<p style="${F_BODY} margin:10px 0 0; font-size:15px; line-height:1.5; color:${C.steel};">${esc(intro)}</p>` : ''}
+      </td></tr>
+
+      <tr><td class="px" style="padding:0 0 4px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           ${cuerpo}
         </table>
-        ${
-          ocultos > 0
-            ? `<p style="${FONT} margin:4px 0 0; font-size:13px; color:${C.steel};">Y ${ocultos} ${ocultos === 1 ? 'aviso más' : 'avisos más'}. <a href="${esc(urlBoton)}" style="color:${C.fire}; font-weight:700; text-decoration:none;">Ver todos&nbsp;&rarr;</a></p>`
-            : ''
-        }
       </td></tr>
 
-      <tr><td class="px" style="background-color:#ffffff; padding:18px 28px 30px;">
+      <tr><td class="px" style="padding:4px 0 28px;">
         <table role="presentation" cellpadding="0" cellspacing="0" class="btn"><tr>
           <td style="background-color:${C.fire};">
-            <a href="${esc(urlBoton)}" style="display:inline-block; ${FONT} padding:13px 26px; font-size:14px; font-weight:700; letter-spacing:0.02em; color:#ffffff; text-decoration:none; text-align:center;">Abrir en Vialto&nbsp;&rarr;</a>
+            <a href="${esc(urlBoton)}" style="display:inline-block; ${F_UI} padding:14px 28px; font-size:15px; font-weight:600; letter-spacing:0.18em; text-transform:uppercase; color:#ffffff; text-decoration:none; text-align:center;">Abrir en Vialto&nbsp;&rsaquo;</a>
           </td>
         </tr></table>
       </td></tr>
 
-      <tr><td class="px" style="padding:18px 28px; border-top:1px solid ${C.borde};">
-        <p style="${FONT} margin:0 0 6px; font-size:12px; line-height:1.55; color:${C.steel};">
-          Recibís este aviso porque estás en la lista de notificaciones${empresa ? ` de ${esc(empresa)}` : ''}.
-          Podés elegir qué avisos llegan y a quién en
-          <a href="${esc(urlConfig)}" style="color:${C.fire}; text-decoration:none; font-weight:700;">Configuración &rarr; Notificaciones</a>.
+      <tr><td class="px" style="background-color:${C.charcoal}; padding:18px 24px;">
+        <p style="${F_BODY} margin:0; font-size:13px; line-height:1.55; color:rgba(255,255,255,0.7);">
+          Elegí qué avisos llegan y a quién en
+          <a href="${esc(urlConfig)}" style="color:${C.fire}; text-decoration:none; font-weight:600;">Configuración &rsaquo; Notificaciones</a>.
         </p>
-        <p style="${FONT} margin:0; font-size:11px; color:${C.suave};">Vialto Software</p>
+        <p style="${F_BODY} margin:12px 0 0; padding-top:12px; border-top:1px solid rgba(255,255,255,0.1); font-size:12px; color:rgba(255,255,255,0.5);">
+          &copy; ${anio} Vialto Software · Plataforma de gestión para empresas de transporte y logística
+        </p>
       </td></tr>
 
     </table>
@@ -336,18 +369,15 @@ export function armarEmailNotificacion(input: EmailNotificacionInput): EmailNoti
   for (const t of tots) {
     lineas.push(`${t.sentido === 'cobrar' ? 'Total a cobrar' : 'Total a pagar'}: ${t.montos.map((m) => fmtMonto(m.monto, m.moneda)).join(' + ')}`);
   }
-  let restantesTxt = MAX_TARJETAS;
   for (const s of secciones) {
-    const visibles = s.items.slice(0, Math.max(restantesTxt, 0));
-    restantesTxt -= visibles.length;
-    if (visibles.length === 0) continue;
-    lineas.push('', s.nombre ? `— ${s.nombre.toUpperCase()} (${s.items.length}) —` : '');
+    const visibles = s.items.slice(0, cupo);
+    lineas.push('', s.nombre ? `${s.nombre.toUpperCase()} (${s.items.length})` : '');
     for (const it of visibles) {
-      lineas.push(`• ${it.titulo}`, `  ${it.detalle}`);
+      lineas.push(`• ${it.encabezado ?? it.titulo}`, `  ${[it.subtitulo, it.detalle || it.etiqueta].filter(Boolean).join(' · ')}`);
       if (it.url) lineas.push(`  ${urlApp(it.url)}`);
     }
+    if (s.items.length > visibles.length) lineas.push(`  Y ${s.items.length - visibles.length} más.`);
   }
-  if (ocultos > 0) lineas.push('', `Y ${ocultos} más.`);
   lineas.push('', `Abrir en Vialto: ${urlBoton}`, `Elegir qué avisos recibir: ${urlConfig}`);
   const text = lineas.filter((l, i, arr) => !(l === '' && arr[i - 1] === '')).join('\n').trim();
 

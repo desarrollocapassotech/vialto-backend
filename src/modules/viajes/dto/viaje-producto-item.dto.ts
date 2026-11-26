@@ -17,4 +17,8 @@ export class ViajeProductoItemDto {
   @Min(0)
   @Type(() => Number)
   pesoKg?: number;
+
+  @IsOptional()
+  @IsString()
+  presentacionId?: string | null;
 }

@@ -9,6 +9,7 @@ export type ViajeClienteProductoItem = {
   productoId: string;
   cantidad?: number | null;
   pesoKg?: number | null;
+  presentacionId?: string | null;
 };
 
 export type ViajeClienteItem = {
@@ -58,6 +59,7 @@ function normalizarProductosCliente(
       productoId,
       cantidad: item.cantidad ?? null,
       pesoKg: item.pesoKg ?? null,
+      presentacionId: item.presentacionId?.trim() || null,
     });
   }
   return out;
@@ -219,6 +221,7 @@ export async function reemplazarClientesDelViaje(
           viajeClienteId: creado.id,
           orden: i,
           productoId: p.productoId,
+          presentacionId: p.presentacionId?.trim() || null,
           cantidad: p.cantidad ?? null,
           pesoKg: p.pesoKg ?? null,
         })),
@@ -243,7 +246,10 @@ export const viajeClientesViajeInclude = {
     destinosCliente: { orderBy: { orden: "asc" as const } },
     productosCliente: {
       orderBy: { orden: "asc" as const },
-      include: { producto: { select: { id: true, nombre: true, activo: true } } },
+      include: {
+        producto: { select: { id: true, nombre: true, activo: true } },
+        presentacion: { select: { id: true, nombre: true } },
+      },
     },
     factura: { select: { ivaPct: true, arcaEstado: true } },
   },

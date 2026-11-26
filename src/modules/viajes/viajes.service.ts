@@ -245,7 +245,12 @@ function calcularMontosReales<
   };
 }
 
-type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
+type ProductoItem = {
+  productoId: string;
+  cantidad?: number;
+  pesoKg?: number;
+  presentacionId?: string | null;
+};
 type PagoTransportistaInput = { monto?: unknown; moneda?: unknown };
 type DestinoItem = { etiqueta: string };
 
@@ -299,7 +304,12 @@ function normalizarProductoItems(
     const id = String(item.productoId ?? "").trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    out.push({ productoId: id, cantidad: item.cantidad, pesoKg: item.pesoKg });
+    out.push({
+      productoId: id,
+      cantidad: item.cantidad,
+      pesoKg: item.pesoKg,
+      presentacionId: item.presentacionId?.trim() || null,
+    });
   }
   return out;
 }

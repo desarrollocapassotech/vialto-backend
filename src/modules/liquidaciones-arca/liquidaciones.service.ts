@@ -286,8 +286,11 @@ export class LiquidacionesService {
     }
     assertCondicionFiscalTransportista(transportista);
 
-    // Determinar el % de comisión: dto > transportista > config default > 0
-    const comisionPct = dto.comisionPct ?? transportista.comisionPct ?? config?.comisionPctDefault ?? 0;
+    // Determinar el % de comisión: dto (si se envió, incluyendo 0) > transportista > config default > 0
+    const comisionPct =
+      typeof dto.comisionPct === 'number' && Number.isFinite(dto.comisionPct)
+        ? dto.comisionPct
+        : (transportista.comisionPct ?? config?.comisionPctDefault ?? 0);
 
     // Obtener los viajes y validar que pertenezcan al tenant y al transportista
     const viajes = await this.prisma.viaje.findMany({

@@ -69,7 +69,7 @@ export class LiquidacionesController {
 
   @ApiOperation({ summary: "Obtener configuración ARCA del tenant" })
   @Get("config")
-  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca")
+  @RequireModule("emision-facturas-arca", "emision-liquido-producto-arca", "liquidaciones")
   @Roles("admin", "member", "superadmin")
   getConfig(@CurrentAuth() auth: AuthPayload) {
     assertTenantId(auth.tenantId);

@@ -7,10 +7,15 @@ export type NotificacionCatalogoItem = {
   modulo: string;
   label: string;
   descripcion: string;
+  /** Una línea debajo del título del email (corta, para quien lo recibe; `descripcion` es para la pantalla de config). */
+  introEmail?: string;
   /** Default para un tenant sin override guardado. */
   defaultActivo: boolean;
-  /** Slug de `Tenant.modules` requerido para que esta notificación tenga sentido — si el tenant no lo tiene, ni se evalúa ni se muestra en la config. */
-  requiereModulo: string;
+  /**
+   * Slug de `Tenant.modules` requerido para que esta notificación tenga sentido — si el tenant no lo tiene, ni
+   * se evalúa ni se muestra en la config. Con una lista, alcanza con tener **alguno** (ver `tieneModuloRequerido`).
+   */
+  requiereModulo: string | string[];
   /**
    * Qué cron dispara este tipo — `diaria` la procesa `NotificacionesCronService.cronDiario`
    * (8 AM), `semanal` la procesa un cron específico de ese dominio en vez del diario (ej.
@@ -25,57 +30,45 @@ export type NotificacionCatalogoItem = {
    * tarea, ej. la corrección de combustible) y no `NotificacionesCronService.cronSemanal`.
    */
   cronPropio?: boolean;
-  /** Ruta relativa (con query params) a la que apunta el botón del email — default: home. */
-  urlDestino?: string;
+  /**
+   * Ruta de la app (sin `#`, con query params) a la que apunta el botón principal del email — default: home.
+   * Función si depende de los módulos del tenant. El `#` del HashRouter lo agrega `urlApp`.
+   */
+  urlDestino?: string | ((modules: string[]) => string);
   /**
    * Tabla de la entidad del aviso (id = `entidadId` hasta el primer ":"). Si la entidad se borra,
    * el aviso deja de mostrarse en la campana (`NotificacionesFeedService.purgarHuerfanas`).
+   * Con una lista, el aviso se conserva mientras el id exista en alguna (ids cuid, únicos entre tablas).
    * Sin valor = el aviso no apunta a un registro estable y se conserva siempre.
    */
-  entidadTabla?: string;
+  entidadTabla?: string | string[];
 };
 
 export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
+  // Un solo aviso de vencimientos (nov 2026): antes había "Factura por vencer", "Factura vencida" y
+  // "Vencimientos de cuenta corriente", y una empresa con los dos módulos recibía dos mails por la
+  // misma factura (cada factura de cliente es también una venta en Cuenta corriente). Ver
+  // `VencimientosEvaluator` y la migración `20261126120000_notificaciones_vencimientos_unificados`.
   {
-    tipo: 'facturacion.facturaPorVencer',
-    modulo: 'facturacion',
-    label: 'Factura de cliente por vencer',
+    tipo: 'vencimientos',
+    modulo: 'vencimientos',
+    label: 'Vencimientos de cobros y pagos',
     descripcion:
-      'Avisa cuando una factura de cliente vence en los próximos días y todavía no fue cobrada.',
+      'Un solo aviso diario con lo que vence en los próximos 3 días y lo que ya venció sin cobrar o pagar: facturas de clientes y, con Cuenta corriente, también compras y liquidaciones a pagar. Cada vencimiento se avisa una vez al acercarse y otra vez si vence sin saldarse.',
+    introEmail: 'Lo que vence en los próximos 3 días y lo que ya venció sin cobrar o pagar.',
     defaultActivo: true,
-    requiereModulo: 'facturacion',
+    requiereModulo: ['facturacion', 'cuenta-corriente'],
     frecuencia: 'diaria',
-    entidadTabla: 'facturas',
-  },
-  {
-    tipo: 'facturacion.facturaVencida',
-    modulo: 'facturacion',
-    label: 'Factura de cliente vencida',
-    descripcion:
-      'Avisa una vez, al día siguiente de vencer, cuando una factura de cliente venció y todavía no fue cobrada.',
-    defaultActivo: true,
-    requiereModulo: 'facturacion',
-    frecuencia: 'diaria',
-    entidadTabla: 'facturas',
-  },
-  {
-    tipo: 'cuenta-corriente.vencimiento',
-    modulo: 'cuenta-corriente',
-    label: 'Vencimientos de cuenta corriente',
-    descripcion:
-      'Avisa cuando una venta o compra de cuenta corriente vence en los próximos días y todavía tiene saldo pendiente (a cobrar o a pagar).',
-    defaultActivo: true,
-    requiereModulo: 'cuenta-corriente',
-    frecuencia: 'diaria',
-    urlDestino: '/cuenta-corriente',
-    entidadTabla: 'movimientos_cuenta_corriente',
+    urlDestino: (modules) => (modules.includes('cuenta-corriente') ? '/cuenta-corriente' : '/facturacion'),
+    entidadTabla: ['movimientos_cuenta_corriente', 'facturas'],
   },
   {
     tipo: 'combustible.cargaSospechosa',
     modulo: 'combustible',
-    label: 'Cargas de combustible sospechosas',
+    label: 'Cargas de combustible para revisar',
     descripcion:
-      'Resumen semanal de cargas con litros, importe o kilometraje fuera de rango, detectadas por la corrección automática.',
+      'Resumen semanal de las cargas con algún dato que no cierra (litros, importe o kilometraje), según el control automático.',
+    introEmail: 'Encontramos cargas con algún dato que no cierra. Fijate si están bien y corregilas si hace falta.',
     defaultActivo: true,
     requiereModulo: 'combustible',
     frecuencia: 'semanal',
@@ -87,6 +80,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     tipo: 'combustible.errorChofer',
     modulo: 'combustible',
     label: 'Cargas de choferes que no se pudieron registrar',
+    introEmail: 'La carga quedó trabada en el celular del chofer hasta que se corrija.',
     descripcion:
       'Avisa en el momento cuando la carga que un chofer guardó en el celular sin conexión es rechazada al sincronizar (km inconsistente, patente inexistente, etc.) y queda trabada hasta que se corrija.',
     defaultActivo: true,
@@ -98,6 +92,7 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
     tipo: 'liquidaciones.pendienteAnulacion',
     modulo: 'liquidaciones',
     label: 'Liquidaciones pendientes de anular',
+    introEmail: 'Recordatorio semanal: estas liquidaciones siguen esperando que se confirme su anulación.',
     descripcion:
       'Recordatorio semanal (lunes) de las liquidaciones marcadas como pendientes de anulación que todavía no se confirmaron como anuladas. Se repite cada semana mientras sigan pendientes.',
     defaultActivo: true,
@@ -134,13 +129,25 @@ export const NOTIFICACIONES_CATALOG: NotificacionCatalogoItem[] = [
   },
 ];
 
+/** El tenant tiene el módulo que pide el tipo (o alguno, si pide una lista). */
+export function tieneModuloRequerido(item: NotificacionCatalogoItem, modules: string[]): boolean {
+  const requeridos = Array.isArray(item.requiereModulo) ? item.requiereModulo : [item.requiereModulo];
+  return requeridos.some((m) => modules.includes(m));
+}
+
+/** Ruta del botón principal del email para este tenant (sin `#`). */
+export function urlDestinoDe(item: NotificacionCatalogoItem, modules: string[]): string {
+  const u = item.urlDestino;
+  return (typeof u === 'function' ? u(modules) : u) ?? '/';
+}
+
 export function getNotificacionesCatalogoPorModulos(
   modules: string[],
   frecuencia?: NotificacionFrecuencia,
 ): NotificacionCatalogoItem[] {
   return NOTIFICACIONES_CATALOG.filter(
     (item) =>
-      modules.includes(item.requiereModulo) &&
+      tieneModuloRequerido(item, modules) &&
       (frecuencia === undefined || item.frecuencia === frecuencia),
   );
 }

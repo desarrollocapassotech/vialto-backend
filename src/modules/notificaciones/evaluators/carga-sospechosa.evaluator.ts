@@ -8,12 +8,13 @@ import type { NotificacionEvaluator, NotificacionItem } from './notificacion-eva
  */
 const LIMITE_CARGAS = 300;
 
+/** Qué llamó la atención, en palabras simples (el aviso no dice "sospechosa": pide revisar). */
 const MOTIVO_LABEL: Record<string, string> = {
-  litros_extremo: 'litros fuera de rango',
-  importe_invalido: 'importe inválido',
-  precio_litro_fuera_de_rango: 'precio por litro fuera de rango',
-  km_delta_invalido: 'salto de kilometraje inválido',
-  costo_km_invalido: 'costo por kilómetro fuera de rango',
+  litros_extremo: 'Los litros parecen demasiados o muy pocos',
+  importe_invalido: 'El importe no parece correcto',
+  precio_litro_fuera_de_rango: 'El precio por litro no es el habitual',
+  km_delta_invalido: 'El kilometraje no coincide con las cargas anteriores',
+  costo_km_invalido: 'El gasto por kilómetro no es el habitual',
 };
 
 /**
@@ -58,10 +59,21 @@ export class CargaSospechosaEvaluator implements NotificacionEvaluator {
       : [];
     const patenteVehiculo = new Map(vehiculos.map((v) => [v.id, v.patente]));
 
-    return cargas.map((c) => ({
-      entidadId: c.id,
-      titulo: `Carga sospechosa — ${c.vehiculoId ? (patenteVehiculo.get(c.vehiculoId) ?? 'vehículo') : 'vehículo sin datos'} en ${c.estacion}`,
-      detalle: `${c.fecha.toLocaleDateString('es-AR')} · ${c.litros} L · $${c.importe.toLocaleString('es-AR')} · Motivo: ${MOTIVO_LABEL[c.motivoSospecha ?? ''] ?? c.motivoSospecha ?? 'sin especificar'}`,
-    }));
+    return cargas.map((c) => {
+      const vehiculo = c.vehiculoId ? (patenteVehiculo.get(c.vehiculoId) ?? 'un vehículo') : 'un vehículo sin patente';
+      const motivo = MOTIVO_LABEL[c.motivoSospecha ?? ''] ?? 'Algún dato no parece correcto';
+      // Día sin hora (medianoche UTC): se formatea en UTC para no mostrar el día anterior.
+      const fecha = c.fecha.toLocaleDateString('es-AR', { timeZone: 'UTC' });
+      return {
+        entidadId: c.id,
+        titulo: `Revisá la carga de ${vehiculo} en ${c.estacion}`,
+        detalle: `${motivo} · ${fecha} · ${c.litros.toLocaleString('es-AR')} L · $${c.importe.toLocaleString('es-AR')}`,
+        url: `/combustible?carga=${encodeURIComponent(c.id)}`,
+        tono: 'aviso' as const,
+        subtitulo: `${fecha} · ${c.litros.toLocaleString('es-AR')} litros`,
+        etiqueta: motivo,
+        importe: { monto: c.importe, moneda: 'ARS' },
+      };
+    });
   }
 }

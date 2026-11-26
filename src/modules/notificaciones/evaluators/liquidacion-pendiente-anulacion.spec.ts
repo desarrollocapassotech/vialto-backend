@@ -76,7 +76,11 @@ function prismaLiquidaciones() {
     const envios: Row[] = [];
     const evaluados: string[] = [];
     const prisma = {
-      tenant: { findMany: async () => tenants },
+      tenant: {
+        findMany: async () => tenants,
+        findUnique: async ({ where }: Row) =>
+          tenants.find((t) => t.clerkOrgId === where.clerkOrgId) ?? { name: 'Empresa', modules: [] },
+      },
       notificacionEnvio: {
         findMany: async ({ where }: Row) =>
           envios.filter(
@@ -103,10 +107,8 @@ function prismaLiquidaciones() {
       config as never,
       email as never,
       users as never,
-      ev('facturacion.facturaPorVencer') as never,
-      ev('facturacion.facturaVencida') as never,
+      ev('vencimientos') as never,
       ev('combustible.cargaSospechosa') as never,
-      ev('cuenta-corriente.vencimiento') as never,
       ev('liquidaciones.pendienteAnulacion') as never,
     );
     return { cron, envios, evaluados };

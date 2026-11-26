@@ -54,6 +54,10 @@ export class LiquidacionPendienteAnulacionEvaluator implements NotificacionEvalu
         entidadId: `${l.id}:${semana}`,
         titulo: `Liquidación ${numero} — ${l.transportista?.nombre ?? 'transportista'}`,
         detalle: `${desde} · Líquido $${l.liquido.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        url: '/liquidaciones?estado=pendiente_anulacion',
+        tono: 'aviso' as const,
+        etiqueta: desde,
+        importe: { monto: l.liquido, moneda: 'ARS' },
       };
     });
   }

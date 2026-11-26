@@ -54,5 +54,7 @@ export function armarAvisosVencimiento(
       entidadId: `${f.vehiculoPlanId}:${f.referencia!.id}`,
       titulo: `${f.vehiculo.patente} — ${f.plan.nombre}`,
       detalle: detalle(f),
+      url: '/mantenimiento',
+      tono: estado === 'vencido' ? ('alerta' as const) : ('aviso' as const),
     }));
 }

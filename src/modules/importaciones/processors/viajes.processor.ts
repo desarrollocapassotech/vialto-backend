@@ -12,6 +12,7 @@ import {
 import type { IImportProcessor, InsertResult } from "./import-processor.interface";
 import type { ValidatedRow } from "../types/import.types";
 import { scalarDataFromRow } from "../prisma-import-fields";
+import { resolverModulosFacturacion } from "../../../shared/util/tenant-modules.util";
 
 /**
  * Un viaje con factura o liquidación vigente no se puede reimportar (sus datos fiscales
@@ -327,6 +328,10 @@ export class ViajesProcessor implements IImportProcessor {
     // en Observaciones para evitar ensuciar la información del viaje.
     const observaciones = (row.observaciones as string | undefined) ?? undefined;
 
+    const tieneFacturacion = row.nroFactura
+      ? await this.tieneFacturacion(tenantId)
+      : true;
+
     // Campos opcionales: `undefined` (no `null`) cuando la celda viene vacía,
     // para que reimportar el mismo ID Personalizado con un Excel más acotado
     // no borre datos ya cargados que esa fila no trae. Scalars nuevos del
@@ -346,6 +351,7 @@ export class ViajesProcessor implements IImportProcessor {
       precioTransportistaIvaIncluidoPct:
         this.parseIvaPct(row.precioTransportistaIvaIncluidoPct) ?? undefined,
       observaciones,
+      ...(!tieneFacturacion ? { nroFactura: undefined } : {}),
     };
     const extras = scalarDataFromRow(row, "Viaje", {
       skip: Object.keys(especiales),
@@ -363,12 +369,18 @@ export class ViajesProcessor implements IImportProcessor {
     return viajeId;
   }
 
-  private async tieneModulo(tenantId: string, modulo: string): Promise<boolean> {
+  private async obtenerModulosFacturacion(
+    tenantId: string,
+  ): Promise<{ tieneFacturacion: boolean; tieneArca: boolean }> {
     const tenant = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    return tenant?.modules.includes(modulo) ?? false;
+    return resolverModulosFacturacion(tenant?.modules);
+  }
+
+  async tieneFacturacion(tenantId: string): Promise<boolean> {
+    return (await this.obtenerModulosFacturacion(tenantId)).tieneFacturacion;
   }
 
   private async create(
@@ -430,11 +442,13 @@ export class ViajesProcessor implements IImportProcessor {
       hoy.setHours(0, 0, 0, 0);
 
       let facturaClienteId: string | null = null;
+      let tieneFacturacion = true;
       if (row.nroFactura) {
         const monedaMonto = (row.monedaMonto as string | null) ?? "ARS";
-        const tieneArca = await this.tieneModulo(tenantId, "emision-facturas-arca");
+        const modulosFacturacion = await this.obtenerModulosFacturacion(tenantId);
+        tieneFacturacion = modulosFacturacion.tieneFacturacion;
 
-        if (!tieneArca || monedaMonto !== "USD") {
+        if (tieneFacturacion && (!modulosFacturacion.tieneArca || monedaMonto !== "USD")) {
           const numeroFactura = row.nroFactura as string;
           const montoFila = this.resolveMonto(row) ?? 0;
 
@@ -514,6 +528,7 @@ export class ViajesProcessor implements IImportProcessor {
         precioTransportistaIvaIncluidoPct:
           this.parseIvaPct(row.precioTransportistaIvaIncluidoPct) ?? 0,
         facturaId: facturaClienteId,
+        ...(!tieneFacturacion ? { nroFactura: null } : {}),
         observaciones,
         otrosGastos: this.extractOtrosGastos(row),
         createdBy,
@@ -940,6 +955,12 @@ export class ViajesProcessor implements IImportProcessor {
     rows: ValidatedRow[],
     tenantId: string,
   ): Promise<{ numero: string; clienteIds: string[]; filas: number[] }[]> {
+    const algTieneFactura = rows.some(
+      (r) => !!(r.nroFactura as string | null)?.toString().trim(),
+    );
+    if (!algTieneFactura || !(await this.tieneFacturacion(tenantId))) {
+      return [];
+    }
     const filasExistentes = await this.resolverFilasExistentes(rows, tenantId);
     const nuevas = rows.filter((r) => !filasExistentes.has(r._rowNum));
 

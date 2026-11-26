@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -62,6 +63,7 @@ import {
 } from "../../shared/util/libro-iva.util";
 import { libroIvaVentas } from "./libro-iva-ventas";
 import { ClerkVialtoRoleService } from "../../core/auth/clerk-vialto-role.service";
+import { resolverModulosFacturacion } from "../../shared/util/tenant-modules.util";
 
 /** Transacciones con varios writes + Neon pueden superar el default de 5s de Prisma. */
 const FACTURA_INTERACTIVE_TX = { timeout: 20_000, maxWait: 10_000 } as const;
@@ -294,12 +296,18 @@ export class FacturacionService {
     }
   }
 
-  private async tieneArca(tenantId: string): Promise<boolean> {
+  private async obtenerModulosFacturacion(
+    tenantId: string,
+  ): Promise<{ tieneFacturacion: boolean; tieneArca: boolean }> {
     const tenant = await this.prisma.tenant.findUnique({
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    return tenant?.modules.includes("emision-facturas-arca") ?? false;
+    return resolverModulosFacturacion(tenant?.modules);
+  }
+
+  private async tieneArca(tenantId: string): Promise<boolean> {
+    return (await this.obtenerModulosFacturacion(tenantId)).tieneArca;
   }
 
   private toShape(
@@ -1100,6 +1108,14 @@ export class FacturacionService {
   }
 
   async createFactura(tenantId: string, dto: CreateFacturaDto) {
+    const { tieneFacturacion, tieneArca } =
+      await this.obtenerModulosFacturacion(tenantId);
+    if (!tieneFacturacion) {
+      throw new ForbiddenException(
+        "La empresa no tiene habilitado el módulo de Facturación.",
+      );
+    }
+
     // Cliente obligatorio (nov 2026, como en Nueva liquidación el transportista): los viajes se
     // eligen a partir de él y la venta va a su cuenta corriente.
     if (!dto.clienteId?.trim()) {
@@ -1107,8 +1123,6 @@ export class FacturacionService {
     }
     await this.assertClienteCtx(tenantId, dto.clienteId);
     await this.assertTransportistaCtx(tenantId, dto.transportistaId);
-
-    const tieneArca = await this.tieneArca(tenantId);
     // Factura hecha por fuera del sistema (empresa con ARCA): no se emite y lleva su
     // número y comprobante, igual que en una empresa sin ARCA.
     // Número interno ("Comprobante interno"): no es un comprobante AFIP, así que con ARCA

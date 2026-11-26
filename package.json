@@ -51,6 +51,7 @@
     "test:padron-validacion": "ts-node src/core/padron/padron-validacion.service.spec.ts",
     "test:receptor-padron": "ts-node src/modules/liquidaciones-arca/receptor-padron.service.spec.ts",
     "test:platform-guard": "ts-node src/shared/guards/platform-tenant-access.guard.spec.ts",
+    "test:facturacion-modulo": "NODE_PATH=src ts-node src/modules/facturacion/facturacion-modulo.spec.ts",
     "test:vehiculos-km": "ts-node src/core/vehiculos/vehiculos-km.spec.ts",
     "test:odometro": "ts-node src/core/odometro/odometro.spec.ts",
     "test:vencimiento": "ts-node src/modules/mantenimiento/vencimiento.util.spec.ts",

@@ -3,6 +3,7 @@ import { PrismaService } from "../../shared/prisma/prisma.service";
 import { LiquidacionesService } from "../liquidaciones-arca/liquidaciones.service";
 import { FacturacionService } from "../facturacion/facturacion.service";
 import { ymdAr } from "../../shared/util/fecha-ar.util";
+import { tieneAlgunModulo } from "../../shared/util/tenant-modules.util";
 
 interface ViajeParaAgrupar {
   id: string;
@@ -66,7 +67,7 @@ export class ImportacionesPostViajesService {
       where: { clerkOrgId: tenantId },
       select: { modules: true },
     });
-    return tenant?.modules.includes(modulo) ?? false;
+    return tieneAlgunModulo(tenant?.modules, [modulo]);
   }
 
   private async viajesParaAgrupar(

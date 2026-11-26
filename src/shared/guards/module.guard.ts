@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
 import { MODULE_KEY } from '../decorators/require-module.decorator';
+import { tieneAlgunModulo } from '../util/tenant-modules.util';
 
 @Injectable()
 export class ModuleGuard implements CanActivate {
@@ -34,7 +35,7 @@ export class ModuleGuard implements CanActivate {
       select: { modules: true },
     });
 
-    const tieneAlguno = requiredModules.some((m) => tenant?.modules?.includes(m));
+    const tieneAlguno = tieneAlgunModulo(tenant?.modules, requiredModules);
     if (!tieneAlguno) {
       throw new ForbiddenException(`Se requiere alguno de los módulos: ${requiredModules.join(', ')}`);
     }

@@ -934,6 +934,9 @@ export class CombustibleService {
       detalle: [patente, fecha ? `carga del ${fecha}` : null, "Tocá para ver qué pasó y cómo resolverlo"]
         .filter(Boolean)
         .join(" · "),
+      url: "/?combustibleTab=alertas",
+      tono: "alerta",
+      subtitulo: [patente, fecha ? `carga del ${fecha}` : null].filter(Boolean).join(" · ") || undefined,
     });
 
     return log;

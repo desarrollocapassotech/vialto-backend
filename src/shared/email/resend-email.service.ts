@@ -5,6 +5,8 @@ export type SendEmailParams = {
   to: string[];
   subject: string;
   html: string;
+  /** Versión en texto plano (clientes sin HTML; además mejora la entrega). */
+  text?: string;
 };
 
 /**
@@ -50,6 +52,7 @@ export class ResendEmailService {
       to: params.to,
       subject: params.subject,
       html: params.html,
+      ...(params.text ? { text: params.text } : {}),
     });
 
     if (error) {

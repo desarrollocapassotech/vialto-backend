@@ -52,8 +52,13 @@ export class LiquidacionPendienteAnulacionEvaluator implements NotificacionEvalu
         : 'Pendiente de anular';
       return {
         entidadId: `${l.id}:${semana}`,
-        titulo: `Liquidación ${numero} — ${l.transportista?.nombre ?? 'transportista'}`,
+        titulo: `Liquidación ${numero} · ${l.transportista?.nombre ?? 'transportista'}`,
         detalle: `${desde} · Líquido $${l.liquido.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        url: '/liquidaciones?estado=pendiente_anulacion',
+        tono: 'aviso' as const,
+        // El título del email ya dice "pendientes de anular": el chip solo lleva desde cuándo.
+        etiqueta: l.anulacionPendienteDesde ? `Desde el ${fmtFecha(l.anulacionPendienteDesde)}` : undefined,
+        importe: { monto: l.liquido, moneda: 'ARS' },
       };
     });
   }

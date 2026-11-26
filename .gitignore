@@ -11,3 +11,6 @@ scripts/*.json
 scripts/.padron-cert/
 *.log
 dist/
+
+# Vista previa del email de notificaciones (npm run preview:email-notificacion)
+tmp-email-preview/

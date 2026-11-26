@@ -52,7 +52,9 @@ export function armarAvisosVencimiento(
     .filter((f) => f.estado === estado && f.referencia)
     .map((f) => ({
       entidadId: `${f.vehiculoPlanId}:${f.referencia!.id}`,
-      titulo: `${f.vehiculo.patente} — ${f.plan.nombre}`,
+      titulo: `${f.vehiculo.patente} · ${f.plan.nombre}`,
       detalle: detalle(f),
+      url: '/mantenimiento',
+      tono: estado === 'vencido' ? ('alerta' as const) : ('aviso' as const),
     }));
 }

@@ -3,10 +3,8 @@ import { NotificacionesController } from './notificaciones.controller';
 import { NotificacionesConfigService } from './notificaciones-config.service';
 import { NotificacionesCronService } from './notificaciones-cron.service';
 import { NotificacionesFeedService } from './notificaciones-feed.service';
-import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evaluator';
-import { FacturaVencidaEvaluator } from './evaluators/factura-vencida.evaluator';
+import { VencimientosEvaluator } from './evaluators/vencimientos.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
-import { CuentaCorrienteVencimientoEvaluator } from './evaluators/cuenta-corriente-vencimiento.evaluator';
 import { LiquidacionPendienteAnulacionEvaluator } from './evaluators/liquidacion-pendiente-anulacion.evaluator';
 import { EmailModule } from '../../shared/email/email.module';
 import { UsersModule } from '../../core/users/users.module';
@@ -18,10 +16,8 @@ import { UsersModule } from '../../core/users/users.module';
     NotificacionesConfigService,
     NotificacionesCronService,
     NotificacionesFeedService,
-    FacturaPorVencerEvaluator,
-    FacturaVencidaEvaluator,
+    VencimientosEvaluator,
     CargaSospechosaEvaluator,
-    CuentaCorrienteVencimientoEvaluator,
     LiquidacionPendienteAnulacionEvaluator,
   ],
   exports: [NotificacionesConfigService, NotificacionesCronService],

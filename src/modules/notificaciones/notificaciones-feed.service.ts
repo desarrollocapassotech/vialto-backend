@@ -10,6 +10,8 @@ export type NotificacionFeedItem = {
   label: string;
   titulo: string;
   detalle: string;
+  /** Ruta de la app (sin `#`) que abre el registro; null si el aviso no tiene destino propio. */
+  url: string | null;
   enviadoAt: Date;
   leido: boolean;
 };
@@ -117,15 +119,18 @@ export class NotificacionesFeedService {
    * Qué tabla mira cada tipo lo dice `entidadTabla` del catálogo (valor fijo, no del request).
    */
   private async purgarHuerfanas(tenantId: string): Promise<void> {
-    const condiciones = NOTIFICACIONES_CATALOG.filter((c) => c.entidadTabla).map(
-      (c) => Prisma.sql`(
-        e."tipo" = ${c.tipo}
-        AND NOT EXISTS (
-          SELECT 1 FROM ${Prisma.raw(`"${c.entidadTabla}"`)} x
+    // Con varias tablas (ej. vencimientos: movimiento de CC o factura), el aviso se borra solo si el
+    // id no está en ninguna.
+    const condiciones = NOTIFICACIONES_CATALOG.filter((c) => c.entidadTabla).map((c) => {
+      const tablas = Array.isArray(c.entidadTabla) ? c.entidadTabla : [c.entidadTabla!];
+      const noExiste = tablas.map(
+        (t) => Prisma.sql`NOT EXISTS (
+          SELECT 1 FROM ${Prisma.raw(`"${t}"`)} x
           WHERE x."id" = split_part(e."entidadId", ':', 1) AND x."tenantId" = ${tenantId}
-        )
-      )`,
-    );
+        )`,
+      );
+      return Prisma.sql`(e."tipo" = ${c.tipo} AND ${Prisma.join(noExiste, ' AND ')})`;
+    });
     if (condiciones.length === 0) return;
     await this.prisma.$executeRaw`
       DELETE FROM "notificacion_envios" e
@@ -135,7 +140,16 @@ export class NotificacionesFeedService {
   }
 
   private toItem(
-    e: { id: string; tipo: string; entidadId: string; titulo: string; detalle: string; enviadoAt: Date; leidoPor: string[] },
+    e: {
+      id: string;
+      tipo: string;
+      entidadId: string;
+      titulo: string;
+      detalle: string;
+      url: string | null;
+      enviadoAt: Date;
+      leidoPor: string[];
+    },
     userId: string,
   ): NotificacionFeedItem {
     return {
@@ -145,6 +159,7 @@ export class NotificacionesFeedService {
       label: labelDeTipo(e.tipo),
       titulo: e.titulo,
       detalle: e.detalle,
+      url: e.url,
       enviadoAt: e.enviadoAt,
       leido: e.leidoPor.includes(userId),
     };

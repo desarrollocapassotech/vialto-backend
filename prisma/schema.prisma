@@ -1588,6 +1588,8 @@ model NotificacionEnvio {
   entidadId     String
   titulo        String
   detalle       String
+  /// Ruta de la app (sin `#`) que abre el registro del aviso — click en la campana. Null en avisos viejos o sin destino.
+  url           String?
   destinatarios String[]
   leidoPor      String[] @default([])
   enviadoAt     DateTime @default(now())

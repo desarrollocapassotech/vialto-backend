@@ -7,33 +7,16 @@ import { NotificacionesConfigService } from './notificaciones-config.service';
 import {
   getNotificacionesCatalogoPorModulos,
   NOTIFICACIONES_CATALOG,
+  tieneModuloRequerido,
+  urlDestinoDe,
   type NotificacionCatalogoItem,
   type NotificacionFrecuencia,
 } from './notificaciones-catalog';
-import { FacturaPorVencerEvaluator } from './evaluators/factura-por-vencer.evaluator';
-import { FacturaVencidaEvaluator } from './evaluators/factura-vencida.evaluator';
+import { VencimientosEvaluator } from './evaluators/vencimientos.evaluator';
 import { CargaSospechosaEvaluator } from './evaluators/carga-sospechosa.evaluator';
-import { CuentaCorrienteVencimientoEvaluator } from './evaluators/cuenta-corriente-vencimiento.evaluator';
 import { LiquidacionPendienteAnulacionEvaluator } from './evaluators/liquidacion-pendiente-anulacion.evaluator';
 import type { NotificacionEvaluator, NotificacionItem } from './evaluators/notificacion-evaluator.interface';
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-/** Logo servido desde el sitio en producción (URL pública estable) — un cliente de email no puede resolver rutas relativas ni localhost. */
-const LOGO_URL = 'https://admin.vialto.uno/vialto-software-white-removebg.png';
-const APP_URL = 'https://admin.vialto.uno';
-
-/** Mismos colores de marca que `index.css` (`--color-vialto-*`) del frontend. */
-const COLOR_CHARCOAL = '#1a1a1a';
-const COLOR_FIRE = '#e8470a';
-const COLOR_STEEL = '#4a4a4a';
-const COLOR_MIST = '#f5f3f0';
+import { armarEmailNotificacion } from './notificacion-email.template';
 
 /**
  * Cron diario que evalúa el catálogo de notificaciones para cada tenant y manda un email
@@ -52,19 +35,11 @@ export class NotificacionesCronService {
     private readonly configService: NotificacionesConfigService,
     private readonly emailService: ResendEmailService,
     private readonly usersService: UsersService,
-    facturaPorVencer: FacturaPorVencerEvaluator,
-    facturaVencida: FacturaVencidaEvaluator,
+    vencimientos: VencimientosEvaluator,
     cargaSospechosa: CargaSospechosaEvaluator,
-    cuentaCorrienteVencimiento: CuentaCorrienteVencimientoEvaluator,
     liquidacionPendienteAnulacion: LiquidacionPendienteAnulacionEvaluator,
   ) {
-    this.evaluators = [
-      facturaPorVencer,
-      facturaVencida,
-      cargaSospechosa,
-      cuentaCorrienteVencimiento,
-      liquidacionPendienteAnulacion,
-    ];
+    this.evaluators = [vencimientos, cargaSospechosa, liquidacionPendienteAnulacion];
   }
 
   /**
@@ -167,7 +142,7 @@ export class NotificacionesCronService {
         where: { clerkOrgId: tenantId },
         select: { modules: true },
       });
-      if (!tenant?.modules.includes(item.requiereModulo)) return;
+      if (!tenant || !tieneModuloRequerido(item, tenant.modules)) return;
       if (!(await this.configService.isActivo(tenantId, tipo))) return;
       await this.enviarYRegistrar(tenantId, item, [aviso]);
     } catch (err) {
@@ -201,11 +176,19 @@ export class NotificacionesCronService {
       return;
     }
 
-    const enviado = await this.emailService.send({
-      to: destinatarios,
-      subject: `Vialto - ${item.label}${nuevas.length > 1 ? ` (${nuevas.length})` : ''}`,
-      html: this.buildHtml(item.label, nuevas, `${APP_URL}${item.urlDestino ?? ''}`),
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: tenantId },
+      select: { name: true, modules: true },
     });
+    const email = armarEmailNotificacion({
+      label: item.label,
+      intro: item.introEmail,
+      empresa: tenant?.name,
+      frecuencia: item.frecuencia,
+      items: nuevas,
+      rutaBoton: urlDestinoDe(item, tenant?.modules ?? []),
+    });
+    const enviado = await this.emailService.send({ to: destinatarios, ...email });
 
     if (!enviado) {
       this.logger.warn(
@@ -220,6 +203,7 @@ export class NotificacionesCronService {
         entidadId: c.entidadId,
         titulo: c.titulo,
         detalle: c.detalle,
+        url: c.url ?? null,
         destinatarios,
       })),
       skipDuplicates: true,
@@ -251,72 +235,5 @@ export class NotificacionesCronService {
     return miembros
       .filter((m) => m.role === 'org:admin' && !!m.email && !m.email.endsWith('@example.com'))
       .map((m) => m.email as string);
-  }
-
-  private buildHtml(label: string, items: NotificacionItem[], urlBoton: string): string {
-    const tarjetas = items
-      .map(
-        (i) => `
-          <tr>
-            <td style="padding-bottom:12px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e7e3dc; border-radius:8px;">
-                <tr>
-                  <td style="padding:14px 16px;">
-                    <p style="margin:0 0 4px; font-family:Arial, sans-serif; font-size:14px; font-weight:700; color:${COLOR_CHARCOAL};">${escapeHtml(i.titulo)}</p>
-                    <p style="margin:0; font-family:Arial, sans-serif; font-size:13px; line-height:1.5; color:${COLOR_STEEL};">${escapeHtml(i.detalle)}</p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>`,
-      )
-      .join('');
-
-    return `
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLOR_MIST}; padding:32px 16px;">
-        <tr>
-          <td align="center">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px; background-color:#ffffff; border-radius:10px; overflow:hidden;">
-              <tr>
-                <td align="center" style="background-color:${COLOR_CHARCOAL}; padding:22px 32px; text-align:center;">
-                  <img src="${LOGO_URL}" alt="Vialto Software" width="130" style="display:block; height:auto; border:0; margin:0 auto;" />
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:32px;">
-                  <p style="margin:0 0 6px; font-family:Arial, sans-serif; font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:${COLOR_FIRE};">
-                    Aviso de Vialto
-                  </p>
-                  <h1 style="margin:0 0 20px; font-family:Arial, sans-serif; font-size:21px; line-height:1.3; color:${COLOR_CHARCOAL};">
-                    ${escapeHtml(label)}
-                  </h1>
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                    ${tarjetas}
-                  </table>
-                  <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:8px;">
-                    <tr>
-                      <td style="border-radius:6px; background-color:${COLOR_CHARCOAL};">
-                        <a href="${urlBoton}" style="display:inline-block; padding:11px 22px; font-family:Arial, sans-serif; font-size:13px; font-weight:700; letter-spacing:0.04em; color:#ffffff; text-decoration:none;">
-                          Ver en Vialto
-                        </a>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:18px 32px; background-color:${COLOR_MIST}; border-top:1px solid #e7e3dc;">
-                  <p style="margin:0; font-family:Arial, sans-serif; font-size:12px; line-height:1.5; color:${COLOR_STEEL};">
-                    Podés elegir qué avisos recibís desde
-                    <a href="${APP_URL}/configuracion/notificaciones" style="color:${COLOR_FIRE}; text-decoration:none;">Configuración → Notificaciones</a>
-                    en Vialto.
-                  </p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    `;
   }
 }

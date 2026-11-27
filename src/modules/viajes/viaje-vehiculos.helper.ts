@@ -67,13 +67,19 @@ export async function reemplazarVehiculosDelViaje(
 export async function reemplazarProductosDelViaje(
   db: Prisma.TransactionClient,
   viajeId: string,
-  items: Array<{ productoId: string; cantidad?: number; pesoKg?: number; presentacionId?: string | null }>,
+  items: Array<{
+    productoId: string;
+    cantidad?: number;
+    pesoKg?: number;
+    pesoTn?: number | null;
+    presentacionId?: string | null;
+  }>,
   tenantId: string,
 ): Promise<void> {
   await db.viajeProducto.deleteMany({ where: { viajeId } });
   if (items.length === 0) return;
   await db.viajeProducto.createMany({
-    data: items.map(({ productoId, cantidad, pesoKg, presentacionId }, orden) => ({
+    data: items.map(({ productoId, cantidad, pesoKg, pesoTn, presentacionId }, orden) => ({
       tenantId,
       viajeId,
       productoId,
@@ -81,6 +87,7 @@ export async function reemplazarProductosDelViaje(
       orden,
       cantidad: cantidad ?? null,
       pesoKg: pesoKg ?? null,
+      pesoTn: pesoTn ?? null,
     })),
   });
 }

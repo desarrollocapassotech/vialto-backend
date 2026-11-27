@@ -1,5 +1,5 @@
 import { IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class ViajeProductoItemDto {
   @IsString()
@@ -17,6 +17,14 @@ export class ViajeProductoItemDto {
   @Min(0)
   @Type(() => Number)
   pesoKg?: number;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === null || value === '' || value === undefined ? undefined : Number(value),
+  )
+  @IsNumber()
+  @Min(0)
+  pesoTn?: number | null;
 
   @IsOptional()
   @IsString()

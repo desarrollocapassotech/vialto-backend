@@ -138,8 +138,8 @@ export class CreateLiquidacionDto {
 
   /**
    * true = el backend asigna el siguiente número interno (`INT-…`) como
-   * `numeroComprobanteProveedor` e ignora el que venga. No aplica a la liquidación manual de
-   * un monotributista (esa lleva la factura del transportista).
+   * `numeroComprobanteProveedor` e ignora el que venga. Con ARCA la liquidación queda manual
+   * (no se emite Líquido Producto).
    */
   @IsOptional() @IsBoolean() numeroAutomatico?: boolean;
 

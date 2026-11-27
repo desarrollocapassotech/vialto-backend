@@ -245,7 +245,12 @@ function calcularMontosReales<
   };
 }
 
-type ProductoItem = { productoId: string; cantidad?: number; pesoKg?: number };
+type ProductoItem = {
+  productoId: string;
+  cantidad?: number;
+  pesoKg?: number;
+  presentacionId?: string | null;
+};
 type PagoTransportistaInput = { monto?: unknown; moneda?: unknown };
 type DestinoItem = { etiqueta: string };
 
@@ -299,7 +304,12 @@ function normalizarProductoItems(
     const id = String(item.productoId ?? "").trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    out.push({ productoId: id, cantidad: item.cantidad, pesoKg: item.pesoKg });
+    out.push({
+      productoId: id,
+      cantidad: item.cantidad,
+      pesoKg: item.pesoKg,
+      presentacionId: item.presentacionId?.trim() || null,
+    });
   }
   return out;
 }
@@ -2045,38 +2055,50 @@ export class ViajesService {
       }
     }
 
+    const valorizacion = evaluarValorizacionViaje({
+      monto: montoInput !== undefined ? montoInput : current.monto,
+      cantidadFactura:
+        dto.cantidadFactura !== undefined
+          ? dto.cantidadFactura
+          : current.cantidadFactura,
+      precioUnitarioFactura:
+        dto.precioUnitarioFactura !== undefined
+          ? dto.precioUnitarioFactura
+          : current.precioUnitarioFactura,
+      transportistaId: op.transportistaId,
+      transportistaEfectivoId: merged.transportistaEfectivoId,
+      precioTransportistaExterno:
+        precioTransportistaExternoInput !== undefined
+          ? precioTransportistaExternoInput
+          : current.precioTransportistaExterno,
+      cantidadTransportista:
+        dto.cantidadTransportista !== undefined
+          ? dto.cantidadTransportista
+          : current.cantidadTransportista,
+      precioUnitarioTransportista:
+        dto.precioUnitarioTransportista !== undefined
+          ? dto.precioUnitarioTransportista
+          : current.precioUnitarioTransportista,
+      clientesViaje:
+        dto.clientes !== undefined
+          ? dto.clientes
+          : (current as any).clientesViaje,
+    });
+
+    // En cuanto el viaje queda valorizado y está en curso (o fecha iniciada),
+    // pasa automáticamente a finalizado sin necesidad de cambiarlo a mano.
+    if (
+      etapaActual !== "finalizado" &&
+      etapaSiguiente !== "cancelado" &&
+      etapaSiguiente === "en_curso" &&
+      valorizacion.valorizado
+    ) {
+      etapaSiguiente = "finalizado";
+    }
+
     const pasandoAFinalizado =
       etapaActual !== "finalizado" && etapaSiguiente === "finalizado";
     if (pasandoAFinalizado) {
-      const valorizacion = evaluarValorizacionViaje({
-        monto: montoInput !== undefined ? montoInput : current.monto,
-        cantidadFactura:
-          dto.cantidadFactura !== undefined
-            ? dto.cantidadFactura
-            : current.cantidadFactura,
-        precioUnitarioFactura:
-          dto.precioUnitarioFactura !== undefined
-            ? dto.precioUnitarioFactura
-            : current.precioUnitarioFactura,
-        transportistaId: op.transportistaId,
-        precioTransportistaExterno:
-          precioTransportistaExternoInput !== undefined
-            ? precioTransportistaExternoInput
-            : current.precioTransportistaExterno,
-        cantidadTransportista:
-          dto.cantidadTransportista !== undefined
-            ? dto.cantidadTransportista
-            : current.cantidadTransportista,
-        precioUnitarioTransportista:
-          dto.precioUnitarioTransportista !== undefined
-            ? dto.precioUnitarioTransportista
-            : current.precioUnitarioTransportista,
-        clientesViaje:
-          dto.clientes !== undefined
-            ? dto.clientes
-            : (current as any).clientesViaje,
-      });
-
       if (!valorizacion.valorizado) {
         if (valorizacion.faltaCliente && valorizacion.faltaTransportista) {
           throw new BadRequestException(

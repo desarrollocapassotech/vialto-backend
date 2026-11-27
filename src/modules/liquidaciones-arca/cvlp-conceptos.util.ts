@@ -234,3 +234,55 @@ export function computeLiquidacionTotales(args: {
     liquido: round2(impNeto + impIva),
   };
 }
+
+/**
+ * Cantidad de redondeos a 2 decimales que separan `computeLiquidacionTotales`
+ * (redondea por parte de viaje, comisión y concepto) del comprobante ARCA
+ * (redondea por alícuota). Define la tolerancia de `compararTotalesCvlp`.
+ */
+export function redondeosLiquidacion(args: {
+  ivaPctDefault: number;
+  lineas?: ConceptoLineaInput[];
+  viajes?: ViajeLiquidacionPayload[];
+}): number {
+  const partesViajes = (args.viajes ?? []).reduce(
+    (s, v) => s + partesFleteViaje(v, args.ivaPctDefault).length,
+    0,
+  );
+  const nViajes = args.viajes?.length ?? 0;
+  const lineas = (args.lineas ?? []).reduce(
+    (s, l) =>
+      s + (l.modoAplicacion === 'TODOS_LOS_VIAJES' && nViajes > 0 ? nViajes : 1),
+    0,
+  );
+  return partesViajes + lineas + 2;
+}
+
+/**
+ * Auditoría IVA (nov 2026, H1): compara los totales de la liquidación con los del
+ * comprobante que se enviaría a ARCA. Difieren cuando el armado por alícuota de
+ * ARCA cambia la cuenta (comisión con otra alícuota que el flete, conceptos en
+ * contra al 0% que AFIP no admite como base negativa, etc.). Diferencias de
+ * centavos por redondeo (medio centavo por cada redondeo) no cuentan.
+ */
+export function compararTotalesCvlp(
+  sistema: { impNeto: number; impIva: number; liquido: number },
+  arca: { impNeto: number; impIva: number; impTotal: number },
+  redondeos: number,
+): {
+  coincide: boolean;
+  tolerancia: number;
+  difNeto: number;
+  difIva: number;
+  difTotal: number;
+} {
+  const tolerancia = round2(Math.max(0.02, Math.ceil(redondeos * 0.5) / 100));
+  const difNeto = round2(arca.impNeto - sistema.impNeto);
+  const difIva = round2(arca.impIva - sistema.impIva);
+  const difTotal = round2(arca.impTotal - sistema.liquido);
+  const coincide =
+    Math.abs(difNeto) <= tolerancia &&
+    Math.abs(difIva) <= tolerancia &&
+    Math.abs(difTotal) <= tolerancia;
+  return { coincide, tolerancia, difNeto, difIva, difTotal };
+}

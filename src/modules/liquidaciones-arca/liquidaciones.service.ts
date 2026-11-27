@@ -12,10 +12,19 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 import { CloudinaryService } from '../../shared/storage/cloudinary.service';
 import { attachAnuladoPorNombres } from '../../shared/util/anulado-por-nombre.util';
 import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.util';
-import { siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
+import { esNumeroInterno, siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { tramosIvaParaLiquidacion } from '../../shared/util/viaje-tramos-transportista.util';
-import { generarTxtLibroIva, validarRangoLibroIva } from '../../shared/util/libro-iva.util';
+import {
+  comprobanteDeLog,
+  generarTxtLibroIva,
+  logAutorizadoPorCae,
+  validarRangoLibroIva,
+} from '../../shared/util/libro-iva.util';
+import {
+  conceptosNotaCreditoDesdeAutorizado,
+  diferenciaNotaCreditoFactura,
+} from './nota-credito-factura.util';
 import { libroIvaCompras } from './libro-iva-compras';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
@@ -63,8 +72,11 @@ import { resolveIvaPct } from './arca-iva.util';
 import { FacturaPdfService } from './factura-pdf.service';
 import {
   buildCvlpConceptosList,
+  compararTotalesCvlp,
   computeLiquidacionTotales,
+  redondeosLiquidacion,
   type ConceptoLineaInput,
+  type ViajeLiquidacionPayload,
 } from './cvlp-conceptos.util';
 import { ConceptosLiquidacionService } from './conceptos-liquidacion.service';
 import type { LiquidacionConceptoLineaDto } from './dto/create-liquidacion.dto';
@@ -212,6 +224,7 @@ export class LiquidacionesService {
   private assertAfipIvaRates(
     ivaPctDefault: number,
     lineas: ConceptoLineaInput[],
+    viajes: ViajeLiquidacionPayload[] = [],
   ): void {
     const tasas = [
       ivaPctDefault,
@@ -224,11 +237,32 @@ export class LiquidacionesService {
           .map((p) => Math.round(p * 10) / 10),
       ),
     ];
-    if (invalidas.length === 0) return;
-    throw new BadRequestException(
-      `La alícuota IVA ${invalidas.join(', ')}% no es válida para AFIP. ` +
-        `Usá una de: ${AFIP_IVA_PCTS.join(', ')}.`,
-    );
+    if (invalidas.length > 0) {
+      throw new BadRequestException(
+        `La alícuota IVA ${invalidas.join(', ')}% no es válida para AFIP. ` +
+          `Usá una de: ${AFIP_IVA_PCTS.join(', ')}.`,
+      );
+    }
+    // Auditoría IVA (nov 2026, H2): el % del viaje y de sus tramos también va al
+    // comprobante. Un % sin código de AFIP (ej. 22% de Uruguay) se informaba como 21%.
+    const viajesInvalidos = viajes
+      .map((v) => {
+        const pcts = [
+          ...(v.tramosIva?.length ? v.tramosIva.map((t) => t.ivaPct) : []),
+          ...(v.tramosIva?.length ? [] : v.ivaPct != null ? [v.ivaPct] : []),
+        ].filter((p) => Number.isFinite(p) && !isAfipIvaPct(p));
+        return pcts.length
+          ? `viaje #${v.numero} (${[...new Set(pcts.map((p) => Math.round(p * 10) / 10))].join(', ')}%)`
+          : null;
+      })
+      .filter((s): s is string => s != null);
+    if (viajesInvalidos.length > 0) {
+      throw new BadRequestException(
+        `No se puede emitir por ARCA: el IVA del transportista de ${viajesInvalidos.join(', ')} ` +
+          `no es una alícuota de AFIP. Usá una de: ${AFIP_IVA_PCTS.join(', ')}. ` +
+          'Se corrige en el viaje (% de IVA o tramos).',
+      );
+    }
   }
 
   /**
@@ -321,35 +355,37 @@ export class LiquidacionesService {
       tenantId,
       'emision-liquido-producto-arca',
     );
-    // Monotributista en empresa con ARCA: liquidación manual, no se emite Líquido Producto.
+    // Monotributista en empresa con ARCA o comprobante interno: liquidación manual, no se emite Líquido Producto.
+    const numeroAutomatico = dto.numeroAutomatico === true;
     const manual =
-      tieneLiquidoProductoArca && esCondicionIvaMonotributo(transportista.condicionIva);
-    // Factura del transportista por separado (Libro IVA): obligatoria en la liquidación manual.
-    const cbteProveedor = manual
-      ? resolverComprobanteManual({
-          cbteTipo: dto.proveedorCbteTipo,
-          ptoVenta: dto.proveedorPtoVenta,
-          cbteNro: dto.proveedorCbteNro,
-          numero: dto.numeroComprobanteProveedor,
-        })
-      : null;
+      (tieneLiquidoProductoArca && esCondicionIvaMonotributo(transportista.condicionIva)) ||
+      numeroAutomatico;
+    // Factura del transportista por separado (Libro IVA): obligatoria en la liquidación manual (salvo comprobante interno).
+    const cbteProveedor =
+      manual && !numeroAutomatico
+        ? resolverComprobanteManual({
+            cbteTipo: dto.proveedorCbteTipo,
+            ptoVenta: dto.proveedorPtoVenta,
+            cbteNro: dto.proveedorCbteNro,
+            numero: dto.numeroComprobanteProveedor,
+          })
+        : null;
     // Sin Líquido Producto (empresa sin ARCA o liquidación manual) la fecha de la liquidación
     // es la del comprobante del proveedor, y es obligatoria: es la fecha con la que entra a
     // Cuenta corriente (pedido de LSF, nov 2026: cargaban facturas viejas y quedaban con la
     // fecha de carga). Con ARCA manda la fecha de emisión del CVLP.
     const sinLiquidoProducto = !tieneLiquidoProductoArca || manual;
-    if (sinLiquidoProducto && !dto.proveedorCbteFecha) {
+    const fechaCbte = dto.proveedorCbteFecha;
+    if (sinLiquidoProducto && !fechaCbte) {
       throw new BadRequestException(
-        manual
+        manual && !numeroAutomatico
           ? 'Ingresá la fecha de la factura del transportista.'
           : 'Ingresá la fecha del comprobante.',
       );
     }
-    // "Comprobante interno": número interno como comprobante del proveedor. Solo en
-    // liquidaciones sin Líquido Producto (con ARCA el número es el del CVLP, y la manual del
-    // monotributista lleva la factura del transportista).
+    // "Comprobante interno": número interno como comprobante del proveedor.
     const numeroInterno =
-      dto.numeroAutomatico && !tieneLiquidoProductoArca
+      numeroAutomatico
         ? await siguienteNumeroInterno(this.prisma, tenantId)
         : null;
     if (tieneLiquidoProductoArca && !manual && moneda === 'USD') {
@@ -402,9 +438,11 @@ export class LiquidacionesService {
         ? round2(tnDestino * tarifaTransportista)
         : round2(v.precioTransportistaExterno ?? 0);
 
-      // precioTransportistaExterno es siempre neto (sin IVA) — el % de IVA del viaje
-      // (precioTransportistaIvaIncluidoPct) es independiente del IVA que declara esta
-      // Liquidación (config aparte, más abajo) y no se usa acá.
+      // precioTransportistaExterno es siempre neto (sin IVA). El % de IVA del viaje
+      // (precioTransportistaIvaIncluidoPct) y sus tramos SÍ se usan, en `viajesPayload`
+      // más abajo: el flete de cada viaje tributa a su % (o por tramo) y, si el % es 0
+      // y no hay tramos, al IVA de la liquidación. La comisión siempre usa el IVA de la
+      // liquidación ("IVA sobre comisión").
       bruto += subtotal;
       viajesDetalle.push({
         viajeId: v.id,
@@ -487,8 +525,8 @@ export class LiquidacionesService {
           proveedorPtoVenta: cbteProveedor?.ptoVenta ?? null,
           proveedorCbteNro: cbteProveedor?.cbteNro ?? null,
           proveedorCbteFecha:
-            sinLiquidoProducto && dto.proveedorCbteFecha
-              ? fechaCalendarioAr(dto.proveedorCbteFecha)
+            sinLiquidoProducto && fechaCbte
+              ? fechaCalendarioAr(fechaCbte)
               : null,
           createdBy: userId,
           updatedAt: new Date(),
@@ -842,26 +880,35 @@ export class LiquidacionesService {
       dto.proveedorCbteNro !== undefined ||
       dto.proveedorCbteFecha !== undefined;
     if ((liq.manual || pasaAManual) && tocaCbteProveedor) {
-      const cbte = resolverComprobanteManual({
-        cbteTipo: dto.proveedorCbteTipo,
-        ptoVenta: dto.proveedorPtoVenta,
-        cbteNro: dto.proveedorCbteNro,
-        numero:
-          dto.numeroComprobanteProveedor === undefined
-            ? liq.numeroComprobanteProveedor
-            : dto.numeroComprobanteProveedor,
-      });
-      const fecha = dto.proveedorCbteFecha ?? liq.proveedorCbteFecha?.toISOString();
-      if (!fecha) {
-        throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+      if (esNumeroInterno(liq.numeroComprobanteProveedor)) {
+        if (dto.numeroComprobanteProveedor !== undefined) {
+          data.numeroComprobanteProveedor = dto.numeroComprobanteProveedor?.trim() || null;
+        }
+        if (dto.proveedorCbteFecha !== undefined) {
+          data.proveedorCbteFecha = dto.proveedorCbteFecha ? fechaCalendarioAr(dto.proveedorCbteFecha) : null;
+        }
+      } else {
+        const cbte = resolverComprobanteManual({
+          cbteTipo: dto.proveedorCbteTipo,
+          ptoVenta: dto.proveedorPtoVenta,
+          cbteNro: dto.proveedorCbteNro,
+          numero:
+            dto.numeroComprobanteProveedor === undefined
+              ? liq.numeroComprobanteProveedor
+              : dto.numeroComprobanteProveedor,
+        });
+        const fecha = dto.proveedorCbteFecha ?? liq.proveedorCbteFecha?.toISOString();
+        if (!fecha) {
+          throw new BadRequestException('Ingresá la fecha de la factura del transportista.');
+        }
+        Object.assign(data, {
+          numeroComprobanteProveedor: cbte.numero,
+          proveedorCbteTipo: cbte.cbteTipo,
+          proveedorPtoVenta: cbte.ptoVenta,
+          proveedorCbteNro: cbte.cbteNro,
+          proveedorCbteFecha: fechaCalendarioAr(fecha),
+        });
       }
-      Object.assign(data, {
-        numeroComprobanteProveedor: cbte.numero,
-        proveedorCbteTipo: cbte.cbteTipo,
-        proveedorPtoVenta: cbte.ptoVenta,
-        proveedorCbteNro: cbte.cbteNro,
-        proveedorCbteFecha: fechaCalendarioAr(fecha),
-      });
     } else if (
       dto.proveedorCbteFecha !== undefined &&
       !(await this.tieneModulo(tenantId, 'emision-liquido-producto-arca'))
@@ -955,7 +1002,9 @@ export class LiquidacionesService {
     }
     if (liquidacion.manual || esCondicionIvaMonotributo(liquidacion.transportista?.condicionIva)) {
       throw new BadRequestException(
-        'A un transportista monotributista no se le emite Líquido Producto: la liquidación queda manual, con la factura del transportista adjunta.',
+        liquidacion.manual
+          ? 'Una liquidación manual o con comprobante interno no se emite por ARCA.'
+          : 'A un transportista monotributista no se le emite Líquido Producto: la liquidación queda manual, con la factura del transportista adjunta.',
       );
     }
     if (liquidacion.moneda === 'USD') {
@@ -1011,6 +1060,97 @@ export class LiquidacionesService {
         liquidacion.transportista,
         'transportista',
       );
+    }
+
+    // impNeto/IVA/total: flete + comisión + conceptos configurables.
+    // Preferir el snapshot de la liquidación para no pisar un override puntual.
+    const ivaPct =
+      (liquidacion as { ivaPct?: number | null }).ivaPct ??
+      config?.ivaGastosAdmin ??
+      21;
+    const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
+      where: { liquidacionId },
+      orderBy: { orden: 'asc' },
+    });
+    const lineas = this.lineasFromStored(lineasDb);
+    const viajesPayload: ViajeLiquidacionPayload[] = liquidacion.viajes.map((v) => {
+      const tnDestino = v.viaje.cantidadTransportista ?? null;
+      const tarifaTransportista = v.viaje.precioUnitarioTransportista ?? null;
+      const subtotal = tnDestino != null && tarifaTransportista != null
+        ? round2(tnDestino * tarifaTransportista)
+        : round2(v.viaje.precioTransportistaExterno ?? 0);
+      return {
+        id: v.viajeId,
+        numero: v.viaje.numero ?? '',
+        bruto: subtotal,
+        comision: round2(subtotal * liquidacion.comisionPct / 100),
+        ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
+        tramosIva: tramosIvaParaLiquidacion(
+          subtotal,
+          v.viaje.precioTransportistaIvaIncluidoPct,
+          v.viaje.tramosTransportista,
+        ),
+      };
+    });
+    this.assertAfipIvaRates(ivaPct, lineas, viajesPayload);
+
+    const conceptos = buildCvlpConceptosList({
+      bruto: liquidacion.bruto,
+      comision: liquidacion.comision,
+      ivaPctDefault: ivaPct,
+      lineas,
+      viajes: viajesPayload,
+    });
+    const montos = computeLiquidacionTotales({
+      bruto: liquidacion.bruto,
+      comision: liquidacion.comision,
+      ivaPctDefault: ivaPct,
+      lineas,
+      viajes: viajesPayload,
+    });
+
+    // Auditoría IVA (nov 2026, H1): no emitir si el comprobante que va a ARCA no
+    // coincide con lo que muestra la liquidación (salvo centavos de redondeo).
+    // Los totales del comprobante no dependen de la cabecera (número, fecha, receptor).
+    const previaArca = buildComprobanteCvlp(
+      {} as Parameters<typeof buildComprobanteCvlp>[0],
+      conceptos,
+      ivaPct,
+    );
+    const comparacion = compararTotalesCvlp(
+      montos,
+      previaArca,
+      redondeosLiquidacion({ ivaPctDefault: ivaPct, lineas, viajes: viajesPayload }),
+    );
+    if (!comparacion.coincide) {
+      const $ = (n: number) =>
+        `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      this.logger.warn(
+        `[emitirLiquidacion] ${liquidacionId} bloqueada: sistema ${JSON.stringify(montos)} vs ARCA ` +
+          `${JSON.stringify({ impNeto: previaArca.impNeto, impIva: previaArca.impIva, impTotal: previaArca.impTotal })}`,
+      );
+      throw new BadRequestException(
+        `No se emitió: el comprobante que se enviaría a ARCA no coincide con la liquidación. ` +
+          `Liquidación: neto ${$(montos.impNeto)}, IVA ${$(montos.impIva)}, total ${$(montos.liquido)}. ` +
+          `ARCA: neto ${$(previaArca.impNeto)}, IVA ${$(previaArca.impIva)}, total ${$(previaArca.impTotal)}. ` +
+          'Suele pasar cuando la comisión tiene un IVA distinto al del flete (por ejemplo, IVA sobre comisión en 0) ' +
+          'o hay un concepto en contra sin IVA. Revisá esos datos o consultá con soporte.',
+      );
+    }
+
+    // Autocuración: si se editaron conceptos y el líquido quedó desfasado, alinear antes de AFIP.
+    if (
+      montos.liquido !== liquidacion.liquido ||
+      montos.impIva !== liquidacion.gastosAdminIva
+    ) {
+      await this.prisma.liquidacion.updateMany({
+        where: { id: liquidacionId, tenantId },
+        data: {
+          gastosAdminIva: montos.impIva,
+          liquido: montos.liquido,
+          updatedAt: new Date(),
+        },
+      });
     }
 
     // Marcar como pendiente antes de llamar a AFIP SDK
@@ -1092,66 +1232,6 @@ export class LiquidacionesService {
         condicionIvaReceptorId,
       });
 
-      // impNeto/IVA/total: flete + comisión + conceptos configurables.
-      // Preferir el snapshot de la liquidación para no pisar un override puntual.
-      const ivaPct =
-        (liquidacion as { ivaPct?: number | null }).ivaPct ??
-        config?.ivaGastosAdmin ??
-        21;
-      const lineasDb = await this.db.liquidacionConceptoLinea.findMany({
-        where: { liquidacionId },
-        orderBy: { orden: 'asc' },
-      });
-      const lineas = this.lineasFromStored(lineasDb);
-      this.assertAfipIvaRates(ivaPct, lineas);
-      const viajesPayload = liquidacion.viajes.map((v) => {
-        const tnDestino = v.viaje.cantidadTransportista ?? null;
-        const tarifaTransportista = v.viaje.precioUnitarioTransportista ?? null;
-        const subtotal = tnDestino != null && tarifaTransportista != null
-          ? round2(tnDestino * tarifaTransportista)
-          : round2(v.viaje.precioTransportistaExterno ?? 0);
-        return {
-          id: v.viajeId,
-          numero: v.viaje.numero ?? '',
-          bruto: subtotal,
-          comision: round2(subtotal * liquidacion.comisionPct / 100),
-          ivaPct: v.viaje.precioTransportistaIvaIncluidoPct || undefined,
-          tramosIva: tramosIvaParaLiquidacion(
-            subtotal,
-            v.viaje.precioTransportistaIvaIncluidoPct,
-            v.viaje.tramosTransportista,
-          ),
-        };
-      });
-
-      const conceptos = buildCvlpConceptosList({
-        bruto: liquidacion.bruto,
-        comision: liquidacion.comision,
-        ivaPctDefault: ivaPct,
-        lineas,
-        viajes: viajesPayload,
-      });
-      // Autocuración: si se editaron conceptos y el líquido quedó desfasado, alinear antes de AFIP.
-      const montos = computeLiquidacionTotales({
-        bruto: liquidacion.bruto,
-        comision: liquidacion.comision,
-        ivaPctDefault: ivaPct,
-        lineas,
-        viajes: viajesPayload,
-      });
-      if (
-        montos.liquido !== liquidacion.liquido ||
-        montos.impIva !== liquidacion.gastosAdminIva
-      ) {
-        await this.prisma.liquidacion.updateMany({
-          where: { id: liquidacionId, tenantId },
-          data: {
-            gastosAdminIva: montos.impIva,
-            liquido: montos.liquido,
-            updatedAt: new Date(),
-          },
-        });
-      }
       const cabeceraBase = {
         cuit: config.cuitEmisor,
         ptoVenta: ptoVentaFinal,
@@ -1192,10 +1272,11 @@ export class LiquidacionesService {
           ambiente: config.ambiente, // 'produccion' | 'homologacion' con el que se emitió
           arcaError: null,
           gastosAdmin: 0,
-          // Totales de negocio (computeLiquidacionTotales): coinciden con el modal.
-          // buildComprobanteCvlp puede diferir en el pie fiscal AFIP (10061 / 0% en contra).
-          gastosAdminIva: montos.impIva,
-          liquido: montos.liquido,
+          // Se guarda lo que ARCA autorizó (auditoría IVA, nov 2026): el freno de arriba
+          // ya garantizó que difiere de la liquidación a lo sumo en centavos de redondeo,
+          // y así el PDF, el QR y la cuenta corriente coinciden con el comprobante.
+          gastosAdminIva: cvlp.impIva,
+          liquido: cvlp.impTotal,
           updatedAt: new Date(),
         },
       });
@@ -1719,16 +1800,58 @@ export class LiquidacionesService {
     const ivaPctDefault = resolveIvaPct(
       factura.ivaPct ?? config.ivaGastosAdmin,
     );
-    const lineasInput: FacturaLineaInput[] = defaultFacturaLineas(
-      facturaRaw,
-      facturaRaw.viajes,
+    // Auditoría IVA (nov 2026, H3): la NC copia los renglones autorizados de la
+    // factura (log cuyo CAE es el de la factura). Rearmarla desde los viajes perdía
+    // tramos, alícuotas por línea, ediciones y viajes de clientes secundarios.
+    const logsFactura = await this.db.arcaLog.findMany({
+      where: { tenantId, facturaId, method: 'FECAESolicitar' },
+      select: { requestBody: true, responseBody: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const logFactura = logAutorizadoPorCae<(typeof logsFactura)[number]>(
+      logsFactura,
+      factura.cae,
     );
-    if (lineasInput.length === 0 || lineasInput.every((l) => l.importe === 0)) {
-      throw new BadRequestException(
-        'La factura no tiene líneas con importe para anular.',
+    const autorizadoFactura = comprobanteDeLog(logFactura);
+    let conceptos = conceptosNotaCreditoDesdeAutorizado(
+      (logFactura?.requestBody as { auditMetadata?: { items?: unknown } } | null)
+        ?.auditMetadata,
+    );
+    if (!conceptos) {
+      // Facturas sin renglones en el log: se rearma como antes y se verifica abajo.
+      const lineasInput: FacturaLineaInput[] = defaultFacturaLineas(
+        facturaRaw,
+        facturaRaw.viajes,
       );
+      if (lineasInput.length === 0 || lineasInput.every((l) => l.importe === 0)) {
+        throw new BadRequestException(
+          'La factura no tiene líneas con importe para anular.',
+        );
+      }
+      conceptos = buildFacturaConceptosList(lineasInput, ivaPctDefault);
     }
-    const conceptos = buildFacturaConceptosList(lineasInput, ivaPctDefault);
+    // Lo que la NC tiene que igualar: lo autorizado por ARCA (o, sin log, lo guardado
+    // al autorizar, que son los importes del comprobante).
+    const totalesFactura = autorizadoFactura && autorizadoFactura.alicuotas.length > 0
+      ? {
+          impNeto: round2(autorizadoFactura.alicuotas.reduce((s, a) => s + a.neto, 0)),
+          impIva: round2(autorizadoFactura.alicuotas.reduce((s, a) => s + a.iva, 0)),
+        }
+      : factura.ivaMonto != null
+        ? { impNeto: round2(factura.importe), impIva: round2(factura.ivaMonto) }
+        : null;
+    if (totalesFactura) {
+      const previaNc = buildComprobanteCvlp(
+        {} as Parameters<typeof buildComprobanteCvlp>[0],
+        conceptos,
+        ivaPctDefault,
+      );
+      const diferencia = diferenciaNotaCreditoFactura(previaNc, totalesFactura);
+      if (diferencia) {
+        this.logger.warn(`[anularFacturaArca] ${facturaId} bloqueada: ${diferencia}`);
+        throw new BadRequestException(diferencia);
+      }
+    }
 
     await (this.prisma as PrismaAny).factura.update({
       where: { id: facturaId },
@@ -2370,6 +2493,21 @@ export class LiquidacionesService {
     }
 
     const conceptos = buildFacturaConceptosList(lineasInput, ivaPctDefault);
+    // Auditoría IVA (nov 2026, H2): un % sin código de AFIP (ej. 22%) se informaba como 21%.
+    const alicuotasInvalidas = [
+      ...new Set(
+        conceptos
+          .map((c) => c.ivaPct ?? ivaPctDefault)
+          .filter((p) => Number.isFinite(p) && !isAfipIvaPct(p))
+          .map((p) => Math.round(p * 10) / 10),
+      ),
+    ];
+    if (alicuotasInvalidas.length > 0) {
+      throw new BadRequestException(
+        `No se puede emitir por ARCA: la alícuota IVA ${alicuotasInvalidas.join(', ')}% no es válida para AFIP. ` +
+          `Usá una de: ${AFIP_IVA_PCTS.join(', ')}. Se corrige en el IVA de la factura, sus tramos o sus conceptos.`,
+      );
+    }
     const importeNeto = round2(
       conceptos.reduce((s, c) => s + c.importe, 0),
     );

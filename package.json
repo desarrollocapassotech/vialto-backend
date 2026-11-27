@@ -38,6 +38,8 @@
     "backfill:asignacion-vehiculo":"ts-node scripts/backfill-asignacion-vehiculo.ts",
     "backfill:asignacion-vehiculo:dry": "ts-node scripts/backfill-asignacion-vehiculo.ts --dry-run",
     "test:arca-iva": "ts-node src/modules/liquidaciones-arca/arca-iva.util.spec.ts",
+    "test:cvlp-freno": "ts-node src/modules/liquidaciones-arca/cvlp-freno-emision.spec.ts",
+    "test:nota-credito": "ts-node src/modules/liquidaciones-arca/nota-credito-factura.util.spec.ts",
     "test:comprobante-manual": "ts-node src/shared/util/comprobante-manual.util.spec.ts",
     "test:libro-iva": "ts-node src/shared/util/libro-iva.util.spec.ts",
     "test:tramos-transportista": "ts-node src/shared/util/viaje-tramos-transportista.util.spec.ts",

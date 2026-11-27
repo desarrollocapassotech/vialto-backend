@@ -15,6 +15,8 @@ import {
 } from './pdf-homologacion-watermark';
 import { pdfColoresComprobante } from './pdf-color-comprobante';
 import { ArcaComprobanteCvlp } from './types/arca.types';
+import { conceptosNotaCreditoDesdeAutorizado } from './nota-credito-factura.util';
+import { logAutorizadoPorCae } from '../../shared/util/libro-iva.util';
 import { numeroVisibleViaje } from '../viajes/viaje-numero-visible.util';
 import { normalizeUnidadCantidad } from './cantidad-unidad.util';
 import { productoLabels } from '../../shared/util/producto-label.util';
@@ -444,11 +446,9 @@ export class FacturaPdfService {
     drawExt: PrismaAny,
   ): Promise<ArcaComprobanteCvlp> {
     if (kind === 'nc') {
-      // Preferir metadata del log de la NC; si no, reconstruir con datos de anulación.
-      const log = await this.db.arcaLog.findFirst({
-        where: { facturaId: factura.id, exitoso: true, method: 'FECAESolicitar' },
-        orderBy: { createdAt: 'desc' },
-      });
+      // Preferir metadata del pedido autorizado de la NC (por su CAE); si no, armarla
+      // con los renglones autorizados de la factura (como la anulación, auditoría IVA H3).
+      const log = await this.logAutorizado(factura, factura.anulacionCae);
       const metadata = (log?.requestBody as { auditMetadata?: ArcaComprobanteCvlp })
         ?.auditMetadata;
       if (
@@ -460,8 +460,13 @@ export class FacturaPdfService {
         return metadata;
       }
       const ivaPct = resolveIvaPct(factura.ivaPct ?? config?.ivaGastosAdmin);
-      const lineas = defaultFacturaLineas(factura, factura.viajes ?? []);
-      const conceptos = buildFacturaConceptosList(lineas, ivaPct);
+      const logFactura = await this.logAutorizado(factura, factura.cae);
+      const conceptos =
+        conceptosNotaCreditoDesdeAutorizado(
+          (logFactura?.requestBody as { auditMetadata?: { items?: unknown } } | null)
+            ?.auditMetadata,
+        ) ??
+        buildFacturaConceptosList(defaultFacturaLineas(factura, factura.viajes ?? []), ivaPct);
       const docNro = factura.cliente?.idFiscal
         ? Number(String(factura.cliente.idFiscal).replace(/-/g, ''))
         : 0;
@@ -486,6 +491,20 @@ export class FacturaPdfService {
     }
     return this.resolveComprobante(factura, config);
   }
+  /** Pedido FECAESolicitar que AFIP autorizó con ese CAE (null si no hay). */
+  private async logAutorizado(
+    factura: PrismaAny,
+    cae: string | null | undefined,
+  ): Promise<{ requestBody: unknown; responseBody: unknown } | null> {
+    if (!cae) return null;
+    const logs = await this.db.arcaLog.findMany({
+      where: { tenantId: factura.tenantId, facturaId: factura.id, method: 'FECAESolicitar' },
+      select: { requestBody: true, responseBody: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return logAutorizadoPorCae<(typeof logs)[number]>(logs, cae);
+  }
+
   private retrofitMetadataItems(metadata: ArcaComprobanteCvlp, viajes: any[]) {
     if (!viajes || !Array.isArray(viajes)) return;
     for (const item of metadata.items) {
@@ -534,10 +553,9 @@ export class FacturaPdfService {
     config: PrismaAny,
   ): Promise<ArcaComprobanteCvlp> {
     if (factura.cae) {
-      const log = await this.db.arcaLog.findFirst({
-        where: { facturaId: factura.id, exitoso: true, method: 'FECAESolicitar' },
-        orderBy: { createdAt: 'desc' },
-      });
+      // Por CAE: "el último log exitoso" puede ser el de la NC (después de anular) o un
+      // pedido que AFIP rechazó (`exitoso` solo dice que el HTTP salió bien).
+      const log = await this.logAutorizado(factura, factura.cae);
       const metadata = (log?.requestBody as { auditMetadata?: ArcaComprobanteCvlp })
         ?.auditMetadata;
       if (metadata && Array.isArray(metadata.items)) {

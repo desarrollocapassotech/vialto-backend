@@ -507,7 +507,6 @@ model ViajeProducto {
   orden          Int           @default(0)
   cantidad       Float?
   pesoKg         Float?
-  pesoTn         Float?
 
   @@unique([viajeId, productoId])
   @@index([tenantId])
@@ -605,7 +604,6 @@ model ViajeClienteProducto {
   orden          Int           @default(0)
   cantidad       Float?
   pesoKg         Float?
-  pesoTn         Float?
 
   @@unique([viajeClienteId, productoId])
   @@index([tenantId])

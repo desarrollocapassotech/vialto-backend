@@ -9,7 +9,6 @@ export type ViajeClienteProductoItem = {
   productoId: string;
   cantidad?: number | null;
   pesoKg?: number | null;
-  pesoTn?: number | null;
   presentacionId?: string | null;
 };
 
@@ -60,7 +59,6 @@ function normalizarProductosCliente(
       productoId,
       cantidad: item.cantidad ?? null,
       pesoKg: item.pesoKg ?? null,
-      pesoTn: item.pesoTn ?? null,
       presentacionId: item.presentacionId?.trim() || null,
     });
   }
@@ -226,7 +224,6 @@ export async function reemplazarClientesDelViaje(
           presentacionId: p.presentacionId?.trim() || null,
           cantidad: p.cantidad ?? null,
           pesoKg: p.pesoKg ?? null,
-          pesoTn: p.pesoTn ?? null,
         })),
       });
     }

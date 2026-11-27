@@ -249,6 +249,7 @@ type ProductoItem = {
   productoId: string;
   cantidad?: number;
   pesoKg?: number;
+  pesoTn?: number | null;
   presentacionId?: string | null;
 };
 type PagoTransportistaInput = { monto?: unknown; moneda?: unknown };
@@ -308,6 +309,7 @@ function normalizarProductoItems(
       productoId: id,
       cantidad: item.cantidad,
       pesoKg: item.pesoKg,
+      pesoTn: item.pesoTn ?? null,
       presentacionId: item.presentacionId?.trim() || null,
     });
   }

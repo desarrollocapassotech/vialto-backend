@@ -710,6 +710,7 @@ export class PlatformController {
 
   // ── Facturación ────────────────────────────────────────────────────────────
 
+  @Roles("superadmin")
   @Get("facturas")
   facturas(
     @Query("tenantId") tenantId?: string,
@@ -719,11 +720,13 @@ export class PlatformController {
   }
 
   /** Vista previa del número interno de "Comprobante interno" (facturas). */
+  @Roles("superadmin")
   @Get("facturas-numero-interno")
   facturaNumeroInterno(@Query("tenantId") tenantId?: string) {
     return this.service.facturaNumeroInterno(tenantId);
   }
 
+  @Roles("superadmin")
   @Post("facturas")
   createFactura(
     @Query("tenantId") tenantId: string | undefined,
@@ -732,11 +735,13 @@ export class PlatformController {
     return this.service.createFactura(tenantId ?? "", dto);
   }
 
+  @Roles("superadmin")
   @Delete("facturas/:id")
   removeFactura(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.removeFactura(tenantId, id);
   }
 
+  @Roles("superadmin")
   @Post("facturas/:id/marcar-cobrada")
   marcarFacturaComoCobrada(
     @Param("id") id: string,
@@ -745,6 +750,7 @@ export class PlatformController {
     return this.service.marcarFacturaComoCobrada(tenantId, id);
   }
 
+  @Roles("superadmin")
   @Patch("facturas/:id")
   updateFactura(
     @Param("id") id: string,
@@ -754,6 +760,7 @@ export class PlatformController {
     return this.service.updateFactura(tenantId, id, dto);
   }
 
+  @Roles("superadmin")
   @Post("pagos")
   createPago(
     @Query("tenantId") tenantId: string | undefined,
@@ -762,6 +769,7 @@ export class PlatformController {
     return this.service.createPago(tenantId, dto);
   }
 
+  @Roles("superadmin")
   @Delete("pagos/:id")
   deletePago(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
     return this.service.deletePago(tenantId, id);
@@ -1430,6 +1438,7 @@ export class PlatformController {
   }
 
   @ApiOperation({ summary: "Descargar PDF de factura A/B (superadmin)" })
+  @Roles("superadmin")
   @Get("arca/facturas/:facturaId/pdf")
   async getFacturaPdf(
     @Param("facturaId") facturaId: string,
@@ -1464,6 +1473,7 @@ export class PlatformController {
   }
 
   @ApiOperation({ summary: "Emitir factura a ARCA (superadmin)" })
+  @Roles("superadmin")
   @Post("arca/facturas/:facturaId/emitir")
   emitirFacturaArca(
     @Param("facturaId") facturaId: string,
@@ -1478,6 +1488,7 @@ export class PlatformController {
     summary:
       "Anular factura A/B — emite Nota de Crédito (03/08) vía AFIP SDK (superadmin)",
   })
+  @Roles("superadmin")
   @Post("arca/facturas/:facturaId/anular")
   @HttpCode(HttpStatus.OK)
   anularFacturaArca(
@@ -1498,6 +1509,7 @@ export class PlatformController {
   @ApiOperation({
     summary: "Descargar PDF de Nota de Crédito de anulación de factura (superadmin)",
   })
+  @Roles("superadmin")
   @Get("arca/facturas/:facturaId/pdf-anulacion")
   async getFacturaPdfAnulacion(
     @Param("facturaId") facturaId: string,

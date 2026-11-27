@@ -1551,6 +1551,8 @@ export class ImportacionesService {
       valid,
       tenantId,
     );
+    const tieneFacturacion =
+      await this.viajesProcessor.tieneFacturacion(tenantId);
     const nombresLookup = await this.resolverNombresLookup(valid, tenantId);
     const parsedByRow = new Map(parsed.map((r) => [r._rowNum, r]));
     const newClienteNames = new Set(
@@ -1604,7 +1606,7 @@ export class ImportacionesService {
       const monto = this.viajesProcessor.resolveMonto(validRow);
       const precioTransp =
         this.viajesProcessor.resolvePrecioTransportistaExterno(validRow);
-      const nroFactura = toStr(p.nroFactura);
+      const nroFactura = tieneFacturacion ? toStr(p.nroFactura) : null;
 
       const nuevoValor = {
         idPersonalizado: toStr(validRow.numeroIdentificacionPersonalizado),

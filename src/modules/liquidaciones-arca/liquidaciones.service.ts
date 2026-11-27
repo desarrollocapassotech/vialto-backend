@@ -15,7 +15,16 @@ import { resolverComprobanteManual } from '../../shared/util/comprobante-manual.
 import { esNumeroInterno, siguienteNumeroInterno } from '../../shared/util/numero-interno.util';
 import { fechaCalendarioAr } from '../../shared/util/fecha-ar.util';
 import { tramosIvaParaLiquidacion } from '../../shared/util/viaje-tramos-transportista.util';
-import { generarTxtLibroIva, validarRangoLibroIva } from '../../shared/util/libro-iva.util';
+import {
+  comprobanteDeLog,
+  generarTxtLibroIva,
+  logAutorizadoPorCae,
+  validarRangoLibroIva,
+} from '../../shared/util/libro-iva.util';
+import {
+  conceptosNotaCreditoDesdeAutorizado,
+  diferenciaNotaCreditoFactura,
+} from './nota-credito-factura.util';
 import { libroIvaCompras } from './libro-iva-compras';
 import { ArcaClientService } from './arca-client.service';
 import { ArcaConfigService } from './arca-config.service';
@@ -1789,16 +1798,58 @@ export class LiquidacionesService {
     const ivaPctDefault = resolveIvaPct(
       factura.ivaPct ?? config.ivaGastosAdmin,
     );
-    const lineasInput: FacturaLineaInput[] = defaultFacturaLineas(
-      facturaRaw,
-      facturaRaw.viajes,
+    // Auditoría IVA (nov 2026, H3): la NC copia los renglones autorizados de la
+    // factura (log cuyo CAE es el de la factura). Rearmarla desde los viajes perdía
+    // tramos, alícuotas por línea, ediciones y viajes de clientes secundarios.
+    const logsFactura = await this.db.arcaLog.findMany({
+      where: { tenantId, facturaId, method: 'FECAESolicitar' },
+      select: { requestBody: true, responseBody: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const logFactura = logAutorizadoPorCae<(typeof logsFactura)[number]>(
+      logsFactura,
+      factura.cae,
     );
-    if (lineasInput.length === 0 || lineasInput.every((l) => l.importe === 0)) {
-      throw new BadRequestException(
-        'La factura no tiene líneas con importe para anular.',
+    const autorizadoFactura = comprobanteDeLog(logFactura);
+    let conceptos = conceptosNotaCreditoDesdeAutorizado(
+      (logFactura?.requestBody as { auditMetadata?: { items?: unknown } } | null)
+        ?.auditMetadata,
+    );
+    if (!conceptos) {
+      // Facturas sin renglones en el log: se rearma como antes y se verifica abajo.
+      const lineasInput: FacturaLineaInput[] = defaultFacturaLineas(
+        facturaRaw,
+        facturaRaw.viajes,
       );
+      if (lineasInput.length === 0 || lineasInput.every((l) => l.importe === 0)) {
+        throw new BadRequestException(
+          'La factura no tiene líneas con importe para anular.',
+        );
+      }
+      conceptos = buildFacturaConceptosList(lineasInput, ivaPctDefault);
     }
-    const conceptos = buildFacturaConceptosList(lineasInput, ivaPctDefault);
+    // Lo que la NC tiene que igualar: lo autorizado por ARCA (o, sin log, lo guardado
+    // al autorizar, que son los importes del comprobante).
+    const totalesFactura = autorizadoFactura && autorizadoFactura.alicuotas.length > 0
+      ? {
+          impNeto: round2(autorizadoFactura.alicuotas.reduce((s, a) => s + a.neto, 0)),
+          impIva: round2(autorizadoFactura.alicuotas.reduce((s, a) => s + a.iva, 0)),
+        }
+      : factura.ivaMonto != null
+        ? { impNeto: round2(factura.importe), impIva: round2(factura.ivaMonto) }
+        : null;
+    if (totalesFactura) {
+      const previaNc = buildComprobanteCvlp(
+        {} as Parameters<typeof buildComprobanteCvlp>[0],
+        conceptos,
+        ivaPctDefault,
+      );
+      const diferencia = diferenciaNotaCreditoFactura(previaNc, totalesFactura);
+      if (diferencia) {
+        this.logger.warn(`[anularFacturaArca] ${facturaId} bloqueada: ${diferencia}`);
+        throw new BadRequestException(diferencia);
+      }
+    }
 
     await (this.prisma as PrismaAny).factura.update({
       where: { id: facturaId },

@@ -438,9 +438,11 @@ export class LiquidacionesService {
         ? round2(tnDestino * tarifaTransportista)
         : round2(v.precioTransportistaExterno ?? 0);
 
-      // precioTransportistaExterno es siempre neto (sin IVA) — el % de IVA del viaje
-      // (precioTransportistaIvaIncluidoPct) es independiente del IVA que declara esta
-      // Liquidación (config aparte, más abajo) y no se usa acá.
+      // precioTransportistaExterno es siempre neto (sin IVA). El % de IVA del viaje
+      // (precioTransportistaIvaIncluidoPct) y sus tramos SÍ se usan, en `viajesPayload`
+      // más abajo: el flete de cada viaje tributa a su % (o por tramo) y, si el % es 0
+      // y no hay tramos, al IVA de la liquidación. La comisión siempre usa el IVA de la
+      // liquidación ("IVA sobre comisión").
       bruto += subtotal;
       viajesDetalle.push({
         viajeId: v.id,
